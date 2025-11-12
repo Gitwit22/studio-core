@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    /* Language and module system */
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    /* Output settings */
+    "outDir": "dist-node",
+    "rootDir": "server",
+
+    /* Type support */
+    "types": ["node"],
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": false,
+
+    /* Helpful defaults */
+    "baseUrl": ".",
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": ["server/**/*.ts"]
+}
