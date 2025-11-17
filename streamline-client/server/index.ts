@@ -1,36 +1,43 @@
 import 'dotenv/config';
-
 import express from 'express';
 import cors from 'cors';
 import { AccessToken } from 'livekit-server-sdk';
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
-app.get('/v1/rooms/token', async (req, res) => {
+app.get('/', (_, res) => res.send('API up'));
+
+app.get('/api/token', async (req, res) => {
   try {
-    const { roomName = 'default', name = 'Guest', role = 'participant' } = req.query as Record<string, string>;
+    const room = (req.query.room as string) || 'default';
+    const identity = (req.query.identity as string) || 'Guest';
+    const role = (req.query.role as string) || 'participant';
 
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    if (!apiKey || !apiSecret) {
-      return res.status(500).json({ error: 'LIVEKIT_API_KEY/SECRET missing on server' });
-    }
+    const key = process.env.LIVEKIT_API_KEY!;
+    const secret = process.env.LIVEKIT_API_SECRET!;
+    const url = process.env.LIVEKIT_URL!;
 
-    const at = new AccessToken(apiKey, apiSecret, { identity: name });
+    if (!key || !secret || !url)
+      return res.status(500).json({ error: 'LIVEKIT env missing' });
+
+    const at = new AccessToken(key, secret, { identity });
     at.addGrant({
-      room: roomName,
+      room,
       roomJoin: true,
       canPublish: true,
       canSubscribe: true,
-      ingressAdmin: role === 'host'
+      ingressAdmin: role === 'host',
     });
 
-    res.json({ token: await at.toJwt() });
+    res.json({ token: await at.toJwt(), url });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'token_error' });
   }
 });
 
-const port = Number(process.env.PORT || 3001);
-app.listen(port, () => console.log(`API listening on http://localhost:${port}`));
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () =>
+  console.log(`✅ API listening on http://localhost:${PORT}`)
+);

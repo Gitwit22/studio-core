@@ -1,15 +1,18 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import App from './App';
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import Join from "./pages/Join";
+import Room from "./pages/Room";
+import "./index.css";
 
-// critical for LiveKit UI
-import '@livekit/components-styles';
-
-ReactDOM.createRoot(document.getElementById('root')!).render(
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
+      <Routes>
+        <Route path="/" element={<Join />} />
+        <Route path="/room/:roomName" element={<Room />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </BrowserRouter>
   </React.StrictMode>
 );
