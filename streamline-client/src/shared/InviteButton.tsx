@@ -1,7 +1,17 @@
-type Props = { roomName: string };
+type Role = "host" | "moderator" | "participant";
 
-export default function InviteButton({ roomName }: Props) {
-  const inviteUrl = `${window.location.origin}/room/${encodeURIComponent(roomName)}`;
+type Props = {
+  roomName: string;
+  /** Optional role for the invite link. Defaults to "participant". */
+  role?: Role;
+  /** Optional custom button text. Defaults to "Invite". */
+  label?: string;
+};
+
+export default function InviteButton({ roomName, role = "participant", label }: Props) {
+  const inviteUrl = `${window.location.origin}/room/${encodeURIComponent(
+    roomName
+  )}?role=${encodeURIComponent(role)}`;
 
   async function handleInvite() {
     try {
@@ -32,7 +42,7 @@ export default function InviteButton({ roomName }: Props) {
       className="rounded-xl px-4 py-2 font-medium shadow border"
       title="Invite someone to this room"
     >
-      Invite
+      {label ?? "Invite"}
     </button>
   );
 }

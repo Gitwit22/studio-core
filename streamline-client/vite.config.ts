@@ -5,6 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+
+    // Proxy ALL /api requests to your backend (including admin routes)
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
@@ -12,6 +14,8 @@ export default defineConfig({
         secure: false,
       },
     },
-    allowedHosts: ['magdalena-bulllike-hildred.ngrok-free.dev'], // 👈 add this line
+
+    // Allow ANY ngrok domain
+    allowedHosts: ['.ngrok-free.dev'],
   },
 })
