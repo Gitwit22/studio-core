@@ -9,7 +9,7 @@ export default defineConfig({
     // Proxy ALL /api requests to your backend (including admin routes)
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:5137',
         changeOrigin: true,
         secure: false,
       },

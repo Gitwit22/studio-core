@@ -4,7 +4,7 @@ import cors from 'cors';
 import pino from 'pino';
 import pinoHttp from 'pino-http';
 import healthRouter from './routes/health';
-import tokensRouter from './routes/tokens';
+import tokensRouter from './routes/token';
 const app = express();
 
 // Logging + middleware

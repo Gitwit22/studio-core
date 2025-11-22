@@ -1,143 +1,234 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LiveKitRoom, VideoConference, Chat } from "@livekit/components-react";
+
+
 import "@livekit/components-styles";
 import InviteButton from "../shared/InviteButton";
-import RoleOverlay from "../components/RoleOverlay";
+import StreamSetupModal from "../components/StreamSetupModal";
 
-const API_BASE = import.meta.env.VITE_API_BASE || ""; // use Vite proxy if empty
+const API_BASE = "https://magdalena-bulllike-hildred.ngrok-free.dev";
+
+type StreamStatus = "idle" | "starting" | "live" | "stopping";
 
 export default function Room() {
   const nav = useNavigate();
   const { roomName: rn } = useParams<{ roomName: string }>();
   const roomName = rn ?? "";
 
-  const [displayName] = useState(
+  const [displayName, setDisplayName] = useState(
     () => localStorage.getItem("sl_displayName") ?? ""
   );
-
+  
+const [pendingName, setPendingName] = useState(displayName);
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showChat, setShowChat] = useState<boolean>(false);
-  const [openDash, setOpenDash] = useState<boolean>(false);
 
-  // Role from query string (?role=host|moderator|participant)
-  // Default YOU to host if nothing is set.
-  const role = useMemo(() => {
-    const raw =
-      new URLSearchParams(window.location.search)
-        .get("role")
-        ?.toLowerCase() ?? "host";
-    if (raw === "host" || raw === "moderator" || raw === "participant") {
-      return raw;
-    }
-    return "host";
-  }, []) as "host" | "moderator" | "participant";
+  // NEW: multistream state
+  const [showStreamSetup, setShowStreamSetup] = useState(false);
+  const [egressId, setEgressId] = useState<string | null>(null);
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
 
+  // --- existing token fetch logic here ---
   useEffect(() => {
-    if (!roomName || !displayName) {
-      nav("/");
-      return;
-    }
-    (async () => {
+    if (!roomName || !displayName) return;
+
+    const fetchToken = async () => {
       try {
-        const qs = new URLSearchParams({
-          room: roomName,
-          identity: displayName,
-          role, // send role to server
-        }).toString();
-        const res = await fetch(`${API_BASE}/api/token?${qs}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await fetch(`${API_BASE}/api/roomToken`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomName, identity: displayName }),
+        });
+
+        if (!res.ok) {
+          throw new Error("Failed to get token");
+        }
+
         const data = await res.json();
         setToken(data.token);
-        setServerUrl(data.url);
-      } catch (e: any) {
-        setError(e.message ?? "token_error");
+        setServerUrl(data.serverUrl);
+      } catch (err) {
+        console.error(err);
+        nav("/");
       }
-    })();
-  }, [roomName, displayName, nav, role]);
+    };
 
-  if (error) {
-    return (
-      <div className="p-6">
-        <p className="text-red-500">Error: {error}</p>
-        <button onClick={() => nav("/")} className="underline mt-2">
-          Go back
+    fetchToken();
+  }, [roomName, displayName, nav]);
+
+  const handleStartMultistream = async (keys: {
+    youtubeKey?: string;
+    facebookKey?: string;
+  }) => {
+    if (!roomName) {
+      alert("No room name");
+      return;
+    }
+
+    try {
+      setStreamStatus("starting");
+
+      const res = await fetch(
+        `${API_BASE}/api/rooms/${encodeURIComponent(
+          roomName
+        )}/start-multistream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            youtubeStreamKey: keys.youtubeKey,
+            facebookStreamKey: keys.facebookKey,
+          }),
+        }
+      );
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        console.error("Start multistream failed", errData);
+        alert("Failed to start multistream");
+        setStreamStatus("idle");
+        return;
+      }
+
+      const data = await res.json();
+      setEgressId(data.egressId);
+      setStreamStatus("live");
+    } catch (err) {
+      console.error(err);
+      alert("Error starting multistream");
+      setStreamStatus("idle");
+    }
+  };
+
+  const handleStopMultistream = async () => {
+    if (!egressId) {
+      alert("No active stream");
+      return;
+    }
+
+    try {
+      setStreamStatus("stopping");
+
+      const res = await fetch(`${API_BASE}/api/rooms/stop-multistream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ egressId }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        console.error("Stop multistream failed", errData);
+        alert("Failed to stop multistream");
+        setStreamStatus("live");
+        return;
+      }
+
+      setEgressId(null);
+      setStreamStatus("idle");
+    } catch (err) {
+      console.error(err);
+      alert("Error stopping multistream");
+      setStreamStatus("live");
+    }
+  };
+
+  // If user has no saved name, show name input screen
+if (!displayName) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-black text-white">
+      <form
+        className="bg-zinc-900 rounded-xl px-6 py-4 w-full max-w-sm space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const name = pendingName.trim();
+          if (!name) return;
+          localStorage.setItem("sl_displayName", name);
+          setDisplayName(name);
+        }}
+      >
+        <h1 className="text-lg font-semibold mb-2">
+          Enter your name to join the stream
+        </h1>
+
+        <input
+          className="w-full px-3 py-2 rounded bg-zinc-800 border border-zinc-700 text-sm outline-none"
+          placeholder="Your name"
+          value={pendingName}
+          onChange={(e) => setPendingName(e.target.value)}
+        />
+
+        <button
+          type="submit"
+          className="mt-2 w-full py-2 rounded bg-indigo-600 text-sm font-medium"
+        >
+          Join Room
         </button>
-      </div>
-    );
-  }
+      </form>
+    </div>
+  );
+}
 
-  if (!token || !serverUrl) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">
-            Room: {roomName || "…"}
-            <span className="ml-2 text-sm opacity-60">({role})</span>
-          </h1>
-          {!!roomName && <InviteButton roomName={roomName} />}
-        </div>
-        <p className="mt-6 opacity-70">Preparing your room…</p>
-      </div>
-    );
-  }
 
   return (
-    <div className="h-screen w-screen bg-[#111] text-white relative overflow-hidden">
-      {/* Top actions bar */}
-      <div className="absolute top-2 left-2 z-50 flex gap-2">
-        <InviteButton roomName={roomName} />
-        <button
-          onClick={() => setShowChat((v) => !v)}
-          className="rounded-xl px-3 py-2 border shadow bg-white/80 text-black"
-          title="Toggle chat"
-        >
-          {showChat ? "Hide Chat" : "Show Chat"}
-        </button>
-        <button
-          onClick={() => setOpenDash((v) => !v)}
-          className="rounded-xl px-3 py-2 border shadow bg-white/80 text-black"
-          title="Toggle dashboard"
-        >
-          {openDash ? "Close Dashboard" : "Dashboard"}
-        </button>
-      </div>
+    <>
+      
 
-      <LiveKitRoom
-        token={token}
-        serverUrl={serverUrl}
-        connect
-        video
-        audio
-        onDisconnected={() => nav("/")}
-      >
-        {/* Main layout: centered video stage + optional chat sidebar */}
-        <div className="h-full w-full flex flex-col md:flex-row items-center justify-center">
-          {/* Video stage */}
-          <div className="flex-1 min-w-0 flex items-center justify-center">
-            <div className="w-full max-w-[900px] h-[20vh] md:h-[55vh] bg-black rounded-xl overflow-hidden shadow-lg">
-              <VideoConference />
-            </div>
-          </div>
 
-          {/* Chat side panel */}
-          {showChat && (
-            <aside className="md:w-[22rem] w-full h-[40vh] md:h-[55vh] border-t md:border-t-0 md:border-l bg-white text-black p-3 overflow-y-auto">
-              <Chat />
-            </aside>
-          )}
+      {/* Top bar / controls */}
+      <div className="flex items-center justify-between px-4 py-2 bg-black text-white">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => nav("/")}
+            className="text-xs underline underline-offset-4"
+          >
+            ← Back
+          </button>
+          <span className="text-sm opacity-80">{roomName}</span>
         </div>
 
-        {/* Role-based overlay dashboard (sits on top of stage) */}
-        <RoleOverlay
-          open={openDash}
-          onClose={() => setOpenDash(false)}
-          role={role}
-          roomName={roomName}
-        />
-      </LiveKitRoom>
-    </div>
+        <div className="flex items-center gap-3">
+          {/* LIVE indicator */}
+          <div className="flex items-center gap-1 text-xs">
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                streamStatus === "live" ? "bg-red-500" : "bg-gray-500"
+              }`}
+            />
+            <span>{streamStatus === "live" ? "LIVE" : "OFF"}</span>
+          </div>
+
+          {/* Setup Stream button */}
+          <button
+            onClick={() => setShowStreamSetup(true)}
+            className="px-2 py-1 text-xs rounded bg-indigo-600"
+          >
+            {streamStatus === "live" ? "Manage Stream" : "Setup Stream"}
+          </button>
+
+          <InviteButton roomName={roomName} />
+        </div>
+      </div>
+
+      {/* Main LiveKit view */}
+      {token && serverUrl && (
+        <LiveKitRoom token={token} serverUrl={serverUrl} connect={true}>
+          <div className="lk-layout">
+            <VideoConference />
+            <Chat />
+          </div>
+        </LiveKitRoom>
+    
+      )}
+
+      {/* Stream setup modal */}
+      <StreamSetupModal
+        isOpen={showStreamSetup}
+        onClose={() => setShowStreamSetup(false)}
+        onStart={handleStartMultistream}
+        onStop={handleStopMultistream}
+        status={streamStatus}
+      />
+    </>
   );
 }
