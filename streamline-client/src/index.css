@@ -12,6 +12,14 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+:root {
+  --lk-bg: #000000 !important;
+  --lk-bg-secondary: #111111 !important;
+  --lk-bg-tertiary: #1a1a1a !important;
+
+  --lk-fg: #ffffff !important;
+  --lk-fg-secondary: #cccccc !important;
+}
 
 a {
   font-weight: 500;
@@ -40,9 +48,9 @@ button {
   border: 1px solid transparent;
   padding: 0.6em 1.2em;
   font-size: 1em;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
-  background-color: #1a1a1a;
+  background-color: #db0f0f;
   cursor: pointer;
   transition: border-color 0.25s;
 }
@@ -51,18 +59,18 @@ button:hover {
 }
 button:focus,
 button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  outline: 6px auto -webkit-focus-ring-color;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;
-    background-color: #ffffff;
+    background-color: #3b413e;
   }
   a:hover {
     color: #747bff;
   }
   button {
-    background-color: #f9f9f9;
+    background-color: #e51010;
   }
 }

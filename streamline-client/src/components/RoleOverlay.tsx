@@ -1,3 +1,4 @@
+import React from "react";
 import { useParticipants } from "@livekit/components-react";
 
 type Role = "host" | "moderator" | "participant";
@@ -29,9 +30,7 @@ export default function RoleOverlay({
         <header className="px-4 py-3 border-b flex items-center justify-between">
           <div className="font-semibold">
             Dashboard{" "}
-            <span className="opacity-60 text-sm">
-              ({role})
-            </span>
+            <span className="opacity-60 text-sm">({role})</span>
           </div>
           <button
             onClick={onClose}
@@ -62,6 +61,22 @@ function HostPanel({ roomName }: { roomName: string }) {
           onRemove={(id) => apiRemove(roomName, id)}
           canModerate
         />
+
+        {/* Mute / Unmute all controls */}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            className="rounded-md border px-2 py-1 text-[11px]"
+            onClick={() => apiMuteAll(roomName, true)}
+          >
+            Mute all
+          </button>
+          <button
+            className="rounded-md border px-2 py-1 text-[11px]"
+            onClick={() => apiMuteAll(roomName, false)}
+          >
+            Unmute all
+          </button>
+        </div>
       </Section>
 
       <Section title="Greenroom (Coming Soon)">
@@ -131,7 +146,13 @@ function ParticipantPanel({ roomName }: { roomName: string }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div>
       <div className="text-sm font-medium mb-2">{title}</div>
@@ -151,8 +172,9 @@ function ParticipantList({
   onMute?: (identity: string, muted: boolean) => void;
   onRemove?: (identity: string) => void;
 }) {
-  if (!participants?.length)
+  if (!participants?.length) {
     return <p className="text-sm opacity-70">No one here yet.</p>;
+  }
 
   return (
     <div className="space-y-2">
@@ -163,7 +185,9 @@ function ParticipantList({
         >
           <div className="text-sm">
             <div className="font-medium">{p.name || p.identity}</div>
-            <div className="opacity-60 text-xs break-all">{p.identity}</div>
+            <div className="opacity-60 text-xs break-all">
+              {p.identity}
+            </div>
           </div>
           {canModerate && (
             <div className="flex gap-2">
@@ -194,6 +218,7 @@ function ParticipantList({
 }
 
 /** --- Minimal admin calls (MVP; secure later with auth/JWT) --- */
+
 async function apiMute(room: string, identity: string, muted: boolean) {
   try {
     const res = await fetch("/api/admin/mute", {
@@ -201,10 +226,52 @@ async function apiMute(room: string, identity: string, muted: boolean) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ room, identity, muted }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      // ignore JSON parse errors
+    }
+
+    if (!res.ok || (data && data.error)) {
+      console.error("mute/unmute failed", { status: res.status, data });
+      alert((data && data.error) || `Mute failed (HTTP ${res.status})`);
+      return;
+    }
+
+    console.log("mute/unmute success", data);
   } catch (e) {
-    console.error("mute failed", e);
-    alert("Mute failed");
+    console.error("mute/unmute failed (network)", e);
+    alert("Mute request failed (network error)");
+  }
+}
+
+async function apiMuteAll(room: string, muted: boolean) {
+  try {
+    const res = await fetch("/api/admin/mute-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room, muted }),
+    });
+
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      // ignore JSON parse errors
+    }
+
+    if (!res.ok || (data && data.error)) {
+      console.error("mute-all failed", { status: res.status, data });
+      alert((data && data.error) || `Mute all failed (HTTP ${res.status})`);
+      return;
+    }
+
+    console.log("mute-all success", data);
+  } catch (e) {
+    console.error("mute-all failed (network)", e);
+    alert("Mute-all request failed (network error)");
   }
 }
 
@@ -215,9 +282,23 @@ async function apiRemove(room: string, identity: string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ room, identity }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      // ignore JSON parse errors
+    }
+
+    if (!res.ok || (data && data.error)) {
+      console.error("remove failed", { status: res.status, data });
+      alert((data && data.error) || `Remove failed (HTTP ${res.status})`);
+      return;
+    }
+
+    console.log("remove success", data);
   } catch (e) {
-    console.error("remove failed", e);
-    alert("Remove failed");
+    console.error("remove failed (network)", e);
+    alert("Remove request failed (network error)");
   }
 }

@@ -6,6 +6,8 @@ import { LiveKitRoom, VideoConference, Chat } from "@livekit/components-react";
 import "@livekit/components-styles";
 import InviteButton from "../shared/InviteButton";
 import StreamSetupModal from "../components/StreamSetupModal";
+import RoleOverlay from "../components/RoleOverlay";
+
 
 const API_BASE = "https://magdalena-bulllike-hildred.ngrok-free.dev";
 
@@ -23,6 +25,7 @@ export default function Room() {
 const [pendingName, setPendingName] = useState(displayName);
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
 
   // NEW: multistream state
   const [showStreamSetup, setShowStreamSetup] = useState(false);
@@ -188,6 +191,14 @@ if (!displayName) {
         </div>
 
         <div className="flex items-center gap-3">
+
+           {/* ✅ RESTORED DASHBOARD BUTTON */}
+      <button
+        onClick={() => setDashboardOpen(true)}
+        className="text-xs px-3 py-1.5 border border-white/40 rounded hover:bg-white/10 transition"
+      >
+        Dashboard
+      </button>
           {/* LIVE indicator */}
           <div className="flex items-center gap-1 text-xs">
             <span
@@ -195,7 +206,7 @@ if (!displayName) {
                 streamStatus === "live" ? "bg-red-500" : "bg-gray-500"
               }`}
             />
-            <span>{streamStatus === "live" ? "LIVE" : "OFF"}</span>
+            <span>{streamStatus === "live" ? "LIVE" : "OFFLINE"}</span>
           </div>
 
           {/* Setup Stream button */}
@@ -216,6 +227,12 @@ if (!displayName) {
           <div className="lk-layout">
             <VideoConference />
             <Chat />
+             <RoleOverlay
+        open={dashboardOpen}
+        onClose={() => setDashboardOpen(false)}
+        role="host"
+        roomName={roomName}
+      />
           </div>
         </LiveKitRoom>
     
