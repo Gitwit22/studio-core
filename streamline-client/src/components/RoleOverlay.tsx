@@ -17,37 +17,45 @@ export default function RoleOverlay({
   if (!open) return null;
 
   return (
-    // Overlay anchored to the whole room area
-    <div className="fixed inset-0 z-[9999] pointer-events-none">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/40 pointer-events-auto"
-        onClick={onClose}
-      />
+  // Full-screen overlay
+  <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
+    {/* Backdrop */}
+    <div
+      className="absolute inset-0 bg-black/40 pointer-events-auto"
+      onClick={onClose}
+    />
 
-      {/* Right-side drawer */}
-      <div className="absolute right-0 top-0 h-full w-full max-w-[420px] bg-white shadow-xl flex flex-col pointer-events-auto">
-        <header className="px-4 py-3 border-b flex items-center justify-between">
-          <div className="font-semibold">
-            Dashboard{" "}
-            <span className="opacity-60 text-sm">({role})</span>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg px-3 py-1 border text-sm"
-          >
-            Close
-          </button>
-        </header>
+    {/* Centered dashboard card */}
+<div
+  className="relative w-full max-w-[520px] max-h-[80vh] bg-white shadow-2xl rounded-2xl flex flex-col pointer-events-auto overflow-hidden"
+  style={{
+    transform: "translateX(150px)", // move left
+  }}
+>
 
-        <div className="p-3 flex-1 overflow-y-auto space-y-6">
-          {role === "host" && <HostPanel roomName={roomName} />}
-          {role === "moderator" && <ModeratorPanel roomName={roomName} />}
-          {role === "participant" && <ParticipantPanel roomName={roomName} />}
+      
+      <header className="px-4 py-3 border-b flex items-center justify-between">
+        <div className="font-semibold">
+          Dashboard{" "}
+          <span className="opacity-60 text-sm">({role})</span>
         </div>
+        <button
+          onClick={onClose}
+          className="rounded-lg px-3 py-1 border text-sm"
+        >
+          Close
+        </button>
+      </header>
+
+      <div className="p-3 flex-1 overflow-y-auto space-y-6">
+        {role === "host" && <HostPanel roomName={roomName} />}
+        {role === "moderator" && <ModeratorPanel roomName={roomName} />}
+        {role === "participant" && <ParticipantPanel roomName={roomName} />}
       </div>
     </div>
-  );
+  </div>
+);
+
 }
 
 function HostPanel({ roomName }: { roomName: string }) {

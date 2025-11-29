@@ -181,6 +181,7 @@ if (!displayName) {
       {/* Top bar / controls */}
       <div className="flex items-center justify-between px-4 py-2 bg-black text-white">
         <div className="flex items-center gap-2">
+          
           <button
             onClick={() => nav("/")}
             className="text-xs underline underline-offset-4"
@@ -223,20 +224,42 @@ if (!displayName) {
 
       {/* Main LiveKit view */}
       {token && serverUrl && (
-        <LiveKitRoom token={token} serverUrl={serverUrl} connect={true}>
-          <div className="lk-layout">
-            <VideoConference />
-            <Chat />
-             <RoleOverlay
+  <LiveKitRoom 
+    data-lk-theme="sl-layout"
+    token={token}
+    serverUrl={serverUrl}
+    connect={true}
+  >
+
+    
+    <div className="relative w-full h-full">
+    <VideoConference />
+
+    <img
+  src="/logo.png"
+  alt="StreamLine Logo"
+  className="hidden md:block absolute right-10 bottom-10 w-[300px] h-auto opacity-85 pointer-events-none"
+  style={{
+    position: "absolute",
+    right: "60px",    // move left/right
+    bottom: "-289px",   // move up/down
+    width: "300px",   // ← actual size (make this smaller/bigger)
+    height: "auto",
+    opacity: 0.85,
+    pointerEvents: "none",
+  }}
+/>
+
+      <Chat />
+<RoleOverlay
         open={dashboardOpen}
         onClose={() => setDashboardOpen(false)}
         role="host"
         roomName={roomName}
       />
-          </div>
-        </LiveKitRoom>
-    
-      )}
+    </div>
+  </LiveKitRoom>
+)}
 
       {/* Stream setup modal */}
       <StreamSetupModal

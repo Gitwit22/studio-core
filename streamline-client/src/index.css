@@ -1,48 +1,55 @@
+/* ================================
+   Base typography + LiveKit theme
+   ================================ */
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-:root {
-  --lk-bg: #000000 !important;
-  --lk-bg-secondary: #111111 !important;
-  --lk-bg-tertiary: #1a1a1a !important;
 
-  --lk-fg: #ffffff !important;
-  --lk-fg-secondary: #cccccc !important;
+  /* LiveKit color palette overrides (dark theme) */
+  --lk-bg: #000000;
+  --lk-bg-secondary: #111111;
+  --lk-bg-tertiary: #1a1a1a;
+
+  --lk-fg: #ffffff;
+  --lk-fg-secondary: #cccccc;
 }
 
+/* ================================
+   Global layout + defaults
+   ================================ */
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background-color: #000000;
+  color: #ffffff;
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+}
+
+/* Links */
 a {
   font-weight: 500;
   color: #646cff;
-  text-decoration: inherit;
+  text-decoration: none;
 }
 a:hover {
   color: #535bf2;
 }
 
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
+/* Buttons (global baseline – can be overridden per-component) */
 button {
   border-radius: 8px;
   border: 1px solid transparent;
@@ -59,18 +66,56 @@ button:hover {
 }
 button:focus,
 button:focus-visible {
-  outline: 6px auto -webkit-focus-ring-color;
+  outline: 3px solid #646cff;
 }
 
+/* Optional: light-mode override (remove if you always want dark) */
 @media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
+  body {
     background-color: #3b413e;
+    color: #213547;
   }
   a:hover {
     color: #747bff;
   }
   button {
     background-color: #e51010;
+  }
+}
+
+/* ================================
+   LiveKit layout overrides
+   ================================ */
+
+/* Stop LiveKit from doing its own auto-layout inside .sl-layout */
+.sl-layout [data-lk-layout] {
+  display: block !important;
+}
+
+/* Our custom layout: video + chat (desktop) */
+.sl-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr; /* video bigger than chat */
+  height: 100vh;
+}
+
+/* Chat area inside our layout (attribute selector may differ per version) */
+.sl-layout [data-lk-chat-container] {
+  display: block;
+}
+
+/* ================================
+   Mobile overrides
+   ================================ */
+
+@media (max-width: 768px) {
+  /* Stack everything in one column on small screens */
+  .sl-layout {
+    grid-template-columns: 1fr;
+  }
+
+  /* Hide chat on mobile so video gets the whole screen */
+  .sl-layout [data-lk-chat-container] {
+    display: none !important;
   }
 }
