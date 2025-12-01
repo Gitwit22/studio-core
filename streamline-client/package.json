@@ -12,9 +12,12 @@
   "dependencies": {
     "@livekit/components-react": "latest",
     "@livekit/components-styles": "latest",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.19.2",
+    "firebase-admin": "^13.6.0",
+    "jsonwebtoken": "^9.0.2",
     "livekit-server-sdk": "^2.14.2",
     "react": "18.3.1",
     "react-dom": "18.3.1",

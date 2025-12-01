@@ -4,6 +4,9 @@ import cors from "cors";
 import { RoomServiceClient, TrackSource, TrackType } from "livekit-server-sdk";
 import multistreamRoutes from "./routes/multistream";
 import roomTokenRoute from "./routes/roomToken";
+import { db } from "./firebase";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 const app = express();
 app.use(cors());
@@ -26,6 +29,7 @@ const roomService = new RoomServiceClient(
   process.env.LIVEKIT_API_KEY!,
   process.env.LIVEKIT_API_SECRET!
 );
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 // Mute/unmute a participant
 // Admin: mute/unmute a single participant's audio
@@ -161,6 +165,109 @@ app.post("/api/admin/remove", async (req, res) => {
   } catch (e: any) {
     console.error("remove error", e);
     res.status(500).json({ error: e.message || "remove_error" });
+  }
+});
+
+
+
+app.post("/api/auth/signup", async (req, res) => {
+  try {
+    const { email, password, displayName } = req.body as {
+      email?: string;
+      password?: string;
+      displayName?: string;
+    };
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "email and password are required" });
+    }
+
+    // Check if user already exists
+    const existingSnap = await db
+      .collection("users")
+      .where("email", "==", email)
+      .limit(1)
+      .get();
+
+    if (!existingSnap.empty) {
+      return res.status(409).json({ error: "email already in use" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // Create user doc
+    const userRef = await db.collection("users").add({
+      email,
+      displayName: displayName || "",
+      passwordHash,
+      plan: "free",
+      youtubeConnected: false,
+      facebookConnected: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    // Store the id inside document
+    await userRef.update({ id: userRef.id });
+
+    const user = {
+      id: userRef.id,
+      email,
+      displayName: displayName || "",
+      plan: "free",
+    };
+
+    const token = jwt.sign(user, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({ user, token });
+  } catch (err) {
+    console.error("signup error", err);
+    return res.status(500).json({ error: "internal server error" });
+  }
+});
+
+// ---------- LOGIN ----------
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body as {
+      email?: string;
+      password?: string;
+    };
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "email and password are required" });
+    }
+
+    const snap = await db
+      .collection("users")
+      .where("email", "==", email)
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      return res.status(401).json({ error: "invalid email or password" });
+    }
+
+    const doc = snap.docs[0];
+    const data = doc.data() as any;
+
+    const ok = await bcrypt.compare(password, data.passwordHash || "");
+    if (!ok) {
+      return res.status(401).json({ error: "invalid email or password" });
+    }
+
+    const user = {
+      id: doc.id,
+      email: data.email,
+      displayName: data.displayName || "",
+      plan: data.plan || "free",
+    };
+
+    const token = jwt.sign(user, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({ user, token });
+  } catch (err) {
+    console.error("login error", err);
+    return res.status(500).json({ error: "internal server error" });
   }
 });
 

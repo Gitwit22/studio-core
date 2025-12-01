@@ -250,7 +250,7 @@ if (!displayName) {
   }}
 />
 
-      <Chat />
+      
 <RoleOverlay
         open={dashboardOpen}
         onClose={() => setDashboardOpen(false)}

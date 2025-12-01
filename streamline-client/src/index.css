@@ -96,7 +96,7 @@ button:focus-visible {
 .sl-layout {
   display: grid;
   grid-template-columns: 2fr 1fr; /* video bigger than chat */
-  height: 100vh;
+  height: 00vh;
 }
 
 /* Chat area inside our layout (attribute selector may differ per version) */
@@ -118,4 +118,16 @@ button:focus-visible {
   .sl-layout [data-lk-chat-container] {
     display: none !important;
   }
+}
+/* Forces tiles to stay small so grid can form rows */
+.lk-participant-tile {
+  width: 480px !important;
+  height: 400px !important;
+  padding: 1px;
+}
+
+/* Make the video inside scale correctly */
+.lk-participant-tile video {
+  object-fit: cover !important;
+  border-radius: 20px;
 }
