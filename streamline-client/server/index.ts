@@ -168,14 +168,27 @@ app.post("/api/admin/remove", async (req, res) => {
   }
 });
 
-
-
+// ---------- SIGNUP (with onboarding) ----------
 app.post("/api/auth/signup", async (req, res) => {
   try {
-    const { email, password, displayName } = req.body as {
+    const {
+      email,
+      password,
+      displayName,
+      timeZone,
+      skipOnboarding,
+      defaultResolution,
+      defaultDestinations,
+      defaultPrivacy,
+    } = req.body as {
       email?: string;
       password?: string;
       displayName?: string;
+      timeZone?: string;
+      skipOnboarding?: boolean;
+      defaultResolution?: string;
+      defaultDestinations?: { youtube?: boolean; facebook?: boolean };
+      defaultPrivacy?: string;
     };
 
     if (!email || !password) {
@@ -195,8 +208,7 @@ app.post("/api/auth/signup", async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Create user doc
-    const userRef = await db.collection("users").add({
+    const userData: any = {
       email,
       displayName: displayName || "",
       passwordHash,
@@ -204,16 +216,40 @@ app.post("/api/auth/signup", async (req, res) => {
       youtubeConnected: false,
       facebookConnected: false,
       createdAt: new Date().toISOString(),
-    });
+      onboardingCompleted: !skipOnboarding,
+    };
 
-    // Store the id inside document
+    if (timeZone) {
+      userData.timeZone = timeZone;
+    }
+
+    // Only store streaming defaults if they didn't skip onboarding
+    if (!skipOnboarding) {
+      userData.defaultResolution = defaultResolution || "720p";
+      userData.defaultDestinations = {
+        youtube: defaultDestinations?.youtube ?? false,
+        facebook: defaultDestinations?.facebook ?? false,
+      };
+      if (defaultPrivacy) {
+        userData.defaultPrivacy = defaultPrivacy; // e.g. "public" | "unlisted"
+      }
+    }
+
+    const userRef = await db.collection("users").add(userData);
     await userRef.update({ id: userRef.id });
 
     const user = {
       id: userRef.id,
-      email,
-      displayName: displayName || "",
-      plan: "free",
+      email: userData.email,
+      displayName: userData.displayName,
+      plan: userData.plan,
+      timeZone: userData.timeZone || null,
+      onboardingCompleted: userData.onboardingCompleted,
+      defaultResolution: userData.defaultResolution || null,
+      defaultDestinations: userData.defaultDestinations || null,
+      defaultPrivacy: userData.defaultPrivacy || null,
+      youtubeConnected: userData.youtubeConnected,
+      facebookConnected: userData.facebookConnected,
     };
 
     const token = jwt.sign(user, JWT_SECRET, { expiresIn: "7d" });
@@ -260,6 +296,13 @@ app.post("/api/auth/login", async (req, res) => {
       email: data.email,
       displayName: data.displayName || "",
       plan: data.plan || "free",
+      timeZone: data.timeZone || null,
+      onboardingCompleted: data.onboardingCompleted ?? false,
+      defaultResolution: data.defaultResolution || null,
+      defaultDestinations: data.defaultDestinations || null,
+      defaultPrivacy: data.defaultPrivacy || null,
+      youtubeConnected: data.youtubeConnected || false,
+      facebookConnected: data.facebookConnected || false,
     };
 
     const token = jwt.sign(user, JWT_SECRET, { expiresIn: "7d" });
@@ -270,6 +313,11 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(500).json({ error: "internal server error" });
   }
 });
+
+
+
+
+
 
 const PORT = process.env.PORT || 5137; // use whatever you were using when it worked
 app.listen(PORT, () => {

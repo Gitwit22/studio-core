@@ -121,7 +121,7 @@ button:focus-visible {
 }
 /* Forces tiles to stay small so grid can form rows */
 .lk-participant-tile {
-  width: 480px !important;
+  width: 790px !important;
   height: 400px !important;
   padding: 1px;
 }

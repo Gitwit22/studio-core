@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { LiveKitRoom, VideoConference, Chat } from "@livekit/components-react";
+import { LiveKitRoom, VideoConference} from "@livekit/components-react";
 
 
 import "@livekit/components-styles";
@@ -12,6 +12,48 @@ import RoleOverlay from "../components/RoleOverlay";
 const API_BASE = "https://magdalena-bulllike-hildred.ngrok-free.dev";
 
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
+
+function ThankYouScreen() {
+  // Optional: try to close app/tab after a delay
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      // ✅ If you're in a native wrapper, call into it here instead:
+      // (example) window.ReactNativeWebView?.postMessage("exit-app");
+
+      // Browser-only best effort (only works if window was opened via script)
+      try {
+        window.close();
+      } catch (e) {
+        // ignore – user can just close tab
+      }
+    }, 4000); // show for 4 seconds
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#000",
+        color: "#fff",
+        flexDirection: "column",
+        textAlign: "center",
+        padding: "1.5rem",
+      }}
+    >
+      <h1 style={{ fontSize: "1.75rem", marginBottom: "0.75rem" }}>
+        Thank you for joining StreamLine
+      </h1>
+      <p style={{ maxWidth: 400, opacity: 0.8 }}>
+        Your session has ended. You can now close this app or tab.
+      </p>
+    </div>
+  );
+}
 
 export default function Room() {
   const nav = useNavigate();
@@ -31,6 +73,10 @@ const [pendingName, setPendingName] = useState(displayName);
   const [showStreamSetup, setShowStreamSetup] = useState(false);
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
+
+  const [showGoodbye, setShowGoodbye] = useState(false);
+const isHost = displayName === roomName;
+
 
   // --- existing token fetch logic here ---
   useEffect(() => {
@@ -53,12 +99,19 @@ const [pendingName, setPendingName] = useState(displayName);
         setServerUrl(data.serverUrl);
       } catch (err) {
         console.error(err);
-        nav("/");
+        
       }
     };
 
     fetchToken();
   }, [roomName, displayName, nav]);
+
+  const handleLeftRoom = () => {
+    // Instead of nav("/"), show thank-you screen
+    setShowGoodbye(true);
+  };
+
+  
 
   const handleStartMultistream = async (keys: {
     youtubeKey?: string;
@@ -139,9 +192,11 @@ const [pendingName, setPendingName] = useState(displayName);
   // If user has no saved name, show name input screen
 if (!displayName) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black text-white">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white px-4">
+
+      {/* Join Room Form */}
       <form
-        className="bg-zinc-900 rounded-xl px-6 py-4 w-full max-w-sm space-y-3"
+        className="bg-zinc-900 rounded-xl px-6 py-5 w-full max-w-sm space-y-4 shadow-lg"
         onSubmit={(e) => {
           e.preventDefault();
           const name = pendingName.trim();
@@ -150,8 +205,8 @@ if (!displayName) {
           setDisplayName(name);
         }}
       >
-        <h1 className="text-lg font-semibold mb-2">
-          Enter your name to join the stream
+        <h1 className="text-xl font-semibold text-center">
+          Enter your name to join
         </h1>
 
         <input
@@ -163,13 +218,24 @@ if (!displayName) {
 
         <button
           type="submit"
-          className="mt-2 w-full py-2 rounded bg-indigo-600 text-sm font-medium"
+          className="mt-2 w-full py-2 rounded bg-indigo-600 text-sm font-medium hover:bg-indigo-500 transition"
         >
           Join Room
         </button>
       </form>
+
+      {/* Logo under form */}
+      <img
+        src="/logo.png"
+        alt="StreamLine Logo"
+        className="mt-6 w-40 opacity-90"
+      />
     </div>
   );
+}
+
+if (showGoodbye) {
+  return <ThankYouScreen />;
 }
 
 
@@ -183,11 +249,26 @@ if (!displayName) {
         <div className="flex items-center gap-2">
           
           <button
-            onClick={() => nav("/")}
-            className="text-xs underline underline-offset-4"
-          >
-            ← Back
-          </button>
+  onClick={() => {
+    if (isHost) {
+      nav("/"); // Host goes back to dashboard normally
+    } else {
+      handleLeftRoom(); // Guest gets Thank You screen
+    }
+  }}
+  className="text-xs underline underline-offset-4"
+>
+  ← Back
+</button>
+<button
+  onClick={() => {
+    localStorage.removeItem("sl_displayName");
+    nav("/"); // send them back to home/login
+  }}
+  className="text-xs px-2 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-white transition"
+>
+  Logout
+</button>
           <span className="text-sm opacity-80">{roomName}</span>
         </div>
 
@@ -229,6 +310,7 @@ if (!displayName) {
     token={token}
     serverUrl={serverUrl}
     connect={true}
+    onDisconnected={handleLeftRoom}      
   >
 
     
