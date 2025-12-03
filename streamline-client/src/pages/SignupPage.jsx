@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
+
+
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 export const SignupPage = () => {
   const nav = useNavigate();
 
+    const [planId, setPlanId] = useState("free"); // default
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

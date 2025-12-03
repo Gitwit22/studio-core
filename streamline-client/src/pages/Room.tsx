@@ -1,33 +1,23 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { LiveKitRoom, VideoConference} from "@livekit/components-react";
-
+import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 
 import "@livekit/components-styles";
 import InviteButton from "../shared/InviteButton";
 import StreamSetupModal from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
 
-
 const API_BASE = "https://magdalena-bulllike-hildred.ngrok-free.dev";
 
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 
 function ThankYouScreen() {
-  // Optional: try to close app/tab after a delay
   useEffect(() => {
     const timer = setTimeout(() => {
-      // ✅ If you're in a native wrapper, call into it here instead:
-      // (example) window.ReactNativeWebView?.postMessage("exit-app");
-
-      // Browser-only best effort (only works if window was opened via script)
       try {
         window.close();
-      } catch (e) {
-        // ignore – user can just close tab
-      }
-    }, 4000); // show for 4 seconds
-
+      } catch (e) {}
+    }, 4000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -63,22 +53,20 @@ export default function Room() {
   const [displayName, setDisplayName] = useState(
     () => localStorage.getItem("sl_displayName") ?? ""
   );
-  
-const [pendingName, setPendingName] = useState(displayName);
+  const [pendingName, setPendingName] = useState(displayName);
+
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [dashboardOpen, setDashboardOpen] = useState(false);
 
-  // NEW: multistream state
   const [showStreamSetup, setShowStreamSetup] = useState(false);
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
 
   const [showGoodbye, setShowGoodbye] = useState(false);
-const isHost = displayName === roomName;
+  const isHost = displayName === roomName;
 
-
-  // --- existing token fetch logic here ---
+  // --- token fetch ---
   useEffect(() => {
     if (!roomName || !displayName) return;
 
@@ -91,27 +79,57 @@ const isHost = displayName === roomName;
         });
 
         if (!res.ok) {
+          console.error("roomToken HTTP error", res.status);
           throw new Error("Failed to get token");
         }
 
         const data = await res.json();
-        setToken(data.token);
-        setServerUrl(data.serverUrl);
+        console.log("roomToken response:", data);
+
+        const tokenFromApi =
+          data.token || data.accessToken || data.jwt || data.roomToken;
+        const serverUrlFromApi =
+          data.serverUrl || data.url || data.livekitUrl || data.wsUrl;
+
+        if (!tokenFromApi || !serverUrlFromApi) {
+          console.error("Missing token or serverUrl in roomToken response");
+          return;
+        }
+
+        setToken(tokenFromApi);
+        setServerUrl(serverUrlFromApi);
       } catch (err) {
-        console.error(err);
-        
+        console.error("fetchToken error:", err);
       }
     };
 
     fetchToken();
-  }, [roomName, displayName, nav]);
+  }, [roomName, displayName]);
 
   const handleLeftRoom = () => {
-    // Instead of nav("/"), show thank-you screen
     setShowGoodbye(true);
   };
 
-  
+  const handleEndStream = async () => {
+    const uid = localStorage.getItem("sl_userId");
+
+    try {
+      if (uid) {
+        await fetch(`${API_BASE}/api/usage/streamEnded`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uid,
+            guestCount: 0,
+          }),
+        });
+      }
+    } catch (err) {
+      console.error("Failed to log usage:", err);
+    }
+
+    handleLeftRoom();
+  };
 
   const handleStartMultistream = async (keys: {
     youtubeKey?: string;
@@ -189,99 +207,95 @@ const isHost = displayName === roomName;
     }
   };
 
-  // If user has no saved name, show name input screen
-if (!displayName) {
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white px-4">
+  // --- conditional screens ---
 
-      {/* Join Room Form */}
-      <form
-        className="bg-zinc-900 rounded-xl px-6 py-5 w-full max-w-sm space-y-4 shadow-lg"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const name = pendingName.trim();
-          if (!name) return;
-          localStorage.setItem("sl_displayName", name);
-          setDisplayName(name);
-        }}
-      >
-        <h1 className="text-xl font-semibold text-center">
-          Enter your name to join
-        </h1>
-
-        <input
-          className="w-full px-3 py-2 rounded bg-zinc-800 border border-zinc-700 text-sm outline-none"
-          placeholder="Your name"
-          value={pendingName}
-          onChange={(e) => setPendingName(e.target.value)}
-        />
-
-        <button
-          type="submit"
-          className="mt-2 w-full py-2 rounded bg-indigo-600 text-sm font-medium hover:bg-indigo-500 transition"
+  if (!displayName) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white px-4">
+        <form
+          className="bg-zinc-900 rounded-xl px-6 py-5 w-full max-w-sm space-y-4 shadow-lg"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const name = pendingName.trim();
+            if (!name) return;
+            localStorage.setItem("sl_displayName", name);
+            setDisplayName(name);
+          }}
         >
-          Join Room
-        </button>
-      </form>
+          <h1 className="text-xl font-semibold text-center">
+            Enter your name to join
+          </h1>
 
-      {/* Logo under form */}
-      <img
-        src="/logo.png"
-        alt="StreamLine Logo"
-        className="mt-6 w-40 opacity-90"
-      />
-    </div>
-  );
-}
+          <input
+            className="w-full px-3 py-2 rounded bg-zinc-800 border border-zinc-700 text-sm outline-none"
+            placeholder="Your name"
+            value={pendingName}
+            onChange={(e) => setPendingName(e.target.value)}
+          />
 
-if (showGoodbye) {
-  return <ThankYouScreen />;
-}
+          <button
+            type="submit"
+            className="mt-2 w-full py-2 rounded bg-indigo-600 text-sm font-medium hover:bg-indigo-500 transition"
+          >
+            Join Room
+          </button>
+        </form>
 
+        <img
+          src="/logo.png"
+          alt="StreamLine Logo"
+          className="mt-6 w-40 opacity-90"
+        />
+      </div>
+    );
+  }
+
+  if (showGoodbye) {
+    return <ThankYouScreen />;
+  }
+
+  // --- main render ---
 
   return (
     <>
-      
-
-
       {/* Top bar / controls */}
       <div className="flex items-center justify-between px-4 py-2 bg-black text-white">
         <div className="flex items-center gap-2">
-          
           <button
-  onClick={() => {
-    if (isHost) {
-      nav("/"); // Host goes back to dashboard normally
-    } else {
-      handleLeftRoom(); // Guest gets Thank You screen
-    }
-  }}
-  className="text-xs underline underline-offset-4"
->
-  ← Back
-</button>
-<button
-  onClick={() => {
-    localStorage.removeItem("sl_displayName");
-    nav("/"); // send them back to home/login
-  }}
-  className="text-xs px-2 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-white transition"
->
-  Logout
-</button>
+            onClick={async () => {
+              if (isHost) {
+                await handleEndStream();
+                nav("/join");
+              } else {
+                handleLeftRoom();
+              }
+            }}
+            className="text-xs underline underline-offset-4"
+          >
+            ← Back
+          </button>
+
+          <button
+            onClick={() => {
+              localStorage.removeItem("sl_displayName");
+              nav("/");
+            }}
+            className="text-xs px-2 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-white transition"
+          >
+            Logout
+          </button>
+
           <span className="text-sm opacity-80">{roomName}</span>
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setDashboardOpen(true)}
+            className="text-xs px-3 py-1.5 border border-white/40 rounded hover:bg-white/10 transition"
+          >
+            Dashboard
+          </button>
 
-           {/* ✅ RESTORED DASHBOARD BUTTON */}
-      <button
-        onClick={() => setDashboardOpen(true)}
-        className="text-xs px-3 py-1.5 border border-white/40 rounded hover:bg-white/10 transition"
-      >
-        Dashboard
-      </button>
-          {/* LIVE indicator */}
           <div className="flex items-center gap-1 text-xs">
             <span
               className={`inline-block w-2 h-2 rounded-full ${
@@ -291,7 +305,6 @@ if (showGoodbye) {
             <span>{streamStatus === "live" ? "LIVE" : "OFFLINE"}</span>
           </div>
 
-          {/* Setup Stream button */}
           <button
             onClick={() => setShowStreamSetup(true)}
             className="px-2 py-1 text-xs rounded bg-indigo-600"
@@ -303,21 +316,27 @@ if (showGoodbye) {
         </div>
       </div>
 
+      {/* Debug status – remove later */}
+      <div className="mt-4 text-xs text-zinc-400 px-4">
+        <div>displayName: {displayName || "(none)"}</div>
+        <div>roomName: {roomName || "(none)"}</div>
+        <div>token: {token ? "yes" : "no"}</div>
+        <div>serverUrl: {serverUrl || "(none)"}</div>
+      </div>
+
       {/* Main LiveKit view */}
       {token && serverUrl && (
-  <LiveKitRoom 
-    data-lk-theme="sl-layout"
-    token={token}
-    serverUrl={serverUrl}
-    connect={true}
-    onDisconnected={handleLeftRoom}      
-  >
+        <LiveKitRoom
+          data-lk-theme="sl-layout"
+          token={token}
+          serverUrl={serverUrl}
+          connect={true}
+          onDisconnected={handleLeftRoom}
+        >
+          <div className="relative w-full max-w-5xl mx-auto mt-4 aspect-video">
+            <VideoConference />
 
-    
-    <div className="relative w-full h-full">
-    <VideoConference />
-
-    <img
+             <img
   src="/logo.png"
   alt="StreamLine Logo"
   className="hidden md:block absolute right-10 bottom-10 w-[300px] h-auto opacity-85 pointer-events-none"
@@ -332,18 +351,20 @@ if (showGoodbye) {
   }}
 />
 
-      
-<RoleOverlay
-        open={dashboardOpen}
-        onClose={() => setDashboardOpen(false)}
-        role="host"
-        roomName={roomName}
-      />
-    </div>
-  </LiveKitRoom>
-)}
+            <RoleOverlay
+              open={dashboardOpen}
+              onClose={() => setDashboardOpen(false)}
+              role="host"
+              roomName={roomName}
+            />
+          </div>
+        </LiveKitRoom>
 
-      {/* Stream setup modal */}
+        
+      )}
+
+
+
       <StreamSetupModal
         isOpen={showStreamSetup}
         onClose={() => setShowStreamSetup(false)}

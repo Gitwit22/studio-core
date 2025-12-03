@@ -29,6 +29,7 @@ export const LoginPage = () => {
 
       localStorage.setItem("sl_user", JSON.stringify(data.user));
       localStorage.setItem("sl_token", data.token);
+localStorage.setItem("sl_userId", data.user.id || data.user.uid);  // 🔥 add this
 
       // After login, go to Create Room (Join page)
       nav("/join");

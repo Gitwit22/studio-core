@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import UsageBanner from "../components/UsageBanner";
+
 
 const raw = localStorage.getItem("sl_user");
 const user = raw ? JSON.parse(raw) : null;
@@ -23,6 +25,7 @@ export default function Join() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white p-6">
+       <UsageBanner />
 
       {/* 🔥 WELCOME BACK BANNER */}
       {user && (
@@ -74,6 +77,8 @@ export default function Join() {
     )}
   </div>
 )}
+
+
 
 
       {/* Your existing form */}
