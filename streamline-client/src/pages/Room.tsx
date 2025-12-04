@@ -9,6 +9,7 @@ import RoleOverlay from "../components/RoleOverlay";
 
 const API_BASE = "https://magdalena-bulllike-hildred.ngrok-free.dev";
 
+
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 
 function ThankYouScreen() {
@@ -49,7 +50,10 @@ export default function Room() {
   const nav = useNavigate();
   const { roomName: rn } = useParams<{ roomName: string }>();
   const roomName = rn ?? "";
-
+const [sessionStart, setSessionStart] = useState<number | null>(null);
+useEffect(() => {
+  setSessionStart(Date.now());
+}, []);
   const [displayName, setDisplayName] = useState(
     () => localStorage.getItem("sl_displayName") ?? ""
   );
@@ -75,7 +79,12 @@ export default function Room() {
         const res = await fetch(`${API_BASE}/api/roomToken`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ roomName, identity: displayName }),
+          body: JSON.stringify({
+  roomName,
+  identity: displayName,
+  uid: localStorage.getItem("sl_userId"),   // 🔥 ADD THIS
+}),
+
         });
 
         if (!res.ok) {
@@ -111,25 +120,35 @@ export default function Room() {
   };
 
   const handleEndStream = async () => {
-    const uid = localStorage.getItem("sl_userId");
+  const uid = localStorage.getItem("sl_userId");
 
-    try {
-      if (uid) {
-        await fetch(`${API_BASE}/api/usage/streamEnded`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            uid,
-            guestCount: 0,
-          }),
-        });
+  try {
+    if (uid) {
+      let minutes = 0;
+      if (sessionStart) {
+        minutes = Math.max(
+          1,
+          Math.round((Date.now() - sessionStart) / 60000)
+        );
       }
-    } catch (err) {
-      console.error("Failed to log usage:", err);
-    }
 
-    handleLeftRoom();
-  };
+      await fetch(`${API_BASE}/api/usage/streamEnded`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid,
+          minutes,
+          guestCount: 0,
+        }),
+      });
+    }
+  } catch (err) {
+    console.error("Failed to log usage:", err);
+  }
+
+  handleLeftRoom();
+};
+
 
   const handleStartMultistream = async (keys: {
     youtubeKey?: string;
@@ -239,6 +258,10 @@ export default function Room() {
           >
             Join Room
           </button>
+
+
+
+          
         </form>
 
         <img
@@ -326,14 +349,15 @@ export default function Room() {
 
       {/* Main LiveKit view */}
       {token && serverUrl && (
-        <LiveKitRoom
-          data-lk-theme="sl-layout"
-          token={token}
-          serverUrl={serverUrl}
-          connect={true}
-          onDisconnected={handleLeftRoom}
-        >
-          <div className="relative w-full max-w-5xl mx-auto mt-4 aspect-video">
+       <LiveKitRoom
+  data-lk-theme="default"        // use LiveKit’s default theme
+  className="sl-layout"          // 🔥 this is what your CSS is looking for
+  token={token}
+  serverUrl={serverUrl}
+  connect={true}
+  onDisconnected={handleLeftRoom}
+>
+  <div className="relative w-full max-w-5xl mx-auto mt-4 aspect-video">
             <VideoConference />
 
              <img

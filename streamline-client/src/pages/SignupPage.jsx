@@ -5,6 +5,8 @@ import { useNavigate } from "react-router-dom";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
+
+
 export const SignupPage = () => {
   const nav = useNavigate();
 
@@ -14,6 +16,8 @@ export const SignupPage = () => {
   const [password, setPassword] = useState("");
 
   const [timeZone, setTimeZone] = useState("");
+
+  
 
   // Streaming defaults
   const [defaultResolution, setDefaultResolution] = useState("720p");
@@ -50,6 +54,9 @@ export const SignupPage = () => {
         password,
         skipOnboarding,
         timeZone,
+        planId,
+          createdAt: new Date().toISOString(),
+
       };
 
       if (!skipOnboarding) {
@@ -74,6 +81,8 @@ export const SignupPage = () => {
 
       localStorage.setItem("sl_user", JSON.stringify(data.user));
       localStorage.setItem("sl_token", data.token);
+      localStorage.setItem("sl_userId", data.user.id || data.user.uid); // 🔥 add this
+
 
       // After signup, go to your existing create-room page
       nav("/join");
@@ -138,6 +147,88 @@ export const SignupPage = () => {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
+
+      {/* Plan selection */}
+      <div className="mt-4">
+        <p className="block text-sm mb-2 font-semibold">Choose your plan</p>
+
+        <div className="space-y-2">
+          {/* Free */}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="plan"
+              value="free"
+              checked={planId === "free"}
+              onChange={(e) => setPlanId(e.target.value)}
+              className="mt-1"
+            />
+            <div>
+              <div className="font-medium">Free</div>
+              <div className="text-xs text-gray-400">
+                Get started with StreamLine at no cost.
+              </div>
+            </div>
+          </label>
+
+          {/* Starter */}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="plan"
+              value="starter"
+              checked={planId === "starter"}
+              onChange={(e) => setPlanId(e.target.value)}
+              className="mt-1"
+            />
+            <div>
+              <div className="font-medium">Starter</div>
+              <div className="text-xs text-gray-400">
+                For new creators streaming a few times a month.
+              </div>
+            </div>
+          </label>
+
+          {/* Pro */}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="plan"
+              value="pro"
+              checked={planId === "pro"}
+              onChange={(e) => setPlanId(e.target.value)}
+              className="mt-1"
+            />
+            <div>
+              <div className="font-medium">Pro</div>
+              <div className="text-xs text-gray-400">
+                More hours and guests for growing shows.
+              </div>
+            </div>
+          </label>
+
+          {/* Enterprise */}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="plan"
+              value="enterprise"
+              checked={planId === "enterprise"}
+              onChange={(e) => setPlanId(e.target.value)}
+              className="mt-1"
+            />
+            <div>
+              <div className="font-medium">Enterprise</div>
+              <div className="text-xs text-gray-400">
+                Teams, networks, and high-usage creators.
+              </div>
+            </div>
+          </label>
+
+          
+        </div>
+      </div>
+
 
             <div>
               <label className="block text-sm mb-1">Time zone (optional)</label>

@@ -68,7 +68,32 @@ button:focus,
 button:focus-visible {
   outline: 3px solid #646cff;
 }
+/* ======================================
+   RESET DESKTOP TO LIVEKIT DEFAULTS
+   ====================================== */
 
+/* Desktop = remove all custom grid forcing */
+@media (min-width: 769px) {
+  .sl-layout .lk-video-grid {
+    display: flex !important;     /* restore LiveKit flex layout */
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .sl-layout .lk-video-grid > * {
+    aspect-ratio: auto !important;
+    width: auto !important;
+    height: auto !important;
+    flex: 0 1 auto !important;    /* normal rectangular tiles */
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .sl-layout .lk-video-grid > * video {
+    object-fit: cover !important;
+  }
+}
 /* Optional: light-mode override (remove if you always want dark) */
 @media (prefers-color-scheme: light) {
   body {
@@ -83,51 +108,46 @@ button:focus-visible {
   }
 }
 
-/* ================================
-   LiveKit layout overrides
-   ================================ */
-
-/* Stop LiveKit from doing its own auto-layout inside .sl-layout */
-.sl-layout [data-lk-layout] {
-  display: block !important;
-}
-
-/* Our custom layout: video + chat (desktop) */
-.sl-layout {
-  display: grid;
-  grid-template-columns: 2fr 1fr; /* video bigger than chat */
-  height: 00vh;
-}
-
-/* Chat area inside our layout (attribute selector may differ per version) */
-.sl-layout [data-lk-chat-container] {
-  display: block;
-}
-
-/* ================================
-   Mobile overrides
-   ================================ */
+/* ======================================
+   STREAMLINE PHONE LAYOUT HOOKED TO ROOM
+   ====================================== */
 
 @media (max-width: 768px) {
-  /* Stack everything in one column on small screens */
-  .sl-layout {
-    grid-template-columns: 1fr;
+  /* Use LiveKit's own video grid, scoped to our room */
+  .sl-layout .lk-video-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
+    justify-content: flex-start;
+    align-content: flex-start;
   }
 
-  /* Hide chat on mobile so video gets the whole screen */
-  .sl-layout [data-lk-chat-container] {
-    display: none !important;
+  /* Each tile (host, guest, screen share) */
+  .sl-layout .lk-video-grid > * {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #000;
+  }
+
+  .sl-layout .lk-video-grid > * video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover; /* fills tile, no side bars */
+  }
+
+  /* Screen share = wide tile across both columns */
+  .sl-layout .lk-video-grid [data-lk-source="screen_share"] {
+    grid-column: span 2;
   }
 }
-/* Forces tiles to stay small so grid can form rows */
-.lk-participant-tile {
-  width: 790px !important;
-  height: 400px !important;
-  padding: 1px;
+
+@media (max-width: 768px) and (orientation: landscape) {
+  .sl-layout .lk-video-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
-/* Make the video inside scale correctly */
-.lk-participant-tile video {
-  object-fit: cover !important;
-  border-radius: 20px;
-}
