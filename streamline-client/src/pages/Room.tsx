@@ -281,7 +281,7 @@ useEffect(() => {
             setDisplayName(name);
           }}
         >
-          <h1 className="text-xl font-semibold text-center">
+          <h1 className="join-instructions text-xl font-semibold text-center">
             Enter your name to join
           </h1>
 
@@ -303,6 +303,12 @@ useEffect(() => {
 
           
         </form>
+
+        <p className="join-instructions text-xs text-center mt-3">
+  When you enter the room, tap the microphone and camera icons to enable audio and video.
+</p>
+
+
 
         <img
           src="/logo.png"
