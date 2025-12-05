@@ -311,7 +311,7 @@ useEffect(() => {
 
 
         <img
-          src="/logo.png"
+          src="/logosmall.png"
           alt="StreamLine Logo"
           className="mt-6 w-40 opacity-90"
         />
