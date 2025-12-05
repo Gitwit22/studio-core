@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LiveKitRoom, VideoConference } from "@livekit/components-react";
-
+import { useLocalParticipantPermissions } from "@livekit/components-react";
 import "@livekit/components-styles";
 import InviteButton from "../shared/InviteButton";
 import StreamSetupModal from "../components/StreamSetupModal";
@@ -71,6 +71,8 @@ useEffect(() => {
   const [showGoodbye, setShowGoodbye] = useState(false);
   const isHost = displayName === roomName;
 
+
+  
   // --- token fetch ---
 // Put this near the top of Room.tsx, outside the component
 function getOrCreateUid() {
@@ -320,7 +322,7 @@ useEffect(() => {
   return (
     <>
       {/* Top bar / controls */}
-      <div className="flex items-center justify-between px-4 py-2 bg-black text-white">
+<div className="flex items-center justify-between px-4 py-2 bg-black text-white sl-topbar">
         <div className="flex items-center gap-2">
           <button
             onClick={async () => {
@@ -336,46 +338,58 @@ useEffect(() => {
             ← Back
           </button>
 
-          <button
-            onClick={() => {
-              localStorage.removeItem("sl_displayName");
-              nav("/");
-            }}
-            className="text-xs px-2 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-white transition"
-          >
-            Logout
-          </button>
+           {/* LOGOUT — HOST ONLY */}
+    {isHost && (
+      <button
+        onClick={() => {
+          localStorage.removeItem("sl_displayName");
+          nav("/");
+        }}
+        className="text-xs px-2 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-white transition"
+      >
+        Logout
+      </button>
+    )}
 
-          <span className="text-sm opacity-80">{roomName}</span>
-        </div>
+    {/* Room Name — optional, keep for all or restrict */}
+    <span className="text-sm opacity-80">{roomName}</span>
+  </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setDashboardOpen(true)}
-            className="text-xs px-3 py-1.5 border border-white/40 rounded hover:bg-white/10 transition"
-          >
-            Dashboard
-          </button>
+  {/* RIGHT SIDE — HOST ONLY */}
+  {isHost && (
+    <div className="flex items-center gap-3">
 
-          <div className="flex items-center gap-1 text-xs">
-            <span
-              className={`inline-block w-2 h-2 rounded-full ${
-                streamStatus === "live" ? "bg-red-500" : "bg-gray-500"
-              }`}
-            />
-            <span>{streamStatus === "live" ? "LIVE" : "OFFLINE"}</span>
-          </div>
+      {/* Dashboard Button */}
+      <button
+        onClick={() => setDashboardOpen(true)}
+        className="text-xs px-3 py-1.5 border border-white/40 rounded hover:bg-white/10 transition"
+      >
+        Dashboard
+      </button>
 
-          <button
-            onClick={() => setShowStreamSetup(true)}
-            className="px-2 py-1 text-xs rounded bg-indigo-600"
-          >
-            {streamStatus === "live" ? "Manage Stream" : "Setup Stream"}
-          </button>
-
-          <InviteButton roomName={roomName} />
-        </div>
+      {/* Live Indicator */}
+      <div className="flex items-center gap-1 text-xs">
+        <span
+          className={`inline-block w-2 h-2 rounded-full ${
+            streamStatus === "live" ? "bg-red-500" : "bg-gray-500"
+          }`}
+        />
+        <span>{streamStatus === "live" ? "LIVE" : "OFFLINE"}</span>
       </div>
+
+      {/* Stream Setup */}
+      <button
+        onClick={() => setShowStreamSetup(true)}
+        className="px-2 py-1 text-xs rounded bg-indigo-600"
+      >
+        {streamStatus === "live" ? "Manage Stream" : "Setup Stream"}
+      </button>
+
+      {/* Invite — HOST ONLY */}
+      <InviteButton roomName={roomName} />
+    </div>
+  )}
+</div>
 
       {/* Debug status – remove later */}
       <div className="mt-4 text-xs text-zinc-400 px-4">
@@ -391,27 +405,20 @@ useEffect(() => {
   data-lk-theme="default"        // use LiveKit’s default theme
   className="sl-layout"          // 🔥 this is what your CSS is looking for
   token={token}
+  
   serverUrl={serverUrl}
   connect={true}
   onDisconnected={handleLeftRoom}
 >
   <div className="relative w-full max-w-5xl mx-auto mt-4 aspect-video">
-            <VideoConference />
-
-             <img
-  src="/logo.png"
-  alt="StreamLine Logo"
-  className="hidden md:block absolute right-10 bottom-10 w-[300px] h-auto opacity-85 pointer-events-none"
-  style={{
-    position: "absolute",
-    right: "60px",    // move left/right
-    bottom: "-289px",   // move up/down
-    width: "300px",   // ← actual size (make this smaller/bigger)
-    height: "auto",
-    opacity: 0.85,
-    pointerEvents: "none",
-  }}
-/>
+            <div className="sl-video-wrapper">
+  <VideoConference />
+  <img
+    src="/logosmall.png"
+    className="sl-watermark"
+  />
+</div>
+             
 
             <RoleOverlay
               open={dashboardOpen}
@@ -419,7 +426,11 @@ useEffect(() => {
               role="host"
               roomName={roomName}
             />
+        
           </div>
+
+          
+
         </LiveKitRoom>
 
         

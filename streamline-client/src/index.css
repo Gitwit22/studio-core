@@ -21,6 +21,8 @@
   --lk-fg-secondary: #cccccc;
 }
 
+
+
 /* ================================
    Global layout + defaults
    ================================ */
@@ -60,6 +62,10 @@ button {
   background-color: #db0f0f;
   cursor: pointer;
   transition: border-color 0.25s;
+   padding: 6px 10px !important; /* inside button */
+  margin: 0 4px;
+  
+  
 }
 button:hover {
   border-color: #646cff;
@@ -68,11 +74,41 @@ button:focus,
 button:focus-visible {
   outline: 3px solid #646cff;
 }
+
+
+
+.sl-video-wrapper {
+  position: relative; /* allows absolute children */
+  width: 100%;
+  height: 100%;
+  
+}
+
+.sl-watermark {
+  position: absolute;
+  bottom: 80px;
+  right: 15px;
+  width: 140px;          /* adjust size */
+  opacity: 0.8;          /* 80% opacity */
+  pointer-events: none;  /* don't block clicks */
+  z-index: 9999;         /* over the video tiles */
+}
+
 /* ======================================
    RESET DESKTOP TO LIVEKIT DEFAULTS
    ====================================== */
 
 /* Desktop = remove all custom grid forcing */
+
+@media (max-width: 768px) {
+  .sl-watermark {
+    width: 60px;   /* phone size */
+    bottom: 80px;
+    right: 6px;
+  }
+}
+
+
 @media (min-width: 769px) {
   .sl-layout .lk-video-grid {
     display: flex !important;     /* restore LiveKit flex layout */
@@ -108,13 +144,16 @@ button:focus-visible {
   }
 }
 
+
+
+
 /* ======================================
    STREAMLINE PHONE LAYOUT HOOKED TO ROOM
    ====================================== */
 
 @media (max-width: 768px) {
-  /* Use LiveKit's own video grid, scoped to our room */
-  .sl-layout .lk-video-grid {
+  /* Force ANY LiveKit layout on phone to be a 2-column grid */
+  .sl-layout [data-lk-layout] {
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px;
@@ -123,8 +162,7 @@ button:focus-visible {
     align-content: flex-start;
   }
 
-  /* Each tile (host, guest, screen share) */
-  .sl-layout .lk-video-grid > * {
+  .sl-layout [data-lk-layout] > * {
     position: relative;
     width: 100%;
     aspect-ratio: 16 / 9;
@@ -133,17 +171,25 @@ button:focus-visible {
     background: #000;
   }
 
-  .sl-layout .lk-video-grid > * video {
+  .sl-layout [data-lk-layout] > * video {
     width: 100% !important;
     height: 100% !important;
     object-fit: cover;
   }
 
-  /* Screen share = wide tile across both columns */
-  .sl-layout .lk-video-grid [data-lk-source="screen_share"] {
+  /* Screen share spans both columns */
+  .sl-layout [data-lk-layout] [data-lk-source="screen_share"] {
     grid-column: span 2;
   }
 }
+
+/* Landscape: more columns if you want */
+@media (max-width: 768px) and (orientation: landscape) {
+  .sl-layout [data-lk-layout] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 
 @media (max-width: 768px) and (orientation: landscape) {
   .sl-layout .lk-video-grid {
