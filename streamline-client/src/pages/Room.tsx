@@ -7,6 +7,7 @@ import InviteButton from "../shared/InviteButton";
 import StreamSetupModal from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
 
+
 const API_BASE = "https://magdalena-bulllike-hildred.ngrok-free.dev";
 
 
@@ -71,49 +72,73 @@ useEffect(() => {
   const isHost = displayName === roomName;
 
   // --- token fetch ---
-  useEffect(() => {
-    if (!roomName || !displayName) return;
+// Put this near the top of Room.tsx, outside the component
+function getOrCreateUid() {
+  // If they’re logged in, use real user id
+  let uid = localStorage.getItem("sl_userId");
 
-    const fetchToken = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/roomToken`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-  roomName,
-  identity: displayName,
-  uid: localStorage.getItem("sl_userId"),   // 🔥 ADD THIS
-}),
+  // If not logged in, reuse a guest id if we already made one
+  if (!uid) {
+    uid = localStorage.getItem("sl_guestId") || null;
+  }
 
-        });
+  // If still nothing, create a new guest id
+  if (!uid) {
+    const rand = Math.random().toString(36).slice(2, 10);
+    uid = `guest_${rand}`;
+    localStorage.setItem("sl_guestId", uid);
+  }
 
-        if (!res.ok) {
-          console.error("roomToken HTTP error", res.status);
-          throw new Error("Failed to get token");
-        }
+  return uid;
+}
 
-        const data = await res.json();
-        console.log("roomToken response:", data);
 
-        const tokenFromApi =
-          data.token || data.accessToken || data.jwt || data.roomToken;
-        const serverUrlFromApi =
-          data.serverUrl || data.url || data.livekitUrl || data.wsUrl;
 
-        if (!tokenFromApi || !serverUrlFromApi) {
-          console.error("Missing token or serverUrl in roomToken response");
-          return;
-        }
+  // --- token fetch ---
+useEffect(() => {
+  if (!roomName || !displayName) return;
 
-        setToken(tokenFromApi);
-        setServerUrl(serverUrlFromApi);
-      } catch (err) {
-        console.error("fetchToken error:", err);
+  const fetchToken = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/roomToken`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomName,
+          identity: displayName,
+          uid: getOrCreateUid(), // 🔥 always defined now (host or guest)
+        }),
+      });
+
+      if (!res.ok) {
+        console.error("roomToken HTTP error", res.status);
+        throw new Error("Failed to get token");
       }
-    };
 
-    fetchToken();
-  }, [roomName, displayName]);
+      const data = await res.json();
+      console.log("roomToken response:", data);
+
+      const tokenFromApi =
+        data.token || data.accessToken || data.jwt || data.roomToken;
+      const serverUrlFromApi =
+        data.serverUrl || data.server_url || data.url || data.livekitUrl;
+
+      if (!tokenFromApi || !serverUrlFromApi) {
+        console.error("Missing token or serverUrl in roomToken response");
+        return;
+      }
+
+      setToken(tokenFromApi);
+      setServerUrl(serverUrlFromApi);
+    } catch (err) {
+      console.error("fetchToken error:", err);
+    }
+  };
+
+  fetchToken();
+}, [roomName, displayName]);
+
+
 
   const handleLeftRoom = () => {
     setShowGoodbye(true);
@@ -151,80 +176,93 @@ useEffect(() => {
 
 
   const handleStartMultistream = async (keys: {
-    youtubeKey?: string;
-    facebookKey?: string;
-  }) => {
-    if (!roomName) {
-      alert("No room name");
-      return;
-    }
+  youtubeKey?: string;
+  facebookKey?: string;
+  twitchKey?: string;   // 👈 NEW
+}) => {
+  if (!roomName) {
+    alert("No room name");
+    return;
+  }
 
-    try {
-      setStreamStatus("starting");
+  try {
+    setStreamStatus("starting");
 
-      const res = await fetch(
-        `${API_BASE}/api/rooms/${encodeURIComponent(
-          roomName
-        )}/start-multistream`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            youtubeStreamKey: keys.youtubeKey,
-            facebookStreamKey: keys.facebookKey,
-          }),
-        }
-      );
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        console.error("Start multistream failed", errData);
-        alert("Failed to start multistream");
-        setStreamStatus("idle");
-        return;
-      }
-
-      const data = await res.json();
-      setEgressId(data.egressId);
-      setStreamStatus("live");
-    } catch (err) {
-      console.error(err);
-      alert("Error starting multistream");
-      setStreamStatus("idle");
-    }
-  };
-
-  const handleStopMultistream = async () => {
-    if (!egressId) {
-      alert("No active stream");
-      return;
-    }
-
-    try {
-      setStreamStatus("stopping");
-
-      const res = await fetch(`${API_BASE}/api/rooms/stop-multistream`, {
+    const res = await fetch(
+      `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ egressId }),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        console.error("Stop multistream failed", errData);
-        alert("Failed to stop multistream");
-        setStreamStatus("live");
-        return;
+        body: JSON.stringify({
+          youtubeStreamKey: keys.youtubeKey,
+          facebookStreamKey: keys.facebookKey,
+          twitchStreamKey: keys.twitchKey,  // 👈 NEW
+        }),
       }
+    );
 
-      setEgressId(null);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      console.error("Start multistream failed", errData);
+      alert("Failed to start multistream");
       setStreamStatus("idle");
-    } catch (err) {
-      console.error(err);
-      alert("Error stopping multistream");
-      setStreamStatus("live");
+      return;
     }
-  };
+
+    const data = await res.json();
+    setEgressId(data.egressId);
+    setStreamStatus("live");
+  } catch (err) {
+    console.error("Error starting multistream", err);
+    alert("Error starting multistream");
+    setStreamStatus("idle");
+  }
+};
+
+
+  const handleStopMultistream = async () => {
+  if (!egressId) {
+    alert("No active stream");
+    return;
+  }
+
+  if (!roomName) {
+    alert("No room name");
+    return;
+  }
+
+  try {
+    setStreamStatus("stopping");
+
+    const res = await fetch(
+      `${API_BASE}/api/rooms/${encodeURIComponent(
+        roomName
+      )}/stop-multistream`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // body is optional – server looks up egressId by roomName
+        body: JSON.stringify({ egressId }),
+      }
+    );
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      console.error("Stop multistream failed", errData);
+      alert("Failed to stop multistream");
+      setStreamStatus("live");
+      return;
+    }
+
+    setEgressId(null);
+    setStreamStatus("idle");
+  } catch (err) {
+    console.error("Error stopping multistream", err);
+    alert("Error stopping multistream");
+    setStreamStatus("live");
+  }
+};
+
 
   // --- conditional screens ---
 

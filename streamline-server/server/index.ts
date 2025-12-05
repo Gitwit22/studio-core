@@ -3,11 +3,14 @@ import express from "express";
 import cors from "cors";
 import { RoomServiceClient, TrackSource, TrackType } from "livekit-server-sdk";
 import multistreamRoutes from "./routes/multistream";
+
 import roomTokenRoute from "./routes/roomToken";
+
 import { firestore as db, auth } from "./firebaseAdmin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import editingRouter from "./routes/editing";
 
 
 dotenv.config();
@@ -27,6 +30,9 @@ app.use("/api/roomToken", roomTokenRoute);
 
 // Multistream routes (YouTube/FB)
 app.use("/api/rooms", multistreamRoutes);
+
+
+app.use("/api/editing", editingRouter);
 
 // -------------------------------
 // Admin Controls (Host/Mod Only)

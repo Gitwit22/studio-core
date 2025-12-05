@@ -136,7 +136,7 @@ button:focus-visible {
   .sl-layout .lk-video-grid > * video {
     width: 100% !important;
     height: 100% !important;
-    object-fit: cover; /* fills tile, no side bars */
+    object-fit: cover;
   }
 
   /* Screen share = wide tile across both columns */
@@ -150,4 +150,3 @@ button:focus-visible {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-

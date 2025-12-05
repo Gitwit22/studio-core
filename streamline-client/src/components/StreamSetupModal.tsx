@@ -1,12 +1,15 @@
-// streamline-client/src/components/StreamSetupModal.tsx
 import { useState } from "react";
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onStart: (keys: { youtubeKey?: string; facebookKey?: string }) => Promise<void>;
+  onStart: (keys: { 
+    youtubeKey?: string; 
+    facebookKey?: string; 
+    twitchKey?: string;   // ⭐ TWITCH
+  }) => Promise<void>;
   onStop: () => Promise<void>;
-  status: string; // keep it loose to shut TS up
+  status: string;
 }
 
 export default function StreamSetupModal({
@@ -18,27 +21,32 @@ export default function StreamSetupModal({
 }: Props) {
   const [useYouTube, setUseYouTube] = useState(true);
   const [useFacebook, setUseFacebook] = useState(false);
+
+  const [useTwitch, setUseTwitch] = useState(false);        // ⭐ TWITCH
   const [youtubeKey, setYoutubeKey] = useState("");
   const [facebookKey, setFacebookKey] = useState("");
+  const [twitchKey, setTwitchKey] = useState("");           // ⭐ TWITCH
 
   if (!isOpen) return null;
 
   const isLive = status === "live";
   const isBusy =
-    (status as string) === "starting" || (status as string) === "stopping";
+    status === "starting" || status === "stopping";
 
   const handleStart = async () => {
     const yt = useYouTube ? youtubeKey.trim() : "";
     const fb = useFacebook ? facebookKey.trim() : "";
+    const tw = useTwitch ? twitchKey.trim() : "";           // ⭐ TWITCH
 
-    if (!yt && !fb) {
-      alert("Enter at least one stream key (YouTube or Facebook).");
+    if (!yt && !fb && !tw) {
+      alert("Enter at least one stream key (YouTube, Facebook, or Twitch).");
       return;
     }
 
     await onStart({
       youtubeKey: yt || undefined,
       facebookKey: fb || undefined,
+      twitchKey: tw || undefined,                           // ⭐ TWITCH
     });
   };
 
@@ -60,18 +68,18 @@ export default function StreamSetupModal({
         </div>
 
         <p className="text-xs text-neutral-400 mb-3">
-          Open YouTube Studio / Facebook Live in another tab, copy your{" "}
-          <strong>stream keys</strong>, and paste them here. We’ll stream your
-          LiveKit room out via RTMP. No logins are saved.
+          Paste your <strong>stream keys</strong> for any platform you want to
+          stream to. No logins are saved.
         </p>
 
         <div className="space-y-3">
+
           {/* YouTube */}
           <label className="flex items-start gap-2 text-sm">
             <input
               type="checkbox"
               checked={useYouTube}
-              onChange={() => setUseYouTube((v) => !v)}
+              onChange={() => setUseYouTube(v => !v)}
             />
             <div className="flex-1">
               <div className="font-medium">YouTube Live</div>
@@ -91,7 +99,7 @@ export default function StreamSetupModal({
             <input
               type="checkbox"
               checked={useFacebook}
-              onChange={() => setUseFacebook((v) => !v)}
+              onChange={() => setUseFacebook(v => !v)}
             />
             <div className="flex-1">
               <div className="font-medium">Facebook Live</div>
@@ -105,6 +113,27 @@ export default function StreamSetupModal({
               />
             </div>
           </label>
+
+          {/* ⭐ TWITCH */}
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={useTwitch}
+              onChange={() => setUseTwitch(v => !v)}
+            />
+            <div className="flex-1">
+              <div className="font-medium">Twitch Live</div>
+              <input
+                type="text"
+                value={twitchKey}
+                onChange={(e) => setTwitchKey(e.target.value)}
+                placeholder="Twitch Stream Key"
+                disabled={!useTwitch || isBusy || isLive}
+                className="mt-1 w-full bg-black/40 border border-white/15 rounded px-2 py-1 text-xs"
+              />
+            </div>
+          </label>
+
         </div>
 
         <div className="mt-4 flex justify-between items-center">
@@ -115,23 +144,24 @@ export default function StreamSetupModal({
             </span>
           </div>
 
-          {!isLive ? (
-            <button
-              onClick={handleStart}
-              disabled={isBusy}
-              className="px-3 py-1 text-xs rounded bg-green-600 disabled:bg-green-900"
-            >
-              {(status as string) === "starting" ? "Starting…" : "Go Live"}
-            </button>
-          ) : (
-            <button
-              onClick={handleStop}
-              disabled={isBusy}
-              className="px-3 py-1 text-xs rounded bg-red-600 disabled:bg-red-900"
-            >
-              {(status as string) === "stopping" ? "Stopping…" : "Stop Stream"}
-            </button>
-          )}
+         {!isLive ? (
+  <button
+    onClick={handleStart}
+    disabled={isBusy}
+    className="px-3 py-1 text-xs rounded bg-green-600 disabled:bg-green-900"
+  >
+    {(status as string) === "starting" ? "Starting…" : "Go Live"}
+  </button>
+) : (
+  <button
+    onClick={handleStop}
+    disabled={isBusy}
+    className="px-3 py-1 text-xs rounded bg-red-600 disabled:bg-red-900"
+  >
+    {(status as string) === "stopping" ? "Stopping…" : "Stop Stream"}
+  </button>
+)}
+
         </div>
       </div>
     </div>
