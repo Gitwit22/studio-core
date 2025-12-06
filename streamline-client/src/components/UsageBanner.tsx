@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "https://magdalena-bulllike-hildred.ngrok-free.dev";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5137";
 
 type UsageSummary = {
   displayName: string;

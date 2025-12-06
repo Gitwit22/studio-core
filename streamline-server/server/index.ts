@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import path from "path";
 import { RoomServiceClient, TrackSource, TrackType } from "livekit-server-sdk";
 import multistreamRoutes from "./routes/multistream";
 
@@ -16,11 +17,14 @@ import editingRouter from "./routes/editing";
 dotenv.config();
 
 
-const port = process.env.PORT || 3157;
+const PORT = process.env.PORT || 5137;
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve React static files
+app.use(express.static(path.join(__dirname, "../dist")));
 
 // Health check
 app.get("/", (_req, res) => res.send("API up"));
@@ -375,9 +379,10 @@ const planSnap = await db.collection("plans").doc(planId).get();
 
 app.post("/api/usage/streamEnded", async (req, res) => {
   try {
-    // TEMP: we’ll pass uid from the client in the body
-    const { uid, guestCount = 0 } = req.body as {
+    // TEMP: we'll pass uid from the client in the body
+    const { uid, minutes = 0, guestCount = 0 } = req.body as {
       uid?: string;
+      minutes?: number;
       guestCount?: number;
     };
 
@@ -394,15 +399,11 @@ app.post("/api/usage/streamEnded", async (req, res) => {
 
     const userData = userSnap.data() || {};
     const usage = (userData.usage || {}) as any;
-
-    if (!usage.lastStreamStart || !usage.lastStreamStart.toDate) {
-      return res.status(400).json({ error: "lastStreamStart missing" });
-    }
-
     const now = new Date();
-    const start: Date = usage.lastStreamStart.toDate();
-    const durationMs = now.getTime() - start.getTime();
-    const durationHours = Math.max(durationMs / (1000 * 60 * 60), 0);
+
+    // Use minutes from client (at least 1 minute)
+    const durationMinutes = Math.max(1, minutes || 0);
+    const durationHours = durationMinutes / 60;
 
     // --- handle monthly reset if needed ---
     const resetDate: Date | null =
@@ -453,9 +454,11 @@ app.post("/api/usage/streamEnded", async (req, res) => {
   }
 });
 
+// Serve React app for all routes that don't match /api
+app.use((_req, res) => {
+  res.sendFile(path.join(__dirname, "../dist/index.html"));
+});
 
-
-const PORT = process.env.PORT || 5137; // use whatever you were using when it worked
 app.listen(PORT, () => {
-  console.log(`✅ API listening on http://localhost:${PORT}`);
+  console.log(`✅ Server listening on http://localhost:${PORT}`);
 });

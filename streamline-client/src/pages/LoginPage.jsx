@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE = "http://localhost:5137";
 
 export const LoginPage = () => {
   const nav = useNavigate();
@@ -16,7 +16,9 @@ export const LoginPage = () => {
     try {
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify({ email, password }),
       });
 

@@ -27,6 +27,16 @@ export default function Join() {
     <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white p-6">
        <UsageBanner />
 
+      {/* Top right corner - Dashboard button */}
+      <div className="fixed top-4 right-4">
+        <button
+          onClick={() => nav("/dashboard")}
+          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-medium transition"
+        >
+          📊 Dashboard
+        </button>
+      </div>
+
       {/* 🔥 WELCOME BACK BANNER */}
       {user && (
         <div className="mb-6 text-center">

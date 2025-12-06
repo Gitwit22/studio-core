@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-
-
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE = "http://localhost:5137";
 
 
 
@@ -67,7 +65,10 @@ export const SignupPage = () => {
 
       const res = await fetch(`${API_BASE}/api/auth/signup`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true"
+        },
         body: JSON.stringify(body),
       });
 
