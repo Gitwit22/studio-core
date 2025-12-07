@@ -399,8 +399,8 @@ useEffect(() => {
 
       {/* Debug status – remove later */}
       <div className="mt-4 text-xs text-zinc-400 px-4">
-        <div>displayName: {displayName || "(none)"}</div>
-        <div>roomName: {roomName || "(none)"}</div>
+        <div>DisplayName: {displayName || "(none)"}</div>
+        <div>Room Name: {roomName || "(none)"}</div>
         <div>token: {token ? "yes" : "no"}</div>
         <div>serverUrl: {serverUrl || "(none)"}</div>
       </div>

@@ -16,7 +16,7 @@ const Welcome = () => {
 
 
       <h1 className=" join-instructions text-4xl font-bold mb-4">Welcome to StreamLine</h1>
-      <p className="join-instructions text-lg mb-8">Stream Anywhere</p>
+      <p className="join-instructions text-lg mb-8">Stream Anywhere. Anytime</p>
 
       <button
         onClick={() => nav("/login")}
