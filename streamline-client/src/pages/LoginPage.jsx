@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API_BASE = "http://localhost:5137";
+// Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
+const API_BASE = "";
 
 export const LoginPage = () => {
   const nav = useNavigate();

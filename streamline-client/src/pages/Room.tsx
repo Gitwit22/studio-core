@@ -8,7 +8,8 @@ import StreamSetupModal from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
 import { mockRecordingApi } from "../services/mockRecording";
 
-const API_BASE = "http://localhost:5137";
+// Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
+const API_BASE = "";
 
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 type RecordingStatus = "idle" | "recording" | "stopping";
@@ -83,7 +84,8 @@ export default function Room() {
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
-  const isHost = displayName === roomName;
+  // First person to join is the host (based on localStorage flag for this room)
+  const isHost = !localStorage.getItem(`sl_room_${roomName}_hasHost`);
 
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
@@ -202,7 +204,12 @@ export default function Room() {
       console.error("Failed to log usage:", err);
     }
 
-    handleLeftRoom();
+    // If we have a recording, navigate to post-stream summary
+    if (recordingId) {
+      nav(`/editing/post-stream?recordingId=${recordingId}&newRecording=${recordingId}`);
+    } else {
+      handleLeftRoom();
+    }
   };
 
   const handleStartMultistream = async (keys: {
@@ -218,6 +225,14 @@ export default function Room() {
     try {
       setStreamStatus("starting");
 
+      // Get userId from localStorage
+      const userId = localStorage.getItem("sl_userId");
+      if (!userId) {
+        alert("User ID not found. Please log in again.");
+        setStreamStatus("idle");
+        return;
+      }
+
       const res = await fetch(
         `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
         {
@@ -227,6 +242,8 @@ export default function Room() {
             youtubeStreamKey: keys.youtubeKey,
             facebookStreamKey: keys.facebookKey,
             twitchStreamKey: keys.twitchKey,
+            userId, // ← Add userId
+            guestCount: viewerCount, // ← Add viewer count
           }),
         }
       );
@@ -295,6 +312,10 @@ export default function Room() {
             const name = pendingName.trim();
             if (!name) return;
             localStorage.setItem("sl_displayName", name);
+            // Mark this room as having a host (first joiner is host)
+            if (isHost) {
+              localStorage.setItem(`sl_room_${roomName}_hasHost`, "true");
+            }
             setDisplayName(name);
           }}
         >

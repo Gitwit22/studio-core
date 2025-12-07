@@ -222,7 +222,26 @@ export default function EditorPage() {
   return (
     <div className="h-screen bg-black text-white flex flex-col">
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+      {/* Top bar with breadcrumb */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-zinc-900/50">
+        <div className="flex items-center gap-4">
+          <div className="text-xs text-gray-400 flex items-center gap-2">
+            {projectId === "new" && (
+              <>
+                <button
+                  onClick={() => nav("/editing/post-stream")}
+                  className="hover:text-white transition"
+                >
+                  Post-Stream
+                </button>
+                <span>→</span>
+              </>
+            )}
+            <span className="text-gray-300">Editor</span>
+            <span>→</span>
+            <span className="text-gray-500">Export</span>
+          </div>
+        </div>
         <div className="flex items-center gap-4">
           <button
             onClick={() => nav("/editing/projects")}
@@ -475,6 +494,17 @@ export default function EditorPage() {
               className="w-full py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-sm font-medium rounded transition"
             >
               ⬇️ Export Project
+            </button>
+
+            <button
+              onClick={() => {
+                mockApi.saveTimeline(projectId!, clips);
+                nav(`/editing/export/${projectId}`);
+              }}
+              disabled={clips.length === 0}
+              className="w-full py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:bg-gray-600 text-sm font-medium rounded transition"
+            >
+              Continue to Export →
             </button>
 
             <div className="mt-6 pt-4 border-t border-gray-700 text-xs text-gray-400">

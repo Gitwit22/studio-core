@@ -12,6 +12,8 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import editingRouter from "./routes/editing";
+import { addUsageForUser, getUserUsage } from "./usageHelper";
+import { uploadVideo } from "./lib/storageClient";
 
 
 dotenv.config();
@@ -37,6 +39,31 @@ app.use("/api/rooms", multistreamRoutes);
 
 
 app.use("/api/editing", editingRouter);
+
+// ✅ PROMPT #1: Storage test route
+app.get("/api/storage/test", async (req, res) => {
+  try {
+    const testContent = `StreamLine Storage Test - ${new Date().toISOString()}`;
+    const testBuffer = Buffer.from(testContent);
+    const testPath = `test/${Date.now()}-test.txt`;
+
+    const publicUrl = await uploadVideo(testBuffer, testPath, "text/plain");
+
+    res.json({
+      success: true,
+      message: "✅ R2 storage is working!",
+      publicUrl,
+      testPath,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error("❌ Storage test failed:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Storage test failed",
+    });
+  }
+});
 
 // -------------------------------
 // Admin Controls (Host/Mod Only)
@@ -373,6 +400,31 @@ const planSnap = await db.collection("plans").doc(planId).get();
     });
   } catch (err) {
     console.error("usage summary error", err);
+    return res.status(500).json({ error: "internal error" });
+  }
+});
+
+// GET /api/usage/me - Get current user's usage (authenticated)
+app.get("/api/usage/me", async (req, res) => {
+  try {
+    const authHeader = req.headers["authorization"];
+    const token = authHeader && authHeader.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ error: "No token provided" });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    const userId = decoded.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const usageData = await getUserUsage(userId);
+    return res.json(usageData);
+  } catch (err) {
+    console.error("usage/me error", err);
     return res.status(500).json({ error: "internal error" });
   }
 });

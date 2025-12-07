@@ -8,9 +8,11 @@ import Room from "./pages/Room";
 import RoomExitPage from "./pages/RoomExitPage";
 import Dashboard from "./pages/Dashboard";
 import StreamSummaryPage from "./pages/StreamSummaryPage";
+import PostStreamSummary from "./pages/PostStreamSummary";
 import AssetLibrary from "./editing/AssetLibrary";
 import ProjectsDashboard from "./editing/ProjectsDashboard";
 import EditorPage from "./editing/EditorPage";
+import RenderAndUploadPage from "./editing/pages/RenderAndUploadPage";
 
 function App() {
   return (
@@ -30,11 +32,13 @@ function App() {
 
       {/* Stream Summary */}
       <Route path="/stream-summary/:recordingId" element={<StreamSummaryPage />} />
+      <Route path="/editing/post-stream" element={<PostStreamSummary />} />
 
       {/* Editing flow */}
       <Route path="/editing/assets" element={<AssetLibrary />} />
       <Route path="/editing/projects" element={<ProjectsDashboard />} />
       <Route path="/editing/editor/:projectId" element={<EditorPage />} />
+      <Route path="/editing/export/:projectId" element={<RenderAndUploadPage />} />
     </Routes>
   );
 }

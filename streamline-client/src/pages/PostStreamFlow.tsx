@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Edit, X, Play, Pause, Scissors, Volume2, Sparkles, Upload, CheckCircle, Youtube, Facebook, Twitter } from 'lucide-react';
 
-const PostStreamFlow = () => {
-  const [currentView, setCurrentView] = useState('post-stream');
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playheadPosition, setPlayheadPosition] = useState(25);
-  const [renderProgress, setRenderProgress] = useState(0);
-  const [uploadProgress, setUploadProgress] = useState(0);
+const PostStreamFlow: React.FC = () => {
+  const [currentView, setCurrentView] = useState<string>('post-stream');
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [playheadPosition, setPlayheadPosition] = useState<number>(25);
+  const [renderProgress, setRenderProgress] = useState<number>(0);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
 
   const streamData = {
     title: 'Weekly Gaming Stream - Dec 6',
@@ -25,12 +25,12 @@ const PostStreamFlow = () => {
   useEffect(() => {
     if (currentView === 'render') {
       const interval = setInterval(() => {
-        setRenderProgress(prev => {
+        setRenderProgress((prev: number) => {
           if (prev >= 100) {
             clearInterval(interval);
             setTimeout(() => {
               const uploadInterval = setInterval(() => {
-                setUploadProgress(p => {
+                setUploadProgress((p: number) => {
                   if (p >= 100) {
                     clearInterval(uploadInterval);
                     return 100;
@@ -48,7 +48,7 @@ const PostStreamFlow = () => {
     }
   }, [currentView]);
 
-  const renderPostStreamPage = () => (
+  const renderPostStreamPage = (): JSX.Element => (
     <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
       <div className="max-w-4xl w-full">
         <div className="text-center mb-12">
@@ -137,7 +137,7 @@ const PostStreamFlow = () => {
     </div>
   );
 
-  const renderEditorPage = () => (
+  const renderEditorPage = (): JSX.Element => (
     <div className="min-h-screen bg-black text-white flex flex-col">
       <div className="bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -380,7 +380,7 @@ const PostStreamFlow = () => {
     </div>
   );
 
-  const renderUploadPage = () => {
+  const renderUploadPage = (): JSX.Element => {
     const isRendering = renderProgress < 100;
     const isUploading = renderProgress === 100 && uploadProgress < 100;
     const isComplete = renderProgress === 100 && uploadProgress === 100;

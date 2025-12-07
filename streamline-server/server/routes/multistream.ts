@@ -2,11 +2,22 @@
 import express from "express";
 import { egressClient } from "../livekitClient";
 import { StreamOutput, StreamProtocol } from "livekit-server-sdk";
+import { firestore } from "../firebaseAdmin";
+import { addUsageForUser, checkStorageLimit, updateStorageUsage } from "../usageHelper";
+import { generateRecordingPath } from "../lib/storageClient";
 
 const router = express.Router();
 
-// Keep track of active egress per room in memory
-const activeEgressIds = new Map<string, string>();
+// Keep track of active egress + stream metadata per room
+interface ActiveStream {
+  egressId: string;
+  userId: string;
+  roomName: string;
+  startedAt: Date;
+  guestCount?: number;
+}
+
+const activeStreams = new Map<string, ActiveStream>();
 
 router.post("/:roomName/start-multistream", async (req, res) => {
   const { roomName } = req.params;
@@ -15,33 +26,38 @@ router.post("/:roomName/start-multistream", async (req, res) => {
     youtubeStreamKey,
     facebookStreamKey,
     twitchStreamKey,
+    userId, // Pass userId from frontend
+    guestCount = 0,
   } = req.body as {
     youtubeStreamKey?: string;
     facebookStreamKey?: string;
     twitchStreamKey?: string;
+    userId?: string;
+    guestCount?: number;
   };
 
   if (!roomName) {
     return res.status(400).json({ error: "roomName is required" });
   }
 
+  if (!userId) {
+    return res.status(400).json({ error: "userId is required" });
+  }
+
   // Build RTMP URLs for each platform
   const urls: string[] = [];
 
   if (youtubeStreamKey) {
-    // YouTube
     urls.push(`rtmp://a.rtmp.youtube.com/live2/${youtubeStreamKey}`);
   }
 
   if (facebookStreamKey) {
-    // Facebook
     urls.push(
       `rtmps://live-api-s.facebook.com:443/rtmp/${facebookStreamKey}`
     );
   }
 
   if (twitchStreamKey) {
-    // Twitch
     urls.push(`rtmp://live.twitch.tv/app/${twitchStreamKey}`);
   }
 
@@ -61,12 +77,30 @@ router.post("/:roomName/start-multistream", async (req, res) => {
     const info = await egressClient.startRoomCompositeEgress(
       roomName,
       { stream: streamOutput },
-      { layout: "grid" } // you can change layout if needed
+      { layout: "grid" }
     );
 
-    // Remember egressId so we can stop it later
+    // Track the active stream with metadata
     if (info.egressId) {
-      activeEgressIds.set(roomName, info.egressId);
+      activeStreams.set(roomName, {
+        egressId: info.egressId,
+        userId,
+        roomName,
+        startedAt: new Date(),
+        guestCount,
+      });
+
+      // Also store in Firestore for persistence (optional, for webhooks later)
+      await firestore.collection("activeStreams").doc(roomName).set(
+        {
+          egressId: info.egressId,
+          userId,
+          roomName,
+          startedAt: new Date(),
+          guestCount,
+        },
+        { merge: true }
+      );
     }
 
     return res.json({
@@ -90,19 +124,63 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
     return res.status(400).json({ error: "roomName is required" });
   }
 
-  const egressId = activeEgressIds.get(roomName);
+  const activeStream = activeStreams.get(roomName);
 
-  if (!egressId) {
+  if (!activeStream) {
     return res.status(404).json({
       error: "No active multistream found for this room",
     });
   }
 
   try {
-    await egressClient.stopEgress(egressId);
-    activeEgressIds.delete(roomName);
+    // Stop the egress
+    await egressClient.stopEgress(activeStream.egressId);
+    
+    // Calculate stream duration
+    const now = new Date();
+    const durationMs = now.getTime() - activeStream.startedAt.getTime();
+    const durationMinutes = Math.ceil(durationMs / 60000); // Round up to nearest minute
 
-    return res.json({ success: true });
+    // Add usage for this stream
+    const usageResult = await addUsageForUser(activeStream.userId, durationMinutes, {
+      guestCount: activeStream.guestCount,
+      description: `Stream in room ${activeStream.roomName}`,
+    });
+
+    // ✅ PROMPT #2: Create recording document after stream ends
+    const timestamp = Date.now();
+    const recordingPath = generateRecordingPath(activeStream.userId, activeStream.roomName, timestamp);
+
+    // Create recording doc in Firestore
+    const recordingRef = await firestore.collection("recordings").add({
+      userId: activeStream.userId,
+      roomId: activeStream.roomName,
+      title: `Stream - ${new Date(activeStream.startedAt).toLocaleString()}`,
+      createdAt: activeStream.startedAt,
+      durationMinutes,
+      storagePath: recordingPath,
+      status: "processing", // Will be "ready" once video is uploaded to R2
+      planId: "free", // Will be fetched from user doc
+      guestCount: activeStream.guestCount || 0,
+      editConfig: null,
+      renderedPath: null,
+      uploadedToUrls: {},
+      updatedAt: now,
+    });
+
+    console.log(`✅ Created recording doc: ${recordingRef.id}`);
+
+    // Clean up tracking
+    activeStreams.delete(activeStream.roomName);
+    await firestore.collection("activeStreams").doc(activeStream.roomName).delete();
+
+    return res.json({
+      success: true,
+      durationMinutes,
+      recordingId: recordingRef.id,
+      recordingPath,
+      usageUpdated: usageResult,
+    });
   } catch (err: any) {
     console.error("Error stopping multistream", err);
     return res.status(500).json({

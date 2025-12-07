@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5137";
+// Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
+const API_BASE = "";
 
 type UsageSummary = {
   displayName: string;
