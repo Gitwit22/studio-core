@@ -49,24 +49,104 @@ const PostStreamFlow: React.FC = () => {
   }, [currentView]);
 
   const renderPostStreamPage = (): JSX.Element => (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-      <div className="max-w-4xl w-full">
-        <div className="text-center mb-12">
-          <div className="w-20 h-20 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center mx-auto mb-6">
-            <CheckCircle className="w-10 h-10" />
+    <div style={{
+      minHeight: '100vh',
+      background: '#000000',
+      color: '#ffffff',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '1.5rem',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
+      {/* Animated Background Orbs */}
+      <div style={{
+        position: 'absolute',
+        top: '10%',
+        left: '10%',
+        width: '300px',
+        height: '300px',
+        borderRadius: '50%',
+        background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+        opacity: 0.1,
+        filter: 'blur(40px)',
+        animation: 'float 6s ease-in-out infinite'
+      }} />
+      <div style={{
+        position: 'absolute',
+        bottom: '20%',
+        right: '15%',
+        width: '250px',
+        height: '250px',
+        borderRadius: '50%',
+        background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+        opacity: 0.08,
+        filter: 'blur(30px)',
+        animation: 'float 8s ease-in-out infinite reverse'
+      }} />
+      
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0px) rotate(0deg); }
+          50% { transform: translateY(-20px) rotate(180deg); }
+        }
+      `}</style>
+      
+      <div style={{ maxWidth: '1024px', width: '100%', position: 'relative', zIndex: 1 }}>
+        <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+          <div style={{
+            width: '80px',
+            height: '80px',
+            background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.5rem',
+            boxShadow: '0 0 30px rgba(220, 38, 38, 0.3)'
+          }}>
+            <CheckCircle style={{ width: '40px', height: '40px' }} />
           </div>
-          <h1 className="text-4xl font-bold mb-3">Stream Complete!</h1>
-          <p className="text-zinc-400 text-lg">Great session - 247 viewers watched for 2h 34m</p>
+          <h1 style={{ fontSize: '2.25rem', fontWeight: 'bold', marginBottom: '0.75rem' }}>Stream Complete!</h1>
+          <p style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '1.125rem' }}>Great session - 247 viewers watched for 2h 34m</p>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden mb-8">
-          <div className="aspect-video bg-gradient-to-br from-zinc-800 to-zinc-900 flex items-center justify-center text-8xl relative">
+        <div style={{
+          background: 'rgba(39, 39, 42, 0.5)',
+          border: '1px solid rgba(63, 63, 70, 0.8)',
+          borderRadius: '1rem',
+          overflow: 'hidden',
+          marginBottom: '2rem',
+          backdropFilter: 'blur(20px)'
+        }}>
+          <div style={{
+            aspectRatio: '16/9',
+            background: 'linear-gradient(135deg, rgba(39, 39, 42, 0.8), rgba(24, 24, 27, 0.9))',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '5rem',
+            position: 'relative'
+          }}>
             {streamData.thumbnail}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-            <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
+            <div style={{
+              position: 'absolute',
+              inset: '0',
+              background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 60%)',
+            }} />
+            <div style={{
+              position: 'absolute',
+              bottom: '1rem',
+              left: '1rem',
+              right: '1rem',
+              display: 'flex',
+              alignItems: 'end',
+              justifyContent: 'space-between'
+            }}>
               <div>
-                <h2 className="text-2xl font-bold mb-1">{streamData.title}</h2>
-                <div className="flex items-center gap-4 text-sm text-zinc-300">
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>{streamData.title}</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.875rem', color: 'rgba(212, 212, 216, 0.8)' }}>
                   <span>Duration: {streamData.duration}</span>
                   <span>•</span>
                   <span>{streamData.viewers} viewers</span>
@@ -76,60 +156,144 @@ const PostStreamFlow: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
           <button
             onClick={() => setCurrentView('editor')}
-            className="group relative bg-gradient-to-br from-purple-600/20 to-pink-600/20 border-2 border-purple-500/30 rounded-2xl p-8 hover:scale-105 hover:border-purple-500 transition-all text-left overflow-hidden"
+            style={{
+              position: 'relative',
+              background: 'rgba(220, 38, 38, 0.1)',
+              border: '2px solid rgba(220, 38, 38, 0.3)',
+              borderRadius: '1rem',
+              padding: '2rem',
+              textAlign: 'left',
+              overflow: 'hidden',
+              backdropFilter: 'blur(20px)',
+              transition: 'all 0.3s ease',
+              cursor: 'pointer'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.05)';
+              e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.8)';
+              e.currentTarget.style.boxShadow = '0 0 30px rgba(220, 38, 38, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.3)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-purple-600/0 to-pink-600/30 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <div className="relative">
-              <div className="w-14 h-14 bg-purple-500/20 rounded-xl flex items-center justify-center mb-4">
-                <Edit className="w-7 h-7 text-purple-400" />
-              </div>
-              <h3 className="text-xl font-bold mb-2">Edit Recording</h3>
-              <p className="text-sm text-zinc-400">Cut, trim, and polish your stream</p>
+            <div style={{
+              width: '56px',
+              height: '56px',
+              background: 'rgba(220, 38, 38, 0.2)',
+              borderRadius: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '1rem'
+            }}>
+              <Edit style={{ width: '28px', height: '28px', color: '#dc2626' }} />
             </div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Edit Recording</h3>
+            <p style={{ fontSize: '0.875rem', color: 'rgba(255, 255, 255, 0.6)' }}>Cut, trim, and polish your stream</p>
           </button>
 
-          <button className="group relative bg-gradient-to-br from-blue-600/20 to-cyan-600/20 border-2 border-blue-500/30 rounded-2xl p-8 hover:scale-105 hover:border-blue-500 transition-all text-left overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-600/0 to-cyan-600/30 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <div className="relative">
-              <div className="w-14 h-14 bg-blue-500/20 rounded-xl flex items-center justify-center mb-4">
-                <Download className="w-7 h-7 text-blue-400" />
-              </div>
-              <h3 className="text-xl font-bold mb-2">Download Now</h3>
-              <p className="text-sm text-zinc-400">Get the raw recording (2.1 GB)</p>
+          <button style={{
+            position: 'relative',
+            background: 'rgba(39, 39, 42, 0.5)',
+            border: '2px solid rgba(63, 63, 70, 0.8)',
+            borderRadius: '1rem',
+            padding: '2rem',
+            textAlign: 'left',
+            overflow: 'hidden',
+            backdropFilter: 'blur(20px)',
+            transition: 'all 0.3s ease',
+            cursor: 'pointer'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.05)';
+            e.currentTarget.style.borderColor = 'rgba(156, 163, 175, 0.6)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.borderColor = 'rgba(63, 63, 70, 0.8)';
+          }}>
+            <div style={{
+              width: '56px',
+              height: '56px',
+              background: 'rgba(63, 63, 70, 0.8)',
+              borderRadius: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '1rem'
+            }}>
+              <Download style={{ width: '28px', height: '28px', color: 'rgba(156, 163, 175, 0.8)' }} />
             </div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Download Now</h3>
+            <p style={{ fontSize: '0.875rem', color: 'rgba(255, 255, 255, 0.6)' }}>Get the raw recording (2.1 GB)</p>
           </button>
 
-          <button className="group relative bg-zinc-900 border-2 border-zinc-800 rounded-2xl p-8 hover:scale-105 hover:border-zinc-700 transition-all text-left overflow-hidden">
-            <div className="relative">
-              <div className="w-14 h-14 bg-zinc-800 rounded-xl flex items-center justify-center mb-4">
-                <X className="w-7 h-7 text-zinc-400" />
-              </div>
-              <h3 className="text-xl font-bold mb-2">Exit</h3>
-              <p className="text-sm text-zinc-400">Leave without saving</p>
+          <button style={{
+            position: 'relative',
+            background: 'rgba(39, 39, 42, 0.5)',
+            border: '2px solid rgba(63, 63, 70, 0.8)',
+            borderRadius: '1rem',
+            padding: '2rem',
+            textAlign: 'left',
+            overflow: 'hidden',
+            backdropFilter: 'blur(20px)',
+            transition: 'all 0.3s ease',
+            cursor: 'pointer'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.05)';
+            e.currentTarget.style.borderColor = 'rgba(156, 163, 175, 0.6)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.borderColor = 'rgba(63, 63, 70, 0.8)';
+          }}>
+            <div style={{
+              width: '56px',
+              height: '56px',
+              background: 'rgba(63, 63, 70, 0.8)',
+              borderRadius: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '1rem'
+            }}>
+              <X style={{ width: '28px', height: '28px', color: 'rgba(156, 163, 175, 0.8)' }} />
             </div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Exit</h3>
+            <p style={{ fontSize: '0.875rem', color: 'rgba(255, 255, 255, 0.6)' }}>Leave without saving</p>
           </button>
         </div>
 
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-          <div className="grid grid-cols-4 gap-6 text-center">
+        <div style={{
+          background: 'rgba(39, 39, 42, 0.5)',
+          border: '1px solid rgba(63, 63, 70, 0.8)',
+          borderRadius: '0.75rem',
+          padding: '1.5rem',
+          backdropFilter: 'blur(20px)'
+        }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', textAlign: 'center' }}>
             <div>
-              <div className="text-2xl font-bold text-emerald-400">247</div>
-              <div className="text-xs text-zinc-500 mt-1">Peak Viewers</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#dc2626' }}>247</div>
+              <div style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)', marginTop: '0.25rem' }}>Peak Viewers</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-blue-400">1,842</div>
-              <div className="text-xs text-zinc-500 mt-1">Total Views</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#dc2626' }}>1,842</div>
+              <div style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)', marginTop: '0.25rem' }}>Total Views</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-purple-400">2h 34m</div>
-              <div className="text-xs text-zinc-500 mt-1">Stream Length</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#dc2626' }}>2h 34m</div>
+              <div style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)', marginTop: '0.25rem' }}>Stream Length</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-pink-400">156</div>
-              <div className="text-xs text-zinc-500 mt-1">Chat Messages</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#dc2626' }}>156</div>
+              <div style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)', marginTop: '0.25rem' }}>Chat Messages</div>
             </div>
           </div>
         </div>
@@ -138,153 +302,477 @@ const PostStreamFlow: React.FC = () => {
   );
 
   const renderEditorPage = (): JSX.Element => (
-    <div className="min-h-screen bg-black text-white flex flex-col">
-      <div className="bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+    <div style={{ minHeight: '100vh', background: '#000000', color: '#ffffff', display: 'flex', flexDirection: 'column' }}>
+      <div style={{
+        background: 'rgba(39, 39, 42, 0.8)',
+        borderBottom: '1px solid rgba(63, 63, 70, 0.8)',
+        padding: '1rem 1.5rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backdropFilter: 'blur(20px)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <button 
             onClick={() => setCurrentView('post-stream')}
-            className="text-zinc-400 hover:text-white transition"
+            style={{
+              color: 'rgba(161, 161, 170, 0.8)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'color 0.3s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.color = '#ffffff'}
+            onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(161, 161, 170, 0.8)'}
           >
             ← Back
           </button>
           <div>
-            <div className="font-semibold">{streamData.title}</div>
-            <div className="text-xs text-zinc-500">Editing • Auto-saved 1 min ago</div>
+            <div style={{ fontWeight: '600' }}>{streamData.title}</div>
+            <div style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)' }}>Editing • Auto-saved 1 min ago</div>
           </div>
         </div>
         <button 
           onClick={() => setCurrentView('render')}
-          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition font-semibold text-sm"
+          style={{
+            padding: '0.625rem 1.5rem',
+            borderRadius: '0.75rem',
+            background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+            border: 'none',
+            color: '#ffffff',
+            fontWeight: '600',
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
         >
           Continue to Export →
         </button>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-64 bg-zinc-900 border-r border-zinc-800 p-4">
-          <div className="space-y-6">
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <div style={{
+          width: '256px',
+          background: 'rgba(39, 39, 42, 0.8)',
+          borderRight: '1px solid rgba(63, 63, 70, 0.8)',
+          padding: '1rem',
+          backdropFilter: 'blur(20px)'
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div>
-              <div className="text-xs font-semibold text-zinc-500 uppercase mb-3">Basic Tools</div>
-              <div className="space-y-2">
-                <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-sm font-medium hover:bg-purple-500/20 transition">
-                  <Scissors className="w-4 h-4 text-purple-400" />
+              <div style={{ fontSize: '0.75rem', fontWeight: '600', color: 'rgba(161, 161, 170, 0.8)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>Basic Tools</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <button style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(220, 38, 38, 0.1)',
+                  border: '1px solid rgba(220, 38, 38, 0.3)',
+                  fontSize: '0.875rem',
+                  fontWeight: '500',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(220, 38, 38, 0.1)'}>
+                  <Scissors style={{ width: '16px', height: '16px', color: '#dc2626' }} />
                   <span>Split Clip</span>
-                  <kbd className="ml-auto text-xs bg-zinc-800 px-2 py-1 rounded">S</kbd>
+                  <kbd style={{ marginLeft: 'auto', fontSize: '0.75rem', background: 'rgba(39, 39, 42, 0.8)', padding: '0.25rem 0.5rem', borderRadius: '0.25rem' }}>S</kbd>
                 </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-zinc-800 text-sm transition">
-                  <Volume2 className="w-4 h-4 text-blue-400" />
+                <button style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(63, 63, 70, 0.3)',
+                  border: 'none',
+                  fontSize: '0.875rem',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.5)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.3)'}>
+                  <Volume2 style={{ width: '16px', height: '16px', color: 'rgba(156, 163, 175, 0.8)' }} />
                   <span>Adjust Audio</span>
                 </button>
               </div>
             </div>
 
             <div>
-              <div className="text-xs font-semibold text-zinc-500 uppercase mb-3 flex items-center gap-2">
-                <Sparkles className="w-3 h-3" />
+              <div style={{ fontSize: '0.75rem', fontWeight: '600', color: 'rgba(161, 161, 170, 0.8)', textTransform: 'uppercase', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Sparkles style={{ width: '12px', height: '12px' }} />
                 AI Tools
-                <span className="ml-auto text-purple-400 text-[10px] bg-purple-500/20 px-2 py-1 rounded-full">PRO</span>
+                <span style={{ marginLeft: 'auto', color: '#dc2626', fontSize: '10px', background: 'rgba(220, 38, 38, 0.2)', padding: '0.25rem 0.5rem', borderRadius: '9999px' }}>PRO</span>
               </div>
-              <div className="space-y-2">
-                <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 border border-purple-500/30 text-sm font-medium">
-                  <Sparkles className="w-4 h-4 text-purple-400" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <button style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(220, 38, 38, 0.15)',
+                  border: '1px solid rgba(220, 38, 38, 0.3)',
+                  fontSize: '0.875rem',
+                  fontWeight: '500',
+                  color: '#ffffff',
+                  cursor: 'pointer'
+                }}>
+                  <Sparkles style={{ width: '16px', height: '16px', color: '#dc2626' }} />
                   <span>Remove Silence</span>
                 </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-zinc-800 text-sm transition">
+                <button style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(63, 63, 70, 0.3)',
+                  border: 'none',
+                  fontSize: '0.875rem',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.5)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.3)'}>
                   <span>Add Captions</span>
                 </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-zinc-800 text-sm transition">
+                <button style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(63, 63, 70, 0.3)',
+                  border: 'none',
+                  fontSize: '0.875rem',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.5)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.3)'}>
                   <span>Find Best Moments</span>
                 </button>
               </div>
             </div>
 
-            <div className="pt-4 border-t border-zinc-800">
-              <button className="w-full px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm transition">
+            <div style={{ paddingTop: '1rem', borderTop: '1px solid rgba(63, 63, 70, 0.8)' }}>
+              <button style={{
+                width: '100%',
+                padding: '0.75rem 1rem',
+                borderRadius: '0.75rem',
+                background: 'rgba(63, 63, 70, 0.8)',
+                border: 'none',
+                fontSize: '0.875rem',
+                color: '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(82, 82, 91, 0.8)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.8)'}>
                 Undo
-                <kbd className="ml-2 text-xs bg-zinc-700 px-2 py-1 rounded">⌘Z</kbd>
+                <kbd style={{ marginLeft: '0.5rem', fontSize: '0.75rem', background: 'rgba(82, 82, 91, 0.8)', padding: '0.25rem 0.5rem', borderRadius: '0.25rem' }}>⌘Z</kbd>
               </button>
             </div>
           </div>
         </div>
 
-        <div className="flex-1 flex flex-col">
-          <div className="bg-black border-b border-zinc-800 p-8 flex items-center justify-center" style={{ height: '50%' }}>
-            <div className="relative w-full max-w-4xl aspect-video bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl">
-              <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 to-pink-900/20 flex items-center justify-center text-6xl">
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div style={{
+            background: '#000000',
+            borderBottom: '1px solid rgba(63, 63, 70, 0.8)',
+            padding: '2rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '50%'
+          }}>
+            <div style={{
+              position: 'relative',
+              width: '100%',
+              maxWidth: '1024px',
+              aspectRatio: '16/9',
+              background: 'rgba(39, 39, 42, 0.8)',
+              borderRadius: '1rem',
+              overflow: 'hidden',
+              border: '1px solid rgba(63, 63, 70, 0.8)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              backdropFilter: 'blur(20px)'
+            }}>
+              <div style={{
+                position: 'absolute',
+                inset: '0',
+                background: 'linear-gradient(135deg, rgba(220, 38, 38, 0.1), rgba(239, 68, 68, 0.05))',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '4rem'
+              }}>
                 {streamData.thumbnail}
               </div>
               
-              <div className="absolute inset-0 flex items-center justify-center">
+              {/* Play button overlay */}
+              <div style={{ position: 'absolute', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <button 
                   onClick={() => setIsPlaying(!isPlaying)}
-                  className="w-24 h-24 rounded-full bg-white/10 backdrop-blur-md border-2 border-white/30 flex items-center justify-center hover:scale-110 hover:bg-white/20 transition-all"
+                  style={{
+                    width: '96px',
+                    height: '96px',
+                    borderRadius: '50%',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    backdropFilter: 'blur(15px)',
+                    border: '2px solid rgba(255, 255, 255, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.1)';
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'scale(1)';
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                  }}
                 >
-                  {isPlaying ? <Pause className="w-10 h-10" /> : <Play className="w-10 h-10 ml-2" />}
+                  {isPlaying ? 
+                    <Pause style={{ width: '40px', height: '40px' }} /> : 
+                    <Play style={{ width: '40px', height: '40px', marginLeft: '8px' }} />
+                  }
                 </button>
               </div>
 
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/80 to-transparent p-6">
-                <div className="flex items-center gap-4">
-                  <button onClick={() => setIsPlaying(!isPlaying)}>
-                    {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
+              <div style={{
+                position: 'absolute',
+                bottom: '0',
+                left: '0',
+                right: '0',
+                background: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 60%, transparent 100%)',
+                padding: '1.5rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <button 
+                    onClick={() => setIsPlaying(!isPlaying)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#ffffff',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {isPlaying ? <Pause style={{ width: '24px', height: '24px' }} /> : <Play style={{ width: '24px', height: '24px' }} />}
                   </button>
-                  <div className="text-sm font-mono">00:42:15</div>
-                  <div className="flex-1 h-2 bg-white/20 rounded-full overflow-hidden cursor-pointer">
-                    <div className="h-full bg-gradient-to-r from-purple-500 to-pink-500" style={{ width: '27%' }}></div>
+                  <div style={{ fontSize: '0.875rem', fontFamily: 'monospace' }}>00:42:15</div>
+                  <div style={{
+                    flex: '1',
+                    height: '8px',
+                    background: 'rgba(255, 255, 255, 0.2)',
+                    borderRadius: '9999px',
+                    overflow: 'hidden',
+                    cursor: 'pointer'
+                  }}>
+                    <div style={{
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #dc2626, #ef4444)',
+                      width: '27%'
+                    }} />
                   </div>
-                  <div className="text-sm font-mono text-zinc-400">2:34:15</div>
-                  <button className="hover:text-purple-400 transition">
-                    <Volume2 className="w-6 h-6" />
+                  <div style={{ fontSize: '0.875rem', fontFamily: 'monospace', color: 'rgba(161, 161, 170, 0.8)' }}>2:34:15</div>
+                  <button style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    transition: 'color 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = '#ffffff'}>
+                    <Volume2 style={{ width: '24px', height: '24px' }} />
                   </button>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="flex-1 bg-zinc-950 p-6 overflow-auto">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="text-sm font-semibold">Timeline</div>
-              <div className="flex items-center gap-3">
-                <div className="text-xs text-zinc-500">2:34:15 total</div>
-                <div className="flex items-center gap-2">
-                  <button className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs transition">−</button>
-                  <span className="text-xs text-zinc-500 w-12 text-center">100%</span>
-                  <button className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs transition">+</button>
+          <div style={{
+            flex: '1',
+            background: 'rgba(9, 9, 11, 0.9)',
+            padding: '1.5rem',
+            overflow: 'auto',
+            backdropFilter: 'blur(20px)'
+          }}>
+            <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: '0.875rem', fontWeight: '600' }}>Timeline</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)' }}>2:34:15 total</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button style={{
+                    padding: '0.375rem 0.75rem',
+                    borderRadius: '0.5rem',
+                    background: 'rgba(63, 63, 70, 0.8)',
+                    border: 'none',
+                    fontSize: '0.75rem',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    transition: 'background 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(82, 82, 91, 0.8)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.8)'}>−</button>
+                  <span style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)', width: '48px', textAlign: 'center' }}>100%</span>
+                  <button style={{
+                    padding: '0.375rem 0.75rem',
+                    borderRadius: '0.5rem',
+                    background: 'rgba(63, 63, 70, 0.8)',
+                    border: 'none',
+                    fontSize: '0.75rem',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    transition: 'background 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(82, 82, 91, 0.8)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(63, 63, 70, 0.8)'}>+</button>
                 </div>
               </div>
             </div>
 
-            <div className="relative h-8 mb-3 border-b border-zinc-800">
-              <div className="absolute inset-0 flex text-[10px] text-zinc-500 font-mono">
+            <div style={{
+              position: 'relative',
+              height: '32px',
+              marginBottom: '0.75rem',
+              borderBottom: '1px solid rgba(63, 63, 70, 0.8)'
+            }}>
+              <div style={{
+                position: 'absolute',
+                inset: '0',
+                display: 'flex',
+                fontSize: '10px',
+                color: 'rgba(161, 161, 170, 0.8)',
+                fontFamily: 'monospace'
+              }}>
                 {['0:00', '0:30', '1:00', '1:30', '2:00', '2:30'].map((time) => (
-                  <div key={time} className="flex-1 flex flex-col items-start">
-                    <div className="h-3 w-px bg-zinc-700"></div>
-                    <div className="mt-1">{time}</div>
+                  <div key={time} style={{
+                    flex: '1',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start'
+                  }}>
+                    <div style={{
+                      height: '12px',
+                      width: '1px',
+                      background: 'rgba(82, 82, 91, 0.8)'
+                    }} />
+                    <div style={{ marginTop: '0.25rem' }}>{time}</div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="relative mb-6">
-              <div className="text-xs text-zinc-500 mb-2 font-medium flex items-center gap-2">
-                <div className="w-6 h-6 bg-purple-500/20 rounded flex items-center justify-center">
-                  <div className="w-3 h-3 bg-purple-500 rounded"></div>
+            <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
+              <div style={{
+                fontSize: '0.75rem',
+                color: 'rgba(161, 161, 170, 0.8)',
+                marginBottom: '0.5rem',
+                fontWeight: '500',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}>
+                <div style={{
+                  width: '24px',
+                  height: '24px',
+                  background: 'rgba(220, 38, 38, 0.2)',
+                  borderRadius: '0.25rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <div style={{
+                    width: '12px',
+                    height: '12px',
+                    background: '#dc2626',
+                    borderRadius: '0.25rem'
+                  }} />
                 </div>
                 Video Track
               </div>
-              <div className="relative h-24 bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden shadow-lg">
-                <div className="absolute inset-0 flex gap-1 p-2">
+              <div style={{
+                position: 'relative',
+                height: '96px',
+                background: 'rgba(39, 39, 42, 0.8)',
+                borderRadius: '0.75rem',
+                border: '1px solid rgba(63, 63, 70, 0.8)',
+                overflow: 'hidden',
+                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
+                backdropFilter: 'blur(20px)'
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  inset: '0',
+                  display: 'flex',
+                  gap: '4px',
+                  padding: '0.5rem'
+                }}>
                   {clips.map((clip, index) => (
                     <div
                       key={clip.id}
-                      className={`relative bg-gradient-to-br ${clip.color} rounded-lg border-2 border-white/30 hover:border-white/60 transition cursor-pointer group`}
-                      style={{ width: `${(clip.duration / 120) * 100}%` }}
+                      style={{
+                        position: 'relative',
+                        background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                        borderRadius: '0.5rem',
+                        border: '2px solid rgba(255, 255, 255, 0.3)',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s ease',
+                        width: `${(clip.duration / 120) * 100}%`
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.6)';
+                        e.currentTarget.style.transform = 'scale(1.02)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
                     >
-                      <div className="absolute inset-0 p-3 flex flex-col justify-between">
-                        <div className="text-[10px] text-white/90 font-semibold">Segment {index + 1}</div>
-                        <div className="text-[9px] text-white/70">{clip.duration}s</div>
+                      <div style={{
+                        position: 'absolute',
+                        inset: '0',
+                        padding: '0.75rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between'
+                      }}>
+                        <div style={{
+                          fontSize: '10px',
+                          color: 'rgba(255, 255, 255, 0.9)',
+                          fontWeight: '600'
+                        }}>Segment {index + 1}</div>
+                        <div style={{
+                          fontSize: '9px',
+                          color: 'rgba(255, 255, 255, 0.7)'
+                        }}>{clip.duration}s</div>
                       </div>
-                      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition rounded-lg"></div>
                     </div>
                   ))}
                 </div>
@@ -386,68 +874,199 @@ const PostStreamFlow: React.FC = () => {
     const isComplete = renderProgress === 100 && uploadProgress === 100;
 
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-        <div className="max-w-3xl w-full">
-          <div className="text-center mb-12">
+      <div style={{
+        minHeight: '100vh',
+        background: '#000000',
+        color: '#ffffff',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1.5rem',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {/* Animated Background Orbs */}
+        <div style={{
+          position: 'absolute',
+          top: '20%',
+          left: '15%',
+          width: '200px',
+          height: '200px',
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+          opacity: 0.08,
+          filter: 'blur(50px)',
+          animation: 'float 8s ease-in-out infinite'
+        }} />
+        <div style={{
+          position: 'absolute',
+          bottom: '30%',
+          right: '20%',
+          width: '300px',
+          height: '300px',
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+          opacity: 0.1,
+          filter: 'blur(60px)',
+          animation: 'float 10s ease-in-out infinite reverse'
+        }} />
+        
+        <style>{`
+          @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-30px) rotate(180deg); }
+          }
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
+        `}</style>
+
+        <div style={{ maxWidth: '768px', width: '100%', position: 'relative', zIndex: 1 }}>
+          <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
             {isRendering && (
               <>
-                <div className="w-20 h-20 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-                <h1 className="text-3xl font-bold mb-2">Rendering Your Video</h1>
-                <p className="text-zinc-400">This usually takes 2-3 minutes...</p>
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  border: '4px solid #dc2626',
+                  borderTop: '4px solid transparent',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite',
+                  margin: '0 auto 1.5rem'
+                }} />
+                <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Rendering Your Video</h1>
+                <p style={{ color: 'rgba(161, 161, 170, 0.8)' }}>This usually takes 2-3 minutes...</p>
               </>
             )}
             {isUploading && (
               <>
-                <div className="w-20 h-20 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-                  <Upload className="w-10 h-10" />
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 1.5rem',
+                  animation: 'pulse 2s ease-in-out infinite'
+                }}>
+                  <Upload style={{ width: '40px', height: '40px' }} />
                 </div>
-                <h1 className="text-3xl font-bold mb-2">Uploading to Platforms</h1>
-                <p className="text-zinc-400">Publishing to your connected accounts...</p>
+                <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Uploading to Platforms</h1>
+                <p style={{ color: 'rgba(161, 161, 170, 0.8)' }}>Publishing to your connected accounts...</p>
               </>
             )}
             {isComplete && (
               <>
-                <div className="w-20 h-20 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <CheckCircle className="w-10 h-10" />
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 1.5rem',
+                  boxShadow: '0 0 30px rgba(220, 38, 38, 0.5)'
+                }}>
+                  <CheckCircle style={{ width: '40px', height: '40px' }} />
                 </div>
-                <h1 className="text-3xl font-bold mb-2">Upload Complete! 🎉</h1>
-                <p className="text-zinc-400">Your video is now live on all platforms</p>
+                <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Upload Complete! 🎉</h1>
+                <p style={{ color: 'rgba(161, 161, 170, 0.8)' }}>Your video is now live on all platforms</p>
               </>
             )}
           </div>
 
           {isRendering && (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-medium">Rendering Video</span>
-                <span className="text-sm text-purple-400 font-mono">{renderProgress}%</span>
+            <div style={{
+              background: 'rgba(39, 39, 42, 0.5)',
+              border: '1px solid rgba(63, 63, 70, 0.8)',
+              borderRadius: '1rem',
+              padding: '2rem',
+              marginBottom: '1.5rem',
+              backdropFilter: 'blur(20px)'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '0.75rem'
+              }}>
+                <span style={{ fontSize: '0.875rem', fontWeight: '500' }}>Rendering Video</span>
+                <span style={{
+                  fontSize: '0.875rem',
+                  color: '#dc2626',
+                  fontFamily: 'monospace'
+                }}>{renderProgress}%</span>
               </div>
-              <div className="h-3 bg-zinc-800 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
-                  style={{ width: `${renderProgress}%` }}
-                ></div>
+              <div style={{
+                height: '12px',
+                background: 'rgba(63, 63, 70, 0.8)',
+                borderRadius: '9999px',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #dc2626, #ef4444)',
+                  transition: 'width 0.3s ease',
+                  width: `${renderProgress}%`
+                }} />
               </div>
-              <div className="mt-4 text-xs text-zinc-500">
+              <div style={{
+                marginTop: '1rem',
+                fontSize: '0.75rem',
+                color: 'rgba(161, 161, 170, 0.8)'
+              }}>
                 Processing with FFmpeg • 1080p @ 30fps
               </div>
             </div>
           )}
 
           {(isUploading || isComplete) && (
-            <div className="space-y-4 mb-8">
-              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-red-500/20 rounded-xl flex items-center justify-center">
-                    <Youtube className="w-6 h-6 text-red-500" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2rem' }}>
+              <div style={{
+                background: 'rgba(39, 39, 42, 0.5)',
+                border: '1px solid rgba(63, 63, 70, 0.8)',
+                borderRadius: '1rem',
+                padding: '1.5rem',
+                backdropFilter: 'blur(20px)'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '1rem',
+                  marginBottom: '1rem'
+                }}>
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    background: 'rgba(239, 68, 68, 0.2)',
+                    borderRadius: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <Youtube style={{ width: '24px', height: '24px', color: '#ef4444' }} />
                   </div>
-                  <div className="flex-1">
-                    <div className="font-semibold mb-1">YouTube</div>
-                    <div className="text-xs text-zinc-500">YourChannel</div>
+                  <div style={{ flex: '1' }}>
+                    <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>YouTube</div>
+                    <div style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)' }}>YourChannel</div>
                   </div>
                   {isComplete && (
-                    <div className="flex items-center gap-2 text-sm text-emerald-400">
-                      <CheckCircle className="w-4 h-4" />
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      fontSize: '0.875rem',
+                      color: '#dc2626'
+                    }}>
+                      <CheckCircle style={{ width: '16px', height: '16px' }} />
                       Live
                     </div>
                   )}
@@ -510,14 +1129,29 @@ const PostStreamFlow: React.FC = () => {
                 )}
               </div>
 
-              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 opacity-50">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-cyan-500/20 rounded-xl flex items-center justify-center">
-                    <Twitter className="w-6 h-6 text-cyan-500" />
+              <div style={{
+                background: 'rgba(39, 39, 42, 0.3)',
+                border: '1px solid rgba(63, 63, 70, 0.5)',
+                borderRadius: '1rem',
+                padding: '1.5rem',
+                opacity: '0.5',
+                backdropFilter: 'blur(20px)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    background: 'rgba(6, 182, 212, 0.2)',
+                    borderRadius: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <Twitter style={{ width: '24px', height: '24px', color: '#06b6d4' }} />
                   </div>
-                  <div className="flex-1">
-                    <div className="font-semibold mb-1">Twitter / X</div>
-                    <div className="text-xs text-zinc-500">Not connected</div>
+                  <div style={{ flex: '1' }}>
+                    <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>Twitter / X</div>
+                    <div style={{ fontSize: '0.75rem', color: 'rgba(161, 161, 170, 0.8)' }}>Not connected</div>
                   </div>
                 </div>
               </div>
@@ -525,14 +1159,45 @@ const PostStreamFlow: React.FC = () => {
           )}
 
           {isComplete && (
-            <div className="flex gap-4">
+            <div style={{ display: 'flex', gap: '1rem' }}>
               <button 
                 onClick={() => setCurrentView('post-stream')}
-                className="flex-1 px-6 py-4 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition font-semibold"
+                style={{
+                  flex: '1',
+                  padding: '1rem 1.5rem',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(39, 39, 42, 0.5)',
+                  border: '1px solid rgba(63, 63, 70, 0.8)',
+                  color: '#ffffff',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backdropFilter: 'blur(20px)'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.borderColor = 'rgba(156, 163, 175, 0.6)'}
+                onMouseLeave={(e) => e.currentTarget.style.borderColor = 'rgba(63, 63, 70, 0.8)'}
               >
                 Back to Home
               </button>
-              <button className="flex-1 px-6 py-4 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition font-semibold">
+              <button style={{
+                flex: '1',
+                padding: '1rem 1.5rem',
+                borderRadius: '0.75rem',
+                background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                border: 'none',
+                color: '#ffffff',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+                e.currentTarget.style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}>
                 Share Links
               </button>
             </div>

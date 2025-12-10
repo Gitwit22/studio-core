@@ -1,20 +1,17 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LiveKitRoom, VideoConference } from "@livekit/components-react";
-import { useLocalParticipantPermissions } from "@livekit/components-react";
 import "@livekit/components-styles";
-import InviteButton from "../shared/InviteButton";
 import StreamSetupModal from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
-import { mockRecordingApi } from "../services/mockRecording";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 const API_BASE = "";
 
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
-type RecordingStatus = "idle" | "recording" | "stopping";
+type RecordingStatus = "idle" | "recording" | "stopping" | "stopped";
 
-function ThankYouScreen() {
+function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: boolean; onHome?: () => void }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
@@ -31,19 +28,205 @@ function ThankYouScreen() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#000",
-        color: "#fff",
+        background: "#000000",
+        color: "#ffffff",
         flexDirection: "column",
         textAlign: "center",
         padding: "1.5rem",
+        position: 'relative',
+        overflow: 'hidden'
       }}
     >
-      <h1 style={{ fontSize: "1.75rem", marginBottom: "0.75rem" }}>
-        Thank you for joining StreamLine
-      </h1>
-      <p style={{ maxWidth: 400, opacity: 0.8 }}>
-        Your session has ended. You can now close this app or tab.
-      </p>
+      {/* Animated Background Orbs */}
+      <div style={{
+        position: 'absolute',
+        top: '10%',
+        left: '10%',
+        width: '200px',
+        height: '200px',
+        borderRadius: '50%',
+        background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+        opacity: 0.1,
+        filter: 'blur(30px)',
+        animation: 'float 6s ease-in-out infinite'
+      }} />
+      <div style={{
+        position: 'absolute',
+        bottom: '15%',
+        right: '15%',
+        width: '150px',
+        height: '150px',
+        borderRadius: '50%',
+        background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+        opacity: 0.08,
+        filter: 'blur(25px)',
+        animation: 'float 8s ease-in-out infinite reverse'
+      }} />
+      
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0px) rotate(0deg); }
+          50% { transform: translateY(-20px) rotate(180deg); }
+        }
+      `}</style>
+
+      <div style={{
+        background: 'rgba(39, 39, 42, 0.5)',
+        borderRadius: '1rem',
+        padding: '2.5rem',
+        border: '1px solid rgba(63, 63, 70, 0.8)',
+        backdropFilter: 'blur(20px)',
+        position: 'relative',
+        zIndex: 1,
+        maxWidth: '500px'
+      }}>
+        <h1 style={{ fontSize: "1.875rem", marginBottom: "1rem", fontWeight: '600' }}>
+          Thank you for joining StreamLine
+        </h1>
+        <p style={{ maxWidth: 400, opacity: 0.9, fontSize: '1.125rem', lineHeight: 1.6, marginBottom: showHomeButton ? '1.5rem' : '0' }}>
+          Your session has ended. You can now close this app or tab.
+        </p>
+        {showHomeButton && onHome && (
+          <button
+            onClick={onHome}
+            style={{
+              padding: '12px 24px',
+              background: 'linear-gradient(to right, #dc2626, #ef4444)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '10px',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              const target = e.target as HTMLButtonElement;
+              target.style.background = 'linear-gradient(to right, #ef4444, #f87171)';
+              target.style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={(e) => {
+              const target = e.target as HTMLButtonElement;
+              target.style.background = 'linear-gradient(to right, #dc2626, #ef4444)';
+              target.style.transform = 'translateY(0)';
+            }}
+          >
+            🏠 Back to Home
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StreamEndedModal({ recordingId, onStartEditing, onExitRoom }: { recordingId: string; onStartEditing: () => void; onExitRoom: () => void }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0, 0, 0, 0.8)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999,
+      backdropFilter: 'blur(4px)',
+    }}>
+      <div style={{
+        background: 'linear-gradient(135deg, #1a1a1a 0%, #2d1a1a 100%)',
+        border: '2px solid rgba(220, 38, 38, 0.3)',
+        borderRadius: '1rem',
+        padding: '2rem',
+        maxWidth: '500px',
+        width: '90%',
+        textAlign: 'center',
+        color: '#ffffff',
+      }}>
+        {/* Success Icon */}
+        <div style={{
+          width: '80px',
+          height: '80px',
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, #16a34a, #22c55e)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 1.5rem',
+          fontSize: '2rem',
+        }}>
+          ✓
+        </div>
+
+        <h2 style={{ fontSize: '1.875rem', fontWeight: 'bold', marginBottom: '1rem' }}>Stream Ended</h2>
+        <p style={{ fontSize: '1rem', color: 'rgba(255, 255, 255, 0.8)', marginBottom: '2rem' }}>
+          Your recording is ready. Choose what you'd like to do next.
+        </p>
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <button
+            onClick={onStartEditing}
+            style={{
+              width: '100%',
+              padding: '1rem',
+              background: 'linear-gradient(to right, #dc2626, #ef4444)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '0.5rem',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              const target = e.target as HTMLButtonElement;
+              target.style.background = 'linear-gradient(to right, #991b1b, #dc2626)';
+              target.style.transform = 'translateY(-2px)';
+              target.style.boxShadow = '0 10px 25px rgba(220, 38, 38, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              const target = e.target as HTMLButtonElement;
+              target.style.background = 'linear-gradient(to right, #dc2626, #ef4444)';
+              target.style.transform = 'translateY(0)';
+              target.style.boxShadow = 'none';
+            }}
+          >
+            ✂️ Start Editing
+          </button>
+
+          <button
+            onClick={onExitRoom}
+            style={{
+              width: '100%',
+              padding: '1rem',
+              background: 'rgba(255, 255, 255, 0.1)',
+              border: '2px solid rgba(255, 255, 255, 0.2)',
+              color: '#ffffff',
+              borderRadius: '0.5rem',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              const target = e.target as HTMLButtonElement;
+              target.style.background = 'rgba(255, 255, 255, 0.15)';
+              target.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+              target.style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={(e) => {
+              const target = e.target as HTMLButtonElement;
+              target.style.background = 'rgba(255, 255, 255, 0.1)';
+              target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+              target.style.transform = 'translateY(0)';
+            }}
+          >
+            🚪 Exit Room
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -68,9 +251,11 @@ export default function Room() {
   const [sessionStart, setSessionStart] = useState<number | null>(null);
   
   useEffect(() => {
-    setSessionStart(Date.now());
-    // Store room name for exit page check
+    const start = Date.now();
+    setSessionStart(start);
+    // Store room name and session start time for exit page
     localStorage.setItem("sl_roomName", roomName);
+    localStorage.setItem("sl_sessionStart", start.toString());
   }, [roomName]);
 
   const [displayName, setDisplayName] = useState(
@@ -84,13 +269,24 @@ export default function Room() {
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
-  // First person to join is the host (based on localStorage flag for this room)
-  const isHost = !localStorage.getItem(`sl_room_${roomName}_hasHost`);
+  // First person to join is the host (based on stored host ID for this room)
+  const currentUserId = getOrCreateUid();
+  const [isHost, setIsHost] = useState(() => {
+    const storedHostId = localStorage.getItem(`sl_room_${roomName}_hostId`);
+    if (!storedHostId) {
+      // This is the first person - set them as host
+      localStorage.setItem(`sl_room_${roomName}_hostId`, currentUserId);
+      return true;
+    }
+    return storedHostId === currentUserId;
+  });
 
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
   const recordingRef = useRef<string | null>(null);
   const [viewerCount] = useState(Math.floor(Math.random() * 200) + 10);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const streamStartTimeRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!roomName || !displayName) return;
@@ -130,86 +326,171 @@ export default function Room() {
     fetchToken();
   }, [roomName, displayName]);
 
+  // Timer effect - runs when stream goes live
+  useEffect(() => {
+    if (streamStatus === "live") {
+      if (!streamStartTimeRef.current) {
+        streamStartTimeRef.current = Date.now();
+      }
+
+      const interval = setInterval(() => {
+        if (streamStartTimeRef.current) {
+          const elapsed = Math.floor((Date.now() - streamStartTimeRef.current) / 1000);
+          setElapsedTime(elapsed);
+        }
+      }, 1000);
+
+      return () => clearInterval(interval);
+    } else {
+      // Reset when stream ends
+      streamStartTimeRef.current = null;
+      setElapsedTime(0);
+    }
+  }, [streamStatus]);
+
   const handleLeftRoom = () => {
     setShowGoodbye(true);
   };
 
+  const handleHomeClick = () => {
+    nav('/join');
+  };
+
   const startRecording = async () => {
     try {
+      console.log("🔴 Starting recording...");
       setRecordingStatus("recording");
-      const result = await mockRecordingApi.startRecording(
-        roomName || "unknown",
-        `Stream - ${new Date().toLocaleString()}`
-      );
-      setRecordingId(result.id);
-      recordingRef.current = result.id;
+      
+      const userId = localStorage.getItem('sl_userId');
+      const authToken = localStorage.getItem('sl_token') || localStorage.getItem('auth_token');
+      
+      console.log("💾 Starting recording session - userId:", userId);
+
+      if (!userId) {
+        console.warn("⚠️ Cannot start recording: userId is missing");
+        setRecordingStatus("idle");
+        return;
+      }
+
+      if (!authToken) {
+        console.warn("⚠️ Cannot start recording: authToken is missing");
+        setRecordingStatus("idle");
+        return;
+      }
+
+      // Use the new /api/recordings/start endpoint
+      const response = await fetch(`/api/recordings/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          roomName: roomName || 'default-room',
+          title: `Stream - ${new Date().toLocaleString()}`,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("❌ Failed to start recording:", response.status, errorData);
+        setRecordingStatus("idle");
+        return;
+      }
+
+      const data = await response.json();
+      console.log("✅ Recording started with ID:", data.id);
+      setRecordingId(data.id);
+      recordingRef.current = data.id;
     } catch (error) {
-      console.error("Failed to start recording:", error);
+      console.error("❌ Failed to start recording:", error);
       setRecordingStatus("idle");
     }
   };
 
   const stopRecording = async () => {
-    if (!recordingRef.current) return;
-
-    setRecordingStatus("stopping");
-
     try {
-      await mockRecordingApi.stopRecording(recordingRef.current, {
-        viewerCount: viewerCount,
-        peakViewers: viewerCount,
-      });
+      console.log("⏹️ Stopping recording...");
+      
+      const recordId = recordingRef.current;
+      console.log("Recording ID to stop:", recordId);
 
-      setTimeout(() => {
-        nav(`/room-exit/${recordingRef.current}`);
-      }, 1000);
+      if (recordId) {
+        // Calculate actual stream duration
+        const duration = streamStartTimeRef.current ? Math.floor((Date.now() - streamStartTimeRef.current) / 1000) : 0;
+        const userId = localStorage.getItem('sl_userId');
+        const authToken = localStorage.getItem('sl_token') || localStorage.getItem('auth_token');
+        
+        console.log("📊 Stopping recording with duration:", duration, "seconds");
+
+        // Call the new /api/recordings/stop endpoint
+        if (userId && recordId !== 'unknown') {
+          try {
+            const stopResponse = await fetch(`/api/recordings/stop`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+              },
+              body: JSON.stringify({
+                recordingId: recordId,
+                duration,
+                viewerCount,
+                peakViewers: viewerCount,
+              }),
+            });
+
+            if (stopResponse.ok) {
+              console.log("✅ Recording stopped via API");
+            } else {
+              console.warn("⚠️ Failed to stop recording:", stopResponse.status);
+            }
+          } catch (updateError) {
+            console.warn("⚠️ Error stopping recording:", updateError);
+          }
+        }
+
+        // Set stream ended status and store the recording ID - DON'T navigate yet
+        setRecordingStatus("stopped");
+        setRecordingId(recordId);
+      } else {
+        console.warn("⚠️ No recording ID available");
+        setRecordingStatus("stopped");
+        setRecordingId("unknown");
+      }
     } catch (error) {
-      console.error("Failed to stop recording:", error);
-      setRecordingStatus("idle");
+      console.error("❌ Failed to stop recording:", error);
+      setRecordingStatus("stopped");
+      setRecordingId("unknown");
     }
   };
 
   useEffect(() => {
     if (isHost && token && !recordingRef.current) {
-      startRecording();
+      // Recording now starts when stream goes live, not on join
     }
   }, [isHost, token]);
 
   const handleEndStream = async () => {
-    if (recordingStatus === "recording") {
-      await stopRecording();
+    // For hosts: if recording is still active, show message and wait
+    if (isHost && recordingStatus === "recording") {
+      alert("⏹️ Recording is still active. Stop the stream first to save your recording.");
       return;
     }
 
-    const uid = localStorage.getItem("sl_userId");
-
-    try {
-      if (uid) {
-        let minutes = 0;
-        if (sessionStart) {
-          minutes = Math.max(1, Math.round((Date.now() - sessionStart) / 60000));
-        }
-
-        await fetch(`${API_BASE}/api/usage/streamEnded`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            uid,
-            minutes,
-            guestCount: viewerCount,
-          }),
-        });
+    // For hosts: navigate to exit page if there was a recording
+    if (isHost) {
+      if (recordingId || recordingRef.current) {
+        nav(`/room-exit/${recordingId || recordingRef.current}`);
+      } else {
+        // No recording - show goodbye screen with home button for hosts
+        setShowGoodbye(true);
       }
-    } catch (err) {
-      console.error("Failed to log usage:", err);
+      return;
     }
 
-    // If we have a recording, navigate to post-stream summary
-    if (recordingId) {
-      nav(`/editing/post-stream?recordingId=${recordingId}&newRecording=${recordingId}`);
-    } else {
-      handleLeftRoom();
-    }
+    // For guests: just leave the room with goodbye screen
+    handleLeftRoom();
   };
 
   const handleStartMultistream = async (keys: {
@@ -257,6 +538,8 @@ export default function Room() {
       const data = await res.json();
       setEgressId(data.egressId);
       setStreamStatus("live");
+      // Start recording when stream goes live
+      await startRecording();
     } catch (err) {
       console.error("Error starting multistream", err);
       alert("Error starting multistream");
@@ -277,6 +560,13 @@ export default function Room() {
 
     try {
       setStreamStatus("stopping");
+
+      // Stop recording when stopping the stream (this saves to database)
+      if (recordingStatus === "recording") {
+        await stopRecording();
+        // Recording handles navigation to exit page, don't continue
+        return;
+      }
 
       const res = await fetch(
         `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
@@ -304,41 +594,150 @@ export default function Room() {
 
   if (!displayName) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white px-4">
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#000000',
+        color: '#ffffff',
+        padding: '1.5rem',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {/* Animated Background Orbs */}
+        <div style={{
+          position: 'absolute',
+          top: '20%',
+          left: '15%',
+          width: '200px',
+          height: '200px',
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+          opacity: 0.1,
+          filter: 'blur(30px)',
+          animation: 'float 7s ease-in-out infinite'
+        }} />
+        <div style={{
+          position: 'absolute',
+          bottom: '25%',
+          right: '20%',
+          width: '150px',
+          height: '150px',
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+          opacity: 0.08,
+          filter: 'blur(25px)',
+          animation: 'float 9s ease-in-out infinite reverse'
+        }} />
+        
+        <style>{`
+          @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-15px) rotate(180deg); }
+          }
+        `}</style>
+
         <form
-          className="bg-zinc-900 rounded-xl px-6 py-5 w-full max-w-sm space-y-4 shadow-lg"
+          style={{
+            background: 'rgba(39, 39, 42, 0.5)',
+            borderRadius: '1rem',
+            padding: '2rem',
+            width: '100%',
+            maxWidth: '400px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            border: '1px solid rgba(63, 63, 70, 0.8)',
+            backdropFilter: 'blur(20px)',
+            position: 'relative',
+            zIndex: 1,
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+          }}
           onSubmit={(e) => {
             e.preventDefault();
             const name = pendingName.trim();
             if (!name) return;
             localStorage.setItem("sl_displayName", name);
-            // Mark this room as having a host (first joiner is host)
-            if (isHost) {
-              localStorage.setItem(`sl_room_${roomName}_hasHost`, "true");
-            }
             setDisplayName(name);
           }}
         >
-          <h1 className="join-instructions text-xl font-semibold text-center">
+          <h1 style={{
+            fontSize: '1.5rem',
+            fontWeight: '600',
+            textAlign: 'center',
+            marginBottom: '0.5rem',
+            color: '#ffffff'
+          }}>
             Enter your name to join
           </h1>
 
           <input
-            className="w-full px-3 py-2 rounded bg-zinc-800 border border-zinc-700 text-sm outline-none"
-            placeholder="Your name"
+            type="text"
+            style={{
+              width: '100%',
+              padding: '0.875rem',
+              borderRadius: '0.75rem',
+              background: 'rgba(31, 41, 55, 0.8)',
+              color: '#ffffff',
+              border: '1px solid rgba(75, 85, 99, 0.5)',
+              outline: 'none',
+              transition: 'all 0.3s ease',
+              backdropFilter: 'blur(10px)'
+            }}
+            onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
+            onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+            placeholder={`Enter your name to join "${roomName}"`}
             value={pendingName}
             onChange={(e) => setPendingName(e.target.value)}
+            autoFocus
           />
 
           <button
             type="submit"
-            className="mt-2 w-full py-2 rounded bg-indigo-600 text-sm font-medium hover:bg-indigo-500 transition"
+            disabled={!pendingName.trim()}
+            style={{
+              width: '100%',
+              padding: '0.875rem',
+              borderRadius: '0.75rem',
+              background: !pendingName.trim() ? 'rgba(75, 85, 99, 0.5)' : 'linear-gradient(135deg, #dc2626, #ef4444)',
+              color: '#ffffff',
+              fontWeight: '600',
+              border: 'none',
+              cursor: !pendingName.trim() ? 'not-allowed' : 'pointer',
+              transition: 'all 0.3s ease',
+              opacity: !pendingName.trim() ? 0.6 : 1
+            }}
+            onMouseEnter={(e) => {
+              if (pendingName.trim()) {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+                target.style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (pendingName.trim()) {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+                target.style.boxShadow = 'none';
+              }
+            }}
           >
             Join Room
           </button>
         </form>
 
-        <p className="join-instructions text-xs text-center mt-3">
+        <p style={{
+          fontSize: '0.875rem',
+          textAlign: 'center',
+          marginTop: '1rem',
+          color: 'rgba(255, 255, 255, 0.7)',
+          position: 'relative',
+          zIndex: 1,
+          maxWidth: '400px',
+          lineHeight: 1.5
+        }}>
           When you enter the room, tap the microphone and camera icons to enable audio and video.
         </p>
 
@@ -352,7 +751,7 @@ export default function Room() {
   }
 
   if (showGoodbye) {
-    return <ThankYouScreen />;
+    return <ThankYouScreen showHomeButton={isHost} onHome={handleHomeClick} />;
   }
 
   return (
@@ -372,50 +771,147 @@ export default function Room() {
       </div>
 
       <div className="flex items-center justify-between px-4 py-2 bg-black text-white sl-topbar border-b border-gray-700">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
           <button
-            onClick={async () => {
-              if (isHost) {
-                await handleEndStream();
-              } else {
-                handleLeftRoom();
-              }
-            }}
+            onClick={handleEndStream}
             disabled={recordingStatus === "stopping"}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded font-semibold text-sm transition disabled:opacity-50"
           >
-            {recordingStatus === "stopping" ? "⏳ Ending..." : "Exit Room"}
+            {recordingStatus === "stopping" ? "⏳ Exiting..." : "Exit Room"}
           </button>
 
-          <span className="text-sm opacity-80 ml-4">{roomName}</span>
+          <span className="text-sm opacity-80">{roomName}</span>
+
+          {/* Invite Link Button - only for hosts */}
+          {isHost && (
+            <button
+              onClick={() => {
+                const inviteUrl = `${window.location.origin}/join?room=${encodeURIComponent(roomName)}`;
+                navigator.clipboard.writeText(inviteUrl);
+                alert(`Invite link copied to clipboard!\n${inviteUrl}`);
+              }}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                border: '1px solid rgba(34, 197, 94, 0.4)',
+                borderRadius: '0.375rem',
+                background: 'rgba(34, 197, 94, 0.05)',
+                color: '#22c55e',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                backdropFilter: 'blur(10px)',
+                fontWeight: '500'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(34, 197, 94, 0.15)';
+                target.style.borderColor = 'rgba(34, 197, 94, 0.8)';
+                target.style.boxShadow = '0 0 12px rgba(34, 197, 94, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(34, 197, 94, 0.05)';
+                target.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+                target.style.boxShadow = 'none';
+              }}
+              title="Copy invite link to clipboard"
+            >
+              🔗 Invite
+            </button>
+          )}
+
+          {/* Stream Timer - only show when streaming */}
+          {streamStatus === "live" && (
+            <div
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                border: '1px solid rgba(220, 38, 38, 0.4)',
+                borderRadius: '0.375rem',
+                background: 'rgba(220, 38, 38, 0.05)',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                backdropFilter: 'blur(10px)',
+                fontWeight: '500',
+                fontFamily: 'monospace',
+                animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+              }}
+            >
+              🔴 {`${Math.floor(elapsedTime / 60)}:${String(elapsedTime % 60).padStart(2, '0')}`}
+            </div>
+          )}
         </div>
 
-        {isHost && (
-          <div className="flex items-center gap-3">
+        {(isHost || true) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button
               onClick={() => setDashboardOpen(true)}
-              className="text-xs px-3 py-1.5 border border-white/40 rounded hover:bg-white/10 transition"
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                border: '1px solid rgba(255, 255, 255, 0.4)',
+                borderRadius: '0.375rem',
+                background: 'rgba(255, 255, 255, 0.05)',
+                color: '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                backdropFilter: 'blur(10px)'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(255, 255, 255, 0.1)';
+                target.style.borderColor = 'rgba(220, 38, 38, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(255, 255, 255, 0.05)';
+                target.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+              }}
             >
               Dashboard
             </button>
 
-            <div className="flex items-center gap-1 text-xs">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: '#ffffff' }}>
               <span
-                className={`inline-block w-2 h-2 rounded-full ${
-                  streamStatus === "live" ? "bg-red-500" : "bg-gray-500"
-                }`}
+                style={{
+                  display: 'inline-block',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: streamStatus === "live" ? "#ef4444" : "#6b7280"
+                }}
               />
               <span>{streamStatus === "live" ? "LIVE" : "OFFLINE"}</span>
             </div>
 
             <button
               onClick={() => setShowStreamSetup(true)}
-              className="px-2 py-1 text-xs rounded bg-indigo-600 hover:bg-indigo-500"
+              style={{
+                padding: '0.375rem 0.75rem',
+                fontSize: '0.75rem',
+                borderRadius: '0.375rem',
+                background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                color: '#ffffff',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontWeight: '500'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+                target.style.boxShadow = '0 0 15px rgba(220, 38, 38, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+                target.style.boxShadow = 'none';
+              }}
             >
               {streamStatus === "live" ? "Manage Stream" : "Setup Stream"}
             </button>
-
-            <InviteButton roomName={roomName} />
           </div>
         )}
       </div>
@@ -436,11 +932,23 @@ export default function Room() {
         >
           <div style={{ width: "100%", height: "100%", position: "relative" }}>
             <VideoConference />
-            <img
-              src="/logosmall.png"
-              className="sl-watermark"
-              alt="StreamLine Logo"
-            />
+            {/* On-stream logo for hosts - visible to viewers */}
+            {isHost && (
+              <img
+                src="/logo.png"
+                alt="StreamLine"
+                style={{
+                  position: "absolute",
+                  top: "20px",
+                  right: "20px",
+                  width: "120px",
+                  height: "auto",
+                  opacity: "0.75",
+                  zIndex: 10,
+                  pointerEvents: "none",
+                }}
+              />
+            )}
           </div>
 
           <RoleOverlay
@@ -459,6 +967,25 @@ export default function Room() {
         onStop={handleStopMultistream}
         status={streamStatus}
       />
+
+      {recordingStatus === "stopped" && recordingId && (
+        <StreamEndedModal
+          recordingId={recordingId}
+          onStartEditing={() => nav(`/editing/editor/new?recordingId=${recordingId}`)}
+          onExitRoom={() => nav(`/room-exit/${recordingId}`)}
+        />
+      )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.7;
+          }
+        }
+      `}</style>
     </>
   );
 }

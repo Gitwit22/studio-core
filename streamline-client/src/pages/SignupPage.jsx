@@ -4,20 +4,14 @@ import { useNavigate } from "react-router-dom";
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 const API_BASE = "";
 
-
-
 export const SignupPage = () => {
   const nav = useNavigate();
-
-    const [planId, setPlanId] = useState("free"); // default
+  const [planId, setPlanId] = useState("free");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [timeZone, setTimeZone] = useState("");
-
   
-
   // Streaming defaults
   const [defaultResolution, setDefaultResolution] = useState("720p");
   const [defaultDestinations, setDefaultDestinations] = useState({
@@ -25,13 +19,11 @@ export const SignupPage = () => {
     facebook: false,
   });
   const [defaultPrivacy, setDefaultPrivacy] = useState("public");
-
   const [skipOnboarding, setSkipOnboarding] = useState(false);
-
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Optional: auto-fill timezone using browser
+  // Auto-fill timezone using browser
   useEffect(() => {
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -51,18 +43,13 @@ export const SignupPage = () => {
         displayName,
         email,
         password,
-        skipOnboarding,
         timeZone,
         planId,
-          createdAt: new Date().toISOString(),
-
+        skipOnboarding,
+        defaultResolution: skipOnboarding ? undefined : defaultResolution,
+        defaultDestinations: skipOnboarding ? undefined : defaultDestinations,
+        defaultPrivacy: skipOnboarding ? undefined : defaultPrivacy,
       };
-
-      if (!skipOnboarding) {
-        body.defaultResolution = defaultResolution;
-        body.defaultDestinations = defaultDestinations;
-        body.defaultPrivacy = defaultPrivacy;
-      }
 
       const res = await fetch(`${API_BASE}/api/auth/signup`, {
         method: "POST",
@@ -74,19 +61,18 @@ export const SignupPage = () => {
       });
 
       const data = await res.json();
-      setLoading(false);
 
       if (!res.ok) {
+        setLoading(false);
         setError(data.error || "Signup failed");
         return;
       }
 
       localStorage.setItem("sl_user", JSON.stringify(data.user));
       localStorage.setItem("sl_token", data.token);
-      localStorage.setItem("sl_userId", data.user.id || data.user.uid); // 🔥 add this
+      localStorage.setItem("sl_userId", data.user.id || data.user.uid);
 
-
-      // After signup, go to your existing create-room page
+      // After signup, go to create-room page
       nav("/join");
     } catch (err) {
       console.error(err);
@@ -103,141 +89,177 @@ export const SignupPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white p-6 text-center">
-      <h2 className="text-3xl font-bold mb-6">Create Your StreamLine Account</h2>
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#000000',
+      color: '#ffffff',
+      padding: '1.5rem',
+      textAlign: 'center',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
+      {/* Animated Background Orbs */}
+      <div style={{
+        position: 'absolute',
+        top: '15%',
+        left: '10%',
+        width: '250px',
+        height: '250px',
+        borderRadius: '50%',
+        background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+        opacity: 0.1,
+        filter: 'blur(40px)',
+        animation: 'float 6s ease-in-out infinite'
+      }} />
+      <div style={{
+        position: 'absolute',
+        bottom: '20%',
+        right: '15%',
+        width: '200px',
+        height: '200px',
+        borderRadius: '50%',
+        background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+        opacity: 0.08,
+        filter: 'blur(30px)',
+        animation: 'float 8s ease-in-out infinite reverse'
+      }} />
+      
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0px) rotate(0deg); }
+          50% { transform: translateY(-20px) rotate(180deg); }
+        }
+      `}</style>
+
+      <h2 style={{
+        fontSize: '1.875rem',
+        fontWeight: 'bold',
+        marginBottom: '1.5rem',
+        position: 'relative',
+        zIndex: 1
+      }}>Create Your StreamLine Account</h2>
 
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col w-full max-w-sm space-y-6 text-left"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          maxWidth: '420px',
+          gap: '1.5rem',
+          textAlign: 'left',
+          background: 'rgba(39, 39, 42, 0.5)',
+          padding: '2rem',
+          borderRadius: '1rem',
+          border: '1px solid rgba(63, 63, 70, 0.8)',
+          backdropFilter: 'blur(20px)',
+          position: 'relative',
+          zIndex: 1
+        }}
       >
         {/* STEP 1 – Basic profile */}
         <div>
-          <h3 className="text-lg font-semibold mb-2">
+          <h3 style={{
+            fontSize: '1.125rem',
+            fontWeight: '600',
+            marginBottom: '0.5rem',
+            color: '#dc2626'
+          }}>
             Step 1 – Basic StreamLine Profile
           </h3>
 
-          <div className="space-y-3">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div>
-              <label className="block text-sm mb-1">Display name</label>
+              <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Display name</label>
               <input
                 type="text"
                 placeholder="What should we call you?"
-                className="w-full p-3 rounded-lg bg-gray-800 text-white outline-none"
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  background: 'rgba(31, 41, 55, 0.8)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(75, 85, 99, 0.5)',
+                  outline: 'none',
+                  transition: 'all 0.3s ease',
+                  backdropFilter: 'blur(10px)'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#dc2626'}
+                onBlur={(e) => e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)'}
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Email</label>
+              <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Email</label>
               <input
                 type="email"
                 placeholder="you@example.com"
-                className="w-full p-3 rounded-lg bg-gray-800 text-white outline-none"
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  background: 'rgba(31, 41, 55, 0.8)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(75, 85, 99, 0.5)',
+                  outline: 'none',
+                  transition: 'all 0.3s ease',
+                  backdropFilter: 'blur(10px)'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#dc2626'}
+                onBlur={(e) => e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Password</label>
+              <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Password</label>
               <input
                 type="password"
                 placeholder="••••••••"
-                className="w-full p-3 rounded-lg bg-gray-800 text-white outline-none"
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  background: 'rgba(31, 41, 55, 0.8)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(75, 85, 99, 0.5)',
+                  outline: 'none',
+                  transition: 'all 0.3s ease',
+                  backdropFilter: 'blur(10px)'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#dc2626'}
+                onBlur={(e) => e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-
-      {/* Plan selection */}
-      <div className="mt-4">
-        <p className="block text-sm mb-2 font-semibold">Choose your plan</p>
-
-        <div className="space-y-2">
-          {/* Free */}
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="plan"
-              value="free"
-              checked={planId === "free"}
-              onChange={(e) => setPlanId(e.target.value)}
-              className="mt-1"
-            />
+            
             <div>
-              <div className="font-medium">Free</div>
-              <div className="text-xs text-gray-400">
-                Get started with StreamLine at no cost.
-              </div>
-            </div>
-          </label>
-
-          {/* Starter */}
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="plan"
-              value="starter"
-              checked={planId === "starter"}
-              onChange={(e) => setPlanId(e.target.value)}
-              className="mt-1"
-            />
-            <div>
-              <div className="font-medium">Starter</div>
-              <div className="text-xs text-gray-400">
-                For new creators streaming a few times a month.
-              </div>
-            </div>
-          </label>
-
-          {/* Pro */}
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="plan"
-              value="pro"
-              checked={planId === "pro"}
-              onChange={(e) => setPlanId(e.target.value)}
-              className="mt-1"
-            />
-            <div>
-              <div className="font-medium">Pro</div>
-              <div className="text-xs text-gray-400">
-                More hours and guests for growing shows.
-              </div>
-            </div>
-          </label>
-
-          {/* Enterprise */}
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="plan"
-              value="enterprise"
-              checked={planId === "enterprise"}
-              onChange={(e) => setPlanId(e.target.value)}
-              className="mt-1"
-            />
-            <div>
-              <div className="font-medium">Enterprise</div>
-              <div className="text-xs text-gray-400">
-                Teams, networks, and high-usage creators.
-              </div>
-            </div>
-          </label>
-
-          
-        </div>
-      </div>
-
-
-            <div>
-              <label className="block text-sm mb-1">Time zone (optional)</label>
+              <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Timezone</label>
               <input
                 type="text"
-                placeholder="America/Detroit"
-                className="w-full p-3 rounded-lg bg-gray-800 text-white outline-none"
+                placeholder="Your timezone"
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  background: 'rgba(31, 41, 55, 0.8)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(75, 85, 99, 0.5)',
+                  outline: 'none',
+                  transition: 'all 0.3s ease',
+                  backdropFilter: 'blur(10px)'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#dc2626'}
+                onBlur={(e) => e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)'}
                 value={timeZone}
                 onChange={(e) => setTimeZone(e.target.value)}
               />
@@ -245,67 +267,157 @@ export const SignupPage = () => {
           </div>
         </div>
 
-        {/* Skip streaming setup toggle */}
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={skipOnboarding}
-            onChange={(e) => setSkipOnboarding(e.target.checked)}
-          />
-          <span>
-            Skip streaming setup for now.
-            <br />
-            <span className="text-xs text-gray-400">
-              If you skip, you can still go live – you&apos;ll just set up
-              YouTube/Facebook and stream keys later from inside your rooms.
-            </span>
-          </span>
-        </label>
+        {/* Plan selection */}
+        <div>
+          <p style={{
+            display: 'block',
+            fontSize: '0.875rem',
+            marginBottom: '0.5rem',
+            fontWeight: '600',
+            color: '#dc2626'
+          }}>Choose your plan</p>
 
-        {/* Only show streaming setup if not skipping */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {/* Free */}
+            <label style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.5rem',
+              cursor: 'pointer',
+              padding: '0.75rem',
+              borderRadius: '0.5rem',
+              background: 'rgba(31, 41, 55, 0.5)',
+              border: planId === 'free' ? '1px solid #dc2626' : '1px solid rgba(75, 85, 99, 0.3)',
+              transition: 'all 0.3s ease',
+              backdropFilter: 'blur(10px)'
+            }}>
+              <input
+                type="radio"
+                name="plan"
+                value="free"
+                checked={planId === "free"}
+                onChange={(e) => setPlanId(e.target.value)}
+                style={{ marginTop: '0.25rem', accentColor: '#dc2626' }}
+              />
+              <div>
+                <div style={{ fontWeight: '500' }}>Free</div>
+                <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
+                  Get started with StreamLine at no cost.
+                </div>
+              </div>
+            </label>
+
+            {/* Starter */}
+            <label style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.5rem',
+              cursor: 'pointer',
+              padding: '0.75rem',
+              borderRadius: '0.5rem',
+              background: 'rgba(31, 41, 55, 0.5)',
+              border: planId === 'starter' ? '1px solid #dc2626' : '1px solid rgba(75, 85, 99, 0.3)',
+              transition: 'all 0.3s ease',
+              backdropFilter: 'blur(10px)'
+            }}>
+              <input
+                type="radio"
+                name="plan"
+                value="starter"
+                checked={planId === "starter"}
+                onChange={(e) => setPlanId(e.target.value)}
+                style={{ marginTop: '0.25rem', accentColor: '#dc2626' }}
+              />
+              <div>
+                <div style={{ fontWeight: '500' }}>Starter</div>
+                <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
+                  For new creators streaming a few times a month.
+                </div>
+              </div>
+            </label>
+
+            {/* Pro */}
+            <label style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.5rem',
+              cursor: 'pointer',
+              padding: '0.75rem',
+              borderRadius: '0.5rem',
+              background: 'rgba(31, 41, 55, 0.5)',
+              border: planId === 'pro' ? '1px solid #dc2626' : '1px solid rgba(75, 85, 99, 0.3)',
+              transition: 'all 0.3s ease',
+              backdropFilter: 'blur(10px)'
+            }}>
+              <input
+                type="radio"
+                name="plan"
+                value="pro"
+                checked={planId === "pro"}
+                onChange={(e) => setPlanId(e.target.value)}
+                style={{ marginTop: '0.25rem', accentColor: '#dc2626' }}
+              />
+              <div>
+                <div style={{ fontWeight: '500' }}>Pro</div>
+                <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
+                  For serious streamers who go live weekly.
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* Skip onboarding checkbox */}
+        <div>
+          <label style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.5rem',
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            padding: '0.5rem',
+            borderRadius: '0.375rem',
+            background: 'rgba(31, 41, 55, 0.3)'
+          }}>
+            <input
+              type="checkbox"
+              checked={skipOnboarding}
+              onChange={(e) => setSkipOnboarding(e.target.checked)}
+              style={{ marginTop: '0.125rem', accentColor: '#dc2626' }}
+            />
+            <span>Skip streaming setup for now (you can set this up later)</span>
+          </label>
+        </div>
+
+        {/* STEP 2 – Streaming defaults */}
         {!skipOnboarding && (
           <>
-            {/* STEP 2 – Connect destinations (visual only for now) */}
-            <div className="border-t border-gray-700 pt-4">
-              <h3 className="text-lg font-semibold mb-2">
-                Step 2 – Connect Destinations
-              </h3>
-              <p className="text-xs text-gray-400 mb-3">
-                In a future update, you&apos;ll be able to fully connect your
-                YouTube and Facebook accounts here. For now, we&apos;ll just
-                remember your streaming preferences.
-              </p>
-
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  className="w-full py-2 rounded-lg bg-gray-800 text-sm text-gray-300 border border-gray-600 cursor-default"
-                >
-                  Connect YouTube (coming soon)
-                </button>
-                <button
-                  type="button"
-                  className="w-full py-2 rounded-lg bg-gray-800 text-sm text-gray-300 border border-gray-600 cursor-default"
-                >
-                  Connect Facebook (coming soon)
-                </button>
-              </div>
-            </div>
-
-            {/* STEP 3 – Streaming defaults */}
-            <div className="border-t border-gray-700 pt-4">
-              <h3 className="text-lg font-semibold mb-2">
-                Step 3 – Streaming Defaults
+            <div>
+              <h3 style={{
+                fontSize: '1.125rem',
+                fontWeight: '600',
+                marginBottom: '0.5rem',
+                color: '#dc2626'
+              }}>
+                Step 2 – Streaming defaults (optional)
               </h3>
 
-              <div className="space-y-3">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <div>
-                  <label className="block text-sm mb-1">
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                     Default resolution
                   </label>
                   <select
-                    className="w-full p-3 rounded-lg bg-gray-800 text-white outline-none"
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      borderRadius: '0.5rem',
+                      background: 'rgba(31, 41, 55, 0.8)',
+                      color: '#ffffff',
+                      border: '1px solid rgba(75, 85, 99, 0.5)',
+                      outline: 'none',
+                      backdropFilter: 'blur(10px)'
+                    }}
                     value={defaultResolution}
                     onChange={(e) => setDefaultResolution(e.target.value)}
                   >
@@ -315,23 +427,41 @@ export const SignupPage = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm mb-1">
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                     Default destinations
                   </label>
-                  <div className="flex flex-col gap-1 text-sm">
-                    <label className="flex items-center gap-2">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.875rem' }}>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                      background: 'rgba(31, 41, 55, 0.3)',
+                      cursor: 'pointer'
+                    }}>
                       <input
                         type="checkbox"
                         checked={defaultDestinations.youtube}
                         onChange={() => toggleDestination("youtube")}
+                        style={{ accentColor: '#dc2626' }}
                       />
                       <span>Use YouTube by default when I go live</span>
                     </label>
-                    <label className="flex items-center gap-2">
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                      background: 'rgba(31, 41, 55, 0.3)',
+                      cursor: 'pointer'
+                    }}>
                       <input
                         type="checkbox"
                         checked={defaultDestinations.facebook}
                         onChange={() => toggleDestination("facebook")}
+                        style={{ accentColor: '#dc2626' }}
                       />
                       <span>Use Facebook by default when I go live</span>
                     </label>
@@ -339,11 +469,20 @@ export const SignupPage = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm mb-1">
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                     Default YouTube privacy (optional)
                   </label>
                   <select
-                    className="w-full p-3 rounded-lg bg-gray-800 text-white outline-none"
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      borderRadius: '0.5rem',
+                      background: 'rgba(31, 41, 55, 0.8)',
+                      color: '#ffffff',
+                      border: '1px solid rgba(75, 85, 99, 0.5)',
+                      outline: 'none',
+                      backdropFilter: 'blur(10px)'
+                    }}
                     value={defaultPrivacy}
                     onChange={(e) => setDefaultPrivacy(e.target.value)}
                   >
@@ -359,13 +498,51 @@ export const SignupPage = () => {
         <button
           type="submit"
           disabled={loading}
-          className="mt-4 bg-white text-black py-3 rounded-xl font-semibold hover:bg-gray-300 transition w-full disabled:opacity-60"
+          style={{
+            padding: '0.75rem',
+            borderRadius: '0.75rem',
+            background: loading ? 'rgba(75, 85, 99, 0.5)' : 'linear-gradient(135deg, #dc2626, #ef4444)',
+            color: '#ffffff',
+            fontWeight: '600',
+            border: 'none',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            width: '100%',
+            transition: 'all 0.3s ease',
+            opacity: loading ? 0.6 : 1
+          }}
+          onMouseEnter={(e) => {
+            if (!loading) {
+              e.target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+              e.target.style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!loading) {
+              e.target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+              e.target.style.boxShadow = 'none';
+            }
+          }}
         >
           {loading ? "Creating account..." : "Create account"}
         </button>
       </form>
 
-      {error && <p className="mt-4 text-red-400 text-sm">{error}</p>}
+      {error && (
+        <p style={{
+          marginTop: '1rem',
+          color: '#ef4444',
+          fontSize: '0.875rem',
+          background: 'rgba(239, 68, 68, 0.1)',
+          padding: '0.75rem',
+          borderRadius: '0.5rem',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          backdropFilter: 'blur(10px)',
+          position: 'relative',
+          zIndex: 1
+        }}>
+          {error}
+        </p>
+      )}
     </div>
   );
 };

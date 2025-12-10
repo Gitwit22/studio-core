@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { mockRecordingApi } from "../services/mockRecording";
-import { mockApi } from "../editing/mockData";
+import { editingApi } from "../lib/editingApi";
 
 type Recording = {
   id: string;
@@ -22,6 +21,11 @@ type Project = {
   duration?: number;
 };
 
+/**
+ * STREAMLINE DASHBOARD - REDESIGNED
+ * Glassmorphism black/red/white theme
+ */
+
 export default function Dashboard() {
   const nav = useNavigate();
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -37,266 +41,575 @@ export default function Dashboard() {
       setUser(userData);
     }
 
-    // Load recordings
-    const allRecordings = mockRecordingApi.listRecordings();
-    setRecordings(allRecordings);
+    const fetchData = async () => {
+      try {
+        // Fetch recordings from real backend API
+        const allRecordings = await editingApi.getRecordings();
+        if (Array.isArray(allRecordings)) {
+          setRecordings(allRecordings as Recording[]);
 
-    // Calculate stats
-    const totalViewCount = allRecordings.reduce(
-      (sum, r) => sum + (r.peakViewers || 0),
-      0
-    );
-    setTotalViewers(totalViewCount);
+          const totalViewCount = allRecordings.reduce((sum: number, r: any) => sum + (r.peakViewers || 0), 0);
+          setTotalViewers(totalViewCount);
 
-    const totalDurationMinutes = allRecordings.reduce(
-      (sum, r) => sum + (r.duration || 0),
-      0
-    );
-    setTotalDuration(totalDurationMinutes / 60);
+          const totalDurationSeconds = allRecordings.reduce((sum: number, r: any) => sum + (r.duration || 0), 0);
+          setTotalDuration(totalDurationSeconds / 60); // Convert to minutes
+        }
+      } catch (error) {
+        console.error("Failed to fetch recordings:", error);
+        setRecordings([]);
+      }
 
-    // Load projects
-    const allProjects = mockApi.listProjects();
-    setProjects(allProjects);
+      try {
+        // Fetch projects from real backend API
+        const allProjects = await editingApi.getProjects();
+        if (Array.isArray(allProjects)) {
+          setProjects(allProjects as Project[]);
+        } else {
+          setProjects([]);
+        }
+      } catch (error) {
+        console.error("Failed to fetch projects:", error);
+        setProjects([]);
+      }
+    };
+
+    fetchData();
   }, []);
 
   const readyRecordings = recordings.filter((r) => r.status === "ready");
-  const processingRecordings = recordings.filter((r) => r.status === "processing");
+
+  const handleDeleteRecording = (recordingId: string) => {
+    if (confirm("Are you sure you want to delete this recording? This cannot be undone.")) {
+      // Remove from state
+      setRecordings(recordings.filter((r) => r.id !== recordingId));
+      // Delete from backend
+      editingApi.deleteRecording(recordingId).catch((err) => {
+        console.error("Failed to delete recording:", err);
+      });
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Header */}
-      <div className="border-b border-gray-700 px-6 py-4">
-        <div className="flex items-center justify-between">
+    <div 
+      style={{
+        minHeight: '100vh',
+        backgroundColor: '#000000',
+        color: '#ffffff',
+        position: 'relative',
+        overflow: 'hidden'
+      }}
+    >
+      
+      {/* ANIMATED BACKGROUND */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 0 }}>
+        <div 
+          style={{
+            position: 'absolute',
+            top: '10%',
+            left: '5%',
+            width: '600px',
+            height: '600px',
+            background: 'rgba(220, 38, 38, 0.1)',
+            borderRadius: '50%',
+            filter: 'blur(140px)',
+            animation: 'pulse 5s ease-in-out infinite'
+          }}
+        />
+        <div 
+          style={{
+            position: 'absolute',
+            bottom: '10%',
+            right: '5%',
+            width: '700px',
+            height: '700px',
+            background: 'rgba(239, 68, 68, 0.08)',
+            borderRadius: '50%',
+            filter: 'blur(160px)',
+            animation: 'pulse 5s ease-in-out infinite',
+            animationDelay: '2.5s'
+          }}
+        />
+      </div>
+
+      {/* HEADER */}
+      <div 
+        style={{
+          position: 'relative',
+          zIndex: 10,
+          background: 'rgba(15, 15, 15, 0.7)',
+          backdropFilter: 'blur(20px)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          padding: '20px 32px'
+        }}
+      >
+        <div 
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            maxWidth: '1400px',
+            margin: '0 auto'
+          }}
+        >
           <div>
-            <h1 className="text-3xl font-bold">
+            <h1 
+              style={{
+                fontSize: '28px',
+                fontWeight: 700,
+                marginBottom: '4px',
+                background: 'linear-gradient(to right, #ffffff, #fecaca)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent'
+              }}
+            >
               Welcome back, {user?.displayName || "Streamer"}! 👋
             </h1>
-            <p className="text-gray-400 mt-1">
-              {user?.plan?.toUpperCase() || "FREE"} Plan
+            <p style={{ fontSize: '14px', color: '#6b7280' }}>
+              {user?.planId?.toUpperCase() || "FREE"} Plan
             </p>
           </div>
-          <button
-            onClick={() => nav("/join")}
-            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-medium"
-          >
-            + New Stream
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 px-6 py-6">
-        <StatCard
-          label="Recordings"
-          value={recordings.length}
-          detail={`${readyRecordings.length} ready`}
-          color="indigo"
-        />
-        <StatCard
-          label="Total Viewers"
-          value={totalViewers.toLocaleString()}
-          detail="Peak viewers"
-          color="green"
-        />
-        <StatCard
-          label="Total Minutes"
-          value={Math.round(totalDuration).toLocaleString()}
-          detail="Streamed"
-          color="blue"
-        />
-        <StatCard
-          label="Projects"
-          value={projects.length}
-          detail="Edited"
-          color="purple"
-        />
-      </div>
-
-      {/* Recent Recordings */}
-      <div className="px-6 py-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold">Recent Recordings</h2>
-          <button
-            onClick={() => nav("/editing/assets")}
-            className="text-sm text-indigo-400 hover:text-indigo-300"
-          >
-            View All →
-          </button>
-        </div>
-
-        {recordings.length === 0 ? (
-          <div className="bg-zinc-900 rounded-lg p-8 text-center">
-            <p className="text-gray-400 mb-4">No recordings yet</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               onClick={() => nav("/join")}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded"
+              style={{
+                padding: '12px 24px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                color: '#ffffff',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.6)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+              }}
             >
-              Start your first stream
+              ← Back
+            </button>
+            <button
+              onClick={() => nav("/join")}
+              style={{
+                padding: '12px 24px',
+                background: 'linear-gradient(to right, #dc2626, #ef4444)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 8px 32px rgba(220, 38, 38, 0.3)',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 12px 40px rgba(220, 38, 38, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 8px 32px rgba(220, 38, 38, 0.3)';
+              }}
+            >
+              + New Stream
             </button>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {recordings.slice(0, 6).map((rec) => (
-              <RecordingCard
-                key={rec.id}
-                recording={rec}
-                onEdit={() =>
-                  nav(
-                    `/stream-summary/${rec.id}`
-                  )
-                }
-              />
-            ))}
-          </div>
-        )}
+        </div>
       </div>
 
-      {/* Recent Projects */}
-      <div className="px-6 py-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold">Recent Projects</h2>
-          <button
-            onClick={() => nav("/editing/projects")}
-            className="text-sm text-indigo-400 hover:text-indigo-300"
-          >
-            View All →
-          </button>
+      {/* STATS GRID */}
+      <div 
+        style={{
+          position: 'relative',
+          zIndex: 10,
+          maxWidth: '1400px',
+          margin: '0 auto',
+          padding: '32px'
+        }}
+      >
+        <div 
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '20px',
+            marginBottom: '40px'
+          }}
+        >
+          <StatCard
+            label="Recordings"
+            value={recordings.length}
+            detail={`${readyRecordings.length} ready`}
+            icon="🎬"
+          />
+          <StatCard
+            label="Total Viewers"
+            value={totalViewers.toLocaleString()}
+            detail="Peak viewers"
+            icon="👥"
+          />
+          <StatCard
+            label="Total Minutes"
+            value={Math.round(totalDuration).toLocaleString()}
+            detail="Streamed"
+            icon="⏱️"
+          />
+          <StatCard
+            label="Projects"
+            value={projects.length}
+            detail="Edited"
+            icon="✂️"
+          />
         </div>
 
-        {projects.length === 0 ? (
-          <div className="bg-zinc-900 rounded-lg p-8 text-center">
-            <p className="text-gray-400 mb-4">No projects yet</p>
+        {/* RECENT RECORDINGS */}
+        <div style={{ marginBottom: '40px' }}>
+          <div 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '20px'
+            }}
+          >
+            <h2 style={{ fontSize: '24px', fontWeight: 700 }}>Recent Recordings</h2>
             <button
               onClick={() => nav("/editing/assets")}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded"
+              style={{
+                fontSize: '14px',
+                color: '#ef4444',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 500
+              }}
             >
-              Create your first project
+              View All →
             </button>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {projects.slice(0, 8).map((proj) => (
-              <ProjectCard
-                key={proj.id}
-                project={proj}
-                onEdit={() => nav(`/editing/editor/${proj.id}`)}
-              />
-            ))}
+
+          {recordings.length === 0 ? (
+            <div 
+              style={{
+                background: 'rgba(15, 15, 15, 0.7)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '16px',
+                padding: '48px',
+                textAlign: 'center'
+              }}
+            >
+              <p style={{ color: '#9ca3af', marginBottom: '20px' }}>No recordings yet</p>
+              <button
+                onClick={() => nav("/join")}
+                style={{
+                  padding: '12px 24px',
+                  background: 'linear-gradient(to right, #dc2626, #ef4444)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  cursor: 'pointer'
+                }}
+              >
+                Start your first stream
+              </button>
+            </div>
+          ) : (
+            <div 
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                gap: '20px'
+              }}
+            >
+              {recordings.slice(0, 6).map((rec) => (
+                <RecordingCard
+                  key={rec.id}
+                  recording={rec}
+                  onEdit={() => nav(`/stream-summary/${rec.id}`)}
+                  onDelete={() => handleDeleteRecording(rec.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* RECENT PROJECTS */}
+        <div>
+          <div 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '20px'
+            }}
+          >
+            <h2 style={{ fontSize: '24px', fontWeight: 700 }}>Recent Projects</h2>
+            <button
+              onClick={() => nav("/editing/projects")}
+              style={{
+                fontSize: '14px',
+                color: '#ef4444',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 500
+              }}
+            >
+              View All →
+            </button>
           </div>
-        )}
+
+          {projects.length === 0 ? (
+            <div 
+              style={{
+                background: 'rgba(15, 15, 15, 0.7)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '16px',
+                padding: '48px',
+                textAlign: 'center'
+              }}
+            >
+              <p style={{ color: '#9ca3af', marginBottom: '20px' }}>No projects yet</p>
+              <button
+                onClick={() => nav("/editing/assets")}
+                style={{
+                  padding: '12px 24px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '10px',
+                  cursor: 'pointer'
+                }}
+              >
+                Create your first project
+              </button>
+            </div>
+          ) : (
+            <div 
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                gap: '20px'
+              }}
+            >
+              {projects.slice(0, 8).map((proj) => (
+                <ProjectCard
+                  key={proj.id}
+                  project={proj}
+                  onEdit={() => nav(`/editing/editor/${proj.id}`)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* CSS ANIMATIONS */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 0.1; transform: scale(1); }
+          50% { opacity: 0.15; transform: scale(1.05); }
+        }
+      `}</style>
     </div>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  detail,
-  color,
-}: {
-  label: string;
-  value: string | number;
-  detail: string;
-  color: "indigo" | "green" | "blue" | "purple";
-}) {
-  const bgColors = {
-    indigo: "bg-indigo-900/40",
-    green: "bg-green-900/40",
-    blue: "bg-blue-900/40",
-    purple: "bg-purple-900/40",
-  };
-
-  const borderColors = {
-    indigo: "border-indigo-500",
-    green: "border-green-500",
-    blue: "border-blue-500",
-    purple: "border-purple-500",
-  };
-
+function StatCard({ label, value, detail, icon }: { label: string; value: string | number; detail: string; icon: string }) {
   return (
-    <div
-      className={`${bgColors[color]} border ${borderColors[color]} rounded-lg p-4`}
+    <div 
+      style={{
+        background: 'rgba(15, 15, 15, 0.7)',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '16px',
+        padding: '24px',
+        transition: 'all 0.3s ease'
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.3)';
+        e.currentTarget.style.transform = 'translateY(-4px)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+        e.currentTarget.style.transform = 'translateY(0)';
+      }}
     >
-      <p className="text-gray-400 text-sm mb-2">{label}</p>
-      <p className="text-2xl font-bold mb-1">{value}</p>
-      <p className="text-xs text-gray-500">{detail}</p>
+      <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '12px' }}>
+        {icon} {label}
+      </p>
+      <p style={{ fontSize: '32px', fontWeight: 700, marginBottom: '4px' }}>{value}</p>
+      <p style={{ fontSize: '12px', color: '#9ca3af' }}>{detail}</p>
     </div>
   );
 }
 
-function RecordingCard({
-  recording,
-  onEdit,
-}: {
-  recording: Recording;
-  onEdit: () => void;
-}) {
-  const statusColors = {
-    recording: "bg-red-500/20 text-red-300",
-    processing: "bg-yellow-500/20 text-yellow-300",
-    ready: "bg-green-500/20 text-green-300",
-  };
-
+function RecordingCard({ recording, onEdit, onDelete }: { recording: Recording; onEdit: () => void; onDelete: () => void }) {
   return (
-    <div className="bg-zinc-900 rounded-lg overflow-hidden hover:border-indigo-500 border border-gray-700 transition">
-      <div className="aspect-video bg-black flex items-center justify-center">
-        <div className="text-5xl">🎬</div>
+    <div 
+      style={{
+        background: 'rgba(15, 15, 15, 0.7)',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '16px',
+        overflow: 'hidden',
+        transition: 'all 0.3s ease'
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.3)';
+        e.currentTarget.style.transform = 'translateY(-4px)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+        e.currentTarget.style.transform = 'translateY(0)';
+      }}
+    >
+      <div 
+        style={{
+          aspectRatio: '16/9',
+          background: '#000',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '48px'
+        }}
+      >
+        🎬
       </div>
-      <div className="p-4">
-        <h3 className="font-semibold truncate mb-2">{recording.title}</h3>
-        <div className="flex items-center justify-between mb-3">
-          <span className={`text-xs px-2 py-1 rounded ${statusColors[recording.status]}`}>
-            {recording.status === "recording" && "🔴 Recording"}
-            {recording.status === "processing" && "⏳ Processing"}
-            {recording.status === "ready" && "✅ Ready"}
+      <div style={{ padding: '16px' }}>
+        <h3 style={{ fontWeight: 600, fontSize: '15px', marginBottom: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {recording.title}
+        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <span 
+            style={{
+              fontSize: '11px',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              background: recording.status === 'ready' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.2)',
+              color: recording.status === 'ready' ? '#22c55e' : '#eab308'
+            }}
+          >
+            {recording.status === 'ready' ? '✅ Ready' : '⏳ Processing'}
           </span>
-          <span className="text-xs text-gray-400">
+          <span style={{ fontSize: '12px', color: '#6b7280' }}>
             {Math.round(recording.duration / 60)}m
           </span>
         </div>
-        <p className="text-xs text-gray-500 mb-3">
+        <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>
           👥 {recording.peakViewers} viewers
         </p>
-        {recording.status === "processing" && (
-          <div className="w-full bg-gray-700 rounded h-1.5 mb-3">
-            <div
-              className="bg-indigo-600 h-1.5 rounded transition-all"
-              style={{ width: `${recording.progress}%` }}
-            />
-          </div>
-        )}
-        <button
-          onClick={onEdit}
-          className="w-full py-2 text-sm bg-indigo-600 hover:bg-indigo-700 rounded font-medium"
-        >
-          Edit
-        </button>
+        <div style={{ display: 'flex', gap: '0', width: '100%' }}>
+          <button
+            onClick={onDelete}
+            style={{
+              flex: 1,
+              padding: '10px',
+              background: '#dc2626',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px 0 0 8px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#b91c1c';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#dc2626';
+            }}
+          >
+            Delete
+          </button>
+          <button
+            onClick={onEdit}
+            style={{
+              flex: 1,
+              padding: '10px',
+              background: '#2563eb',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '0 8px 8px 0',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#1d4ed8';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#2563eb';
+            }}
+          >
+            Edit
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function ProjectCard({
-  project,
-  onEdit,
-}: {
-  project: Project;
-  onEdit: () => void;
-}) {
+function ProjectCard({ project, onEdit }: { project: Project; onEdit: () => void }) {
   return (
-    <div className="bg-zinc-900 rounded-lg overflow-hidden hover:border-indigo-500 border border-gray-700 transition">
-      <div className="aspect-video bg-black flex items-center justify-center">
-        <div className="text-5xl">📽️</div>
+    <div 
+      style={{
+        background: 'rgba(15, 15, 15, 0.7)',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '16px',
+        overflow: 'hidden',
+        transition: 'all 0.3s ease'
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.3)';
+        e.currentTarget.style.transform = 'translateY(-4px)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+        e.currentTarget.style.transform = 'translateY(0)';
+      }}
+    >
+      <div 
+        style={{
+          aspectRatio: '16/9',
+          background: '#000',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '48px'
+        }}
+      >
+        🎞️
       </div>
-      <div className="p-4">
-        <h3 className="font-semibold truncate mb-2">{project.name}</h3>
-        <p className="text-xs text-gray-500 mb-3">
+      <div style={{ padding: '16px' }}>
+        <h3 style={{ fontWeight: 600, fontSize: '15px', marginBottom: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {project.name}
+        </h3>
+        <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>
           {new Date(project.createdAt).toLocaleDateString()}
         </p>
         <button
           onClick={onEdit}
-          className="w-full py-2 text-sm bg-indigo-600 hover:bg-indigo-700 rounded font-medium"
+          style={{
+            width: '100%',
+            padding: '10px',
+            background: 'rgba(255, 255, 255, 0.05)',
+            color: '#ffffff',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
         >
           Open
         </button>

@@ -22,8 +22,6 @@ const PORT = process.env.PORT || 5137;
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
-// Serve React static files
-app.use(express_1.default.static(path_1.default.join(__dirname, "../dist")));
 // Health check
 app.get("/", (_req, res) => res.send("API up"));
 // Token route used by the frontend
@@ -380,6 +378,164 @@ app.post("/api/usage/streamEnded", async (req, res) => {
     catch (err) {
         console.error("streamEnded error", err);
         return res.status(500).json({ error: "internal error" });
+    }
+});
+// ============================================================================
+// WEBHOOK: LiveKit Egress Completed
+// ============================================================================
+app.post("/api/webhook/egress", async (req, res) => {
+    try {
+        const event = req.body;
+        console.log("📹 Egress webhook received:", event);
+        // Check if egress finished successfully
+        if (event.event === "egress_finished" && event.egress?.fileOutputs) {
+            const fileOutputs = event.egress.fileOutputs;
+            for (const file of fileOutputs) {
+                if (file.fileKey) {
+                    // The file has been saved to S3/R2
+                    const recordingId = event.egress.roomName;
+                    const userId = event.egress.metadata;
+                    if (recordingId && userId) {
+                        // Update recording status to "ready"
+                        await firebaseAdmin_1.firestore.collection("recordings").doc(recordingId).update({
+                            status: "ready",
+                            videoUrl: `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}/${file.fileKey}`,
+                            egressId: event.egress.egressId,
+                            completedAt: new Date().toISOString(),
+                        });
+                        console.log(`✅ Recording ${recordingId} ready at ${file.fileKey}`);
+                    }
+                }
+            }
+        }
+        // Acknowledge receipt
+        res.json({ ok: true });
+    }
+    catch (err) {
+        console.error("Egress webhook error:", err);
+        res.status(500).json({ error: "Webhook processing error" });
+    }
+});
+// ============================================================================
+// ENDPOINT: Save Recording to Firestore
+// ============================================================================
+app.post("/api/recordings/save", async (req, res) => {
+    try {
+        const { roomName, title, duration, viewerCount, peakViewers, userId } = req.body;
+        if (!roomName || !userId) {
+            return res.status(400).json({ error: "roomName and userId are required" });
+        }
+        const recordingRef = await firebaseAdmin_1.firestore.collection("recordings").add({
+            roomName,
+            title: title || `Stream - ${new Date().toLocaleString()}`,
+            userId,
+            status: "ready",
+            duration: duration || 0,
+            viewerCount: viewerCount || 0,
+            peakViewers: peakViewers || 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        });
+        console.log("✅ Recording created and marked ready:", recordingRef.id);
+        res.json({
+            id: recordingRef.id,
+            status: "ready",
+            message: "Recording saved and ready to edit!"
+        });
+    }
+    catch (err) {
+        console.error("Save recording error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+// ============================================================================
+// ENDPOINT: Get Recording Download URL
+// ============================================================================
+app.get("/api/recordings/:recordingId/download", async (req, res) => {
+    try {
+        const { recordingId } = req.params;
+        const authHeader = req.headers["authorization"];
+        const token = authHeader && authHeader.split(" ")[1];
+        // Get recording document
+        const recordingSnap = await firebaseAdmin_1.firestore.collection("recordings").doc(recordingId).get();
+        if (!recordingSnap.exists) {
+            return res.status(404).json({ error: "Recording not found" });
+        }
+        const recordingData = recordingSnap.data();
+        // Verify ownership if authenticated
+        if (token) {
+            try {
+                const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
+                const userId = decoded.id;
+                if (recordingData.userId !== userId) {
+                    return res.status(403).json({ error: "Unauthorized" });
+                }
+            }
+            catch (err) {
+                // Invalid token, continue without auth check
+            }
+        }
+        // Check if recording is ready
+        if (recordingData.status !== "ready" || !recordingData.videoUrl) {
+            return res.status(400).json({
+                error: "Recording not ready for download",
+                status: recordingData.status,
+                message: "Please wait for processing to complete"
+            });
+        }
+        // Return download URL
+        res.json({
+            id: recordingId,
+            title: recordingData.title,
+            videoUrl: recordingData.videoUrl,
+            duration: recordingData.duration,
+            fileSize: recordingData.fileSize || null,
+            status: recordingData.status,
+        });
+    }
+    catch (err) {
+        console.error("Recording download error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+// ============================================================================
+// ENDPOINT: Delete Recording
+// ============================================================================
+app.delete("/api/recordings/:recordingId", async (req, res) => {
+    try {
+        const { recordingId } = req.params;
+        const authHeader = req.headers["authorization"];
+        const token = authHeader && authHeader.split(" ")[1];
+        if (!token) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        // Verify ownership
+        const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
+        const userId = decoded.id;
+        const recordingSnap = await firebaseAdmin_1.firestore.collection("recordings").doc(recordingId).get();
+        if (!recordingSnap.exists) {
+            return res.status(404).json({ error: "Recording not found" });
+        }
+        const recordingData = recordingSnap.data();
+        if (recordingData.userId !== userId) {
+            return res.status(403).json({ error: "Unauthorized" });
+        }
+        // Delete from Firestore
+        await firebaseAdmin_1.firestore.collection("recordings").doc(recordingId).delete();
+        // TODO: Delete video file from S3/R2 storage
+        // if (recordingData.videoUrl) {
+        //   const fileKey = recordingData.videoUrl.split('/').pop();
+        //   await deleteVideo(fileKey);
+        // }
+        res.json({
+            id: recordingId,
+            deleted: true,
+            message: "Recording deleted successfully"
+        });
+    }
+    catch (err) {
+        console.error("Delete recording error:", err);
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 // Serve React app for all routes that don't match /api

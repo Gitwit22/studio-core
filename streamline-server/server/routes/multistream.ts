@@ -1,10 +1,10 @@
 // server/routes/multistream.ts
 import express from "express";
 import { egressClient } from "../livekitClient";
-import { StreamOutput, StreamProtocol } from "livekit-server-sdk";
+import { StreamOutput, StreamProtocol, EncodingOptions } from "livekit-server-sdk";
 import { firestore } from "../firebaseAdmin";
 import { addUsageForUser, checkStorageLimit, updateStorageUsage } from "../usageHelper";
-import { generateRecordingPath } from "../lib/storageClient";
+import { generateRecordingPath, getSignedDownloadUrl } from "../lib/storageClient";
 
 const router = express.Router();
 
@@ -68,15 +68,19 @@ router.post("/:roomName/start-multistream", async (req, res) => {
   }
 
   try {
+    // Create RTMP stream output for live platforms
     const streamOutput = new StreamOutput({
       protocol: StreamProtocol.RTMP,
       urls,
     });
 
-    // Start Room Composite egress and stream to all URLs
+    // Start Room Composite egress with streaming
+    // Recording is handled separately via webhooks (not during stream)
     const info = await egressClient.startRoomCompositeEgress(
       roomName,
-      { stream: streamOutput },
+      { 
+        stream: streamOutput,
+      },
       { layout: "grid" }
     );
 
@@ -139,6 +143,7 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
     // Calculate stream duration
     const now = new Date();
     const durationMs = now.getTime() - activeStream.startedAt.getTime();
+    const durationSeconds = Math.floor(durationMs / 1000);
     const durationMinutes = Math.ceil(durationMs / 60000); // Round up to nearest minute
 
     // Add usage for this stream
@@ -147,28 +152,33 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
       description: `Stream in room ${activeStream.roomName}`,
     });
 
-    // ✅ PROMPT #2: Create recording document after stream ends
+    // Generate recording path and get the video URL
     const timestamp = Date.now();
     const recordingPath = generateRecordingPath(activeStream.userId, activeStream.roomName, timestamp);
+    const videoUrl = await getSignedDownloadUrl(recordingPath); // Get R2 signed URL
 
-    // Create recording doc in Firestore
+    console.log("🎬 Recording saved to:", recordingPath);
+    console.log("📹 Video URL:", videoUrl);
+
+    // Create recording document in Firestore with video URL
     const recordingRef = await firestore.collection("recordings").add({
       userId: activeStream.userId,
-      roomId: activeStream.roomName,
+      roomName: activeStream.roomName,
       title: `Stream - ${new Date(activeStream.startedAt).toLocaleString()}`,
-      createdAt: activeStream.startedAt,
+      status: "ready",
+      duration: durationSeconds,
       durationMinutes,
+      viewerCount: activeStream.guestCount || 0,
+      peakViewers: activeStream.guestCount || 0,
+      videoUrl, // ✅ Store the actual video URL
+      thumbnailUrl: null,
       storagePath: recordingPath,
-      status: "processing", // Will be "ready" once video is uploaded to R2
-      planId: "free", // Will be fetched from user doc
-      guestCount: activeStream.guestCount || 0,
-      editConfig: null,
-      renderedPath: null,
-      uploadedToUrls: {},
+      progress: 100,
+      createdAt: activeStream.startedAt,
       updatedAt: now,
     });
 
-    console.log(`✅ Created recording doc: ${recordingRef.id}`);
+    console.log(`✅ Created recording doc: ${recordingRef.id} with video URL`);
 
     // Clean up tracking
     activeStreams.delete(activeStream.roomName);
@@ -176,9 +186,10 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
 
     return res.json({
       success: true,
+      durationSeconds,
       durationMinutes,
       recordingId: recordingRef.id,
-      recordingPath,
+      videoUrl,
       usageUpdated: usageResult,
     });
   } catch (err: any) {

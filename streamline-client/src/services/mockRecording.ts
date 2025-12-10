@@ -135,6 +135,15 @@ export const mockRecordingApi = {
     return { deleted: true };
   },
 
+  deleteRecordingSync: (recordingId: string) => {
+    const recordings = JSON.parse(
+      localStorage.getItem('sl_recordings') || '[]'
+    );
+    const filtered = recordings.filter((r: MockRecording) => r.id !== recordingId);
+    localStorage.setItem('sl_recordings', JSON.stringify(filtered));
+    return { deleted: true };
+  },
+
   listRecordings: (): MockRecording[] => {
     // Synchronous version for dashboard
     return JSON.parse(localStorage.getItem('sl_recordings') || '[]');

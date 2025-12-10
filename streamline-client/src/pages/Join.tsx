@@ -1,15 +1,37 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import UsageBanner from "../components/UsageBanner";
-
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 const raw = localStorage.getItem("sl_user");
 const user = raw ? JSON.parse(raw) : null;
 
+/**
+ * STREAMLINE JOIN PAGE WITH USAGE BANNER - REDESIGNED
+ * Glassmorphism black/red/white theme with integrated usage stats
+ */
+
+// Mock usage data - replace with real API call
+const mockUsageData = {
+  streamingMinutes: 127,
+  maxStreamingMinutes: 300,
+  storageUsed: 2.3, // GB
+  maxStorage: 10, // GB
+  planId: "free"
+};
+
 export default function Join() {
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const [displayName, setDisplayName] = useState("");
   const [roomName, setRoomName] = useState("");
+
+  // Check for invite link (room query parameter)
+  useEffect(() => {
+    const inviteRoom = searchParams.get("room");
+    if (inviteRoom) {
+      const decodedRoom = decodeURIComponent(inviteRoom);
+      setRoomName(decodedRoom);
+    }
+  }, [searchParams]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -19,111 +41,518 @@ export default function Join() {
     if (!name || !room) return;
 
     localStorage.setItem("sl_displayName", name);
-
     nav(`/room/${encodeURIComponent(room)}`);
   }
 
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white p-6">
-       <UsageBanner />
+  const streamingPercent = (mockUsageData.streamingMinutes / mockUsageData.maxStreamingMinutes) * 100;
+  const storagePercent = (mockUsageData.storageUsed / mockUsageData.maxStorage) * 100;
 
-      {/* Top right corner - Dashboard button */}
-      <div className="fixed top-4 right-4">
-        <button
-          onClick={() => nav("/dashboard")}
-          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-medium transition"
-        >
-          📊 Dashboard
-        </button>
+  return (
+    <div 
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#000000',
+        color: '#ffffff',
+        padding: '24px',
+        position: 'relative',
+        overflow: 'hidden'
+      }}
+    >
+      
+      {/* ANIMATED BACKGROUND */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+        <div 
+          style={{
+            position: 'absolute',
+            top: '20%',
+            right: '15%',
+            width: '500px',
+            height: '500px',
+            background: 'rgba(220, 38, 38, 0.15)',
+            borderRadius: '50%',
+            filter: 'blur(120px)',
+            animation: 'pulse 4s ease-in-out infinite'
+          }}
+        />
+        <div 
+          style={{
+            position: 'absolute',
+            bottom: '20%',
+            left: '15%',
+            width: '600px',
+            height: '600px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            borderRadius: '50%',
+            filter: 'blur(150px)',
+            animation: 'pulse 4s ease-in-out infinite',
+            animationDelay: '2s'
+          }}
+        />
       </div>
 
-      {/* 🔥 WELCOME BACK BANNER */}
-      {user && (
-        <div className="mb-6 text-center">
-          <h2 className="text-xl font-semibold">
-            Welcome back, {user.displayName || user.email} 👋
-          </h2>
+      {/* USAGE BANNER - TOP BAR */}
+      <div 
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 30,
+          background: 'rgba(15, 15, 15, 0.9)',
+          backdropFilter: 'blur(20px)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          padding: '16px 24px'
+        }}
+      >
+        <div 
+          style={{
+            maxWidth: '1200px',
+            margin: '0 auto',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '24px',
+            flexWrap: 'wrap'
+          }}
+        >
+          
+          {/* Usage Stats */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '32px', flexWrap: 'wrap' }}>
+            
+            {/* Streaming Minutes */}
+            <div>
+              <div 
+                style={{
+                  fontSize: '11px',
+                  color: '#6b7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: '4px'
+                }}
+              >
+                Streaming Minutes
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ fontSize: '18px', fontWeight: 700 }}>
+                  {mockUsageData.streamingMinutes}
+                </div>
+                <div style={{ fontSize: '13px', color: '#9ca3af' }}>
+                  / {mockUsageData.maxStreamingMinutes}
+                </div>
+              </div>
+              <div 
+                style={{
+                  width: '120px',
+                  height: '4px',
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: '2px',
+                  marginTop: '4px',
+                  overflow: 'hidden'
+                }}
+              >
+                <div 
+                  style={{
+                    height: '100%',
+                    width: `${streamingPercent}%`,
+                    background: 'linear-gradient(to right, #dc2626, #ef4444)',
+                    borderRadius: '2px'
+                  }}
+                />
+              </div>
+            </div>
 
-          {/* Optional: show their onboarding defaults */}
-          {user.defaultResolution && (
-            <p className="text-sm text-gray-400">
-              Default resolution: {user.defaultResolution}
-            </p>
-          )}
+            {/* Storage Used */}
+            <div>
+              <div 
+                style={{
+                  fontSize: '11px',
+                  color: '#6b7280',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: '4px'
+                }}
+              >
+                Storage Used
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ fontSize: '18px', fontWeight: 700 }}>
+                  {mockUsageData.storageUsed} GB
+                </div>
+                <div style={{ fontSize: '13px', color: '#9ca3af' }}>
+                  / {mockUsageData.maxStorage} GB
+                </div>
+              </div>
+              <div 
+                style={{
+                  width: '120px',
+                  height: '4px',
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: '2px',
+                  marginTop: '4px',
+                  overflow: 'hidden'
+                }}
+              >
+                <div 
+                  style={{
+                    height: '100%',
+                    width: `${storagePercent}%`,
+                    background: 'linear-gradient(to right, #dc2626, #ef4444)',
+                    borderRadius: '2px'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Plan Badge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div 
+                style={{
+                  padding: '6px 12px',
+                  background: 'rgba(220, 38, 38, 0.2)',
+                  border: '1px solid rgba(220, 38, 38, 0.4)',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase'
+                }}
+              >
+                {mockUsageData.planId} Plan
+              </div>
+              <button
+                onClick={() => alert('Upgrade modal coming soon')}
+                style={{
+                  fontSize: '12px',
+                  color: '#ef4444',
+                  background: 'none',
+                  border: 'none',
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                Upgrade
+              </button>
+            </div>
+          </div>
+
+          {/* My Content Button */}
+          <div>
+            <button
+              onClick={() => nav('/dashboard')}
+              style={{
+                fontSize: '13px',
+                padding: '8px 16px',
+                background: 'rgba(220, 38, 38, 0.1)',
+                border: '1px solid rgba(220, 38, 38, 0.4)',
+                borderRadius: '8px',
+                color: '#ef4444',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.3s ease',
+                fontWeight: 500
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)';
+                e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.8)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(220, 38, 38, 0.1)';
+                e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.4)';
+              }}
+            >
+              🎬 My Content
+            </button>
+          </div>
         </div>
-      )}
-
-{/* 🔥 ONBOARDING COMPLETION SECTION */}
-{user && !user.onboardingCompleted && (
-  <div className="w-full max-w-md bg-gray-900 p-4 rounded-lg mb-6">
-    <h3 className="text-lg font-semibold mb-2">Finish Your Streaming Setup</h3>
-    <p className="text-sm text-gray-400 mb-4">
-      You skipped streaming setup during signup. Connect your destinations
-      here to make going live even faster.
-    </p>
-
-    {/* YouTube Button */}
-    {!user.youtubeConnected && (
-      <button
-        type="button"
-        className="w-full py-2 bg-red-600 hover:bg-red-700 rounded mb-3"
-        onClick={() => alert("YouTube OAuth coming soon")}
-      >
-        Connect YouTube
-      </button>
-    )}
-
-    {/* Facebook Button */}
-    {!user.facebookConnected && (
-      <button
-        type="button"
-        className="w-full py-2 bg-blue-600 hover:bg-blue-700 rounded"
-        onClick={() => alert("Facebook OAuth coming soon")}
-      >
-        Connect Facebook
-      </button>
-
-      
-    )}
-  </div>
-)}
+      </div>
 
 
+      <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '480px', marginTop: '80px' }}>
+        
+        {/* LOGO */}
+        <div style={{ marginBottom: '32px', textAlign: 'center' }}>
+          <img
+            src="/logo.png"
+            alt="StreamLine Logo"
+            style={{
+              width: '320px',
+              height: '320px',
+              margin: '0 auto',
+              filter: 'drop-shadow(0 0 25px rgba(220, 38, 38, 0.5))'
+            }}
+          />
+        </div>
 
+        {/* WELCOME MESSAGE */}
+        {user && (
+          <div style={{ marginBottom: '32px', textAlign: 'center' }}>
+            <h2 
+              style={{
+                fontSize: '28px',
+                fontWeight: 700,
+                marginBottom: '8px',
+                background: 'linear-gradient(to right, #ffffff, #fecaca, #ffffff)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent'
+              }}
+            >
+              Welcome back, {user.displayName || user.email}! 👋
+            </h2>
+            {user.defaultResolution && (
+              <p style={{ fontSize: '14px', color: '#6b7280' }}>
+                Default resolution: {user.defaultResolution}
+              </p>
+            )}
+          </div>
+        )}
 
-      {/* Your existing form */}
-      <form onSubmit={handleSubmit}>
+        {!user && (
+          <div style={{ marginBottom: '32px', textAlign: 'center' }}>
+            <h1 
+              style={{
+                fontSize: '32px',
+                fontWeight: 700,
+                marginBottom: '8px',
+                background: 'linear-gradient(to right, #ffffff, #fecaca, #ffffff)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent'
+              }}
+            >
+              Create or Join Room
+            </h1>
+            <p style={{ fontSize: '16px', color: '#9ca3af' }}>
+              Start streaming in seconds
+            </p>
+          </div>
+        )}
 
-        <input
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="Your name"
-          className="p-2 rounded mb-3 text-black"
-        />
+        {/* ONBOARDING COMPLETION CARD - Only show if user is authenticated AND not coming from an invite */}
+        {user && !user.onboardingCompleted && !searchParams.get("room") && (
+          <div
+            style={{
+              background: 'rgba(15, 15, 15, 0.7)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '16px',
+              padding: '24px',
+              marginBottom: '24px'
+            }}
+          >
+            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', color: '#ef4444' }}>
+              ⚠️ Finish Your Streaming Setup
+            </h3>
+            <p style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '16px', lineHeight: '1.5' }}>
+              You skipped streaming setup during signup. Connect your destinations here to make going live even faster.
+            </p>
 
-        <input
-          value={roomName}
-          onChange={(e) => setRoomName(e.target.value)}
-          placeholder="Room name"
-          className="p-2 rounded mb-3 text-black"
-        />
+            {!user.youtubeConnected && (
+              <button
+                onClick={() => alert("YouTube OAuth coming soon")}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: 'rgba(239, 68, 68, 0.2)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '10px',
+                  color: '#ffffff',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  marginBottom: '12px',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.3)';
+                  e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+                  e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+                }}
+              >
+                🔴 Connect YouTube
+              </button>
+            )}
 
-        <button type="submit" className="bg-white text-black py-2 px-4 rounded">
-          Enter Room
-        </button>
+            {!user.facebookConnected && (
+              <button
+                onClick={() => alert("Facebook OAuth coming soon")}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: 'rgba(59, 130, 246, 0.2)',
+                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                  borderRadius: '10px',
+                  color: '#ffffff',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(59, 130, 246, 0.3)';
+                  e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(59, 130, 246, 0.2)';
+                  e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+                }}
+              >
+                📘 Connect Facebook
+              </button>
+            )}
+          </div>
+        )}
 
-      </form>
+        {/* FORM CONTAINER */}
+        <div
+          style={{
+            background: 'rgba(15, 15, 15, 0.7)',
+            backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '20px',
+            padding: '32px',
+            marginBottom: '24px'
+          }}
+        >
+          <form onSubmit={handleSubmit}>
+            
+            {/* DISPLAY NAME */}
+            <div style={{ marginBottom: '20px' }}>
+              <label 
+                style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: '#9ca3af',
+                  marginBottom: '8px'
+                }}
+              >
+                Your Name
+              </label>
+              <input
+                type="text"
+                placeholder="Enter your display name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '14px 16px',
+                  background: 'rgba(0, 0, 0, 0.4)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '12px',
+                  color: '#ffffff',
+                  fontSize: '15px',
+                  outline: 'none'
+                }}
+              />
+            </div>
 
-      <button
-  onClick={() => {
-    localStorage.removeItem("sl_displayName");
-    window.location.href = "/"; // guaranteed redirect
-  }}
-  className="text-xs px-3 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-white transition"
->
-  Logout
-</button>
+            {/* ROOM NAME */}
+            {!searchParams.get("room") && (
+              <div style={{ marginBottom: '24px' }}>
+                <label 
+                  style={{
+                    display: 'block',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    color: '#9ca3af',
+                    marginBottom: '8px'
+                  }}
+                >
+                  Room Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter room name"
+                  value={roomName}
+                  onChange={(e) => setRoomName(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '14px 16px',
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '12px',
+                    color: '#ffffff',
+                    fontSize: '15px',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            )}
 
+            {/* SUBMIT BUTTON */}
+            <button
+              type="submit"
+              style={{
+                width: '100%',
+                padding: '16px',
+                background: 'linear-gradient(to right, #dc2626, #ef4444)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '12px',
+                fontSize: '16px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 8px 32px rgba(220, 38, 38, 0.3)',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(to right, #ef4444, #f87171)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(to right, #dc2626, #ef4444)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              Enter Room
+            </button>
+          </form>
+        </div>
+
+        {/* LOGOUT BUTTON */}
+        <div style={{ textAlign: 'center' }}>
+          <button
+            onClick={() => {
+              localStorage.removeItem("sl_displayName");
+              window.location.href = "/";
+            }}
+            style={{
+              fontSize: '13px',
+              padding: '8px 16px',
+              border: '1px solid rgba(220, 38, 38, 0.5)',
+              background: 'transparent',
+              color: '#ef4444',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+
+      {/* CSS ANIMATIONS */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 0.15; transform: scale(1); }
+          50% { opacity: 0.25; transform: scale(1.05); }
+        }
+      `}</style>
     </div>
   );
 }

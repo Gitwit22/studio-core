@@ -1,44 +1,55 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Download, Edit, Home, CheckCircle } from 'lucide-react';
-import { mockRecordingApi, MockRecording } from '../services/mockRecording';
+import { editingApi } from '../lib/editingApi';
+
+type Recording = {
+  id: string;
+  title: string;
+  roomName?: string;
+  status: 'ready' | 'processing';
+  progress: number;
+  duration: number;
+  viewerCount: number;
+  peakViewers: number;
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  createdAt: string;
+};
 
 export default function PostStreamSummary() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [recording, setRecording] = useState<MockRecording | null>(null);
+  const [recording, setRecording] = useState<Recording | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const recordingId = searchParams.get('recordingId');
 
   useEffect(() => {
     if (!recordingId) {
+      setError('No recording ID provided');
       setLoading(false);
       return;
     }
 
-    // Simulate loading the recording
-    const rec = mockRecordingApi.listRecordings().find(r => r.id === recordingId);
-    if (rec) {
-      setRecording(rec);
-    } else {
-      // Create a mock recording if it doesn't exist (for demo)
-      const mockRec: MockRecording = {
-        id: recordingId,
-        title: 'Weekly Gaming Stream',
-        roomName: 'gaming-room',
-        status: 'ready',
-        progress: 100,
-        duration: 154,
-        viewerCount: 247,
-        peakViewers: 247,
-        videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-library/sample/BigBuckBunny.mp4',
-        thumbnailUrl: 'https://placehold.co/640x360?text=Stream+Recording',
-        createdAt: new Date().toISOString(),
-      };
-      setRecording(mockRec);
-    }
-    setLoading(false);
+    const fetchRecording = async () => {
+      try {
+        const rec = await editingApi.getRecording(recordingId);
+        if (rec) {
+          setRecording(rec as Recording);
+        } else {
+          setError('Recording not found');
+        }
+      } catch (err) {
+        console.error('Failed to fetch recording:', err);
+        setError('Failed to load recording');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecording();
   }, [recordingId]);
 
   const handleEditClick = () => {
@@ -75,7 +86,7 @@ export default function PostStreamSummary() {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <div className="text-center">
-          <p className="text-zinc-400 mb-6">No recording found</p>
+          <p className="text-red-400 mb-6">{error || 'Recording not found'}</p>
           <button
             onClick={handleExitClick}
             className="px-6 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition"

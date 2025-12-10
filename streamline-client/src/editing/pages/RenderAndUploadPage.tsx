@@ -1,15 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CheckCircle, Youtube, Facebook, Twitter } from 'lucide-react';
-import { mockApi } from '../mockData';
-
-interface Project {
-  id: string;
-  name: string;
-  assetId: string;
-  duration?: number;
-  lastModified: string;
-}
+import { editingApi, type Project } from '../../lib/editingApi';
 
 export default function RenderAndUploadPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -22,7 +14,7 @@ export default function RenderAndUploadPage() {
   useEffect(() => {
     // Load project
     if (projectId) {
-      mockApi.getProject(projectId).then((proj) => {
+      editingApi.getProject(projectId).then((proj) => {
         if (proj) {
           setProject(proj as Project);
         }
