@@ -287,6 +287,8 @@ export default function Room() {
   const [viewerCount] = useState(Math.floor(Math.random() * 200) + 10);
   const [elapsedTime, setElapsedTime] = useState(0);
   const streamStartTimeRef = useRef<number | null>(null);
+  const [didStreamThisSession, setDidStreamThisSession] = useState(false);
+  const [showExitOptions, setShowExitOptions] = useState(false);
 
   useEffect(() => {
     if (!roomName || !displayName) return;
@@ -378,8 +380,8 @@ export default function Room() {
         return;
       }
 
-      // Use the new /api/recordings/start endpoint
-      const response = await fetch(`/api/recordings/start`, {
+      // Use the new /api/editing/recordings/start endpoint
+      const response = await fetch(`/api/editing/recordings/start`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -423,10 +425,10 @@ export default function Room() {
         
         console.log("📊 Stopping recording with duration:", duration, "seconds");
 
-        // Call the new /api/recordings/stop endpoint
+        // Call the new /api/editing/recordings/stop endpoint
         if (userId && recordId !== 'unknown') {
           try {
-            const stopResponse = await fetch(`/api/recordings/stop`, {
+            const stopResponse = await fetch(`/api/editing/recordings/stop`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -472,24 +474,59 @@ export default function Room() {
   }, [isHost, token]);
 
   const handleEndStream = async () => {
-    // For hosts: if recording is still active, show message and wait
-    if (isHost && recordingStatus === "recording") {
-      alert("⏹️ Recording is still active. Stop the stream first to save your recording.");
+    // For hosts: if stream is still live, show message and wait
+    if (isHost && streamStatus === "live") {
+      alert("⏹️ Stream is still live. Stop the stream first.");
       return;
     }
 
-    // For hosts: navigate to exit page if there was a recording
+    // For hosts: if recording is still active, show message and wait
+    if (isHost && recordingStatus === "recording") {
+      alert("⏹️ Recording is still active. Stop the stream first.");
+      return;
+    }
+
+    // For hosts: show exit options menu
+    if (isHost && didStreamThisSession) {
+      setShowExitOptions(true);
+      return;
+    }
+
+    // For hosts who never streamed - just show goodbye
     if (isHost) {
-      if (recordingId || recordingRef.current) {
-        nav(`/room-exit/${recordingId || recordingRef.current}`);
-      } else {
-        // No recording - show goodbye screen with home button for hosts
-        setShowGoodbye(true);
-      }
+      console.log('👋 User never streamed - showing goodbye');
+      setShowGoodbye(true);
       return;
     }
 
     // For guests: just leave the room with goodbye screen
+    handleLeftRoom();
+  };
+
+  const handleStayAndRecord = () => {
+    // Reset recording state for next stream
+    setRecordingId(null);
+    setRecordingStatus("idle");
+    recordingRef.current = null;
+    setShowExitOptions(false);
+    // User stays in room, ready to click "Go Live" again
+    console.log('🎬 Ready to record another session');
+  };
+
+  const handleViewSummary = () => {
+    const finalRecordingId = recordingId || recordingRef.current;
+    setShowExitOptions(false);
+    
+    if (finalRecordingId && finalRecordingId !== 'unknown') {
+      nav(`/stream-summary/${finalRecordingId}`);
+    } else {
+      // Fallback to room exit page
+      nav(`/room-exit/${roomName}`);
+    }
+  };
+
+  const handleLeaveRoom = () => {
+    setShowExitOptions(false);
     handleLeftRoom();
   };
 
@@ -538,6 +575,7 @@ export default function Room() {
       const data = await res.json();
       setEgressId(data.egressId);
       setStreamStatus("live");
+      setDidStreamThisSession(true);
       // Start recording when stream goes live
       await startRecording();
     } catch (err) {
@@ -564,8 +602,7 @@ export default function Room() {
       // Stop recording when stopping the stream (this saves to database)
       if (recordingStatus === "recording") {
         await stopRecording();
-        // Recording handles navigation to exit page, don't continue
-        return;
+        // Don't return - continue to stop the multistream
       }
 
       const res = await fetch(
@@ -754,6 +791,174 @@ export default function Room() {
     return <ThankYouScreen showHomeButton={isHost} onHome={handleHomeClick} />;
   }
 
+  // Exit Options Modal for hosts who streamed
+  if (showExitOptions) {
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0, 0, 0, 0.8)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+        backdropFilter: 'blur(5px)'
+      }}>
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%)',
+          borderRadius: '1.5rem',
+          padding: '2.5rem',
+          width: '100%',
+          maxWidth: '500px',
+          border: '1px solid rgba(220, 38, 38, 0.3)',
+          backdropFilter: 'blur(20px)',
+          boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5)'
+        }}>
+          <div style={{
+            textAlign: 'center',
+            marginBottom: '2rem'
+          }}>
+            <div style={{
+              fontSize: '3rem',
+              marginBottom: '1rem'
+            }}>
+              🎬
+            </div>
+            <h2 style={{
+              fontSize: '1.75rem',
+              fontWeight: '700',
+              color: '#ffffff',
+              marginBottom: '0.5rem',
+              background: 'linear-gradient(to right, #ffffff, #fecaca)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent'
+            }}>
+              Recording Complete!
+            </h2>
+            <p style={{
+              fontSize: '0.95rem',
+              color: '#9ca3af',
+              marginTop: '0.75rem'
+            }}>
+              What would you like to do next?
+            </p>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem'
+          }}>
+            {/* Stay & Record Another */}
+            <button
+              onClick={handleStayAndRecord}
+              style={{
+                padding: '1.25rem',
+                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%)',
+                border: '2px solid rgba(34, 197, 94, 0.5)',
+                borderRadius: '0.75rem',
+                color: '#10b981',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                backdropFilter: 'blur(10px)',
+                fontSize: '1rem',
+                fontWeight: '600',
+                textAlign: 'left'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, rgba(34, 197, 94, 0.25) 0%, rgba(16, 185, 129, 0.2) 100%)';
+                target.style.borderColor = 'rgba(34, 197, 94, 0.8)';
+                target.style.boxShadow = '0 0 20px rgba(34, 197, 94, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%)';
+                target.style.borderColor = 'rgba(34, 197, 94, 0.5)';
+                target.style.boxShadow = 'none';
+              }}
+            >
+              <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>🎯 Stay & Record Another</div>
+              <div style={{ fontSize: '0.85rem', color: '#6ee7b7', opacity: 0.9 }}>
+                Perfect for multiple episodes, series, or batch recording
+              </div>
+            </button>
+
+            {/* View Summary & Edit */}
+            <button
+              onClick={handleViewSummary}
+              style={{
+                padding: '1.25rem',
+                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%)',
+                border: '2px solid rgba(59, 130, 246, 0.5)',
+                borderRadius: '0.75rem',
+                color: '#3b82f6',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                backdropFilter: 'blur(10px)',
+                fontSize: '1rem',
+                fontWeight: '600',
+                textAlign: 'left'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.25) 0%, rgba(37, 99, 235, 0.2) 100%)';
+                target.style.borderColor = 'rgba(59, 130, 246, 0.8)';
+                target.style.boxShadow = '0 0 20px rgba(59, 130, 246, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%)';
+                target.style.borderColor = 'rgba(59, 130, 246, 0.5)';
+                target.style.boxShadow = 'none';
+              }}
+            >
+              <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>📊 View Summary & Edit</div>
+              <div style={{ fontSize: '0.85rem', color: '#60a5fa', opacity: 0.9 }}>
+                See stats and edit your recording in the timeline editor
+              </div>
+            </button>
+
+            {/* Leave Room */}
+            <button
+              onClick={handleLeaveRoom}
+              style={{
+                padding: '1.25rem',
+                background: 'rgba(107, 114, 128, 0.15)',
+                border: '2px solid rgba(107, 114, 128, 0.5)',
+                borderRadius: '0.75rem',
+                color: '#d1d5db',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                backdropFilter: 'blur(10px)',
+                fontSize: '1rem',
+                fontWeight: '600',
+                textAlign: 'left'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(107, 114, 128, 0.25)';
+                target.style.borderColor = 'rgba(107, 114, 128, 0.8)';
+                target.style.boxShadow = '0 0 20px rgba(107, 114, 128, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(107, 114, 128, 0.15)';
+                target.style.borderColor = 'rgba(107, 114, 128, 0.5)';
+                target.style.boxShadow = 'none';
+              }}
+            >
+              <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>🚪 Leave Room</div>
+              <div style={{ fontSize: '0.85rem', color: '#9ca3af', opacity: 0.9 }}>
+                Exit without viewing summary or recording another
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {recordingStatus === "recording" && (
@@ -763,12 +968,6 @@ export default function Room() {
           <span className="text-xs text-gray-200 ml-2">{recordingId}</span>
         </div>
       )}
-
-      <div className="fixed top-4 right-4 bg-black/80 border border-gray-700 rounded-lg p-3 text-sm z-40">
-        <div className="text-gray-400">
-          👥 <span className="text-white font-bold">{viewerCount}</span> viewers
-        </div>
-      </div>
 
       <div className="flex items-center justify-between px-4 py-2 bg-black text-white sl-topbar border-b border-gray-700">
         <div className="flex items-center gap-4">
@@ -844,7 +1043,7 @@ export default function Room() {
           )}
         </div>
 
-        {(isHost || true) && (
+        {isHost && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button
               onClick={() => setDashboardOpen(true)}

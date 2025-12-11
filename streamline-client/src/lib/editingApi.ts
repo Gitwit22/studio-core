@@ -225,9 +225,13 @@ export const recordingsApi = {
 
   async getById(id: string): Promise<Recording | null> {
     try {
-      // Recordings endpoint returns all user's recordings, filter client-side
-      const all = await this.getAll();
-      return all.find((r) => r.id === id) || null;
+      const response = await fetch(`${API_BASE}/editing/recordings/${id}`, {
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return handleResponse<Recording>(response);
     } catch (error) {
       console.error('Recording API error:', error);
       return null;

@@ -107,20 +107,50 @@ export default function EditorPage() {
         const assetId = searchParams.get("assetId");
 
         if (recordingId) {
+          console.log('📹 Loading recording:', recordingId);
           const recording = await editingApi.getRecording(recordingId);
+          console.log('✅ Recording loaded:', recording);
+          
           if (recording) {
             setProjectName(`Edit: ${recording.title}`);
+            const videoUrl = recording.videoUrl || SAMPLE_VIDEO_URL;
+            const clipData = {
+              id: `clip_${Date.now()}`,
+              assetId: recordingId,
+              trackId: 'video_1',
+              startTime: 0,
+              duration: Math.min(recording.duration || 60, 60),
+              inPoint: 0,
+              outPoint: Math.min(recording.duration || 60, 60),
+              name: recording.title || 'Recording',
+              videoUrl: videoUrl,
+            };
+            console.log('🎬 Clip data:', clipData);
+            setClips([clipData]);
+            
+            // Load video directly into ref
+            setTimeout(() => {
+              if (videoRef.current) {
+                videoRef.current.src = videoUrl;
+                videoRef.current.load();
+                console.log('📺 Video loaded into player:', videoUrl);
+              }
+            }, 100);
+          } else {
+            console.error('❌ Recording not found:', recordingId);
+            // Fallback to sample
+            setProjectName("New Project");
             setClips([
               {
                 id: `clip_${Date.now()}`,
-                assetId: recordingId,
+                assetId: "sample",
                 trackId: 'video_1',
                 startTime: 0,
-                duration: Math.min(recording.duration, 60),
+                duration: 30,
                 inPoint: 0,
-                outPoint: Math.min(recording.duration, 60),
-                name: recording.title,
-                videoUrl: recording.videoUrl || SAMPLE_VIDEO_URL,
+                outPoint: 30,
+                name: "Sample Clip",
+                videoUrl: SAMPLE_VIDEO_URL,
               },
             ]);
           }
@@ -138,7 +168,7 @@ export default function EditorPage() {
                 inPoint: 0,
                 outPoint: Math.min(asset.duration, 60),
                 name: asset.name,
-                videoUrl: SAMPLE_VIDEO_URL,
+                videoUrl: asset.videoUrl || SAMPLE_VIDEO_URL,
               },
             ]);
           }
@@ -175,7 +205,7 @@ export default function EditorPage() {
               inPoint: 0,
               outPoint: Math.min(asset?.duration || 60, 60),
               name: asset?.name || proj.name,
-              videoUrl: SAMPLE_VIDEO_URL,
+              videoUrl: asset?.videoUrl || SAMPLE_VIDEO_URL,
             },
           ]);
         }
@@ -184,6 +214,86 @@ export default function EditorPage() {
 
     loadProject();
   }, [projectId, searchParams]);
+
+  // ============================================================================
+  // LOAD RECORDING INTO TIMELINE
+  // ============================================================================
+
+  useEffect(() => {
+    const recordingId = searchParams.get('recordingId');
+    
+    if (recordingId && clips.length === 0) {
+      console.log('📹 Loading recording into editor:', recordingId);
+      loadRecordingIntoEditor(recordingId);
+    }
+  }, [searchParams]);
+
+  const loadRecordingIntoEditor = async (recordingId: string) => {
+    try {
+      console.log('🔍 Fetching recording:', recordingId);
+      
+      // Fetch recording details
+      const response = await fetch(`/api/editing/recordings/${recordingId}`);
+      if (!response.ok) {
+        throw new Error('Recording not found');
+      }
+      
+      const recording = await response.json();
+      console.log('✅ Recording data:', recording);
+
+      if (!recording.videoUrl) {
+        throw new Error('Recording has no video URL');
+      }
+
+      // Update project name
+      setProjectName(recording.title || `Recording ${new Date().toLocaleDateString()}`);
+
+      // Calculate duration
+      const duration = recording.duration || (recording.durationMinutes ? recording.durationMinutes * 60 : 60);
+
+      // Create video clip
+      const videoClip: TimelineClip = {
+        id: `clip_video_${Date.now()}`,
+        assetId: recording.id,
+        trackId: 'video_1',
+        startTime: 0,
+        duration: duration,
+        inPoint: 0,
+        outPoint: duration,
+        name: recording.title || 'Video',
+        videoUrl: recording.videoUrl
+      };
+
+      // Create audio clip (linked)
+      const audioClip: TimelineClip = {
+        id: `clip_audio_${Date.now()}`,
+        assetId: recording.id,
+        trackId: 'audio_1',
+        startTime: 0,
+        duration: duration,
+        inPoint: 0,
+        outPoint: duration,
+        name: recording.title || 'Audio',
+        videoUrl: recording.videoUrl
+      };
+
+      // Add to timeline
+      setClips([videoClip, audioClip]);
+      
+      // Load video into player
+      if (videoRef.current) {
+        videoRef.current.src = recording.videoUrl;
+        videoRef.current.load();
+        console.log('📺 Video loaded into player:', recording.videoUrl);
+      }
+
+      console.log('✅ Recording loaded into timeline!');
+
+    } catch (error: any) {
+      console.error('❌ Failed to load recording:', error);
+      alert(`Failed to load recording: ${error.message}`);
+    }
+  };
 
   // ============================================================================
   // VIDEO SYNC
@@ -968,11 +1078,25 @@ export default function EditorPage() {
           <div className="flex-1 bg-black flex items-center justify-center p-4 min-h-0">
             {clips.length > 0 ? (
               <video
+                key={clips[0]?.id || 'no-clip'}
                 ref={videoRef}
                 src={clips[0]?.videoUrl || SAMPLE_VIDEO_URL}
-                className="max-h-full max-w-full rounded shadow-2xl"
+                className="max-h-full max-w-full rounded shadow-2xl object-contain"
+                style={{
+                  maxHeight: '100%',
+                  maxWidth: '100%',
+                  borderRadius: '8px'
+                }}
                 playsInline
-                muted
+                controls
+                controlsList="nodownload"
+                onError={(e) => {
+                  console.error('❌ Video error:', e);
+                  console.log('Video src:', videoRef.current?.src);
+                }}
+                onCanPlay={() => {
+                  console.log('✅ Video can play:', clips[0]?.videoUrl);
+                }}
               />
             ) : (
               <div className="text-zinc-600 text-center">

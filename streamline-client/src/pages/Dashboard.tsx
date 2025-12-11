@@ -330,7 +330,7 @@ export default function Dashboard() {
                 <RecordingCard
                   key={rec.id}
                   recording={rec}
-                  onEdit={() => nav(`/stream-summary/${rec.id}`)}
+                  onEdit={() => nav(`/editing/editor/new?recordingId=${rec.id}`)}
                   onDelete={() => handleDeleteRecording(rec.id)}
                 />
               ))}

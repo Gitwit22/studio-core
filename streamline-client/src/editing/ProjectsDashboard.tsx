@@ -210,7 +210,15 @@ export default function ProjectsDashboard() {
               <ProjectCard 
                 key={proj.id} 
                 project={proj} 
-                onDelete={() => setProjects(projects.filter((p) => p.id !== proj.id))} 
+                onDelete={async () => {
+                  try {
+                    await editingApi.deleteProject(proj.id);
+                    setProjects(projects.filter((p) => p.id !== proj.id));
+                  } catch (err) {
+                    console.error('Failed to delete project:', err);
+                    alert('Failed to delete project. Please try again.');
+                  }
+                }} 
               />
             ))}
           </div>
@@ -415,7 +423,7 @@ function ProjectCard({
   onDelete,
 }: {
   project: Project;
-  onDelete: () => void;
+  onDelete: () => Promise<void>;
 }) {
   const nav = useNavigate();
   
