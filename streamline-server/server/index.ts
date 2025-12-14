@@ -35,7 +35,7 @@ app.use("/api/roomToken", roomTokenRoute);
 app.use("/api/rooms", multistreamRoutes);
 
 
-app.use("/api/editing", editingRouter);
+//app.use("/api/editing", editingRouter);
 
 // ✅ PROMPT #1: Storage test route
 app.get("/api/storage/test", async (req, res) => {
