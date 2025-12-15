@@ -23,8 +23,11 @@ export default function Join() {
   const [searchParams] = useSearchParams();
   const [displayName, setDisplayName] = useState("");
   const [roomName, setRoomName] = useState("");
+  const [showEditingModal, setShowEditingModal] = useState(false);
 
   // Check for invite link (room query parameter)
+  const isParticipant = searchParams.get("room") !== null;
+  
   useEffect(() => {
     const inviteRoom = searchParams.get("room");
     if (inviteRoom) {
@@ -41,6 +44,16 @@ export default function Join() {
     if (!name || !room) return;
 
     localStorage.setItem("sl_displayName", name);
+    
+    // Mark this room as created by this user (only if not joining via invite)
+    if (!isParticipant) {
+      const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
+      if (!createdRooms.includes(room)) {
+        createdRooms.push(room);
+        localStorage.setItem("sl_created_rooms", JSON.stringify(createdRooms));
+      }
+    }
+    
     nav(`/room/${encodeURIComponent(room)}`);
   }
 
@@ -94,7 +107,8 @@ export default function Join() {
         />
       </div>
 
-      {/* USAGE BANNER - TOP BAR */}
+      {/* USAGE BANNER - TOP BAR - Hidden for participants */}
+      {!isParticipant && (
       <div 
         style={{
           position: 'fixed',
@@ -242,7 +256,7 @@ export default function Join() {
           {/* My Content Button */}
           <div>
             <button
-              onClick={() => nav('/dashboard')}
+              onClick={() => setShowEditingModal(true)}
               style={{
                 fontSize: '13px',
                 padding: '8px 16px',
@@ -269,9 +283,9 @@ export default function Join() {
           </div>
         </div>
       </div>
+      )}
 
-
-      <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '480px', marginTop: '80px' }}>
+      <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '480px', marginTop: isParticipant ? '0px' : '80px' }}>
         
         {/* LOGO */}
         <div style={{ marginBottom: '32px', textAlign: 'center' }}>
@@ -343,7 +357,7 @@ export default function Join() {
             }}
           >
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', color: '#ef4444' }}>
-              ⚠️ Finish Your Streaming Setup
+              ⚠️ Finish Your Streaming Setup (Coming Soon)
             </h3>
             <p style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '16px', lineHeight: '1.5' }}>
               You skipped streaming setup during signup. Connect your destinations here to make going live even faster.
@@ -545,6 +559,85 @@ export default function Join() {
           </button>
         </div>
       </div>
+
+      {/* Editing Suite Coming Soon Modal */}
+      {showEditingModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(8px)'
+          }}
+          onClick={() => setShowEditingModal(false)}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(20, 20, 30, 0.95), rgba(30, 30, 40, 0.95))',
+              border: '1px solid rgba(220, 38, 38, 0.3)',
+              borderRadius: '16px',
+              padding: '2rem',
+              maxWidth: '400px',
+              width: '90%',
+              textAlign: 'center',
+              backdropFilter: 'blur(16px)',
+              boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1) inset'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎬</div>
+            <h2 style={{ 
+              fontSize: '1.5rem', 
+              fontWeight: 'bold', 
+              marginBottom: '1rem',
+              background: 'linear-gradient(135deg, #ffffff, #f0f0f0)',
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent'
+            }}>
+              Editing Suite
+            </h2>
+            <p style={{ 
+              color: 'rgba(255, 255, 255, 0.8)', 
+              marginBottom: '1.5rem',
+              lineHeight: '1.6'
+            }}>
+              Our powerful video editing suite is coming soon! 
+              For now, you can stream and download your recordings.
+            </p>
+            <button
+              onClick={() => setShowEditingModal(false)}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                border: 'none',
+                borderRadius: '8px',
+                color: '#ffffff',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              Got it!
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* CSS ANIMATIONS */}
       <style>{`

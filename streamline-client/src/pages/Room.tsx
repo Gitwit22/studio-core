@@ -248,6 +248,12 @@ export default function Room() {
   const nav = useNavigate();
   const { roomName: rn } = useParams<{ roomName: string }>();
   const roomName = rn ?? "";
+  
+  // Debug room name extraction
+  useEffect(() => {
+    console.log('🏠 Room component - URL params:', { rn, roomName, fullPath: window.location.pathname });
+  }, [rn, roomName]);
+  
   const [sessionStart, setSessionStart] = useState<number | null>(null);
   
   useEffect(() => {
@@ -271,15 +277,27 @@ export default function Room() {
   const [showGoodbye, setShowGoodbye] = useState(false);
   // First person to join is the host (based on stored host ID for this room)
   const currentUserId = getOrCreateUid();
-  const [isHost, setIsHost] = useState(() => {
-    const storedHostId = localStorage.getItem(`sl_room_${roomName}_hostId`);
-    if (!storedHostId) {
-      // This is the first person - set them as host
-      localStorage.setItem(`sl_room_${roomName}_hostId`, currentUserId);
-      return true;
-    }
-    return storedHostId === currentUserId;
-  });
+  const [isHost, setIsHost] = useState(false);
+  const [debugInfo, setDebugInfo] = useState({ roomName: '', userId: '', isHost: false });
+
+  // Effect to determine host status based on room creation
+  useEffect(() => {
+    if (!roomName) return;
+    
+    // Check if user created this room (stored when they created it from /join)
+    const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
+    const willBeHost = createdRooms.includes(roomName);
+    setIsHost(willBeHost);
+    
+    console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost });
+    
+    // Update debug info
+    setDebugInfo({ 
+      roomName: roomName || 'none', 
+      userId: currentUserId.slice(-4) || 'none', 
+      isHost: willBeHost 
+    });
+  }, [roomName, currentUserId]);
 
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
@@ -355,7 +373,7 @@ export default function Room() {
   };
 
   const handleHomeClick = () => {
-    nav('/join');
+    nav('/join', { replace: true });
   };
 
   const startRecording = async () => {
@@ -363,47 +381,12 @@ export default function Room() {
       console.log("🔴 Starting recording...");
       setRecordingStatus("recording");
       
-      const userId = localStorage.getItem('sl_userId');
-      const authToken = localStorage.getItem('sl_token') || localStorage.getItem('auth_token');
+      // Generate a simple recording ID for MVP (no backend storage needed)
+      const recordId = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       
-      console.log("💾 Starting recording session - userId:", userId);
-
-      if (!userId) {
-        console.warn("⚠️ Cannot start recording: userId is missing");
-        setRecordingStatus("idle");
-        return;
-      }
-
-      if (!authToken) {
-        console.warn("⚠️ Cannot start recording: authToken is missing");
-        setRecordingStatus("idle");
-        return;
-      }
-
-      // Use the new /api/editing/recordings/start endpoint
-      const response = await fetch(`/api/editing/recordings/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          roomName: roomName || 'default-room',
-          title: `Stream - ${new Date().toLocaleString()}`,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("❌ Failed to start recording:", response.status, errorData);
-        setRecordingStatus("idle");
-        return;
-      }
-
-      const data = await response.json();
-      console.log("✅ Recording started with ID:", data.id);
-      setRecordingId(data.id);
-      recordingRef.current = data.id;
+      console.log("✅ Recording started with ID:", recordId);
+      setRecordingId(recordId);
+      recordingRef.current = recordId;
     } catch (error) {
       console.error("❌ Failed to start recording:", error);
       setRecordingStatus("idle");
@@ -420,39 +403,9 @@ export default function Room() {
       if (recordId) {
         // Calculate actual stream duration
         const duration = streamStartTimeRef.current ? Math.floor((Date.now() - streamStartTimeRef.current) / 1000) : 0;
-        const userId = localStorage.getItem('sl_userId');
-        const authToken = localStorage.getItem('sl_token') || localStorage.getItem('auth_token');
-        
-        console.log("📊 Stopping recording with duration:", duration, "seconds");
+        console.log("📊 Recording stopped with duration:", duration, "seconds");
 
-        // Call the new /api/editing/recordings/stop endpoint
-        if (userId && recordId !== 'unknown') {
-          try {
-            const stopResponse = await fetch(`/api/editing/recordings/stop`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-              },
-              body: JSON.stringify({
-                recordingId: recordId,
-                duration,
-                viewerCount,
-                peakViewers: viewerCount,
-              }),
-            });
-
-            if (stopResponse.ok) {
-              console.log("✅ Recording stopped via API");
-            } else {
-              console.warn("⚠️ Failed to stop recording:", stopResponse.status);
-            }
-          } catch (updateError) {
-            console.warn("⚠️ Error stopping recording:", updateError);
-          }
-        }
-
-        // Set stream ended status and store the recording ID - DON'T navigate yet
+        // Set stream ended status and store the recording ID
         setRecordingStatus("stopped");
         setRecordingId(recordId);
       } else {
@@ -518,10 +471,10 @@ export default function Room() {
     setShowExitOptions(false);
     
     if (finalRecordingId && finalRecordingId !== 'unknown') {
-      nav(`/stream-summary/${finalRecordingId}`);
+      nav('/thanks', { replace: true });
     } else {
-      // Fallback to room exit page
-      nav(`/room-exit/${roomName}`);
+      // Fallback to thanks page
+      nav('/thanks', { replace: true });
     }
   };
 
@@ -540,46 +493,63 @@ export default function Room() {
       return;
     }
 
+    // Debug logging
+    console.log("🎬 Room.tsx - handleStartMultistream called");
+    console.log("   Room:", roomName);
+    console.log("   Keys received:", {
+      youtube: keys.youtubeKey ? "✓ provided" : "✗ empty",
+      facebook: keys.facebookKey ? "✓ provided" : "✗ empty",
+      twitch: keys.twitchKey ? "✓ provided" : "✗ empty",
+    });
+
+    // Validate at least one key
+    if (!keys.youtubeKey && !keys.facebookKey && !keys.twitchKey) {
+      alert("At least one stream key is required");
+      return;
+    }
+
     try {
       setStreamStatus("starting");
 
-      // Get userId from localStorage
-      const userId = localStorage.getItem("sl_userId");
-      if (!userId) {
-        alert("User ID not found. Please log in again.");
-        setStreamStatus("idle");
-        return;
-      }
+      const requestBody = {
+        youtubeStreamKey: keys.youtubeKey,
+        facebookStreamKey: keys.facebookKey,
+        twitchStreamKey: keys.twitchKey,
+        userId: getOrCreateUid(),
+        guestCount: viewerCount,
+      };
+
+      console.log("   Sending to API:", requestBody);
 
       const res = await fetch(
         `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            youtubeStreamKey: keys.youtubeKey,
-            facebookStreamKey: keys.facebookKey,
-            twitchStreamKey: keys.twitchKey,
-            userId, // ← Add userId
-            guestCount: viewerCount, // ← Add viewer count
-          }),
+          body: JSON.stringify(requestBody),
         }
       );
 
+      console.log("   Response status:", res.status);
+
+      const data = await res.json();
+      console.log("   Response data:", data);
+
       if (!res.ok) {
-        alert("Failed to start multistream");
+        console.error("Start multistream failed", data);
+        alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
         setStreamStatus("idle");
         return;
       }
 
-      const data = await res.json();
       setEgressId(data.egressId);
       setStreamStatus("live");
       setDidStreamThisSession(true);
-      // Start recording when stream goes live
-      await startRecording();
+      // Start recording when stream goes live - DISABLED FOR MVP
+      // await startRecording();
+      console.log("✅ Stream started! Egress ID:", data.egressId);
     } catch (err) {
-      console.error("Error starting multistream", err);
+      console.error("Error starting multistream:", err);
       alert("Error starting multistream");
       setStreamStatus("idle");
     }
@@ -599,11 +569,11 @@ export default function Room() {
     try {
       setStreamStatus("stopping");
 
-      // Stop recording when stopping the stream (this saves to database)
-      if (recordingStatus === "recording") {
-        await stopRecording();
-        // Don't return - continue to stop the multistream
-      }
+      // Stop recording when stopping the stream (this saves to database) - DISABLED FOR MVP
+      // if (recordingStatus === "recording") {
+      //   await stopRecording();
+      //   // Don't return - continue to stop the multistream
+      // }
 
       const res = await fetch(
         `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
@@ -1045,7 +1015,7 @@ export default function Room() {
 
         {isHost && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <button
+              <button
               onClick={() => setDashboardOpen(true)}
               style={{
                 fontSize: '0.75rem',
@@ -1170,8 +1140,8 @@ export default function Room() {
       {recordingStatus === "stopped" && recordingId && (
         <StreamEndedModal
           recordingId={recordingId}
-          onStartEditing={() => nav(`/editing/editor/new?recordingId=${recordingId}`)}
-          onExitRoom={() => nav(`/room-exit/${recordingId}`)}
+          onStartEditing={() => nav('/edit', { replace: true })}
+          onExitRoom={() => nav('/thanks', { replace: true })}
         />
       )}
 

@@ -72,7 +72,7 @@ router.post(
       console.log(`👤 User: ${userId}`);
 
       // Check storage limits (skip for dev user)
-      if (userId !== "dev_user_123") {
+      if (userId && userId !== "dev_user_123") {
         try {
           await checkStorageLimit(userId, req.file.size);
         } catch (err: any) {
@@ -99,7 +99,7 @@ router.post(
       console.log(`✅ Upload complete: ${publicUrl}`);
 
       // Update storage usage (skip for dev user)
-      if (userId !== "dev_user_123") {
+      if (userId && userId !== "dev_user_123") {
         try {
           await updateStorageUsage(userId, req.file.size);
         } catch (err) {

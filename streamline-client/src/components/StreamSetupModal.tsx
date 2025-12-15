@@ -3,9 +3,9 @@ import { useState } from "react";
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onStart: (keys: { 
-    youtubeKey?: string; 
-    facebookKeys?: string[]; 
+  onStart: (keys: {
+    youtubeKey?: string;
+    facebookKey?: string;
     twitchKey?: string;
   }) => Promise<void>;
   onStop: () => Promise<void>;
@@ -19,16 +19,13 @@ export default function StreamSetupModal({
   onStop,
   status,
 }: Props) {
-  const [useYouTube, setUseYouTube] = useState(true);
+  const [useYouTube, setUseYouTube] = useState(false);
   const [useFacebook, setUseFacebook] = useState(false);
   const [useTwitch, setUseTwitch] = useState(false);
-  const [youtubeKey, setYoutubeKey] = useState("");
-  const [facebookKeys, setFacebookKeys] = useState<string[]>([""]);
-  const [twitchKey, setTwitchKey] = useState("");
 
-  const facebookPageNames = ["Main Page", "Page 2", "Page 3", "Page 4", "Page 5"];
-  const filledFacebookKeys = facebookKeys.filter(key => key.trim());
-  const canAddMoreFacebook = facebookKeys.length < 5;
+  const [youtubeKey, setYoutubeKey] = useState("");
+  const [facebookKey, setFacebookKey] = useState("");
+  const [twitchKey, setTwitchKey] = useState("");
 
   if (!isOpen) return null;
 
@@ -37,37 +34,32 @@ export default function StreamSetupModal({
 
   const handleStart = async () => {
     const yt = useYouTube ? youtubeKey.trim() : "";
-    const fb = useFacebook ? facebookKeys.filter(k => k.trim()) : [];
+    const fb = useFacebook ? facebookKey.trim() : "";
     const tw = useTwitch ? twitchKey.trim() : "";
 
-    if (!yt && fb.length === 0 && !tw) {
+    console.log("🎬 StreamSetupModal - handleStart called");
+    console.log("   YouTube enabled:", useYouTube, "key:", yt ? `${yt.slice(0, 4)}...` : "(empty)");
+    console.log("   Facebook enabled:", useFacebook, "key:", fb ? `${fb.slice(0, 4)}...` : "(empty)");
+    console.log("   Twitch enabled:", useTwitch, "key:", tw ? `${tw.slice(0, 4)}...` : "(empty)");
+
+    if (!yt && !fb && !tw) {
       alert("Enter at least one stream key (YouTube, Facebook, or Twitch).");
       return;
     }
 
-    await onStart({
+    const keys = {
       youtubeKey: yt || undefined,
-      facebookKeys: fb.length > 0 ? fb : undefined,
+      facebookKey: fb || undefined,
       twitchKey: tw || undefined,
+    };
+
+    console.log("   Calling onStart with keys:", {
+      youtubeKey: keys.youtubeKey ? "✓ provided" : "✗ empty",
+      facebookKey: keys.facebookKey ? "✓ provided" : "✗ empty",
+      twitchKey: keys.twitchKey ? "✓ provided" : "✗ empty",
     });
-  };
 
-  const addFacebookKey = () => {
-    if (facebookKeys.length < 5) {
-      setFacebookKeys([...facebookKeys, ""]);
-    }
-  };
-
-  const removeFacebookKey = (index: number) => {
-    if (facebookKeys.length > 1) {
-      setFacebookKeys(facebookKeys.filter((_, i) => i !== index));
-    }
-  };
-
-  const updateFacebookKey = (index: number, value: string) => {
-    const updated = [...facebookKeys];
-    updated[index] = value;
-    setFacebookKeys(updated);
+    await onStart(keys);
   };
 
   const handleStop = async () => {
@@ -206,162 +198,48 @@ export default function StreamSetupModal({
             </label>
 
             {/* Facebook */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.85rem' }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', fontSize: '0.85rem' }}>
+              <input
+                type="checkbox"
+                checked={useFacebook}
+                onChange={() => setUseFacebook(v => !v)}
+                style={{ marginTop: '0.25rem', cursor: 'pointer', accentColor: '#ef4444' }}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>Facebook Live</div>
                 <input
-                  type="checkbox"
-                  checked={useFacebook}
-                  onChange={() => setUseFacebook(v => !v)}
-                  style={{ cursor: 'pointer', accentColor: '#ef4444' }}
+                  type="text"
+                  value={facebookKey}
+                  onChange={(e) => setFacebookKey(e.target.value)}
+                  placeholder="Stream Key"
+                  disabled={!useFacebook || isBusy || isLive}
+                  style={{
+                    width: '100%',
+                    padding: '0.4rem 0.5rem',
+                    background: 'rgba(31, 41, 55, 0.7)',
+                    border: '1px solid rgba(75, 85, 99, 0.5)',
+                    borderRadius: '0.25rem',
+                    color: '#ffffff',
+                    fontSize: '0.75rem',
+                    outline: 'none',
+                    transition: 'all 0.3s ease',
+                    opacity: (!useFacebook || isBusy || isLive) ? 0.5 : 1,
+                    cursor: (!useFacebook || isBusy || isLive) ? 'not-allowed' : 'text'
+                  }}
+                  onFocus={(e) => {
+                    if (!(!useFacebook || isBusy || isLive)) {
+                      e.target.style.borderColor = '#3b82f6';
+                    }
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)';
+                  }}
                 />
-                <div style={{ fontWeight: '600' }}>Facebook Live</div>
-                {useFacebook && (
-                  <button
-                    onClick={addFacebookKey}
-                    disabled={!canAddMoreFacebook || isBusy || isLive}
-                    style={{
-                      marginLeft: 'auto',
-                      padding: '0.3rem 0.6rem',
-                      fontSize: '0.7rem',
-                      borderRadius: '0.25rem',
-                      background: canAddMoreFacebook && !isBusy && !isLive ? '#3b82f6' : 'rgba(59, 130, 246, 0.3)',
-                      color: '#ffffff',
-                      border: 'none',
-                      fontWeight: '600',
-                      cursor: canAddMoreFacebook && !isBusy && !isLive ? 'pointer' : 'not-allowed',
-                      transition: 'all 0.3s ease',
-                      opacity: canAddMoreFacebook && !isBusy && !isLive ? 1 : 0.6
-                    }}
-                    onMouseEnter={(e) => {
-                      if (canAddMoreFacebook && !isBusy && !isLive) {
-                        const target = e.target as HTMLButtonElement;
-                        target.style.background = '#2563eb';
-                        target.style.boxShadow = '0 0 10px rgba(59, 130, 246, 0.4)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      const target = e.target as HTMLButtonElement;
-                      target.style.background = '#3b82f6';
-                      target.style.boxShadow = 'none';
-                    }}
-                  >
-                    + Add Page
-                  </button>
-                )}
-              </label>
-
-              {useFacebook && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginLeft: '1.5rem', paddingLeft: '0.5rem', borderLeft: '2px solid #3b82f6' }}>
-                  {facebookKeys.map((key, index) => (
-                    <div key={index} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8rem' }}>
-                      <div style={{ 
-                        background: '#3b82f6', 
-                        color: '#ffffff', 
-                        padding: '0.25rem 0.4rem', 
-                        borderRadius: '0.25rem',
-                        fontWeight: '600',
-                        minWidth: '1.5rem',
-                        textAlign: 'center'
-                      }}>
-                        #{index + 1}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.6)', marginBottom: '0.25rem' }}>
-                          {facebookPageNames[index]}
-                        </div>
-                        <input
-                          type="text"
-                          value={key}
-                          onChange={(e) => updateFacebookKey(index, e.target.value)}
-                          placeholder="Stream Key"
-                          disabled={isBusy || isLive}
-                          style={{
-                            width: '100%',
-                            padding: '0.4rem 0.5rem',
-                            background: 'rgba(31, 41, 55, 0.7)',
-                            border: '1px solid rgba(75, 85, 99, 0.5)',
-                            borderRadius: '0.25rem',
-                            color: '#ffffff',
-                            fontSize: '0.7rem',
-                            fontFamily: 'monospace',
-                            outline: 'none',
-                            transition: 'all 0.3s ease',
-                            opacity: (isBusy || isLive) ? 0.5 : 1,
-                            cursor: (isBusy || isLive) ? 'not-allowed' : 'text'
-                          }}
-                          onFocus={(e) => {
-                            if (!(isBusy || isLive)) {
-                              e.target.style.borderColor = '#3b82f6';
-                              e.target.style.boxShadow = '0 0 8px rgba(59, 130, 246, 0.3)';
-                            }
-                          }}
-                          onBlur={(e) => {
-                            e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)';
-                            e.target.style.boxShadow = 'none';
-                          }}
-                        />
-                      </div>
-                      {facebookKeys.length > 1 && (
-                        <button
-                          onClick={() => removeFacebookKey(index)}
-                          disabled={isBusy || isLive}
-                          style={{
-                            padding: '0.35rem 0.45rem',
-                            background: 'rgba(239, 68, 68, 0.2)',
-                            border: '1px solid rgba(239, 68, 68, 0.5)',
-                            borderRadius: '0.25rem',
-                            color: '#ef4444',
-                            cursor: (isBusy || isLive) ? 'not-allowed' : 'pointer',
-                            fontSize: '1rem',
-                            transition: 'all 0.3s ease',
-                            opacity: (isBusy || isLive) ? 0.5 : 1,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            marginTop: '0.25rem'
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!(isBusy || isLive)) {
-                              const target = e.target as HTMLButtonElement;
-                              target.style.background = 'rgba(239, 68, 68, 0.4)';
-                              target.style.borderColor = 'rgba(239, 68, 68, 0.8)';
-                              target.style.boxShadow = '0 0 8px rgba(239, 68, 68, 0.3)';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            const target = e.target as HTMLButtonElement;
-                            target.style.background = 'rgba(239, 68, 68, 0.2)';
-                            target.style.borderColor = 'rgba(239, 68, 68, 0.5)';
-                            target.style.boxShadow = 'none';
-                          }}
-                          title="Delete this Facebook page"
-                        >
-                          🗑️
-                        </button>
-                      )}
-                    </div>
-                  ))}
-
-                  {filledFacebookKeys.length > 0 && (
-                    <div style={{ 
-                      marginTop: '0.5rem',
-                      padding: '0.5rem',
-                      background: 'rgba(59, 130, 246, 0.1)',
-                      border: '1px solid rgba(59, 130, 246, 0.3)',
-                      borderRadius: '0.25rem',
-                      fontSize: '0.75rem',
-                      color: '#60a5fa',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem'
-                    }}>
-                      <span>🔵</span>
-                      <span>Streaming to <strong>{filledFacebookKeys.length}</strong> Facebook page{filledFacebookKeys.length > 1 ? 's' : ''}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+                <p style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.6)', marginTop: '0.25rem' }}>
+                  Get your key from Facebook Live Producer → Use Stream Key
+                </p>
+              </div>
+            </label>
 
             {/* Twitch */}
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', fontSize: '0.85rem' }}>

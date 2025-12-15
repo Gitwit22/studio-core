@@ -1,193 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Download, Edit, X, Play, Pause, Scissors, Volume2, Sparkles, Upload, CheckCircle, Youtube, Facebook, Twitter } from 'lucide-react';
+import React from 'react';
 
 const PostStreamFlow: React.FC = () => {
-  const [currentView, setCurrentView] = useState<string>('post-stream');
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [playheadPosition, setPlayheadPosition] = useState<number>(25);
-  const [renderProgress, setRenderProgress] = useState<number>(0);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-
-  const streamData = {
-    title: 'Weekly Gaming Stream - Dec 6',
-    duration: '2:34:15',
-    viewers: 247,
-    thumbnail: '🎮'
-  };
-
-  const clips = [
-    { id: 1, start: 0, duration: 35, color: 'from-purple-500 to-pink-500' },
-    { id: 2, start: 35, duration: 40, color: 'from-blue-500 to-cyan-500' },
-    { id: 3, start: 75, duration: 45, color: 'from-emerald-500 to-teal-500' },
-  ];
-
-  // Simulate render progress
-  useEffect(() => {
-    if (currentView === 'render') {
-      const interval = setInterval(() => {
-        setRenderProgress((prev: number) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            setTimeout(() => {
-              const uploadInterval = setInterval(() => {
-                setUploadProgress((p: number) => {
-                  if (p >= 100) {
-                    clearInterval(uploadInterval);
-                    return 100;
-                  }
-                  return p + 2;
-                });
-              }, 100);
-            }, 1000);
-            return 100;
-          }
-          return prev + 1;
-        });
-      }, 50);
-      return () => clearInterval(interval);
-    }
-  }, [currentView]);
-
-  const renderPostStreamPage = (): JSX.Element => (
-    <div style={{
-      minHeight: '100vh',
-      background: '#000000',
-      color: '#ffffff',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '1.5rem',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      {/* Animated Background Orbs */}
-      <div style={{
-        position: 'absolute',
-        top: '10%',
-        left: '10%',
-        width: '300px',
-        height: '300px',
-        borderRadius: '50%',
-        background: 'linear-gradient(135deg, #dc2626, #ef4444)',
-        opacity: 0.1,
-        filter: 'blur(40px)',
-        animation: 'float 6s ease-in-out infinite'
-      }} />
-      <div style={{
-        position: 'absolute',
-        bottom: '20%',
-        right: '15%',
-        width: '250px',
-        height: '250px',
-        borderRadius: '50%',
-        background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-        opacity: 0.08,
-        filter: 'blur(30px)',
-        animation: 'float 8s ease-in-out infinite reverse'
-      }} />
-      
-      <style>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0px) rotate(0deg); }
-          50% { transform: translateY(-20px) rotate(180deg); }
-        }
-      `}</style>
-      
-      <div style={{ maxWidth: '1024px', width: '100%', position: 'relative', zIndex: 1 }}>
-        <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-          <div style={{
-            width: '80px',
-            height: '80px',
-            background: 'linear-gradient(135deg, #dc2626, #ef4444)',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 1.5rem',
-            boxShadow: '0 0 30px rgba(220, 38, 38, 0.3)'
-          }}>
-            <CheckCircle style={{ width: '40px', height: '40px' }} />
-          </div>
-          <h1 style={{ fontSize: '2.25rem', fontWeight: 'bold', marginBottom: '0.75rem' }}>Stream Complete!</h1>
-          <p style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '1.125rem' }}>Great session - 247 viewers watched for 2h 34m</p>
-        </div>
-
-        <div style={{
-          background: 'rgba(39, 39, 42, 0.5)',
-          border: '1px solid rgba(63, 63, 70, 0.8)',
-          borderRadius: '1rem',
-          overflow: 'hidden',
-          marginBottom: '2rem',
-          backdropFilter: 'blur(20px)'
-        }}>
-          <div style={{
-            aspectRatio: '16/9',
-            background: 'linear-gradient(135deg, rgba(39, 39, 42, 0.8), rgba(24, 24, 27, 0.9))',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '5rem',
-            position: 'relative'
-          }}>
-            {streamData.thumbnail}
-            <div style={{
-              position: 'absolute',
-              inset: '0',
-              background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 60%)',
-            }} />
-            <div style={{
-              position: 'absolute',
-              bottom: '1rem',
-              left: '1rem',
-              right: '1rem',
-              display: 'flex',
-              alignItems: 'end',
-              justifyContent: 'space-between'
-            }}>
-              <div>
-                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>{streamData.title}</h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.875rem', color: 'rgba(212, 212, 216, 0.8)' }}>
-                  <span>Duration: {streamData.duration}</span>
-                  <span>•</span>
-                  <span>{streamData.viewers} viewers</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
-          <button
-            onClick={() => setCurrentView('editor')}
-            style={{
-              position: 'relative',
-              background: 'rgba(220, 38, 38, 0.1)',
-              border: '2px solid rgba(220, 38, 38, 0.3)',
-              borderRadius: '1rem',
-              padding: '2rem',
-              textAlign: 'left',
-              overflow: 'hidden',
-              backdropFilter: 'blur(20px)',
-              transition: 'all 0.3s ease',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.05)';
-              e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.8)';
-              e.currentTarget.style.boxShadow = '0 0 30px rgba(220, 38, 38, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.3)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-          >
-            <div style={{
-              width: '56px',
-              height: '56px',
-              background: 'rgba(220, 38, 38, 0.2)',
-              borderRadius: '0.75rem',
-              display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               marginBottom: '1rem'
@@ -1208,10 +1021,60 @@ const PostStreamFlow: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen">
-      {currentView === 'post-stream' && renderPostStreamPage()}
-      {currentView === 'editor' && renderEditorPage()}
-      {currentView === 'render' && renderUploadPage()}
+    <div style={{
+      minHeight: '100vh',
+      background: '#000000',
+      color: '#ffffff',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '1.5rem',
+      textAlign: 'center'
+    }}>
+      <div style={{ maxWidth: '600px' }}>
+        <h1 style={{
+          fontSize: '3rem',
+          fontWeight: 'bold',
+          marginBottom: '1rem',
+          background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent'
+        }}>
+          Thank You! 🎉
+        </h1>
+        <p style={{
+          fontSize: '1.2rem',
+          color: 'rgba(255, 255, 255, 0.8)',
+          marginBottom: '2rem',
+          lineHeight: '1.6'
+        }}>
+          Thanks for streaming with Streamline! Your content has been delivered to your platforms.
+        </p>
+        <button
+          onClick={() => window.location.href = '/'}
+          style={{
+            padding: '1rem 2rem',
+            fontSize: '1.1rem',
+            borderRadius: '0.75rem',
+            background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+            color: '#ffffff',
+            border: 'none',
+            fontWeight: '600',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
+        >
+          Start New Stream
+        </button>
+      </div>
     </div>
   );
 };

@@ -4,6 +4,12 @@ import { useNavigate } from "react-router-dom";
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 const API_BASE = "";
 
+// Email validation function
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.com$/;
+  return re.test(email);
+}
+
 export const SignupPage = () => {
   const nav = useNavigate();
   const [planId, setPlanId] = useState("free");
@@ -37,6 +43,13 @@ export const SignupPage = () => {
     e.preventDefault();
     setError("");
     setLoading(true);
+
+    // Validate email format
+    if (!validateEmail(email)) {
+      setError("Please enter a valid email address.");
+      setLoading(false);
+      return;
+    }
 
     try {
       const body = {

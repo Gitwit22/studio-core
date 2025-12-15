@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { RoomServiceClient, TrackSource, TrackType } from "livekit-server-sdk";
-import multistreamRoutes from "./routes/multistream";
 import roomTokenRoute from "./routes/roomToken";
 import { db } from "./firebase";
 import bcrypt from "bcryptjs";
@@ -18,8 +17,7 @@ app.get("/", (_req, res) => res.send("API up"));
 // Token route used by the frontend
 app.use("/api/roomToken", roomTokenRoute);
 
-// Multistream routes (YouTube/FB)
-app.use("/api/rooms", multistreamRoutes);
+// NOTE: Multistream routes are handled by the main streamline-server, not this client server
 
 // -------------------------------
 // Admin Controls (Host/Mod Only)

@@ -3,6 +3,12 @@ import { useNavigate } from "react-router-dom";
 
 const API_BASE = "";
 
+// Email validation function
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.com$/;
+  return re.test(email);
+}
+
 /**
  * STREAMLINE LOGIN PAGE - REDESIGNED
  * 
@@ -24,6 +30,13 @@ export const LoginPage = () => {
     e.preventDefault();
     setError("");
     setLoading(true);
+
+    // Validate email format
+    if (!validateEmail(email)) {
+      setError("Please enter a valid email address.");
+      setLoading(false);
+      return;
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/auth/login`, {
