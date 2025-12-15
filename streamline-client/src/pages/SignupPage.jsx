@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
-const API_BASE = "";
+const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 // Email validation function
 function validateEmail(email) {

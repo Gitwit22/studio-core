@@ -6,7 +6,7 @@ import StreamSetupModal from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
-const API_BASE = "";
+const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 type RecordingStatus = "idle" | "recording" | "stopping" | "stopped";
