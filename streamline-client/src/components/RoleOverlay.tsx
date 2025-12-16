@@ -1,6 +1,8 @@
 import React from "react";
 import { useParticipants } from "@livekit/components-react";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "";
+
 type Role = "host" | "moderator" | "participant";
 
 export default function RoleOverlay({
@@ -426,7 +428,7 @@ function ParticipantList({
 
 async function apiMute(room: string, identity: string, muted: boolean) {
   try {
-    const res = await fetch("/api/admin/mute", {
+    const res = await fetch(`${API_BASE}/api/admin/mute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ room, identity, muted }),
@@ -454,7 +456,7 @@ async function apiMute(room: string, identity: string, muted: boolean) {
 
 async function apiMuteAll(room: string, muted: boolean) {
   try {
-    const res = await fetch("/api/admin/mute-all", {
+    const res = await fetch(`${API_BASE}/api/admin/mute-all`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ room, muted }),
@@ -482,7 +484,7 @@ async function apiMuteAll(room: string, muted: boolean) {
 
 async function apiRemove(room: string, identity: string) {
   try {
-    const res = await fetch("/api/admin/remove", {
+    const res = await fetch(`${API_BASE}/api/admin/remove`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ room, identity }),
