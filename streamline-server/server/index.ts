@@ -88,44 +88,31 @@ app.post("/api/admin/mute", async (req, res) => {
         .json({ error: "room, identity and muted are required" });
     }
 
-    // Log for debugging
     console.log("ADMIN MUTE", { room, identity, muted });
 
     const participant = await roomService.getParticipant(room, identity);
+    
+    console.log("Participant tracks:", participant.tracks);
 
+    // Find audio track - check both type and source
     const audioTrack = participant.tracks?.find((t) => {
-      const isAudioType = t.type === TrackType.AUDIO;
-      const isMicSource = t.source === TrackSource.MICROPHONE;
-      return isAudioType || isMicSource;
+      console.log("Track:", t.sid, "Type:", t.type, "Source:", t.source, "Name:", t.name);
+      return t.source === 1 || t.type === 1 || t.name?.toLowerCase().includes("microphone");
     });
 
-    if (!audioTrack) {
-      console.warn("No audio track found for", { room, identity });
-      return res.status(404).json({ error: "no audio track found" });
+    if (!audioTrack || !audioTrack.sid) {
+      console.warn("No audio track found for", identity);
+      return res.status(404).json({ error: "No audio track found" });
     }
 
-    await roomService.mutePublishedTrack(
-      room,
-      identity,
-      audioTrack.sid,
-      muted
-    );
+    console.log("Muting track:", audioTrack.sid);
 
-    return res.json({
-      ok: true,
-      muted,
-      trackSid: audioTrack.sid,
-      identity,
-    });
+    await roomService.mutePublishedTrack(room, identity, audioTrack.sid, muted);
+
+    return res.json({ ok: true, muted, trackSid: audioTrack.sid });
   } catch (e: any) {
     console.error("mute error", e);
-    const msg =
-      typeof e?.message === "string"
-        ? e.message
-        : typeof e?.toString === "function"
-        ? e.toString()
-        : "mute_error";
-    return res.status(500).json({ error: msg });
+    return res.status(500).json({ error: e.message || "mute_error" });
   }
 });
 
