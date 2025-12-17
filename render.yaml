@@ -27,10 +27,6 @@ projects:
         sync: false
       - key: VITE_API_BASE
         sync: false
-      - key: PORT
-        sync: false
-      - key: JWT_SECRET
-        sync: false
       - key: VITE_LIVEKIT_URL
         sync: false
       - key: LIVEKIT_API_SECRET
