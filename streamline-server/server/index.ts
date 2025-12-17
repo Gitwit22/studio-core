@@ -672,10 +672,8 @@ app.delete("/api/recordings/:recordingId", async (req, res) => {
   }
 });
 
-// Serve React app for all routes that don't match /api
-app.use((_req, res) => {
-  res.sendFile(path.join(__dirname, "../dist/index.html"));
-});
+
+
 
 app.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
