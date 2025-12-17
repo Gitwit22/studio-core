@@ -3,10 +3,10 @@ version: "1"
 projects:
 - name: StreamLine
   environments:
-  - name: Production
+  - name: test
     services:
     - type: web
-      name: streamline-backend2
+      name: streamline-backend2test
       runtime: node
       repo: https://github.com/Gitwit22/streamline-platform
       plan: free
