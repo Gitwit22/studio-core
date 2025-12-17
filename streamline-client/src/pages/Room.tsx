@@ -4,6 +4,7 @@ import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
 import StreamSetupModal from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
+import InviteMenu from "../components/InviteMenu";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -278,7 +279,8 @@ export default function Room() {
   // First person to join is the host (based on stored host ID for this room)
   const currentUserId = getOrCreateUid();
   const [isHost, setIsHost] = useState(false);
-  const [debugInfo, setDebugInfo] = useState({ roomName: '', userId: '', isHost: false });
+  const [userRole, setUserRole] = useState<string>("guest");
+  const [debugInfo, setDebugInfo] = useState({ roomName: '', userId: '', isHost: false, role: '' });
 
   // Effect to determine host status based on room creation
   useEffect(() => {
@@ -288,14 +290,19 @@ export default function Room() {
     const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
     const willBeHost = createdRooms.includes(roomName);
     setIsHost(willBeHost);
+
+    // Get role from localStorage (set during join process)
+    const currentRole = localStorage.getItem("sl_current_role") || "guest";
+    setUserRole(currentRole);
     
-    console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost });
+    console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost, role: currentRole });
     
     // Update debug info
     setDebugInfo({ 
       roomName: roomName || 'none', 
       userId: currentUserId.slice(-4) || 'none', 
-      isHost: willBeHost 
+      isHost: willBeHost,
+      role: currentRole
     });
   }, [roomName, currentUserId]);
 
@@ -951,42 +958,9 @@ export default function Room() {
 
           <span className="text-sm opacity-80">{roomName}</span>
 
-          {/* Invite Link Button - only for hosts */}
+          {/* Invite Menu - only for hosts */}
           {isHost && (
-            <button
-              onClick={() => {
-                const inviteUrl = `${window.location.origin}/join?room=${encodeURIComponent(roomName)}`;
-                navigator.clipboard.writeText(inviteUrl);
-                alert(`Invite link copied to clipboard!\n${inviteUrl}`);
-              }}
-              style={{
-                fontSize: '0.75rem',
-                padding: '0.5rem 0.75rem',
-                border: '1px solid rgba(34, 197, 94, 0.4)',
-                borderRadius: '0.375rem',
-                background: 'rgba(34, 197, 94, 0.05)',
-                color: '#22c55e',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                backdropFilter: 'blur(10px)',
-                fontWeight: '500'
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(34, 197, 94, 0.15)';
-                target.style.borderColor = 'rgba(34, 197, 94, 0.8)';
-                target.style.boxShadow = '0 0 12px rgba(34, 197, 94, 0.3)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(34, 197, 94, 0.05)';
-                target.style.borderColor = 'rgba(34, 197, 94, 0.4)';
-                target.style.boxShadow = 'none';
-              }}
-              title="Copy invite link to clipboard"
-            >
-              🔗 Invite
-            </button>
+            <InviteMenu roomName={roomName} />
           )}
 
           {/* Stream Timer - only show when streaming */}
@@ -1123,7 +1097,7 @@ export default function Room() {
           <RoleOverlay
             open={dashboardOpen}
             onClose={() => setDashboardOpen(false)}
-            role="host"
+            role={isHost ? "host" : (userRole === "moderator" ? "moderator" : "participant")}
             roomName={roomName}
           />
         </LiveKitRoom>
