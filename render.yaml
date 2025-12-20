@@ -58,7 +58,6 @@ services:
   - type: web
     name: streamline-platform-test
     runtime: static
-    plan: free
     repo: https://github.com/Gitwit22/streamline-platform
     branch: test
     rootDir: streamline-client
