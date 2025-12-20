@@ -11,7 +11,7 @@ import { firestore as db, auth } from "./firebaseAdmin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
-import editingRouter from "./routes/editing";
+
 import { addUsageForUser, getUserUsage } from "./usageHelper";
 import { uploadVideo } from "./lib/storageClient";
 
@@ -72,117 +72,7 @@ const roomService = new RoomServiceClient(
 );
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
-// Mute/unmute a participant
-// Admin: mute/unmute a single participant's audio
-app.post("/api/admin/mute", async (req, res) => {
-  try {
-    const { room, identity, muted } = req.body as {
-      room?: string;
-      identity?: string;
-      muted?: boolean;
-    };
 
-    if (!room || !identity || typeof muted !== "boolean") {
-      return res
-        .status(400)
-        .json({ error: "room, identity and muted are required" });
-    }
-
-    console.log("ADMIN MUTE", { room, identity, muted });
-
-    const participant = await roomService.getParticipant(room, identity);
-    
-    console.log("Participant tracks:", participant.tracks);
-
-    // Find audio track - check both type and source
-    const audioTrack = participant.tracks?.find((t) => {
-      console.log("Track:", t.sid, "Type:", t.type, "Source:", t.source, "Name:", t.name);
-      return t.source === 1 || t.type === 1 || t.name?.toLowerCase().includes("microphone");
-    });
-
-    if (!audioTrack || !audioTrack.sid) {
-      console.warn("No audio track found for", identity);
-      return res.status(404).json({ error: "No audio track found" });
-    }
-
-    console.log("Muting track:", audioTrack.sid);
-
-    await roomService.mutePublishedTrack(room, identity, audioTrack.sid, muted);
-
-    return res.json({ ok: true, muted, trackSid: audioTrack.sid });
-  } catch (e: any) {
-    console.error("mute error", e);
-    return res.status(500).json({ error: e.message || "mute_error" });
-  }
-});
-
-// Admin: mute/unmute ALL participants' audio
-// Admin: mute/unmute ALL participants' audio
-app.post("/api/admin/mute-all", async (req, res) => {
-  try {
-    const { room, muted } = req.body as {
-      room?: string;
-      muted?: boolean;
-    };
-
-    if (!room || typeof muted !== "boolean") {
-      return res
-        .status(400)
-        .json({ error: "room and muted are required" });
-    }
-
-    console.log("ADMIN MUTE-ALL", { room, muted });
-
-    const participants = await roomService.listParticipants(room);
-
-    const results: {
-      identity: string;
-      trackSid: string | null;
-      changed: boolean;
-    }[] = [];
-
-    for (const p of participants) {
-      const audioTrack = p.tracks?.find((t) => {
-        const isAudioType = t.type === TrackType.AUDIO;
-        const isMicSource = t.source === TrackSource.MICROPHONE;
-        return isAudioType || isMicSource;
-      });
-
-      if (!audioTrack) {
-        results.push({
-          identity: p.identity,
-          trackSid: null,
-          changed: false,
-        });
-        continue;
-      }
-
-      await roomService.mutePublishedTrack(
-        room,
-        p.identity,
-        audioTrack.sid,
-        muted
-      );
-
-      results.push({
-        identity: p.identity,
-        trackSid: audioTrack.sid,
-        changed: true,
-      });
-    }
-
-    return res.json({ ok: true, muted, results });
-  } catch (e: any) {
-    console.error("mute-all error", e);
-    const msg =
-      typeof e?.message === "string"
-        ? e.message
-        : typeof e?.toString === "function"
-        ? e.toString()
-        : "mute_all_error";
-    return res.status(500).json({ error: msg });
-  }
-});
 
 // Remove/kick a participant
 app.post("/api/admin/remove", async (req, res) => {
