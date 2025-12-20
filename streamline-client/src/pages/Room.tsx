@@ -4,6 +4,7 @@ import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
 import StreamSetupModal from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
+import { HostAVControls } from "../components/HostAVControls";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -1100,6 +1101,7 @@ export default function Room() {
           }}
         >
           <div style={{ width: "100%", height: "100%", position: "relative" }}>
+            {isHost && <HostAVControls />}
             <VideoConference />
             {/* On-stream logo for hosts - visible to viewers */}
             {isHost && (
