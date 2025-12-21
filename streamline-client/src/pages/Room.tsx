@@ -425,7 +425,9 @@ const startRecording = async (layout: "speaker" | "grid" = "grid") => {
     streamStartTimeRef.current = Date.now();
   } catch (e) {
     console.error("❌ Failed to start recording:", e);
-    setRecordingStatus("error");
+    setRecordingStatus("idle"); // Reset to idle so UI is not stuck
+    recordingRef.current = null;
+    setRecordingId(null);
   }
 };
 
