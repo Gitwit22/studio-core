@@ -167,78 +167,30 @@ router.post("/:roomName/start-multistream", async (req, res) => {
   }
 });
 
-router.post("/:roomName/stop-multistream", async (req, res) => {
+
+router.post(":roomName/stop-multistream", async (req, res) => {
   const { roomName } = req.params;
+  const { egressId } = req.body;
 
   if (!roomName) {
-    return res.status(400).json({ error: "roomName is required" });
+    return res.status(400).json({ success: false, error: "roomName is required" });
   }
 
-  const activeStream = activeStreams.get(roomName);
+  let targetEgressId = egressId;
+  let activeStream = activeStreams.get(roomName);
 
-  if (!activeStream) {
-    return res.status(404).json({
-      error: "No active multistream found for this room",
-    });
+  // Fallback: if no egressId provided, use the one from activeStreams
+  if (!targetEgressId && activeStream) {
+    targetEgressId = activeStream.egressId;
+  }
+
+  if (!targetEgressId) {
+    return res.status(400).json({ success: false, error: "egressId is required or no active stream for this room" });
   }
 
   try {
     // Stop the egress
-    await egressClient.stopEgress(activeStream.egressId);
-    
-    // Calculate stream duration
-    const now = new Date();
-    const durationMs = now.getTime() - activeStream.startedAt.getTime();
-    const durationSeconds = Math.floor(durationMs / 1000);
-    const durationMinutes = Math.ceil(durationMs / 60000);
-
-    // Add usage for this stream
-    let usageResult = null;
-    try {
-      usageResult = await addUsageForUser(activeStream.userId, durationMinutes, {
-        guestCount: activeStream.guestCount,
-        description: `Stream in room ${activeStream.roomName}`,
-      });
-    } catch (usageErr) {
-      console.warn("Failed to update usage:", usageErr);
-    }
-
-    // Generate recording path and get the video URL
-    let videoUrl = null;
-    let recordingPath = null;
-    try {
-      const timestamp = Date.now();
-      recordingPath = generateRecordingPath(activeStream.userId, activeStream.roomName, timestamp);
-      videoUrl = await getSignedDownloadUrl(recordingPath);
-      console.log("🎬 Recording path:", recordingPath);
-    } catch (storageErr) {
-      console.warn("Failed to generate recording URL:", storageErr);
-    }
-
-    // Create recording document in Firestore
-    let recordingId = null;
-    try {
-      const recordingRef = await firestore.collection("recordings").add({
-        userId: activeStream.userId,
-        roomName: activeStream.roomName,
-        title: `Stream - ${new Date(activeStream.startedAt).toLocaleString()}`,
-        status: "ready",
-        duration: durationSeconds,
-        durationMinutes,
-        viewerCount: activeStream.guestCount || 0,
-        peakViewers: activeStream.guestCount || 0,
-        videoUrl,
-        thumbnailUrl: null,
-        storagePath: recordingPath,
-        progress: 100,
-        createdAt: activeStream.startedAt,
-        updatedAt: now,
-      });
-      recordingId = recordingRef.id;
-      console.log(`✅ Created recording doc: ${recordingRef.id}`);
-    } catch (firestoreErr) {
-      console.warn("Failed to create recording doc:", firestoreErr);
-    }
+    await egressClient.stopEgress(targetEgressId);
 
     // Clean up tracking
     activeStreams.delete(roomName);
@@ -248,21 +200,78 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
       console.warn("Failed to cleanup activeStreams doc:", cleanupErr);
     }
 
-    return res.json({
-      success: true,
-      egressId: activeStream.egressId,
-      durationSeconds,
-      durationMinutes,
-      recordingId,
-      videoUrl,
-      usageUpdated: usageResult,
-    });
-  } catch (err: any) {
+    // If we have activeStream, do the rest (usage, recording, etc.)
+    if (activeStream && targetEgressId === activeStream.egressId) {
+      // Calculate stream duration
+      const now = new Date();
+      const durationMs = now.getTime() - activeStream.startedAt.getTime();
+      const durationSeconds = Math.floor(durationMs / 1000);
+      const durationMinutes = Math.ceil(durationMs / 60000);
+
+      // Add usage for this stream
+      let usageResult = null;
+      try {
+        usageResult = await addUsageForUser(activeStream.userId, durationMinutes, {
+          guestCount: activeStream.guestCount,
+          description: `Stream in room ${activeStream.roomName}`,
+        });
+      } catch (usageErr) {
+        console.warn("Failed to update usage:", usageErr);
+      }
+
+      // Generate recording path and get the video URL
+      let videoUrl = null;
+      let recordingPath = null;
+      try {
+        const timestamp = Date.now();
+        recordingPath = generateRecordingPath(activeStream.userId, activeStream.roomName, timestamp);
+        videoUrl = await getSignedDownloadUrl(recordingPath);
+        console.log("🎬 Recording path:", recordingPath);
+      } catch (storageErr) {
+        console.warn("Failed to generate recording URL:", storageErr);
+      }
+
+      // Create recording document in Firestore
+      let recordingId = null;
+      try {
+        const recordingRef = await firestore.collection("recordings").add({
+          userId: activeStream.userId,
+          roomName: activeStream.roomName,
+          title: `Stream - ${new Date(activeStream.startedAt).toLocaleString()}`,
+          status: "ready",
+          duration: durationSeconds,
+          durationMinutes,
+          viewerCount: activeStream.guestCount || 0,
+          peakViewers: activeStream.guestCount || 0,
+          videoUrl,
+          thumbnailUrl: null,
+          storagePath: recordingPath,
+          progress: 100,
+          createdAt: activeStream.startedAt,
+          updatedAt: now,
+        });
+        recordingId = recordingRef.id;
+        console.log(`✅ Created recording doc: ${recordingRef.id}`);
+      } catch (firestoreErr) {
+        console.warn("Failed to create recording doc:", firestoreErr);
+      }
+
+      return res.json({
+        success: true,
+        egressId: targetEgressId,
+        durationSeconds,
+        durationMinutes,
+        recordingId,
+        videoUrl,
+        usageUpdated: usageResult,
+      });
+    } else {
+      // If we don't have activeStream, just return success
+      return res.json({ success: true, egressId: targetEgressId });
+    }
+  } catch (err) {
     console.error("Error stopping multistream:", err);
-    return res.status(500).json({
-      error: "Failed to stop multistream",
-      details: err?.message,
-    });
+    return res.status(500).json({ success: false, error: "Failed to stop multistream", details: err?.message });
   }
 });
 
