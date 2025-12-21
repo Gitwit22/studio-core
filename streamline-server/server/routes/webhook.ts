@@ -14,26 +14,41 @@ function mustGetEnv(name: string): string {
 // POST /api/livekit/webhook
 // IMPORTANT: mount this route with express.raw({ type: "application/json" })
 router.post("/", async (req, res) => {
+  console.log("🔔 LiveKit webhook received");
+  
   try {
     const secret = mustGetEnv("LIVEKIT_WEBHOOK_SECRET");
-const receiver = new WebhookReceiver(secret, secret);
+    const receiver = new WebhookReceiver(secret, secret);
 
     const authHeader = (req.headers["authorization"] as string) || "";
     const rawBody = (req as any).body as Buffer;
 
-const event = await receiver.receive(rawBody.toString("utf8"), authHeader);
+    console.log("📝 Parsing webhook event...");
+    
+    const event = await receiver.receive(rawBody.toString("utf8"), authHeader);
+
+    console.log("📦 Webhook event type:", event.event);
 
     if (event.event === "egress_ended") {
       const recordingId = event.egressInfo?.egressId;
+      
+      console.log("🎬 Egress ended event:", {
+        recordingId,
+        hasEgressInfo: !!event.egressInfo
+      });
+      
       if (!recordingId) {
+        console.error("❌ Missing egressId in egress_ended event");
         return res.status(400).json({ error: "Missing egressId" });
       }
 
       // filepath is what YOU set in EncodedFileOutput.filepath
-const objectKey =
-  (event.egressInfo as any)?.file?.filepath ||
-  (event.egressInfo as any)?.fileResults?.[0]?.filepath ||
-  null;
+      const objectKey =
+        (event.egressInfo as any)?.file?.filepath ||
+        (event.egressInfo as any)?.fileResults?.[0]?.filepath ||
+        null;
+
+      console.log("📁 Object key from webhook:", objectKey);
 
       // one-time token
       const rawToken = crypto.randomBytes(32).toString("hex");
@@ -53,16 +68,22 @@ const objectKey =
           { merge: true }
         );
 
-      // DEV ONLY (don’t ship logging rawToken)
+      console.log("✅ Recording marked as READY:", recordingId);
+      
+      // DEV ONLY (don't ship logging rawToken in production)
       console.log(
         `[webhook] egress_ended recordingId=${recordingId} objectKey=${objectKey} oneTimeToken=${rawToken}`
       );
     }
 
-    return res.json({ ok: true });
+    return res.status(200).json({ ok: true });
+    
   } catch (err: any) {
-    console.error("LiveKit webhook error:", err);
-    return res.status(400).json({ error: "Webhook processing error", details: err?.message });
+    console.error("❌ LiveKit webhook error:", err);
+    return res.status(400).json({ 
+      error: "Webhook processing error", 
+      details: err?.message || String(err)
+    });
   }
 });
 
