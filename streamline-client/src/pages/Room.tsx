@@ -5,12 +5,16 @@ import "@livekit/components-styles";
 import StreamSetupModal from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
 import { HostAVControls } from "../components/HostAVControls";
+import React from "react";
+
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
-type RecordingStatus = "idle" | "recording" | "stopping" | "stopped";
+type RecordingStatus = "idle" | "recording" | "stopping" | "stopped" | "error";
+
+
 
 function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: boolean; onHome?: () => void }) {
   useEffect(() => {
@@ -121,6 +125,43 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
 }
 
 function StreamEndedModal({ recordingId, onStartEditing, onExitRoom }: { recordingId: string; onStartEditing: () => void; onExitRoom: () => void }) {
+  const [processing, setProcessing] = React.useState(true);
+  const [ready, setReady] = React.useState(false);
+
+  React.useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    const pollStatus = async () => {
+      try {
+        const res = await fetch(`/api/recordings/${recordingId}`);
+        if (!res.ok) throw new Error("Failed to fetch recording status");
+        const data = await res.json();
+        if (data.status === "READY" || data.status === "ready") {
+          setProcessing(false);
+          setReady(true);
+          if (interval) clearInterval(interval);
+        } else {
+          setProcessing(true);
+        }
+      } catch {
+        setProcessing(true);
+      }
+    };
+    if (recordingId) {
+      pollStatus();
+      interval = setInterval(pollStatus, 3000);
+    }
+    return () => { if (interval) clearInterval(interval); };
+  }, [recordingId]);
+
+  // Handler for downloading the recording
+  const handleDownload = async () => {
+    try {
+      window.open(`/api/recordings/${recordingId}/download`, "_blank");
+    } catch (err) {
+      alert("Failed to download recording.");
+    }
+  };
+
   return (
     <div style={{
       position: 'fixed',
@@ -145,27 +186,11 @@ function StreamEndedModal({ recordingId, onStartEditing, onExitRoom }: { recordi
         textAlign: 'center',
         color: '#ffffff',
       }}>
-        {/* Success Icon */}
-        <div style={{
-          width: '80px',
-          height: '80px',
-          borderRadius: '50%',
-          background: 'linear-gradient(135deg, #16a34a, #22c55e)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          margin: '0 auto 1.5rem',
-          fontSize: '2rem',
-        }}>
-          ✓
-        </div>
-
-        <h2 style={{ fontSize: '1.875rem', fontWeight: 'bold', marginBottom: '1rem' }}>Stream Ended</h2>
-        <p style={{ fontSize: '1rem', color: 'rgba(255, 255, 255, 0.8)', marginBottom: '2rem' }}>
-          Your recording is ready. Choose what you'd like to do next.
-        </p>
-
-        {/* Action Buttons */}
+        {processing && (
+          <div style={{ marginBottom: '1rem', fontWeight: 600, color: '#fbbf24' }}>
+            <span role="img" aria-label="processing">⏳</span> Processing recording…
+          </div>
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <button
             onClick={onStartEditing}
@@ -181,20 +206,28 @@ function StreamEndedModal({ recordingId, onStartEditing, onExitRoom }: { recordi
               cursor: 'pointer',
               transition: 'all 0.3s ease',
             }}
-            onMouseEnter={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'linear-gradient(to right, #991b1b, #dc2626)';
-              target.style.transform = 'translateY(-2px)';
-              target.style.boxShadow = '0 10px 25px rgba(220, 38, 38, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'linear-gradient(to right, #dc2626, #ef4444)';
-              target.style.transform = 'translateY(0)';
-              target.style.boxShadow = 'none';
-            }}
+            disabled={processing}
           >
             ✂️ Start Editing
+          </button>
+
+          <button
+            onClick={handleDownload}
+            style={{
+              width: '100%',
+              padding: '1rem',
+              background: 'linear-gradient(to right, #16a34a, #22c55e)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '0.5rem',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+            }}
+            disabled={processing}
+          >
+            ⬇️ Download Recording
           </button>
 
           <button
@@ -210,18 +243,6 @@ function StreamEndedModal({ recordingId, onStartEditing, onExitRoom }: { recordi
               fontWeight: '600',
               cursor: 'pointer',
               transition: 'all 0.3s ease',
-            }}
-            onMouseEnter={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'rgba(255, 255, 255, 0.15)';
-              target.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-              target.style.transform = 'translateY(-2px)';
-            }}
-            onMouseLeave={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'rgba(255, 255, 255, 0.1)';
-              target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-              target.style.transform = 'translateY(0)';
             }}
           >
             🚪 Exit Room
@@ -246,24 +267,13 @@ function getOrCreateUid() {
 }
 
 export default function Room() {
+  
   const nav = useNavigate();
-  const { roomName: rn } = useParams<{ roomName: string }>();
-  const roomName = rn ?? "";
+  const { roomName } = useParams<{ roomName: string }>();
+  const onExitRoom = () => nav("/dashboard");
+  const onStartEditing = () => nav("/editor");
+
   
-  // Debug room name extraction
-  useEffect(() => {
-    console.log('🏠 Room component - URL params:', { rn, roomName, fullPath: window.location.pathname });
-  }, [rn, roomName]);
-  
-  const [sessionStart, setSessionStart] = useState<number | null>(null);
-  
-  useEffect(() => {
-    const start = Date.now();
-    setSessionStart(start);
-    // Store room name and session start time for exit page
-    localStorage.setItem("sl_roomName", roomName);
-    localStorage.setItem("sl_sessionStart", start.toString());
-  }, [roomName]);
 
   const [displayName, setDisplayName] = useState(
     () => localStorage.getItem("sl_displayName") ?? ""
@@ -300,6 +310,7 @@ export default function Room() {
     });
   }, [roomName, currentUserId]);
 
+  const [recordingEnabled, setRecordingEnabled] = useState(false);
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
   const recordingRef = useRef<string | null>(null);
@@ -377,49 +388,55 @@ export default function Room() {
     nav('/join', { replace: true });
   };
 
-  const startRecording = async () => {
-    try {
-      console.log("🔴 Starting recording...");
-      setRecordingStatus("recording");
-      
-      // Generate a simple recording ID for MVP (no backend storage needed)
-      const recordId = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      
-      console.log("✅ Recording started with ID:", recordId);
-      setRecordingId(recordId);
-      recordingRef.current = recordId;
-    } catch (error) {
-      console.error("❌ Failed to start recording:", error);
-      setRecordingStatus("idle");
-    }
-  };
+  async function apiStartRecording(roomName: string, layout: "speaker" | "grid") {
+  const res = await fetch("/api/recordings/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roomName, layout }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ recordingId: string }>;
+}
 
-  const stopRecording = async () => {
-    try {
-      console.log("⏹️ Stopping recording...");
-      
-      const recordId = recordingRef.current;
-      console.log("Recording ID to stop:", recordId);
+async function apiStopRecording(recordingId: string) {
+  const res = await fetch("/api/recordings/stop", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recordingId }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: true }>;
+}
 
-      if (recordId) {
-        // Calculate actual stream duration
-        const duration = streamStartTimeRef.current ? Math.floor((Date.now() - streamStartTimeRef.current) / 1000) : 0;
-        console.log("📊 Recording stopped with duration:", duration, "seconds");
+const startRecording = async () => {
+  if (!roomName) return;
 
-        // Set stream ended status and store the recording ID
-        setRecordingStatus("stopped");
-        setRecordingId(recordId);
-      } else {
-        console.warn("⚠️ No recording ID available");
-        setRecordingStatus("stopped");
-        setRecordingId("unknown");
-      }
-    } catch (error) {
-      console.error("❌ Failed to stop recording:", error);
-      setRecordingStatus("stopped");
-      setRecordingId("unknown");
-    }
-  };
+  setRecordingStatus("recording");
+  try {
+    const { recordingId } = await apiStartRecording(roomName, "grid");
+    recordingRef.current = recordingId;
+    setRecordingId(recordingId);
+    streamStartTimeRef.current = Date.now();
+  } catch (e) {
+    console.error("❌ Failed to start recording:", e);
+    setRecordingStatus("error");
+  }
+};
+
+const stopRecording = async () => {
+  const id = recordingRef.current;
+  if (!id) return;
+
+  setRecordingStatus("stopping");
+  try {
+    await apiStopRecording(id);
+    setRecordingStatus("stopped");
+    setRecordingId(id);
+  } catch (e) {
+    console.error("❌ Failed to stop recording:", e);
+    setRecordingStatus("error");
+  }
+};
 
   useEffect(() => {
     if (isHost && token && !recordingRef.current) {
@@ -546,8 +563,10 @@ export default function Room() {
       setEgressId(data.egressId);
       setStreamStatus("live");
       setDidStreamThisSession(true);
-      // Start recording when stream goes live - DISABLED FOR MVP
-      // await startRecording();
+      // Start recording if enabled
+      if (recordingEnabled) {
+        await startRecording();
+      }
       console.log("✅ Stream started! Egress ID:", data.egressId);
     } catch (err) {
       console.error("Error starting multistream:", err);
@@ -570,11 +589,10 @@ export default function Room() {
     try {
       setStreamStatus("stopping");
 
-      // Stop recording when stopping the stream (this saves to database) - DISABLED FOR MVP
-      // if (recordingStatus === "recording") {
-      //   await stopRecording();
-      //   // Don't return - continue to stop the multistream
-      // }
+      // Stop recording if currently recording
+      if (recordingStatus === "recording") {
+        await stopRecording();
+      }
 
       const res = await fetch(
         `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
@@ -974,9 +992,8 @@ export default function Room() {
               }}
               onMouseEnter={(e) => {
                 const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(34, 197, 94, 0.15)';
-                target.style.borderColor = 'rgba(34, 197, 94, 0.8)';
-                target.style.boxShadow = '0 0 12px rgba(34, 197, 94, 0.3)';
+                target.style.background = 'rgba(34, 197, 94, 0.1)';
+                target.style.borderColor = 'rgba(220, 38, 38, 0.6)';
               }}
               onMouseLeave={(e) => {
                 const target = e.target as HTMLButtonElement;
@@ -1132,11 +1149,14 @@ export default function Room() {
       )}
 
       <StreamSetupModal
-        isOpen={showStreamSetup}
+        open={showStreamSetup}
         onClose={() => setShowStreamSetup(false)}
-        onStart={handleStartMultistream}
-        onStop={handleStopMultistream}
-        status={streamStatus}
+        roomName={roomName ?? ""}
+        recordingEnabled={recordingEnabled}
+        setRecordingEnabled={setRecordingEnabled}
+        recordingStatus={recordingStatus}
+        onStartStream={handleStartMultistream}
+        onStopStream={handleStopMultistream}
       />
 
       {recordingStatus === "stopped" && recordingId && (

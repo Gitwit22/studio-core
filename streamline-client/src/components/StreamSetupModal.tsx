@@ -1,36 +1,53 @@
 import { useState } from "react";
 
+
 interface Props {
-  isOpen: boolean;
+  open: boolean;
   onClose: () => void;
-  onStart: (keys: {
+  roomName: string;
+  recordingEnabled: boolean;
+  setRecordingEnabled: (enabled: boolean) => void;
+  recordingStatus: string;
+  onStartStream: (params: {
     youtubeKey?: string;
     facebookKey?: string;
     twitchKey?: string;
+    record?: boolean;
+    layout?: string;
   }) => Promise<void>;
-  onStop: () => Promise<void>;
-  status: string;
+  onStopStream: () => Promise<void>;
 }
 
 export default function StreamSetupModal({
-  isOpen,
+  open,
   onClose,
-  onStart,
-  onStop,
-  status,
+  roomName,
+  recordingEnabled,
+  setRecordingEnabled,
+  recordingStatus,
+  onStartStream,
+  onStopStream,
 }: Props) {
   const [useYouTube, setUseYouTube] = useState(false);
   const [useFacebook, setUseFacebook] = useState(false);
   const [useTwitch, setUseTwitch] = useState(false);
 
+
   const [youtubeKey, setYoutubeKey] = useState("");
   const [facebookKey, setFacebookKey] = useState("");
   const [twitchKey, setTwitchKey] = useState("");
 
-  if (!isOpen) return null;
+  // New: Recording toggle and layout
+  // Use controlled prop for recording toggle
+  const record = recordingEnabled;
+  const setRecord = setRecordingEnabled;
+  const [layout, setLayout] = useState("speaker");
 
-  const isLive = status === "live";
-  const isBusy = status === "starting" || status === "stopping";
+  if (!open) return null;
+
+  // For demo, treat recordingStatus as busy if not idle
+  const isLive = recordingStatus === "recording";
+  const isBusy = recordingStatus === "stopping";
 
   const handleStart = async () => {
     const yt = useYouTube ? youtubeKey.trim() : "";
@@ -41,29 +58,28 @@ export default function StreamSetupModal({
     console.log("   YouTube enabled:", useYouTube, "key:", yt ? `${yt.slice(0, 4)}...` : "(empty)");
     console.log("   Facebook enabled:", useFacebook, "key:", fb ? `${fb.slice(0, 4)}...` : "(empty)");
     console.log("   Twitch enabled:", useTwitch, "key:", tw ? `${tw.slice(0, 4)}...` : "(empty)");
+    console.log("   Record this stream:", record);
+    console.log("   Layout:", layout);
 
     if (!yt && !fb && !tw) {
       alert("Enter at least one stream key (YouTube, Facebook, or Twitch).");
       return;
     }
 
-    const keys = {
+    const params = {
       youtubeKey: yt || undefined,
       facebookKey: fb || undefined,
       twitchKey: tw || undefined,
+      record,
+      layout,
     };
 
-    console.log("   Calling onStart with keys:", {
-      youtubeKey: keys.youtubeKey ? "✓ provided" : "✗ empty",
-      facebookKey: keys.facebookKey ? "✓ provided" : "✗ empty",
-      twitchKey: keys.twitchKey ? "✓ provided" : "✗ empty",
-    });
-
-    await onStart(keys);
+    console.log("   Calling onStart with params:", params);
+    await onStartStream(params);
   };
 
   const handleStop = async () => {
-    await onStop();
+    await onStopStream();
   };
 
   return (
@@ -155,6 +171,39 @@ export default function StreamSetupModal({
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {/* Record this stream toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.95rem', marginBottom: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={record}
+                onChange={() => setRecord(!record)}
+                style={{ accentColor: '#22c55e', width: '1.1em', height: '1.1em', cursor: 'pointer' }}
+              />
+              <span style={{ fontWeight: 600, color: record ? '#22c55e' : '#fff' }}>Record this stream</span>
+            </label>
+
+            {/* Layout dropdown */}
+            <label style={{ fontSize: '0.95rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <span style={{ fontWeight: 600 }}>Layout:</span>
+              <select
+                value={layout}
+                onChange={e => setLayout(e.target.value)}
+                style={{
+                  padding: '0.3rem 0.7rem',
+                  borderRadius: '0.3rem',
+                  border: '1px solid #ef4444',
+                  background: '#18181b',
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: '0.95rem',
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="speaker">Speaker</option>
+                <option value="grid">Grid</option>
+              </select>
+            </label>
 
             {/* YouTube */}
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', fontSize: '0.85rem' }}>

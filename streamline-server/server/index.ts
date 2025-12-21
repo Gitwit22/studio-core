@@ -1,3 +1,6 @@
+import webhookRouter from "./routes/webhook";
+import livekitWebhookRoutes from "./routes/webhook";
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -24,7 +27,8 @@ const PORT = process.env.PORT || 5137;
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+// LiveKit webhook route
+app.use("/api/livekit", webhookRouter);
 // Health check
 app.get("/", (_req, res) => res.send("API up"));
 
@@ -34,8 +38,13 @@ app.use("/api/roomToken", roomTokenRoute);
 // Multistream routes (YouTube/FB)
 app.use("/api/rooms", multistreamRoutes);
 
+// Recordings API
+import recordingsRouter from "./routes/recordings";
+app.use("/api/recordings", recordingsRouter);
 
 //app.use("/api/editing", editingRouter);
+
+app.use("/api/livekit/webhook", express.raw({ type: "application/json" }), livekitWebhookRoutes);
 
 // ✅ PROMPT #1: Storage test route
 app.get("/api/storage/test", async (req, res) => {
