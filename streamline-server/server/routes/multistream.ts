@@ -191,6 +191,7 @@ router.post(":roomName/stop-multistream", async (req, res) => {
   try {
     // Stop the egress
     await egressClient.stopEgress(targetEgressId);
+    console.log(`[DEBUG] Stopped egress for room ${roomName} (egressId: ${targetEgressId})`);
 
     // Clean up tracking
     activeStreams.delete(roomName);
