@@ -394,9 +394,12 @@ export default function Room() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ roomName, layout }),
   });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json() as Promise<{ recordingId: string }>;
+
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+  return text ? (JSON.parse(text) as { recordingId: string }) : { recordingId: "unknown" };
 }
+
 
 async function apiStopRecording(recordingId: string) {
   const res = await fetch("/api/recordings/stop", {
@@ -404,16 +407,19 @@ async function apiStopRecording(recordingId: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ recordingId }),
   });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json() as Promise<{ ok: true }>;
+
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+  return text ? (JSON.parse(text) as { ok: true }) : ({ ok: true } as const);
 }
 
-const startRecording = async () => {
+
+const startRecording = async (layout: "speaker" | "grid" = "grid") => {
   if (!roomName) return;
 
   setRecordingStatus("recording");
   try {
-    const { recordingId } = await apiStartRecording(roomName, "grid");
+    const { recordingId } = await apiStartRecording(roomName, layout);
     recordingRef.current = recordingId;
     setRecordingId(recordingId);
     streamStartTimeRef.current = Date.now();
@@ -505,7 +511,10 @@ const stopRecording = async () => {
     youtubeKey?: string;
     facebookKey?: string;
     twitchKey?: string;
+    record?: boolean;
+    layout?: "speaker" | "grid";
   }) => {
+    if (streamStatus === "starting" || streamStatus === "live") return;
     if (!roomName) {
       alert("No room name");
       return;
@@ -518,6 +527,8 @@ const stopRecording = async () => {
       youtube: keys.youtubeKey ? "✓ provided" : "✗ empty",
       facebook: keys.facebookKey ? "✓ provided" : "✗ empty",
       twitch: keys.twitchKey ? "✓ provided" : "✗ empty",
+      record: keys.record,
+      layout: keys.layout,
     });
 
     // Validate at least one key
@@ -562,10 +573,11 @@ const stopRecording = async () => {
 
       setEgressId(data.egressId);
       setStreamStatus("live");
+      streamStartTimeRef.current = Date.now();
       setDidStreamThisSession(true);
-      // Start recording if enabled
-      if (recordingEnabled) {
-        await startRecording();
+      // Start recording using passed-in values
+      if (keys.record) {
+        await startRecording(keys.layout ?? "grid");
       }
       console.log("✅ Stream started! Egress ID:", data.egressId);
     } catch (err) {
