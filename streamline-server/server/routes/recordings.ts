@@ -1,6 +1,6 @@
 import express from "express";
 import { firestore } from "../firebaseAdmin";
-import { EgressClient, EncodedFileOutput, RoomCompositeEgressRequest, EncodedFileType, } from "livekit-server-sdk";
+import { EgressClient, EncodedFileOutput, EncodedFileType } from "livekit-server-sdk";
 import { S3Upload } from "livekit-server-sdk";
 import crypto from "crypto";
 import { r2GetStream, r2Delete } from "../lib/r2";
@@ -12,7 +12,9 @@ function mustGetEnv(name: string): string {
   if (!v) throw new Error(`Missing env var: ${name}`);
   return v;
 }
-// GET /api/recordings/:id/download?token=...
+
+// IMPORTANT: More specific routes MUST come before generic ones!
+// GET /api/recordings/:id/download - Must be FIRST (most specific)
 router.get("/:id/download", async (req, res) => {
   const { id } = req.params;
   const token = String(req.query.token || "");
@@ -67,7 +69,7 @@ router.get("/:id/download", async (req, res) => {
   }
 });
 
-// GET /api/recordings/:id - Get recording status
+// GET /api/recordings/:id - Get recording status (comes AFTER /download)
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
   
@@ -109,9 +111,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-
-
-
 // POST /api/recordings/start
 router.post("/start", async (req, res) => {
   const { roomName, layout } = req.body;
@@ -132,21 +131,21 @@ router.post("/start", async (req, res) => {
 
     const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 
-   const output = new EncodedFileOutput({
-  fileType: EncodedFileType.MP4,
-  filepath: `recordings/${roomName}/rec_${Date.now()}.mp4`,
-  output: {
-    case: "s3",
-    value: new S3Upload({
-      accessKey: mustGetEnv("R2_ACCESS_KEY_ID"),
-      secret: mustGetEnv("R2_SECRET_ACCESS_KEY"),
-      bucket: mustGetEnv("R2_BUCKET"),
-      endpoint: mustGetEnv("R2_ENDPOINT"),
-      region: process.env.R2_REGION ?? "auto",
-      forcePathStyle: true,
-    }),
-  },
-});
+    const output = new EncodedFileOutput({
+      fileType: EncodedFileType.MP4,
+      filepath: `recordings/${roomName}/rec_${Date.now()}.mp4`,
+      output: {
+        case: "s3",
+        value: new S3Upload({
+          accessKey: mustGetEnv("R2_ACCESS_KEY_ID"),
+          secret: mustGetEnv("R2_SECRET_ACCESS_KEY"),
+          bucket: mustGetEnv("R2_BUCKET"),
+          endpoint: mustGetEnv("R2_ENDPOINT"),
+          region: process.env.R2_REGION ?? "auto",
+          forcePathStyle: true,
+        }),
+      },
+    });
 
     console.log("📦 Output configuration created");
 
@@ -226,7 +225,5 @@ router.post("/stop", async (req, res) => {
     });
   }
 });
-
-
 
 export default router;
