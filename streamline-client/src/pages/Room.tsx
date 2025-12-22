@@ -430,6 +430,10 @@ const startRecording = async (layout: "speaker" | "grid" = "grid") => {
     console.log("❌ No roomName, can't start recording");
     return;
   }
+  if (recordingRef.current) {
+    console.log("⏳ Recording already in progress, skipping startRecording call.");
+    return;
+  }
 
   console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout);
   setRecordingStatus("recording");

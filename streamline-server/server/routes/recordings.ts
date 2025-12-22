@@ -99,7 +99,8 @@ router.get("/:id", async (req, res) => {
       createdAt: data?.createdAt,
       updatedAt: data?.updatedAt,
       endedAt: data?.endedAt,
-      layout: data?.layout
+      layout: data?.layout,
+      downloadReady: data?.status === "READY" && !!data?.objectKey
     });
     
   } catch (err: any) {
@@ -113,14 +114,20 @@ router.get("/:id", async (req, res) => {
 
 // POST /api/recordings/start
 router.post("/start", async (req, res) => {
-  const { roomName, layout } = req.body;
-  
+  const { roomName, layout } = req.body as {
+    roomName?: string;
+    layout?: "speaker" | "grid";
+  };
+
   console.log("🎬 /api/recordings/start called:", { roomName, layout });
-  
+
   if (!roomName) {
-    return res.status(400).json({ error: "roomName is required" });
+    return res.status(400).json({ ok: false, error: "roomName is required" });
   }
-  
+
+  // default layout if missing
+  const chosenLayout: "speaker" | "grid" = layout === "speaker" ? "speaker" : "grid";
+
   try {
     // Get environment variables
     const LIVEKIT_URL = mustGetEnv("LIVEKIT_URL");
@@ -131,9 +138,11 @@ router.post("/start", async (req, res) => {
 
     const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 
+    const filepath = `recordings/${roomName}/rec_${Date.now()}.mp4`;
+
     const output = new EncodedFileOutput({
       fileType: EncodedFileType.MP4,
-      filepath: `recordings/${roomName}/rec_${Date.now()}.mp4`,
+      filepath,
       output: {
         case: "s3",
         value: new S3Upload({
@@ -147,42 +156,58 @@ router.post("/start", async (req, res) => {
       },
     });
 
-    console.log("📦 Output configuration created");
+    // IMPORTANT: start egress and ALWAYS return JSON
+  
+    const info = await egressClient.startRoomCompositeEgress(roomName, {
+  file: output,
+});
 
-    // Start the recording
-    const info = await egressClient.startRoomCompositeEgress(
-      roomName,
-      output,
+
+    // LiveKit SDK returns an egressId; normalize it
+    const recordingId =
+      (info as any)?.egressId ||
+      (info as any)?.egressInfo?.egressId ||
+      (info as any)?.info?.egressId;
+
+    if (!recordingId) {
+      console.warn("⚠️ startRoomCompositeEgress returned no egressId:", info);
+      return res.status(500).json({ ok: false, error: "Egress started but no recordingId returned" });
+    }
+
+    console.log("✅ Recording started:", { recordingId, roomName, layout: chosenLayout, filepath });
+
+    // Write Firestore doc immediately
+    await firestore.collection("recordings").doc(recordingId).set(
       {
-        layout: layout === "speaker" ? "speaker" : "grid",
-      }
+        roomName,
+        layout: chosenLayout,
+        status: "RECORDING",
+        objectKey: null,
+        filepath,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      { merge: true }
     );
 
-    const egressId = info.egressId;
-
-    console.log("✅ Egress started successfully:", egressId);
-
-    // Save to Firestore
-    await firestore.collection("recordings").doc(egressId).set({
+    return res.status(200).json({
+      ok: true,
+      recordingId,
       roomName,
-      layout: layout || null,
-      status: "STARTED",
-      createdAt: new Date(),
+      layout: chosenLayout,
+      filepath,
     });
-
-    console.log("💾 Recording saved to Firestore");
-
-    // Return the response
-    return res.status(200).json({ recordingId: egressId });
-    
   } catch (err: any) {
-    console.error("❌ Failed to start recording:", err);
-    return res.status(500).json({ 
-      error: "Failed to start recording", 
-      details: err?.message || String(err)
+    console.error("❌ /api/recordings/start failed:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err?.message ?? "Failed to start recording",
     });
   }
 });
+
+
+// (Removed unreachable duplicate code block that referenced undefined variables)
 
 // POST /api/recordings/stop
 router.post("/stop", async (req, res) => {
