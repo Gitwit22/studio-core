@@ -5,8 +5,6 @@ import { S3Upload } from "livekit-server-sdk";
 import crypto from "crypto";
 import { r2GetStream, r2Delete } from "../lib/r2";
 
-// import { startLiveKitRecording, stopLiveKitRecording, getRecordingStreamFromR2 } from "../lib/recordingService";
-
 const router = express.Router();
 
 function mustGetEnv(name: string): string {
@@ -14,6 +12,48 @@ function mustGetEnv(name: string): string {
   if (!v) throw new Error(`Missing env var: ${name}`);
   return v;
 }
+
+// GET /api/recordings/:id - Get recording status
+router.get("/:id", async (req, res) => {
+  const { id } = req.params;
+  
+  console.log(`📋 GET /api/recordings/${id} - Fetching recording status`);
+  
+  if (!id) {
+    return res.status(400).json({ error: "Recording ID is required" });
+  }
+  
+  try {
+    const snap = await firestore.collection("recordings").doc(id).get();
+    
+    if (!snap.exists) {
+      console.log(`❌ Recording ${id} not found in Firestore`);
+      return res.status(404).json({ error: "Recording not found" });
+    }
+    
+    const data = snap.data();
+    
+    console.log(`✅ Recording ${id} status:`, data?.status);
+    
+    return res.status(200).json({
+      id: id,
+      status: data?.status || "PROCESSING",
+      roomName: data?.roomName,
+      objectKey: data?.objectKey,
+      createdAt: data?.createdAt,
+      updatedAt: data?.updatedAt,
+      endedAt: data?.endedAt,
+      layout: data?.layout
+    });
+    
+  } catch (err: any) {
+    console.error(`❌ Failed to fetch recording ${id}:`, err);
+    return res.status(500).json({ 
+      error: "Failed to fetch recording", 
+      details: err?.message || String(err)
+    });
+  }
+});
 
 // POST /api/recordings/start
 router.post("/start", async (req, res) => {
