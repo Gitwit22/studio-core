@@ -100,22 +100,21 @@ router.post("/start", async (req, res) => {
 
     const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 
-    // Configure S3/R2 output
-    const output = new EncodedFileOutput({
-      fileType: EncodedFileType.MP4,
-      filepath: `recordings/${roomName}/rec_${Date.now()}.mp4`,
-      output: {
-        case: "s3",
-        value: new S3Upload({
-          accessKey: mustGetEnv("R2_ACCESS_KEY_ID"),
-          secret: mustGetEnv("R2_SECRET_ACCESS_KEY"),
-          bucket: mustGetEnv("R2_BUCKET"),
-          endpoint: mustGetEnv("R2_ENDPOINT"),
-          region: process.env.R2_REGION ?? "auto",
-          forcePathStyle: true,
-        }),
-      },
-    });
+   const output = new EncodedFileOutput({
+  fileType: EncodedFileType.MP4,
+  filepath: `recordings/${roomName}/rec_${Date.now()}.mp4`,
+  output: {
+    case: "s3",
+    value: new S3Upload({
+      accessKey: mustGetEnv("R2_ACCESS_KEY_ID"),
+      secret: mustGetEnv("R2_SECRET_ACCESS_KEY"),
+      bucket: mustGetEnv("R2_BUCKET"),
+      endpoint: mustGetEnv("R2_ENDPOINT"),
+      region: process.env.R2_REGION ?? "auto",
+      forcePathStyle: true,
+    }),
+  },
+});
 
     console.log("📦 Output configuration created");
 
