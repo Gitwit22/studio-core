@@ -55,6 +55,31 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+
+// GET /api/recordings/:id
+router.get("/:id", async (req, res) => {
+  const { id } = req.params;
+  console.log(`📋 Checking status for recording: ${id}`);
+  
+  try {
+    const snap = await firestore.collection("recordings").doc(id).get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Recording not found" });
+    }
+    
+    const data = snap.data();
+    return res.status(200).json({
+      id: id,
+      status: data?.status || "PROCESSING",
+      roomName: data?.roomName,
+      objectKey: data?.objectKey,
+      createdAt: data?.createdAt
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to fetch recording" });
+  }
+});
+
 // POST /api/recordings/start
 router.post("/start", async (req, res) => {
   const { roomName, layout } = req.body;
