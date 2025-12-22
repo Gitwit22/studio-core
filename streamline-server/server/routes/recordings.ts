@@ -12,6 +12,60 @@ function mustGetEnv(name: string): string {
   if (!v) throw new Error(`Missing env var: ${name}`);
   return v;
 }
+// GET /api/recordings/:id/download?token=...
+router.get("/:id/download", async (req, res) => {
+  const { id } = req.params;
+  const token = String(req.query.token || "");
+
+  if (!id || !token) {
+    return res.status(400).json({ error: "id and token are required" });
+  }
+
+  try {
+    const snap = await firestore.collection("recordings").doc(id).get();
+    if (!snap.exists) return res.status(404).json({ error: "Recording not found" });
+
+    const data = snap.data() as any;
+
+    // Must be ready + have file key
+    if (data.status !== "READY" || !data.objectKey) {
+      return res.status(409).json({ error: "Recording not ready yet" });
+    }
+
+    // Validate token (sha256)
+    const hashed = crypto.createHash("sha256").update(token).digest("hex");
+    if (!data.oneTimeToken || hashed !== data.oneTimeToken) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    // Stream from R2
+    const body = await r2GetStream(data.objectKey);
+    if (!body) return res.status(404).json({ error: "File not found in storage" });
+
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Disposition", `attachment; filename="${id}.mp4"`);
+
+    // Pipe stream
+    (body as any).pipe(res);
+
+    // Optional: one-time cleanup AFTER response finishes
+    res.on("finish", async () => {
+      try {
+        // delete file + invalidate token
+        await r2Delete(data.objectKey);
+        await firestore.collection("recordings").doc(id).set(
+          { oneTimeToken: null, status: "DOWNLOADED", downloadedAt: new Date() },
+          { merge: true }
+        );
+      } catch (e) {
+        console.error("[download] cleanup failed:", e);
+      }
+    });
+  } catch (err: any) {
+    console.error("Download failed:", err);
+    return res.status(500).json({ error: "Failed to download recording", details: err?.message });
+  }
+});
 
 // GET /api/recordings/:id - Get recording status
 router.get("/:id", async (req, res) => {
@@ -56,29 +110,7 @@ router.get("/:id", async (req, res) => {
 });
 
 
-// GET /api/recordings/:id
-router.get("/:id", async (req, res) => {
-  const { id } = req.params;
-  console.log(`📋 Checking status for recording: ${id}`);
-  
-  try {
-    const snap = await firestore.collection("recordings").doc(id).get();
-    if (!snap.exists) {
-      return res.status(404).json({ error: "Recording not found" });
-    }
-    
-    const data = snap.data();
-    return res.status(200).json({
-      id: id,
-      status: data?.status || "PROCESSING",
-      roomName: data?.roomName,
-      objectKey: data?.objectKey,
-      createdAt: data?.createdAt
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: "Failed to fetch recording" });
-  }
-});
+
 
 // POST /api/recordings/start
 router.post("/start", async (req, res) => {
@@ -195,59 +227,6 @@ router.post("/stop", async (req, res) => {
   }
 });
 
-// GET /api/recordings/:id/download?token=...
-router.get("/:id/download", async (req, res) => {
-  const { id } = req.params;
-  const token = String(req.query.token || "");
 
-  if (!id || !token) {
-    return res.status(400).json({ error: "id and token are required" });
-  }
-
-  try {
-    const snap = await firestore.collection("recordings").doc(id).get();
-    if (!snap.exists) return res.status(404).json({ error: "Recording not found" });
-
-    const data = snap.data() as any;
-
-    // Must be ready + have file key
-    if (data.status !== "READY" || !data.objectKey) {
-      return res.status(409).json({ error: "Recording not ready yet" });
-    }
-
-    // Validate token (sha256)
-    const hashed = crypto.createHash("sha256").update(token).digest("hex");
-    if (!data.oneTimeToken || hashed !== data.oneTimeToken) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
-    // Stream from R2
-    const body = await r2GetStream(data.objectKey);
-    if (!body) return res.status(404).json({ error: "File not found in storage" });
-
-    res.setHeader("Content-Type", "video/mp4");
-    res.setHeader("Content-Disposition", `attachment; filename="${id}.mp4"`);
-
-    // Pipe stream
-    (body as any).pipe(res);
-
-    // Optional: one-time cleanup AFTER response finishes
-    res.on("finish", async () => {
-      try {
-        // delete file + invalidate token
-        await r2Delete(data.objectKey);
-        await firestore.collection("recordings").doc(id).set(
-          { oneTimeToken: null, status: "DOWNLOADED", downloadedAt: new Date() },
-          { merge: true }
-        );
-      } catch (e) {
-        console.error("[download] cleanup failed:", e);
-      }
-    });
-  } catch (err: any) {
-    console.error("Download failed:", err);
-    return res.status(500).json({ error: "Failed to download recording", details: err?.message });
-  }
-});
 
 export default router;
