@@ -388,16 +388,27 @@ export default function Room() {
     nav('/join', { replace: true });
   };
 
-  async function apiStartRecording(roomName: string, layout: "speaker" | "grid") {
+ async function apiStartRecording(roomName: string, layout: "speaker" | "grid" = "grid") {
+  console.log("🔧 apiStartRecording called:", { roomName, layout });
+  
   const res = await fetch("/api/recordings/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ roomName, layout }),
   });
 
-  const text = await res.text();
-  if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
-  return text ? (JSON.parse(text) as { recordingId: string }) : { recordingId: "unknown" };
+  console.log("🔧 API response status:", res.status);
+  
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("🔧 API error:", text);
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  
+  const json = await res.json();
+  console.log("🔧 API response JSON:", json);
+  
+  return json;  // ← Make sure this is here!
 }
 
 
@@ -415,31 +426,66 @@ async function apiStopRecording(recordingId: string) {
 
 
 const startRecording = async (layout: "speaker" | "grid" = "grid") => {
-  if (!roomName) return;
+  if (!roomName) {
+    console.log("❌ No roomName, can't start recording");
+    return;
+  }
 
+  console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout);
   setRecordingStatus("recording");
+  
   try {
-    const { recordingId } = await apiStartRecording(roomName, layout);
+    console.log("📡 Calling apiStartRecording...");
+    const response = await apiStartRecording(roomName, layout);
+    console.log("📡 Got response:", response);
+    
+    const { recordingId } = response;
+    console.log("🎬 Extracted recordingId:", recordingId);
+    
+    if (!recordingId || recordingId === "unknown") {
+      console.error("❌ Invalid recordingId:", recordingId);
+      setRecordingStatus("error");
+      return;
+    }
+    
     recordingRef.current = recordingId;
     setRecordingId(recordingId);
     streamStartTimeRef.current = Date.now();
+    
+    console.log("✅ Recording started!");
+    console.log("   recordingRef.current:", recordingRef.current);
+    console.log("   recordingId state:", recordingId);
   } catch (e) {
     console.error("❌ Failed to start recording:", e);
-    setRecordingStatus("idle"); // Reset to idle so UI is not stuck
+    setRecordingStatus("idle");
     recordingRef.current = null;
     setRecordingId(null);
   }
 };
 
 const stopRecording = async () => {
+  console.log("🛑 stopRecording called");
+  console.log("   recordingRef.current:", recordingRef.current);
+  console.log("   recordingId state:", recordingId);
+  
   const id = recordingRef.current;
-  if (!id) return;
+  
+  if (!id || id === "unknown") {
+    console.error("❌ No valid recording ID to stop!");
+    console.error("   recordingRef.current:", recordingRef.current);
+    console.error("   This means recording never started properly");
+    setRecordingStatus("error");
+    return;
+  }
 
+  console.log("🛑 Stopping recording with ID:", id);
   setRecordingStatus("stopping");
+  
   try {
     await apiStopRecording(id);
+    console.log("✅ Recording stopped successfully");
     setRecordingStatus("stopped");
-    setRecordingId(id);
+    setRecordingId(id);  // Set this so modal can poll!
   } catch (e) {
     console.error("❌ Failed to stop recording:", e);
     setRecordingStatus("error");
