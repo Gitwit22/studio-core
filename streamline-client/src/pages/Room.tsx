@@ -400,30 +400,55 @@ export default function Room() {
   console.log("🔧 API response status:", res.status);
   
   if (!res.ok) {
-    const text = await res.text();
-    console.error("🔧 API error:", text);
-    throw new Error(text || `HTTP ${res.status}`);
+    // For errors, still parse as JSON since bulletproof API returns JSON
+    try {
+      const errorData = await res.json();
+      console.error("🔧 API error:", errorData);
+      throw new Error(errorData.error || `HTTP ${res.status}`);
+    } catch (parseError) {
+      // Fallback if response isn't JSON
+      const text = await res.text();
+      console.error("🔧 API error (text):", text);
+      throw new Error(text || `HTTP ${res.status}`);
+    }
   }
   
   const json = await res.json();
   console.log("🔧 API response JSON:", json);
   
-  return json;  // ← Make sure this is here!
+  // UPDATED: Return the full response (bulletproof format)
+  return json;
 }
 
-
 async function apiStopRecording(recordingId: string) {
+  console.log("🛑 apiStopRecording called:", { recordingId });
+  
   const res = await fetch("/api/recordings/stop", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ recordingId }),
   });
 
-  const text = await res.text();
-  if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
-  return text ? (JSON.parse(text) as { ok: true }) : ({ ok: true } as const);
-}
+  console.log("🛑 API response status:", res.status);
 
+  if (!res.ok) {
+    try {
+      const errorData = await res.json();
+      console.error("🛑 API error:", errorData);
+      throw new Error(errorData.error || `HTTP ${res.status}`);
+    } catch (parseError) {
+      const text = await res.text();
+      console.error("🛑 API error (text):", text);
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+  }
+
+  const json = await res.json();
+  console.log("🛑 API response JSON:", json);
+  
+  // UPDATED: Return the full response
+  return json;
+}
 
 const startRecording = async (layout: "speaker" | "grid" = "grid") => {
   if (!roomName) {
@@ -443,7 +468,13 @@ const startRecording = async (layout: "speaker" | "grid" = "grid") => {
     const response = await apiStartRecording(roomName, layout);
     console.log("📡 Got response:", response);
     
-    const { recordingId } = response;
+    // UPDATED: Check for success and extract from data
+    if (!response.success || !response.data) {
+      console.error("❌ API returned failure:", response);
+      throw new Error(response.error || "Recording start failed");
+    }
+    
+    const { recordingId } = response.data;
     console.log("🎬 Extracted recordingId:", recordingId);
     
     if (!recordingId || recordingId === "unknown") {
@@ -461,7 +492,7 @@ const startRecording = async (layout: "speaker" | "grid" = "grid") => {
     console.log("   recordingId state:", recordingId);
   } catch (e) {
     console.error("❌ Failed to start recording:", e);
-    setRecordingStatus("idle");
+    setRecordingStatus("error");
     recordingRef.current = null;
     setRecordingId(null);
   }
@@ -486,8 +517,14 @@ const stopRecording = async () => {
   setRecordingStatus("stopping");
   
   try {
-    await apiStopRecording(id);
-    console.log("✅ Recording stopped successfully");
+    const response = await apiStopRecording(id);
+    console.log("✅ Recording stopped successfully:", response);
+    
+    // UPDATED: Check for success
+    if (!response.success) {
+      throw new Error(response.error || "Stop recording failed");
+    }
+    
     setRecordingStatus("stopped");
     setRecordingId(id);  // Set this so modal can poll!
   } catch (e) {
