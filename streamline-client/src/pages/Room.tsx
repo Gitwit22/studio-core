@@ -134,7 +134,14 @@ function StreamEndedModal({ recordingId, onStartEditing, onExitRoom }: { recordi
       try {
         const res = await fetch(`/api/recordings/${recordingId}`);
         if (!res.ok) throw new Error("Failed to fetch recording status");
-        const data = await res.json();
+        const text = await res.text();
+
+if (!text) {
+  throw new Error("Empty response from server");
+}
+
+const data = JSON.parse(text);
+
         if (data.status === "READY" || data.status === "ready") {
           setProcessing(false);
           setReady(true);

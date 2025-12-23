@@ -7,6 +7,13 @@ import { r2GetStream, r2Delete } from "../lib/r2";
 
 const router = express.Router();
 
+router.use((req, res, next) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  next();
+});
+
+
 function mustGetEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env var: ${name}`);
@@ -305,17 +312,20 @@ router.post("/start", async (req, res) => {
     console.log("=".repeat(80));
 
     // BULLETPROOF: Always return consistent JSON shape
-    return res.status(200).json({
-      success: true,
-      data: {
-        recordingId: egressId,
-        roomName,
-        layout: chosenLayout,
-        filepath,
-        status: "RECORDING",
-        startedAt: new Date().toISOString(),
-      },
-    });
+      const responseData = {
+        success: true,
+        recording: {
+          egressId,
+          roomName,
+          layout: chosenLayout,
+          status: "RECORDING",
+          startedAt: new Date().toISOString(),
+        },
+      };
+
+      console.log("📤 Sending recording response:", responseData);
+
+      return res.status(200).json(responseData);
 
   } catch (err: any) {
     console.error("=".repeat(80));
