@@ -397,28 +397,26 @@ export default function Room() {
     body: JSON.stringify({ roomName, layout }),
   });
 
-  console.log("🔧 API response status:", res.status);
-  
+  console.log("🔧 Response status:", res.status);
+
+  // ✅ FIX: Read as text first (more reliable than res.json())
+  const text = await res.text();
+  console.log("🔧 Raw response:", text);
+
   if (!res.ok) {
-    // For errors, still parse as JSON since bulletproof API returns JSON
-    try {
-      const errorData = await res.json();
-      console.error("🔧 API error:", errorData);
-      throw new Error(errorData.error || `HTTP ${res.status}`);
-    } catch (parseError) {
-      // Fallback if response isn't JSON
-      const text = await res.text();
-      console.error("🔧 API error (text):", text);
-      throw new Error(text || `HTTP ${res.status}`);
-    }
+    throw new Error(text || `HTTP ${res.status}`);
   }
+
+  // Now parse the text
+  const json = JSON.parse(text);
+  console.log("🔧 Parsed JSON:", json);
   
-  const json = await res.json();
-  console.log("🔧 API response JSON:", json);
-  
-  // UPDATED: Return the full response (bulletproof format)
   return json;
 }
+  
+  // UPDATED: Return the full response (bulletproof format)
+  
+
 
 async function apiStopRecording(recordingId: string) {
   console.log("🛑 apiStopRecording called:", { recordingId });
