@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
-import StreamSetupModal from "../components/StreamSetupModal";
+import StreamSetupModalV2 from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
 import { HostAVControls } from "../components/HostAVControls";
 import React from "react";
@@ -1249,15 +1249,16 @@ const stopRecording = async () => {
         </LiveKitRoom>
       )}
 
-      <StreamSetupModal
+      <StreamSetupModalV2
         open={showStreamSetup}
         onClose={() => setShowStreamSetup(false)}
         roomName={roomName ?? ""}
-        recordingEnabled={recordingEnabled}
-        setRecordingEnabled={setRecordingEnabled}
-        recordingStatus={recordingStatus}
+        streamStatus={streamStatus}
         onStartStream={handleStartMultistream}
         onStopStream={handleStopMultistream}
+        recordingStatus={recordingStatus}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
       />
 
       {recordingStatus === "stopped" && recordingId && (
