@@ -1,3 +1,3 @@
-export const API_BASE =
+export const API_BASE = 
   import.meta.env.VITE_API_BASE || 
-  (import.meta.env.PROD ? "" : "/api");
+  "https://streamline-backend2test.onrender.com";

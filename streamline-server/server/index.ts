@@ -22,6 +22,18 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 const app = express();
 
+
+app.use(cors({
+  origin: [
+    'https://streamline-platform-test.onrender.com',
+    'https://streamline-platform.onrender.com',  // Add production too
+    'http://localhost:5173',  // Local development
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 app.use(
   "/api/livekit/webhook", 
   express.raw({ type: "application/json" }), 
@@ -41,15 +53,11 @@ app.get("/", (_req, res) => res.send("API up"));
 // API ROUTES - Order matters! More specific routes first
 // =============================================================================
 
-
-
 // Token route used by the frontend
 app.use("/api/roomToken", roomTokenRoute);
 
 // Multistream routes (YouTube/FB/Twitch)
 app.use("/api/rooms", multistreamRoutes);
-
-
 
 // Storage test route
 app.get("/api/storage/test", async (req, res) => {
@@ -359,6 +367,15 @@ app.post("/api/usage/streamEnded", async (req, res) => {
 // =============================================================================
 // SERVE FRONTEND - Must be LAST (catch-all route)
 // =============================================================================
+
+app.use((_req, res) => {
+  res.json({ 
+    service: "StreamLine Backend API",
+    status: "running",
+    endpoints: ["/api/auth", "/api/recordings", "/api/rooms"]
+  });
+});
+
 
 app.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
