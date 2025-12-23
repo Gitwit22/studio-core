@@ -21,8 +21,18 @@ const PORT = process.env.PORT || 5137;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 const app = express();
-app.use(cors());
+
+app.use(
+  "/api/livekit/webhook", 
+  express.raw({ type: "application/json" }), 
+  webhookRouter
+);
+
 app.use(express.json());
+
+
+// Recordings API - This handles GET /:id and POST /start, /stop
+app.use("/api/recordings", recordingsRouter);
 
 // Health check
 app.get("/", (_req, res) => res.send("API up"));
@@ -31,8 +41,7 @@ app.get("/", (_req, res) => res.send("API up"));
 // API ROUTES - Order matters! More specific routes first
 // =============================================================================
 
-// LiveKit webhook route - MUST use raw body parser
-app.use("/api/livekit/webhook", express.raw({ type: "application/json" }), webhookRouter);
+
 
 // Token route used by the frontend
 app.use("/api/roomToken", roomTokenRoute);
@@ -40,8 +49,7 @@ app.use("/api/roomToken", roomTokenRoute);
 // Multistream routes (YouTube/FB/Twitch)
 app.use("/api/rooms", multistreamRoutes);
 
-// Recordings API - This handles GET /:id and POST /start, /stop
-app.use("/api/recordings", recordingsRouter);
+
 
 // Storage test route
 app.get("/api/storage/test", async (req, res) => {
