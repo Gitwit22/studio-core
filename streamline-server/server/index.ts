@@ -359,9 +359,6 @@ app.post("/api/usage/streamEnded", async (req, res) => {
 // =============================================================================
 // SERVE FRONTEND - Must be LAST (catch-all route)
 // =============================================================================
-app.use((_req, res) => {
-  res.sendFile(path.join(__dirname, "../dist/index.html"));
-});
 
 app.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
