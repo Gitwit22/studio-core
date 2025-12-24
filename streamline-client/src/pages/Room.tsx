@@ -533,43 +533,32 @@ async function apiStopRecording(recordingId: string) {
   return json;
 }
 
-const stopRecording = async () => {
-  console.log("🛑 stopRecording called");
-  console.log("   recordingRef.current:", recordingRef.current);
-  console.log("   recordingId state:", recordingId);
-  
-  const id = recordingRef.current;
-  
-  if (!id || id === "unknown") {
-    console.error("❌ No valid recording ID to stop!");
-    setRecordingStatus("error");
+const startRecording = async (layout: "speaker" | "grid" = "grid") => {
+  if (!roomName) {
+    console.log("❌ No roomName, can't start recording");
+    return;
+  }
+  if (recordingRef.current) {
+    console.log("⏳ Recording already in progress, skipping startRecording call.");
     return;
   }
 
-  console.log("🛑 Stopping recording with ID:", id);
-  setRecordingStatus("stopping");
+  console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout);
+  setRecordingStatus("recording");
   
-  try {  // ✅ THIS MUST BE HERE
-    // ✅ Stop stream first if it's live
-    if (streamStatus === "live" && egressId) {
-      console.log("🛑 Auto-stopping stream before recording stops...");
-      await handleStopMultistream();
+  try {  // ✅ ADD THIS LINE if missing
+    console.log("📡 Calling apiStartRecording...");
+    const response = await apiStartRecording(roomName, layout);
+    console.log("📡 Got response:", response);
+    
+    const { recordingId } = response.data;
+    console.log("🎬 Extracted recordingId:", recordingId);
+    
+    if (!recordingId || recordingId === "unknown") {
+      console.error("❌ Invalid recordingId:", recordingId);
+      setRecordingStatus("error");
+      return;
     }
-    
-    const response = await apiStopRecording(id);
-    console.log("✅ Recording stopped successfully:", response);
-    
-    if (!response.success) {
-      throw new Error(response.error || "Stop recording failed");
-    }
-    
-    setRecordingStatus("stopped");
-    setRecordingId(id);
-  } catch (e) {  // ✅ Line 581 - This should match the try above
-    console.error("❌ Failed to stop recording:", e);
-    setRecordingStatus("error");
-  }
-};
     
     recordingRef.current = recordingId;
     setRecordingId(recordingId);
@@ -578,11 +567,9 @@ const stopRecording = async () => {
     console.log("✅ Recording started!");
     console.log("   recordingRef.current:", recordingRef.current);
     console.log("   recordingId state:", recordingId);
-  } catch (e) {
+  } catch (e) {  // ✅ Line 581
     console.error("❌ Failed to start recording:", e);
     setRecordingStatus("error");
-    recordingRef.current = null;
-    setRecordingId(null);
   }
 };
 
