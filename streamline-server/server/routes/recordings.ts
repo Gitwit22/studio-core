@@ -307,79 +307,69 @@ router.post("/start", async (req, res) => {
     const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
     const filepath = `recordings/${roomName}/rec_${Date.now()}.mp4`;
 
-    const output = new EncodedFileOutput({
-      fileType: EncodedFileType.MP4,
-      filepath,
-      output: {
-        case: "s3",
-        value: new S3Upload({
-          accessKey: R2_ACCESS_KEY_ID,
-          secret: R2_SECRET_ACCESS_KEY,
-          bucket: R2_BUCKET,
-          endpoint: R2_ENDPOINT,
-          region: R2_REGION,
-          forcePathStyle: true,
-        }),
-      },
-    });
-
-    console.log("🚀 Starting egress...");
-    const info: EgressInfo = await egressClient.startRoomCompositeEgress(roomName, {
-      file: output,
-    });
-
-    const egressId = info?.egressId || (info as any)?.info?.egressId;
-
-    if (!egressId) {
-      const errorData = { success: false, error: "No egressId returned" };
-      console.log("📤 Sending error:", errorData);
-      res.status(500);
-      res.send(JSON.stringify(errorData));
-      return;
-    }
-
-    console.log("✅ Egress ID:", egressId);
-
-    await firestore.collection("recordings").doc(egressId).set({
-      roomName,
-      layout: chosenLayout,
-      status: "RECORDING",
-      objectKey: null,
-      filepath,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }, { merge: true });
-
-    const payload = {
-      success: true,
-      data: {
-        recordingId: egressId,
-        roomName,
-        layout: chosenLayout,
-        status: "RECORDING",
-        startedAt: new Date().toISOString(),
-      },
-    };
-
-    console.log("📤 FINAL recording response:", payload);
-
-    res.status(200);
-    res.setHeader("Content-Type", "application/json");
-    res.send(JSON.stringify(payload));
-    return;
-
-  } catch (err: any) {
-    console.error("❌ ERROR:", err?.message);
-    const errorData = {
-      success: false,
-      error: err?.message ?? "Failed to start recording",
-    };
-    console.log("📤 Sending error:", errorData);
-    res.status(500);
-    res.send(JSON.stringify(errorData));
-    return;
-  }
+   const output = new EncodedFileOutput({
+  fileType: EncodedFileType.MP4,
+  filepath, // ✅ this is the object key/path in your bucket
+  output: {
+    case: "s3",
+    value: new S3Upload({
+      accessKey: R2_ACCESS_KEY_ID,
+      secret: R2_SECRET_ACCESS_KEY,
+      bucket: R2_BUCKET,
+      endpoint: R2_ENDPOINT,
+      region: R2_REGION,
+      forcePathStyle: true,
+    }),
+  },
 });
+
+console.log("🚀 Starting egress...");
+const info: EgressInfo = await egressClient.startRoomCompositeEgress(roomName, {
+  file: output,
+});
+
+// ✅ Bulletproof egressId extraction
+const egressId =
+  (info as any)?.egressId ||
+  (info as any)?.info?.egressId ||
+  (info as any)?.result?.egressId ||
+  (info as any)?.data?.egressId;
+
+if (!egressId) {
+  const errorData = { success: false, error: "No egressId returned" };
+  console.log("📤 Sending error:", errorData);
+  return res.status(500).json(errorData);
+}
+
+console.log("✅ Egress ID:", egressId);
+
+// ✅ IMPORTANT: set objectKey to filepath immediately (source of truth)
+await firestore.collection("recordings").doc(egressId).set(
+  {
+    roomName,
+    layout: chosenLayout,
+    status: "RECORDING",
+    objectKey: filepath,   // ✅ FIX: was null
+    filepath,              // keep for backwards compatibility
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  { merge: true }
+);
+
+const payload = {
+  success: true,
+  data: {
+    recordingId: egressId,
+    roomName,
+    layout: chosenLayout,
+    status: "RECORDING",
+    startedAt: new Date().toISOString(),
+  },
+};
+
+console.log("📤 FINAL recording response:", payload);
+return res.status(200).json(payload);
 
 // =============================================================================
 // STOP RECORDING

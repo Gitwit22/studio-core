@@ -299,7 +299,7 @@ const pollCountRef = useRef(0);
 
 <button
   onClick={handleDownload}
-  disabled={processing || !ready}
+  disabled={!ready}
   style={{
     width: "100%",
     padding: "12px 16px",
@@ -307,13 +307,16 @@ const pollCountRef = useRef(0);
     border: "none",
     fontSize: "14px",
     fontWeight: 600,
-    cursor: processing || !ready ? "not-allowed" : "pointer",
-    opacity: processing || !ready ? 0.6 : 1,
+    cursor: !ready ? "not-allowed" : "pointer",
+    opacity: !ready ? 0.6 : 1,
     transition: "all 0.3s ease",
+    background: ready ? "#16a34a" : "#374151",  // ✅ green vs gray
+    color: "#fff",
   }}
 >
-  {processing ? "⏳ Processing..." : "✅ Download Ready"}
+  {ready ? "⬇️ Download Recording" : "⏳ Processing..."}
 </button>
+
 
 
 
