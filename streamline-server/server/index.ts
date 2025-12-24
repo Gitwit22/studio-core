@@ -40,6 +40,12 @@ app.use(
   webhookRouter
 );
 
+
+
+app.use("/api/livekit/webhook", express.raw({ type: "application/json" }), webhookRouter);
+
+
+
 app.use(express.json());
 
 

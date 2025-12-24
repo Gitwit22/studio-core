@@ -1,3 +1,4 @@
+
 import express from "express";
 import { firestore } from "../firebaseAdmin";
 import { EgressClient, EncodedFileOutput, EncodedFileType, EgressInfo } from "livekit-server-sdk";
@@ -206,6 +207,8 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+
+
 // =============================================================================
 // START RECORDING
 // =============================================================================
@@ -368,16 +371,42 @@ router.post("/stop", async (req, res) => {
     // BULLETPROOF: Extract egressId from response
     const stoppedEgressId = response?.egressId || recordingId;
 
+
+const ref = firestore.collection("recordings").doc(stoppedEgressId);
+const snap = await ref.get();
+
+if (snap.exists) {
+  const data = snap.data() as any;
+
+  // If we already captured filepath earlier, use it to finalize
+  if (data?.filepath && !data?.objectKey) {
+    await ref.set(
+      {
+        status: "READY",
+        objectKey: data.filepath, // <- reuse what you already store
+        readyAt: new Date(),
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+  }
+}
+
     // BULLETPROOF: Consistent response shape
     return res.status(200).json({
-      success: true,
-      data: {
-        recordingId: stoppedEgressId,
-        status: "STOP_REQUESTED",
-        stoppedAt: new Date().toISOString(),
-      },
-    });
-    
+  success: true,
+  data: {
+    recordingId: stoppedEgressId,
+    status: "STOP_REQUESTED",
+    stoppedAt: new Date().toISOString(),
+  },
+});
+
+    // AFTER you successfully request stop from LiveKit
+// (right after you set status: "STOP_REQUESTED")
+
+
+
   } catch (err: any) {
     console.error("=".repeat(80));
     console.error("❌ RECORDING STOP FAILED");
