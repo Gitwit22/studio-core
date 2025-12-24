@@ -296,25 +296,23 @@ const pollCountRef = useRef(0);
           >
             ✂️ Start Editing
           <button
-            onClick={handleDownload}
-            style={{ width: '100%', padding: '1rem', background: 'linear-gradient(to right, #16a34a, #22c55e)', color: '#ffffff', border: 'none', borderRadius: '0.5rem', fontSize: '1rem', fontWeight: '600', cursor: 'pointer', transition: 'all 0.3s ease' }}
-            disabled={processing || !ready}
-          >
-            {processing ? "⏳ Processing..." : "✅ Download Ready"}
-          </button>
-              padding: '1rem',
-              background: 'linear-gradient(to right, #16a34a, #22c55e)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '0.5rem',
-              fontSize: '1rem',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-            }}
+  onClick={handleDownload}
+  disabled={processing || !ready}
+  style={{
+    width: "100%",
+    padding: "12px 16px",
+    borderRadius: "8px",
+    border: "none",
+    fontSize: "14px",
+    fontWeight: 600,
+    cursor: processing || !ready ? "not-allowed" : "pointer",
+    opacity: processing || !ready ? 0.6 : 1,
+    transition: "all 0.3s ease",
+  }}
 >
   {processing ? "⏳ Processing..." : "✅ Download Ready"}
 </button>
+
 
           <button
             onClick={onExitRoom}
