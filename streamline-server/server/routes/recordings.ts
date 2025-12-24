@@ -378,13 +378,14 @@ const snap = await ref.get();
 if (snap.exists) {
   const data = snap.data() as any;
 
-  // If we already captured filepath earlier, use it to finalize
+  if (snap.exists) {
+  const data = snap.data() as any;
+
   if (data?.filepath && !data?.objectKey) {
     await ref.set(
       {
-        status: "READY",
-        objectKey: data.filepath, // <- reuse what you already store
-        readyAt: new Date(),
+        status: "PROCESSING",  // ✅ Wait for webhook
+        objectKey: data.filepath,
         updatedAt: new Date(),
       },
       { merge: true }

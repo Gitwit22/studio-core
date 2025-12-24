@@ -309,10 +309,9 @@ function StreamEndedModal({
               cursor: 'pointer',
               transition: 'all 0.3s ease',
             }}
-            disabled={processing}
-          >
-            ⬇️ Download Recording
-          </button>
+>
+  {processing ? "⏳ Processing..." : "✅ Download Ready"}
+</button>
 
           <button
             onClick={onExitRoom}
