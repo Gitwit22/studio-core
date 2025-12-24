@@ -167,76 +167,32 @@ router.post("/start", async (req, res) => {
 
   console.log("=".repeat(80));
   console.log("🎬 /api/recordings/start called");
-  console.log("=".repeat(80));
-  console.log("Room:", roomName);
-  console.log("Layout:", layout);
+  console.log("Room:", roomName, "Layout:", layout);
 
   if (!roomName) {
-    console.error("❌ Missing roomName");
-    return res.status(400).json({
-      success: false,
-      error: "roomName is required",
-    });
+    const errorData = { success: false, error: "roomName is required" };
+    console.log("📤 Sending error:", errorData);
+    res.status(400);
+    res.send(JSON.stringify(errorData));
+    return;
   }
 
   const chosenLayout: "speaker" | "grid" = layout === "speaker" ? "speaker" : "grid";
 
   try {
-    // Validate environment variables
-    console.log("🔑 Checking environment variables...");
+    console.log("🔑 Initializing LiveKit client...");
     
-    const requiredEnvVars = [
-      "LIVEKIT_URL",
-      "LIVEKIT_API_KEY", 
-      "LIVEKIT_API_SECRET",
-      "R2_ACCESS_KEY_ID",
-      "R2_SECRET_ACCESS_KEY",
-      "R2_BUCKET",
-      "R2_ENDPOINT"
-    ];
-
-    const missingVars: string[] = [];
-    for (const varName of requiredEnvVars) {
-      if (!process.env[varName]) {
-        missingVars.push(varName);
-      }
-    }
-
-    if (missingVars.length > 0) {
-      const errorMsg = `Missing required environment variables: ${missingVars.join(", ")}`;
-      console.error("❌", errorMsg);
-      return res.status(500).json({
-        success: false,
-        error: errorMsg,
-        details: { missingVars },
-      });
-    }
-
-    // Initialize LiveKit client
     const LIVEKIT_URL = mustGetEnv("LIVEKIT_URL");
     const LIVEKIT_API_KEY = mustGetEnv("LIVEKIT_API_KEY");
     const LIVEKIT_API_SECRET = mustGetEnv("LIVEKIT_API_SECRET");
-
-    console.log("✅ LiveKit credentials loaded");
-    console.log("   URL:", LIVEKIT_URL);
-    console.log("   API Key:", LIVEKIT_API_KEY.substring(0, 10) + "...");
-
-    const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
-    console.log("✅ EgressClient initialized");
-
-    // Prepare output configuration
-    const filepath = `recordings/${roomName}/rec_${Date.now()}.mp4`;
-    console.log("📁 File path:", filepath);
-
     const R2_ACCESS_KEY_ID = mustGetEnv("R2_ACCESS_KEY_ID");
     const R2_SECRET_ACCESS_KEY = mustGetEnv("R2_SECRET_ACCESS_KEY");
     const R2_BUCKET = mustGetEnv("R2_BUCKET");
     const R2_ENDPOINT = mustGetEnv("R2_ENDPOINT");
     const R2_REGION = process.env.R2_REGION ?? "auto";
 
-    console.log("✅ R2 credentials loaded");
-    console.log("   Bucket:", R2_BUCKET);
-    console.log("   Endpoint:", R2_ENDPOINT);
+    const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+    const filepath = `recordings/${roomName}/rec_${Date.now()}.mp4`;
 
     const output = new EncodedFileOutput({
       fileType: EncodedFileType.MP4,
@@ -254,99 +210,64 @@ router.post("/start", async (req, res) => {
       },
     });
 
-    console.log("✅ S3Upload output configured");
-
-    // Start egress
-    console.log("🚀 Starting room composite egress...");
+    console.log("🚀 Starting egress...");
     const info: EgressInfo = await egressClient.startRoomCompositeEgress(roomName, {
       file: output,
     });
 
-    console.log("✅ Egress API call completed");
-    console.log("   Full response:", JSON.stringify(info, null, 2));
-
-    // BULLETPROOF: Extract egressId with fallbacks
-    // The response is EgressInfo which has egressId directly
-    const egressId =
-      info?.egressId ||
-      (info as any)?.info?.egressId;
+    const egressId = info?.egressId || (info as any)?.info?.egressId;
 
     if (!egressId) {
-      console.error("❌ No egressId in response!");
-      console.error("   Response structure:", Object.keys(info || {}));
-      
-      return res.status(500).json({
-        success: false,
-        error: "Egress started but no egressId returned by LiveKit.",
-        details: {
-          responseKeys: Object.keys(info || {}),
-          fullResponse: process.env.NODE_ENV === "development" ? info : undefined,
-        },
-      });
+      const errorData = { success: false, error: "No egressId returned" };
+      console.log("📤 Sending error:", errorData);
+      res.status(500);
+      res.send(JSON.stringify(errorData));
+      return;
     }
 
-    console.log("✅ Recording ID extracted:", egressId);
+    console.log("✅ Egress ID:", egressId);
 
-    // Save to Firestore
-    console.log("💾 Writing to Firestore...");
-    await firestore.collection("recordings").doc(egressId).set(
-      {
+    await firestore.collection("recordings").doc(egressId).set({
+      roomName,
+      layout: chosenLayout,
+      status: "RECORDING",
+      objectKey: null,
+      filepath,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }, { merge: true });
+
+    const responseData = {
+      success: true,
+      data: {
+        recordingId: egressId,
         roomName,
         layout: chosenLayout,
-        status: "RECORDING",
-        objectKey: null,
         filepath,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        status: "RECORDING",
+        startedAt: new Date().toISOString(),
       },
-      { merge: true }
-    );
+    };
 
-    console.log("✅ Firestore document created");
     console.log("=".repeat(80));
-    console.log("🎉 RECORDING STARTED SUCCESSFULLY");
-    console.log("=".repeat(80));
-    console.log("Recording ID:", egressId);
-    console.log("Room:", roomName);
-    console.log("Layout:", chosenLayout);
+    console.log("📤 SENDING RESPONSE:");
+    console.log(JSON.stringify(responseData, null, 2));
     console.log("=".repeat(80));
 
-   // BULLETPROOF: Always return consistent JSON shape
-const responseData = {
-  success: true,
-  data: {
-    recordingId: egressId,  // ✅ Changed from recording.egressId
-    roomName,
-    layout: chosenLayout,
-    filepath,
-    status: "RECORDING",
-    startedAt: new Date().toISOString(),
-  },
-};
-
-      console.log("📤 Sending recording response:", responseData);
-
-      return res.status(200).json(responseData);
+    res.status(200);
+    res.send(JSON.stringify(responseData));
+    return;
 
   } catch (err: any) {
-    console.error("=".repeat(80));
-    console.error("❌ RECORDING START FAILED");
-    console.error("=".repeat(80));
-    console.error("Error name:", err?.name);
-    console.error("Error message:", err?.message);
-    console.error("Error stack:", err?.stack);
-    console.error("=".repeat(80));
-    
-    // BULLETPROOF: Always return JSON, never crash without response
-    return res.status(500).json({
+    console.error("❌ ERROR:", err?.message);
+    const errorData = {
       success: false,
       error: err?.message ?? "Failed to start recording",
-      details: {
-        name: err?.name,
-        message: err?.message,
-        stack: process.env.NODE_ENV === "development" ? err?.stack : undefined,
-      },
-    });
+    };
+    console.log("📤 Sending error:", errorData);
+    res.status(500);
+    res.send(JSON.stringify(errorData));
+    return;
   }
 });
 
@@ -358,7 +279,7 @@ router.post("/stop", async (req, res) => {
   const { recordingId } = req.body;
   
   console.log("=".repeat(80));
-  console.log("⏹️ /api/recordings/stop called");
+  console.log("ℹ️ /api/recordings/stop called");
   console.log("=".repeat(80));
   console.log("Recording ID:", recordingId);
   
