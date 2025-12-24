@@ -78,8 +78,14 @@ router.post("/", async (req, res) => {
     const rawToken = crypto.randomBytes(32).toString("hex");
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
 
-    // ✅ Only mark READY when we have a key (payload OR fallback)
-    const finalStatus = objectKey ? "READY" : "FAILED";
+    // Only mark READY if egressInfo.status is COMPLETE
+    const egressStatus = String(egressInfo?.status || "").toUpperCase();
+    let finalStatus = "PROCESSING";
+    if (egressStatus === "COMPLETE" && objectKey) {
+      finalStatus = "READY";
+    } else if (!objectKey) {
+      finalStatus = "FAILED";
+    }
 
     await ref.set(
       {
@@ -88,6 +94,7 @@ router.post("/", async (req, res) => {
         status: finalStatus,
         updatedAt: new Date(),
         endedAt: new Date(),
+        livekitStatus: egressStatus,
       },
       { merge: true }
     );
@@ -97,6 +104,7 @@ router.post("/", async (req, res) => {
       recordingId,
       status: finalStatus,
       objectKey,
+      livekitStatus: egressStatus,
       testDownloadUrl: `/api/recordings/${recordingId}/download?token=${rawToken}`,
     });
 

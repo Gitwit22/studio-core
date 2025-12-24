@@ -5,7 +5,9 @@ import { EgressClient, EncodedFileOutput, EncodedFileType, EgressInfo } from "li
 import { S3Upload } from "livekit-server-sdk";
 import crypto from "crypto";
 import { r2GetStream, r2Delete } from "../lib/r2";
+import { r2HeadObjectSize } from "../lib/r2Head";
 import { Readable } from "stream";
+import { getFileMetadata } from "../lib/storageClient";
 
 
 const router = express.Router();
@@ -38,8 +40,21 @@ router.get("/:id/download-link", async (req, res) => {
 
     const data = snap.data() as any;
 
+
+    // Size stability check (optional but strong)
     if (data.status !== "READY" || !data.objectKey) {
       return res.status(409).json({ success: false, error: "Recording not ready yet" });
+    }
+
+    // Check object size stability
+    const size1 = await r2HeadObjectSize(data.objectKey);
+    if (!size1 || size1 === 0) {
+      return res.status(409).json({ success: false, error: "Recording file not available or empty (size1)" });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const size2 = await r2HeadObjectSize(data.objectKey);
+    if (size2 !== size1) {
+      return res.status(409).json({ success: false, error: "Recording file size not stable yet (size2)" });
     }
 
     const rawToken = crypto.randomBytes(24).toString("hex");
@@ -180,22 +195,66 @@ router.get("/:id", async (req, res) => {
     }
     
     const data = snap.data();
+
+let downloadReady = false;
+
+if (data?.objectKey) {
+  try {
+    const meta = await getFileMetadata(data.objectKey);
+    const sizeNow = meta?.ContentLength ?? 0;
+
+    const lastSize = typeof data.lastSize === "number" ? data.lastSize : null;
+    const lastSizeAt = typeof data.lastSizeAt === "number" ? data.lastSizeAt : null;
+    const now = Date.now();
+
+    // File is considered ready if:
+    // - size > 0
+    // - size hasn't changed
+    // - last check was at least 2s ago
+    const stable =
+      sizeNow > 0 &&
+      lastSize !== null &&
+      sizeNow === lastSize &&
+      lastSizeAt !== null &&
+      now - lastSizeAt >= 2000;
+
+    // Persist size info for next poll
+    await snap.ref.set(
+      {
+        lastSize: sizeNow,
+        lastSizeAt: now,
+        ...(stable && data.status !== "READY"
+          ? { status: "READY", readyAt: new Date() }
+          : {}),
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    downloadReady = stable;
+  } catch (err) {
+    console.warn("⚠️ Failed to check file size for readiness", err);
+  }
+}
+
+
     console.log(`✅ Recording ${id} status:`, data?.status);
     
     return res.status(200).json({
-      success: true,
-      data: {
-        id: id,
-        status: data?.status || "PROCESSING",
-        roomName: data?.roomName,
-        objectKey: data?.objectKey,
-        createdAt: data?.createdAt,
-        updatedAt: data?.updatedAt,
-        endedAt: data?.endedAt,
-        layout: data?.layout,
-        downloadReady: data?.status === "READY" && !!data?.objectKey,
-      },
-    });
+  success: true,
+  data: {
+    id,
+    status: data?.status || "PROCESSING",
+    roomName: data?.roomName,
+    objectKey: data?.objectKey,
+    createdAt: data?.createdAt,
+    updatedAt: data?.updatedAt,
+    endedAt: data?.endedAt,
+    layout: data?.layout,
+    downloadReady,
+  },
+});
+
     
   } catch (err: any) {
     console.error(`❌ Failed to fetch recording ${id}:`, err);
@@ -377,24 +436,16 @@ router.post("/stop", async (req, res) => {
     if (snap.exists) {
       const data = snap.data() as any;
 
+      // ✅ Just ensure objectKey is populated (optional), but DO NOT mark READY here
       if (data?.filepath && !data?.objectKey) {
         await ref.set(
           {
-            status: "PROCESSING",
             objectKey: data.filepath,
             updatedAt: new Date(),
           },
           { merge: true }
         );
-        
-        // ✅ Calculate processing time based on recording duration
-        const recordingDuration = data.createdAt 
-          ? Date.now() - data.createdAt.toMillis() 
-          : 60000; // Default 1 min if unknown
-        
-        // Processing takes ~40% of recording time, minimum 10 seconds, max 5 minutes
-        const processingTime = Math.min(
-          Math.max(recordingDuration * 0.4, 10000), // Min 10 sec
+      }
           300000 // Max 5 min
         );
         

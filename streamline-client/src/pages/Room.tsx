@@ -5,7 +5,7 @@ import "@livekit/components-styles";
 import StreamSetupModalV2 from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
 import { HostAVControls } from "../components/HostAVControls";
-import React from "react";
+
 
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
@@ -133,70 +133,87 @@ function StreamEndedModal({
   onStartEditing: () => void;
   onExitRoom: () => void;
 }) {
-  const [processing, setProcessing] = React.useState(true);
-  const [ready, setReady] = React.useState(false);
-  const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [processing, setProcessing] = useState(true);
+const [ready, setReady] = useState(false);
+const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = React.useRef(0);
   const MAX_POLLS = 100; // Stop after 5 minutes (100 * 3 seconds)
 
-  React.useEffect(() => {
-    const pollStatus = async () => {
-      // ✅ Safety limit: Stop after MAX_POLLS attempts
-      pollCountRef.current += 1;
-      if (pollCountRef.current > MAX_POLLS) {
-        console.warn("⚠️ Max polling attempts reached. Stopping.");
+  useEffect(() => {
+  if (!recordingId) return;
+
+  const pollStatus = async () => {
+    // ✅ Safety limit: Stop after MAX_POLLS attempts
+    pollCountRef.current += 1;
+    if (pollCountRef.current > MAX_POLLS) {
+      console.warn("⚠️ Max polling attempts reached. Stopping.");
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      setProcessing(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/recordings/${recordingId}`);
+      if (!res.ok) throw new Error("Failed to fetch recording status");
+
+      const text = await res.text();
+      if (!text) throw new Error("Empty response from server");
+
+      const payload = JSON.parse(text);
+      console.log("🔍 Full response:", payload);
+
+      const status = payload?.data?.status ?? payload?.status ?? "PROCESSING";
+      const downloadReady = !!payload?.data?.downloadReady;
+
+      console.log("📊 Recording status:", status);
+      console.log("📦 downloadReady:", downloadReady);
+      console.log("📊 Current state - Processing:", processing, "Ready:", ready);
+
+      // ✅ NEW SOURCE OF TRUTH: only unlock when downloadReady === true
+      if (downloadReady) {
+        console.log("✅ downloadReady is true - enabling download button!");
+
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
+          console.log("🛑 Polling stopped - recording is ready!");
         }
+
         setProcessing(false);
+        setReady(true);
         return;
       }
 
-      try {
-        const res = await fetch(`${API_BASE}/api/recordings/${recordingId}`);
-        if (!res.ok) throw new Error("Failed to fetch recording status");
-        const text = await res.text();
-
-        if (!text) {
-          throw new Error("Empty response from server");
-        }
-
-        const data = JSON.parse(text);
-        
-        console.log("🔍 Full response:", data);
-
-        // ✅ Add more detailed status checking
-        const status = data.data?.status || data.status;
-        console.log("📊 Recording status:", status);
-        console.log("📊 Current state - Processing:", processing, "Ready:", ready);
-
-        if (status === "READY" || status === "ready") {
-          console.log("✅ Status is READY - enabling download button!");
-          
-          // ✅ STOP POLLING IMMEDIATELY
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-            console.log("🛑 Polling stopped - recording is ready!");
-          }
-          
-          setProcessing(false);
-          setReady(true);
-        } else if (status === "RECORDING") {
-          setProcessing(true);
-          // Still recording
-        } else if (status === "STOP_REQUESTED") {
-          setProcessing(true);
-          // Processing/encoding
-        } else {
-          setProcessing(true);
-        }
-      } catch (err) {
-        console.error("❌ Poll error:", err);
+      // Not ready yet — keep processing indicator on
+      if (status === "RECORDING") {
+        setProcessing(true);
+      } else if (status === "STOP_REQUESTED" || status === "PROCESSING") {
+        setProcessing(true);
+      } else {
+        // Unknown status, still keep it "processing" until downloadReady flips
         setProcessing(true);
       }
-    };
+    } catch (err) {
+      console.error("❌ Poll error:", err);
+      setProcessing(true);
+    }
+  };
+
+  // Run once immediately, then poll
+  pollStatus();
+  intervalRef.current = setInterval(pollStatus, 3000);
+
+  return () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+}, [API_BASE, recordingId]);
+
 
     if (recordingId && !ready) {
       console.log("🔄 Starting polling for recording:", recordingId);
@@ -351,7 +368,9 @@ function getOrCreateUid() {
 
 export default function Room() {
 
-    const [multistreamEgressId, setMultistreamEgressId] = useState<string | null>(null);
+    
+    // Separate ref for stream egress id
+    const streamEgressRef = useRef<string | null>(null);
   
   const nav = useNavigate();
   const { roomName } = useParams<{ roomName: string }>();
@@ -602,6 +621,7 @@ const stopRecording = async () => {
     
     setRecordingStatus("stopped");
     setRecordingId(id);  // Set this so modal can poll!
+    recordingRef.current = null;
   } catch (e) {
     console.error("❌ Failed to stop recording:", e);
     setRecordingStatus("error");
@@ -723,10 +743,21 @@ const stopRecording = async () => {
         }
       );
 
-      console.log("   Response status:", res.status);
+      // Bulletproof: try to parse as JSON, fallback to text
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        const text = await res.text();
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { raw: text };
+        }
+      }
 
-      const data = await res.json();
-      console.log("   Response data:", data);
+      // Log the full response for debugging
+      console.log("🔍 startMultistream full response:", data);
 
       if (!res.ok) {
         console.error("Start multistream failed", data);
@@ -735,8 +766,15 @@ const stopRecording = async () => {
         return;
       }
 
-      setMultistreamEgressId(data.data?.egressId || data.egressId);
-      setEgressId(data.data?.egressId || data.egressId); // optional legacy
+      // Bulletproof egressId extraction
+      const egressId =
+        data?.data?.egressId ??
+        data?.egressId ??
+        data?.data?.id ??
+        data?.id;
+
+     
+      streamEgressRef.current = egressId || null;
       setStreamStatus("live");
       streamStartTimeRef.current = Date.now();
       setDidStreamThisSession(true);
@@ -744,7 +782,7 @@ const stopRecording = async () => {
       if (keys.record) {
         await startRecording(keys.layout ?? "grid");
       }
-      console.log("✅ Stream started! Egress ID:", data.egressId);
+      console.log("✅ Stream started! Egress ID:", egressId);
     } catch (err) {
       console.error("Error starting multistream:", err);
       alert("Error starting multistream");
@@ -753,7 +791,9 @@ const stopRecording = async () => {
   };
 
   const handleStopMultistream = async () => {
-    if (!multistreamEgressId) {
+    // Use streamEgressRef for stopping stream
+    const streamEgressId = streamEgressRef.current;
+    if (!streamEgressId) {
       alert("No active stream");
       return;
     }
@@ -774,7 +814,7 @@ const stopRecording = async () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ egressId: multistreamEgressId }),
+          body: JSON.stringify({ egressId: streamEgressId }),
         }
       );
 
@@ -786,6 +826,7 @@ const stopRecording = async () => {
 
       setEgressId(null);
       setStreamStatus("idle");
+      streamEgressRef.current = null;
       
       // ✅ Show alert that recording is still active
       if (recordingStatus === "recording") {

@@ -172,15 +172,18 @@ router.post("/:roomName/start-multistream", async (req, res) => {
 
     console.log('✅ Stream tracked in memory and Firestore');
 
-    // BULLETPROOF: Consistent response shape
+    // BULLETPROOF: Consistent response shape with required fields
     return res.status(200).json({
       success: true,
       data: {
         egressId,
+        status: response?.status || "started",
         roomName,
-        status: "started",
-        platforms: urls.length,
-        startedAt: new Date().toISOString(),
+        outputs: {
+          youtube: !!youtubeStreamKey,
+          twitch: !!twitchStreamKey,
+          facebook: !!facebookStreamKey,
+        },
       },
     });
 
