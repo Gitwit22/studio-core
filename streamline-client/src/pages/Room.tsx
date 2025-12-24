@@ -549,7 +549,7 @@ const stopRecording = async () => {
   console.log("🛑 Stopping recording with ID:", id);
   setRecordingStatus("stopping");
   
-  try {
+  try {  // ✅ THIS MUST BE HERE
     // ✅ Stop stream first if it's live
     if (streamStatus === "live" && egressId) {
       console.log("🛑 Auto-stopping stream before recording stops...");
@@ -565,7 +565,7 @@ const stopRecording = async () => {
     
     setRecordingStatus("stopped");
     setRecordingId(id);
-  } catch (e) {
+  } catch (e) {  // ✅ Line 581 - This should match the try above
     console.error("❌ Failed to stop recording:", e);
     setRecordingStatus("error");
   }
