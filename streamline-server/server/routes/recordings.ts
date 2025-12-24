@@ -446,37 +446,7 @@ router.post("/stop", async (req, res) => {
           { merge: true }
         );
       }
-          300000 // Max 5 min
-        );
-        
-        console.log(`⏱️ Recording duration: ${Math.round(recordingDuration/1000)}s`);
-        console.log(`⏱️ Estimated processing: ${Math.round(processingTime/1000)}s`);
-        
-        setTimeout(async () => {
-          try {
-            const snap2 = await ref.get();
-            const currentData = snap2.data() as any;
-            
-            // Only update if still PROCESSING
-            if (currentData?.status === "PROCESSING") {
-              await ref.set(
-                {
-                  status: "READY",
-                  readyAt: new Date(),
-                  updatedAt: new Date(),
-                },
-                { merge: true }
-              );
-              console.log(`✅ Auto-updated ${stoppedEgressId} to READY`);
-            } else {
-              console.log(`ℹ️ Status already ${currentData?.status}, skipping auto-update`);
-            }
-          } catch (err) {
-            console.error("❌ Auto-update failed:", err);
-          }
-        }, processingTime);
-      }
-    }
+    }   
 
     // ✅ Return response immediately (don't wait for setTimeout)
     return res.status(200).json({

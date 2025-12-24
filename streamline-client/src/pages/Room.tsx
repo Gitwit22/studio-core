@@ -136,7 +136,7 @@ function StreamEndedModal({
   const [processing, setProcessing] = useState(true);
 const [ready, setReady] = useState(false);
 const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollCountRef = React.useRef(0);
+const pollCountRef = useRef(0);
   const MAX_POLLS = 100; // Stop after 5 minutes (100 * 3 seconds)
 
   useEffect(() => {
@@ -215,22 +215,7 @@ const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 }, [API_BASE, recordingId]);
 
 
-    if (recordingId && !ready) {
-      console.log("🔄 Starting polling for recording:", recordingId);
-      pollStatus(); // Initial poll
-      intervalRef.current = setInterval(pollStatus, 3000);
-    }
-
-    // Cleanup on unmount or when recordingId changes
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-        console.log("🧹 Cleanup: Polling stopped");
-      }
-    };
-  }, [recordingId, ready]); // ✅ Add 'ready' to dependencies
-
+    
   // ✅ UPDATED download handler (this is the only change)
   const handleDownload = async () => {
     try {
@@ -310,12 +295,13 @@ const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
             disabled={processing}
           >
             ✂️ Start Editing
-          </button>
-
           <button
             onClick={handleDownload}
-            style={{
-              width: '100%',
+            style={{ width: '100%', padding: '1rem', background: 'linear-gradient(to right, #16a34a, #22c55e)', color: '#ffffff', border: 'none', borderRadius: '0.5rem', fontSize: '1rem', fontWeight: '600', cursor: 'pointer', transition: 'all 0.3s ease' }}
+            disabled={processing || !ready}
+          >
+            {processing ? "⏳ Processing..." : "✅ Download Ready"}
+          </button>
               padding: '1rem',
               background: 'linear-gradient(to right, #16a34a, #22c55e)',
               color: '#ffffff',
