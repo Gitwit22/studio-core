@@ -150,15 +150,30 @@ function StreamEndedModal({
         }
 
         const data = JSON.parse(text);
+        
+        console.log("🔍 Full response:", data);
 
-        if (data.status === "READY" || data.status === "ready") {
+        // ✅ Add more detailed status checking
+        const status = data.data?.status || data.status;
+        console.log("📊 Recording status:", status);
+        console.log("📊 Current state - Processing:", processing, "Ready:", ready);
+
+        if (status === "READY" || status === "ready") {
+          console.log("✅ Status is READY - enabling download button!");
           setProcessing(false);
           setReady(true);
           if (interval) clearInterval(interval);
+        } else if (status === "RECORDING") {
+          setProcessing(true);
+          // Still recording
+        } else if (status === "STOP_REQUESTED") {
+          setProcessing(true);
+          // Processing/encoding
         } else {
           setProcessing(true);
         }
-      } catch {
+      } catch (err) {
+        console.error("❌ Poll error:", err);
         setProcessing(true);
       }
     };
@@ -226,8 +241,12 @@ function StreamEndedModal({
         color: '#ffffff',
       }}>
         {processing && (
-          <div style={{ marginBottom: '1rem', fontWeight: 600, color: '#fbbf24' }}>
-            <span role="img" aria-label="processing">⏳</span> Processing recording…
+          <div style={{ marginBottom: '1rem', fontWeight: 600, color: '#fbbf24', textAlign: 'center' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
+            <div>Processing recording...</div>
+            <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem' }}>
+              This usually takes 1-2 minutes. The download button will activate when ready.
+            </div>
           </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -730,33 +749,31 @@ const stopRecording = async () => {
     try {
       setStreamStatus("stopping");
 
-      
-     // 1️⃣ Stop multistream FIRST
-const res = await fetch(
-  `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ egressId: multistreamEgressId }),
-  }
-);
+      // ✅ DON'T stop recording - let user control that separately
+      // Recording continues even after stream ends
 
-if (!res.ok) {
-  alert("Failed to stop multistream");
-  setStreamStatus("live");
-  return;
-}
-
-// 2️⃣ THEN stop recording (room is now stable)
-if (recordingStatus === "recording") {
-  await stopRecording();
-}
-
-setEgressId(null);
-setStreamStatus("idle");
-
+      const res = await fetch(
+        `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ egressId: multistreamEgressId }),
+        }
+      );
 
       if (!res.ok) {
+        alert("Failed to stop multistream");
+        setStreamStatus("live");
+        return;
+      }
+
+      setEgressId(null);
+      setStreamStatus("idle");
+      
+      // ✅ Show alert that recording is still active
+      if (recordingStatus === "recording") {
+        console.log("ℹ️ Stream stopped but recording still active");
+      }
         alert("Failed to stop multistream");
         setStreamStatus("live");
         return;
