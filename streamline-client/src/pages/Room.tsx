@@ -135,11 +135,24 @@ function StreamEndedModal({
 }) {
   const [processing, setProcessing] = React.useState(true);
   const [ready, setReady] = React.useState(false);
+  const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const pollCountRef = React.useRef(0);
+  const MAX_POLLS = 100; // Stop after 5 minutes (100 * 3 seconds)
 
   React.useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-
     const pollStatus = async () => {
+      // ✅ Safety limit: Stop after MAX_POLLS attempts
+      pollCountRef.current += 1;
+      if (pollCountRef.current > MAX_POLLS) {
+        console.warn("⚠️ Max polling attempts reached. Stopping.");
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        setProcessing(false);
+        return;
+      }
+
       try {
         const res = await fetch(`${API_BASE}/api/recordings/${recordingId}`);
         if (!res.ok) throw new Error("Failed to fetch recording status");
@@ -160,9 +173,16 @@ function StreamEndedModal({
 
         if (status === "READY" || status === "ready") {
           console.log("✅ Status is READY - enabling download button!");
+          
+          // ✅ STOP POLLING IMMEDIATELY
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+            console.log("🛑 Polling stopped - recording is ready!");
+          }
+          
           setProcessing(false);
           setReady(true);
-          if (interval) clearInterval(interval);
         } else if (status === "RECORDING") {
           setProcessing(true);
           // Still recording
@@ -178,15 +198,21 @@ function StreamEndedModal({
       }
     };
 
-    if (recordingId) {
-      pollStatus();
-      interval = setInterval(pollStatus, 3000);
+    if (recordingId && !ready) {
+      console.log("🔄 Starting polling for recording:", recordingId);
+      pollStatus(); // Initial poll
+      intervalRef.current = setInterval(pollStatus, 3000);
     }
 
+    // Cleanup on unmount or when recordingId changes
     return () => {
-      if (interval) clearInterval(interval);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        console.log("🧹 Cleanup: Polling stopped");
+      }
     };
-  }, [recordingId]);
+  }, [recordingId, ready]); // ✅ Add 'ready' to dependencies
 
   // ✅ UPDATED download handler (this is the only change)
   const handleDownload = async () => {
