@@ -1,4 +1,3 @@
-
 import express from "express";
 import { firestore } from "../firebaseAdmin";
 import { EgressClient, EncodedFileOutput, EncodedFileType, EgressInfo } from "livekit-server-sdk";
@@ -9,7 +8,6 @@ import { r2HeadObjectSize } from "../lib/r2Head";
 import { Readable } from "stream";
 import { getFileMetadata } from "../lib/storageClient";
 
-
 const router = express.Router();
 
 router.use((req, res, next) => {
@@ -17,7 +15,6 @@ router.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   next();
 });
-
 
 function mustGetEnv(name: string): string {
   const v = process.env[name];
@@ -40,21 +37,18 @@ router.get("/:id/download-link", async (req, res) => {
 
     const data = snap.data() as any;
 
-
-    // Size stability check (optional but strong)
     if (data.status !== "READY" || !data.objectKey) {
       return res.status(409).json({ success: false, error: "Recording not ready yet" });
     }
 
-    // Check object size stability
     const size1 = await r2HeadObjectSize(data.objectKey);
     if (!size1 || size1 === 0) {
-      return res.status(409).json({ success: false, error: "Recording file not available or empty (size1)" });
+      return res.status(409).json({ success: false, error: "Recording file not available or empty" });
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const size2 = await r2HeadObjectSize(data.objectKey);
     if (size2 !== size1) {
-      return res.status(409).json({ success: false, error: "Recording file size not stable yet (size2)" });
+      return res.status(409).json({ success: false, error: "Recording file size not stable yet" });
     }
 
     const rawToken = crypto.randomBytes(24).toString("hex");
@@ -76,10 +70,6 @@ router.get("/:id/download-link", async (req, res) => {
     return res.status(500).json({ success: false, error: "Failed to create download link" });
   }
 });
-
-// =============================================================================
-// DOWNLOAD RECORDING (STREAM + DELETE AFTER DOWNLOAD)
-// =============================================================================
 
 router.get("/:id/download", async (req, res) => {
   const { id } = req.params;
@@ -110,29 +100,21 @@ router.get("/:id/download", async (req, res) => {
       return res.status(409).send("Recording file not available");
     }
 
-    // Stream from R2
     const body: any = await r2GetStream(data.objectKey);
 
+    let nodeStream: NodeJS.ReadableStream;
 
-// Convert AWS Body -> Node stream
-let nodeStream: NodeJS.ReadableStream;
-
-if (body && typeof body.pipe === "function") {
-  // Already a Node stream
-  nodeStream = body;
-} else if (body && typeof body.getReader === "function") {
-  // Web ReadableStream (Node 18+)
-  nodeStream = Readable.fromWeb(body);
-} else {
-  throw new Error("R2 returned an unsupported body type");
-}
-
-nodeStream.pipe(res);
+    if (body && typeof body.pipe === "function") {
+      nodeStream = body;
+    } else if (body && typeof body.getReader === "function") {
+      nodeStream = Readable.fromWeb(body);
+    } else {
+      throw new Error("R2 returned an unsupported body type");
+    }
 
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Content-Disposition", `attachment; filename="${id}.mp4"`);
 
-    // Cleanup: delete from bucket + mark downloaded
     let cleaned = false;
     const cleanup = async () => {
       if (cleaned) return;
@@ -140,7 +122,6 @@ nodeStream.pipe(res);
 
       try {
         await r2Delete(data.objectKey);
-
         await firestore.collection("recordings").doc(id).set(
           {
             status: "DOWNLOADED",
@@ -155,21 +136,16 @@ nodeStream.pipe(res);
       }
     };
 
-    res.on("finish", cleanup); // completed download
-    res.on("close", cleanup);  // user cancelled / tab closed
+    res.on("finish", cleanup);
+    res.on("close", cleanup);
 
-  nodeStream.pipe(res);
+    nodeStream.pipe(res);
 
   } catch (err) {
     console.error("[download] failed:", err);
     return res.status(500).send("Download failed");
   }
 });
-
-
-// =============================================================================
-// GET RECORDING STATUS
-// =============================================================================
 
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
@@ -196,65 +172,58 @@ router.get("/:id", async (req, res) => {
     
     const data = snap.data();
 
-let downloadReady = false;
+    let downloadReady = false;
 
-if (data?.objectKey) {
-  try {
-    const meta = await getFileMetadata(data.objectKey);
-    const sizeNow = meta?.ContentLength ?? 0;
+    if (data?.objectKey) {
+      try {
+        const meta = await getFileMetadata(data.objectKey);
+        const sizeNow = meta?.ContentLength ?? 0;
 
-    const lastSize = typeof data.lastSize === "number" ? data.lastSize : null;
-    const lastSizeAt = typeof data.lastSizeAt === "number" ? data.lastSizeAt : null;
-    const now = Date.now();
+        const lastSize = typeof data.lastSize === "number" ? data.lastSize : null;
+        const lastSizeAt = typeof data.lastSizeAt === "number" ? data.lastSizeAt : null;
+        const now = Date.now();
 
-    // File is considered ready if:
-    // - size > 0
-    // - size hasn't changed
-    // - last check was at least 2s ago
-    const stable =
-      sizeNow > 0 &&
-      lastSize !== null &&
-      sizeNow === lastSize &&
-      lastSizeAt !== null &&
-      now - lastSizeAt >= 2000;
+        const stable =
+          sizeNow > 0 &&
+          lastSize !== null &&
+          sizeNow === lastSize &&
+          lastSizeAt !== null &&
+          now - lastSizeAt >= 2000;
 
-    // Persist size info for next poll
-    await snap.ref.set(
-      {
-        lastSize: sizeNow,
-        lastSizeAt: now,
-        ...(stable && data.status !== "READY"
-          ? { status: "READY", readyAt: new Date() }
-          : {}),
-        updatedAt: new Date(),
-      },
-      { merge: true }
-    );
+        await snap.ref.set(
+          {
+            lastSize: sizeNow,
+            lastSizeAt: now,
+            ...(stable && data.status !== "READY"
+              ? { status: "READY", readyAt: new Date() }
+              : {}),
+            updatedAt: new Date(),
+          },
+          { merge: true }
+        );
 
-    downloadReady = stable;
-  } catch (err) {
-    console.warn("⚠️ Failed to check file size for readiness", err);
-  }
-}
-
+        downloadReady = stable;
+      } catch (err) {
+        console.warn("⚠️ Failed to check file size for readiness", err);
+      }
+    }
 
     console.log(`✅ Recording ${id} status:`, data?.status);
     
     return res.status(200).json({
-  success: true,
-  data: {
-    id,
-    status: data?.status || "PROCESSING",
-    roomName: data?.roomName,
-    objectKey: data?.objectKey,
-    createdAt: data?.createdAt,
-    updatedAt: data?.updatedAt,
-    endedAt: data?.endedAt,
-    layout: data?.layout,
-    downloadReady,
-  },
-});
-
+      success: true,
+      data: {
+        id,
+        status: data?.status || "PROCESSING",
+        roomName: data?.roomName,
+        objectKey: data?.objectKey,
+        createdAt: data?.createdAt,
+        updatedAt: data?.updatedAt,
+        endedAt: data?.endedAt,
+        layout: data?.layout,
+        downloadReady,
+      },
+    });
     
   } catch (err: any) {
     console.error(`❌ Failed to fetch recording ${id}:`, err);
@@ -265,12 +234,6 @@ if (data?.objectKey) {
     });
   }
 });
-
-
-
-// =============================================================================
-// START RECORDING
-// =============================================================================
 
 router.post("/start", async (req, res) => {
   const { roomName, layout } = req.body as {
@@ -285,9 +248,7 @@ router.post("/start", async (req, res) => {
   if (!roomName) {
     const errorData = { success: false, error: "roomName is required" };
     console.log("📤 Sending error:", errorData);
-    res.status(400);
-    res.send(JSON.stringify(errorData));
-    return;
+    return res.status(400).json(errorData);
   }
 
   const chosenLayout: "speaker" | "grid" = layout === "speaker" ? "speaker" : "grid";
@@ -305,75 +266,80 @@ router.post("/start", async (req, res) => {
     const R2_REGION = process.env.R2_REGION ?? "auto";
 
     const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
-    const filepath = `recordings/${roomName}/rec_${Date.now()}.mp4`;
+    const filepath = `recordings/${roomName}/${Date.now()}.mp4`;
 
-   const output = new EncodedFileOutput({
-  fileType: EncodedFileType.MP4,
-  filepath, // ✅ this is the object key/path in your bucket
-  output: {
-    case: "s3",
-    value: new S3Upload({
-      accessKey: R2_ACCESS_KEY_ID,
-      secret: R2_SECRET_ACCESS_KEY,
-      bucket: R2_BUCKET,
-      endpoint: R2_ENDPOINT,
-      region: R2_REGION,
-      forcePathStyle: true,
-    }),
-  },
+    const output = new EncodedFileOutput({
+      fileType: EncodedFileType.MP4,
+      filepath,
+      output: {
+        case: "s3",
+        value: new S3Upload({
+          accessKey: R2_ACCESS_KEY_ID,
+          secret: R2_SECRET_ACCESS_KEY,
+          bucket: R2_BUCKET,
+          endpoint: R2_ENDPOINT,
+          region: R2_REGION,
+          forcePathStyle: true,
+        }),
+      },
+    });
+
+    console.log("🚀 Starting egress...");
+    const info: EgressInfo = await egressClient.startRoomCompositeEgress(roomName, {
+      file: output,
+    });
+
+    const egressId =
+      (info as any)?.egressId ||
+      (info as any)?.info?.egressId ||
+      (info as any)?.result?.egressId ||
+      (info as any)?.data?.egressId;
+
+    if (!egressId) {
+      const errorData = { success: false, error: "No egressId returned" };
+      console.log("📤 Sending error:", errorData);
+      return res.status(500).json(errorData);
+    }
+
+    console.log("✅ Egress ID:", egressId);
+
+    await firestore.collection("recordings").doc(egressId).set(
+      {
+        roomName,
+        layout: chosenLayout,
+        status: "RECORDING",
+        objectKey: filepath,
+        filepath,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    const payload = {
+      success: true,
+      data: {
+        recordingId: egressId,
+        roomName,
+        layout: chosenLayout,
+        status: "RECORDING",
+        startedAt: new Date().toISOString(),
+      },
+    };
+
+    console.log("📤 FINAL recording response:", payload);
+    return res.status(200).json(payload);
+
+  } catch (err: any) {
+    console.error("❌ ERROR:", err?.message);
+    const errorData = {
+      success: false,
+      error: err?.message ?? "Failed to start recording",
+    };
+    console.log("📤 Sending error:", errorData);
+    return res.status(500).json(errorData);
+  }
 });
-
-console.log("🚀 Starting egress...");
-const info: EgressInfo = await egressClient.startRoomCompositeEgress(roomName, {
-  file: output,
-});
-
-// ✅ Bulletproof egressId extraction
-const egressId =
-  (info as any)?.egressId ||
-  (info as any)?.info?.egressId ||
-  (info as any)?.result?.egressId ||
-  (info as any)?.data?.egressId;
-
-if (!egressId) {
-  const errorData = { success: false, error: "No egressId returned" };
-  console.log("📤 Sending error:", errorData);
-  return res.status(500).json(errorData);
-}
-
-console.log("✅ Egress ID:", egressId);
-
-// ✅ IMPORTANT: set objectKey to filepath immediately (source of truth)
-await firestore.collection("recordings").doc(egressId).set(
-  {
-    roomName,
-    layout: chosenLayout,
-    status: "RECORDING",
-    objectKey: filepath,   // ✅ FIX: was null
-    filepath,              // keep for backwards compatibility
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  { merge: true }
-);
-
-const payload = {
-  success: true,
-  data: {
-    recordingId: egressId,
-    roomName,
-    layout: chosenLayout,
-    status: "RECORDING",
-    startedAt: new Date().toISOString(),
-  },
-};
-
-console.log("📤 FINAL recording response:", payload);
-return res.status(200).json(payload);
-
-// =============================================================================
-// STOP RECORDING
-// =============================================================================
 
 router.post("/stop", async (req, res) => {
   const { recordingId } = req.body;
@@ -407,7 +373,6 @@ router.post("/stop", async (req, res) => {
 
     console.log("✅ Egress stop requested:", stoppedEgressId);
 
-    // ✅ Update Firestore status (use stoppedEgressId consistently)
     console.log("💾 Updating Firestore status...");
     const ref = firestore.collection("recordings").doc(stoppedEgressId);
 
@@ -420,7 +385,6 @@ router.post("/stop", async (req, res) => {
       { merge: true }
     );
 
-    // ✅ Ensure objectKey is populated (optional) but DO NOT mark READY here
     const snap = await ref.get();
     if (snap.exists) {
       const data = snap.data() as any;
@@ -436,7 +400,6 @@ router.post("/stop", async (req, res) => {
       }
     }
 
-    // ✅ Return immediately (webhook/GET route will decide downloadReady)
     return res.status(200).json({
       success: true,
       data: {
@@ -460,4 +423,5 @@ router.post("/stop", async (req, res) => {
     });
   }
 });
+
 export default router;
