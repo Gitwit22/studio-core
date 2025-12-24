@@ -255,6 +255,7 @@ router.post("/start", async (req, res) => {
     console.log("=".repeat(80));
 
     res.status(200);
+    res.setHeader("Content-Type", "application/json");
     res.send(JSON.stringify(responseData));
     return;
 

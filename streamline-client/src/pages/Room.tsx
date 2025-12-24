@@ -274,6 +274,8 @@ function getOrCreateUid() {
 }
 
 export default function Room() {
+
+    const [multistreamEgressId, setMultistreamEgressId] = useState<string | null>(null);
   
   const nav = useNavigate();
   const { roomName } = useParams<{ roomName: string }>();
@@ -665,7 +667,8 @@ const stopRecording = async () => {
         return;
       }
 
-      setEgressId(data.data?.egressId || data.egressId); // ✅ Handle both formats
+      setMultistreamEgressId(data.data?.egressId || data.egressId);
+      setEgressId(data.data?.egressId || data.egressId); // optional legacy
       setStreamStatus("live");
       streamStartTimeRef.current = Date.now();
       setDidStreamThisSession(true);
@@ -682,7 +685,7 @@ const stopRecording = async () => {
   };
 
   const handleStopMultistream = async () => {
-    if (!egressId) {
+    if (!multistreamEgressId) {
       alert("No active stream");
       return;
     }
@@ -695,19 +698,31 @@ const stopRecording = async () => {
     try {
       setStreamStatus("stopping");
 
-      // Stop recording if currently recording
-      if (recordingStatus === "recording") {
-        await stopRecording();
-      }
+      
+     // 1️⃣ Stop multistream FIRST
+const res = await fetch(
+  `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ egressId: multistreamEgressId }),
+  }
+);
 
-      const res = await fetch(
-        `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ egressId }),
-        }
-      );
+if (!res.ok) {
+  alert("Failed to stop multistream");
+  setStreamStatus("live");
+  return;
+}
+
+// 2️⃣ THEN stop recording (room is now stable)
+if (recordingStatus === "recording") {
+  await stopRecording();
+}
+
+setEgressId(null);
+setStreamStatus("idle");
+
 
       if (!res.ok) {
         alert("Failed to stop multistream");
