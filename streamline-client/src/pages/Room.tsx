@@ -124,23 +124,32 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
   );
 }
 
-function StreamEndedModal({ recordingId, onStartEditing, onExitRoom }: { recordingId: string; onStartEditing: () => void; onExitRoom: () => void }) {
+function StreamEndedModal({
+  recordingId,
+  onStartEditing,
+  onExitRoom,
+}: {
+  recordingId: string;
+  onStartEditing: () => void;
+  onExitRoom: () => void;
+}) {
   const [processing, setProcessing] = React.useState(true);
   const [ready, setReady] = React.useState(false);
 
   React.useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
+
     const pollStatus = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/recordings/${recordingId}`);
         if (!res.ok) throw new Error("Failed to fetch recording status");
         const text = await res.text();
 
-if (!text) {
-  throw new Error("Empty response from server");
-}
+        if (!text) {
+          throw new Error("Empty response from server");
+        }
 
-const data = JSON.parse(text);
+        const data = JSON.parse(text);
 
         if (data.status === "READY" || data.status === "ready") {
           setProcessing(false);
@@ -153,36 +162,59 @@ const data = JSON.parse(text);
         setProcessing(true);
       }
     };
+
     if (recordingId) {
       pollStatus();
       interval = setInterval(pollStatus, 3000);
     }
-    return () => { if (interval) clearInterval(interval); };
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [recordingId]);
 
-  // Handler for downloading the recording
+  // ✅ UPDATED download handler (this is the only change)
   const handleDownload = async () => {
     try {
-      window.open(`${API_BASE}/api/recordings/${recordingId}/download`, "_blank");
+      // 1️⃣ Ask backend for a one-time download link
+      const res = await fetch(
+        `${API_BASE}/api/recordings/${recordingId}/download-link`
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to get download link");
+      }
+
+      const data = await res.json();
+
+      if (!data?.success || !data?.data?.path) {
+        throw new Error(data?.error || "Invalid download link response");
+      }
+
+      // 2️⃣ Open the real download URL (includes token)
+      window.open(`${API_BASE}${data.data.path}`, "_blank");
     } catch (err) {
+      console.error(err);
       alert("Failed to download recording.");
     }
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.8)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999,
-      backdropFilter: 'blur(4px)',
-    }}>
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0, 0, 0, 0.8)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 9999,
+        backdropFilter: "blur(4px)",
+      }}
+    >
       <div style={{
         background: 'linear-gradient(135deg, #1a1a1a 0%, #2d1a1a 100%)',
         border: '2px solid rgba(220, 38, 38, 0.3)',
@@ -1286,8 +1318,10 @@ setStreamStatus("idle");
           recordingId={recordingId}
           onStartEditing={() => nav('/edit', { replace: true })}
           onExitRoom={() => nav('/thanks', { replace: true })}
+
+          
         />
-      )}
+      )} 
 
       <style>{`
         @keyframes pulse {
