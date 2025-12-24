@@ -368,45 +368,35 @@ router.post("/stop", async (req, res) => {
     console.log("✅ Recording status updated to STOP_REQUESTED");
     console.log("=".repeat(80));
 
-    // BULLETPROOF: Extract egressId from response
     const stoppedEgressId = response?.egressId || recordingId;
 
+    // Check if we need to set objectKey
+    const ref = firestore.collection("recordings").doc(stoppedEgressId);
+    const snap = await ref.get();
 
-const ref = firestore.collection("recordings").doc(stoppedEgressId);
-const snap = await ref.get();
+    if (snap.exists) {
+      const data = snap.data() as any;
 
-if (snap.exists) {
-  const data = snap.data() as any;
+      if (data?.filepath && !data?.objectKey) {
+        await ref.set(
+          {
+            status: "PROCESSING",
+            objectKey: data.filepath,
+            updatedAt: new Date(),
+          },
+          { merge: true }
+        );
+      }
+    }
 
-  if (snap.exists) {
-  const data = snap.data() as any;
-
-  if (data?.filepath && !data?.objectKey) {
-    await ref.set(
-      {
-        status: "PROCESSING",  // ✅ Wait for webhook
-        objectKey: data.filepath,
-        updatedAt: new Date(),
-      },
-      { merge: true }
-    );
-  }
-}
-
-    // BULLETPROOF: Consistent response shape
     return res.status(200).json({
-  success: true,
-  data: {
-    recordingId: stoppedEgressId,
-    status: "STOP_REQUESTED",
-    stoppedAt: new Date().toISOString(),
-  },
-});
-
-    // AFTER you successfully request stop from LiveKit
-// (right after you set status: "STOP_REQUESTED")
-
-
+      success: true,
+      data: {
+        recordingId: stoppedEgressId,
+        status: "STOP_REQUESTED",
+        stoppedAt: new Date().toISOString(),
+      },
+    });
 
   } catch (err: any) {
     console.error("=".repeat(80));
@@ -416,7 +406,6 @@ if (snap.exists) {
     console.error("Stack:", err?.stack);
     console.error("=".repeat(80));
     
-    // BULLETPROOF: Always return JSON
     return res.status(500).json({
       success: false,
       error: "Failed to stop recording",
