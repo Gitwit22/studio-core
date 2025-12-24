@@ -279,23 +279,25 @@ const pollCountRef = useRef(0);
 )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <button
-            onClick={onStartEditing}
-            style={{
-              width: '100%',
-              padding: '1rem',
-              background: 'linear-gradient(to right, #dc2626, #ef4444)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '0.5rem',
-              fontSize: '1rem',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-            }}
-            disabled={processing}
-          >
-            ✂️ Start Editing
-          <button
+  onClick={onStartEditing}
+  style={{
+    width: '100%',
+    padding: '1rem',
+    background: 'linear-gradient(to right, #dc2626, #ef4444)',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '0.5rem',
+    fontSize: '1rem',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+  }}
+  disabled={processing}
+>
+  ✂️ Start Editing
+</button>
+
+<button
   onClick={handleDownload}
   disabled={processing || !ready}
   style={{
@@ -312,6 +314,7 @@ const pollCountRef = useRef(0);
 >
   {processing ? "⏳ Processing..." : "✅ Download Ready"}
 </button>
+
 
 
           <button
