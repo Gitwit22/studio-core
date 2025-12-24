@@ -374,44 +374,58 @@ router.post("/stop", async (req, res) => {
     const ref = firestore.collection("recordings").doc(stoppedEgressId);
     const snap = await ref.get();
 
-    if (snap.exists) {
-      const data = snap.data() as any;
+ if (snap.exists) {
+  const data = snap.data() as any;
 
-      if (data?.filepath && !data?.objectKey) {
-        await ref.set(
-          {
-            status: "PROCESSING",
-            objectKey: data.filepath,
-            updatedAt: new Date(),
-          },
-          { merge: true }
-        );
-      }
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        recordingId: stoppedEgressId,
-        status: "STOP_REQUESTED",
-        stoppedAt: new Date().toISOString(),
+  if (data?.filepath && !data?.objectKey) {
+    await ref.set(
+      {
+        status: "PROCESSING",
+        objectKey: data.filepath,
+        updatedAt: new Date(),
       },
-    });
-
-  } catch (err: any) {
-    console.error("=".repeat(80));
-    console.error("❌ RECORDING STOP FAILED");
-    console.error("=".repeat(80));
-    console.error("Error:", err?.message);
-    console.error("Stack:", err?.stack);
-    console.error("=".repeat(80));
+      { merge: true }
+    );
     
-    return res.status(500).json({
-      success: false,
-      error: "Failed to stop recording",
-      details: err?.message || String(err),
-    });
+    // ✅ Calculate processing time based on recording duration
+    const recordingDuration = data.createdAt 
+      ? Date.now() - data.createdAt.toMillis() 
+      : 60000; // Default 1 min if unknown
+    
+    // Processing takes ~40% of recording time, minimum 10 seconds, max 5 minutes
+    const processingTime = Math.min(
+      Math.max(recordingDuration * 0.4, 10000), // Min 10 sec
+      300000 // Max 5 min
+    );
+    
+    console.log(`⏱️ Recording duration: ${Math.round(recordingDuration/1000)}s`);
+    console.log(`⏱️ Estimated processing: ${Math.round(processingTime/1000)}s`);
+    
+    setTimeout(async () => {
+      try {
+        const snap2 = await ref.get();
+        const currentData = snap2.data() as any;
+        
+        // Only update if still PROCESSING
+        if (currentData?.status === "PROCESSING") {
+          await ref.set(
+            {
+              status: "READY",
+              readyAt: new Date(),
+              updatedAt: new Date(),
+            },
+            { merge: true }
+          );
+          console.log(`✅ Auto-updated ${stoppedEgressId} to READY`);
+        } else {
+          console.log(`ℹ️ Status already ${currentData?.status}, skipping auto-update`);
+        }
+      } catch (err) {
+        console.error("❌ Auto-update failed:", err);
+      }
+    }, processingTime);
   }
+}
 });
 
 export default router;

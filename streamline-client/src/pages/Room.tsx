@@ -266,15 +266,15 @@ function StreamEndedModal({
         textAlign: 'center',
         color: '#ffffff',
       }}>
-        {processing && (
-          <div style={{ marginBottom: '1rem', fontWeight: 600, color: '#fbbf24', textAlign: 'center' }}>
-            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
-            <div>Processing recording...</div>
-            <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-              This usually takes 1-2 minutes. The download button will activate when ready.
-            </div>
-          </div>
-        )}
+       {processing && (
+  <div style={{ marginBottom: '1rem', fontWeight: 600, color: '#fbbf24', textAlign: 'center' }}>
+    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
+    <div className="processing-text">Processing recording<span className="dots"></span></div>
+    <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem' }}>
+      This usually takes 1-2 minutes. The download button will activate when ready.
+    </div>
+  </div>
+)}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <button
             onClick={onStartEditing}
@@ -1352,15 +1352,26 @@ const stopRecording = async () => {
       )} 
 
       <style>{`
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: 0.7;
-          }
-        }
-      `}</style>
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+  
+  @keyframes dots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+  }
+  
+  .processing-text {
+    display: inline-block;
+  }
+  
+  .dots::after {
+    content: '';
+    animation: dots 1.5s steps(1) infinite;
+  }
+`}</style>
     </>
   );
 }
