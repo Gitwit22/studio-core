@@ -132,7 +132,7 @@ function StreamEndedModal({ recordingId, onStartEditing, onExitRoom }: { recordi
     let interval: NodeJS.Timeout | null = null;
     const pollStatus = async () => {
       try {
-        const res = await fetch(`/api/recordings/${recordingId}`);
+        const res = await fetch(`${API_BASE}/api/recordings/${recordingId}`);
         if (!res.ok) throw new Error("Failed to fetch recording status");
         const text = await res.text();
 
@@ -163,7 +163,7 @@ const data = JSON.parse(text);
   // Handler for downloading the recording
   const handleDownload = async () => {
     try {
-      window.open(`/api/recordings/${recordingId}/download`, "_blank");
+      window.open(`${API_BASE}/api/recordings/${recordingId}/download`, "_blank");
     } catch (err) {
       alert("Failed to download recording.");
     }
@@ -400,7 +400,7 @@ export default function Room() {
  async function apiStartRecording(roomName: string, layout: "speaker" | "grid" = "grid") {
   console.log("🔧 apiStartRecording called:", { roomName, layout });
   
-  const res = await fetch("/api/recordings/start", {
+  const res = await fetch(`${API_BASE}/api/recordings/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ roomName, layout }),
@@ -430,7 +430,7 @@ export default function Room() {
 async function apiStopRecording(recordingId: string) {
   console.log("🛑 apiStopRecording called:", { recordingId });
   
-  const res = await fetch("/api/recordings/stop", {
+  const res = await fetch(`${API_BASE}/api/recordings/stop`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ recordingId }),
