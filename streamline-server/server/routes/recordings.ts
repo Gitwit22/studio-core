@@ -387,12 +387,12 @@ router.post("/start", async (req, res) => {
 
 router.post("/stop", async (req, res) => {
   const { recordingId } = req.body;
-  
+
   console.log("=".repeat(80));
   console.log("ℹ️ /api/recordings/stop called");
   console.log("=".repeat(80));
   console.log("Recording ID:", recordingId);
-  
+
   if (!recordingId) {
     console.error("❌ Missing recordingId");
     return res.status(400).json({
@@ -400,7 +400,7 @@ router.post("/stop", async (req, res) => {
       error: "recordingId is required",
     });
   }
-  
+
   try {
     const LIVEKIT_URL = mustGetEnv("LIVEKIT_URL");
     const LIVEKIT_API_KEY = mustGetEnv("LIVEKIT_API_KEY");
@@ -413,30 +413,28 @@ router.post("/stop", async (req, res) => {
     console.log("🛑 Stopping egress...");
     const response: EgressInfo = await egressClient.stopEgress(recordingId);
 
-    console.log("✅ Egress stopped successfully");
+    const stoppedEgressId = response?.egressId || recordingId;
 
+    console.log("✅ Egress stop requested:", stoppedEgressId);
+
+    // ✅ Update Firestore status (use stoppedEgressId consistently)
     console.log("💾 Updating Firestore status...");
-    await firestore.collection("recordings").doc(recordingId).set(
+    const ref = firestore.collection("recordings").doc(stoppedEgressId);
+
+    await ref.set(
       {
         status: "STOP_REQUESTED",
         stoppedAt: new Date(),
+        updatedAt: new Date(),
       },
       { merge: true }
     );
 
-    console.log("✅ Recording status updated to STOP_REQUESTED");
-    console.log("=".repeat(80));
-
-    const stoppedEgressId = response?.egressId || recordingId;
-
-    // Check if we need to set objectKey
-    const ref = firestore.collection("recordings").doc(stoppedEgressId);
+    // ✅ Ensure objectKey is populated (optional) but DO NOT mark READY here
     const snap = await ref.get();
-
     if (snap.exists) {
       const data = snap.data() as any;
 
-      // ✅ Just ensure objectKey is populated (optional), but DO NOT mark READY here
       if (data?.filepath && !data?.objectKey) {
         await ref.set(
           {
@@ -446,9 +444,9 @@ router.post("/stop", async (req, res) => {
           { merge: true }
         );
       }
-    }   
+    }
 
-    // ✅ Return response immediately (don't wait for setTimeout)
+    // ✅ Return immediately (webhook/GET route will decide downloadReady)
     return res.status(200).json({
       success: true,
       data: {
@@ -457,7 +455,6 @@ router.post("/stop", async (req, res) => {
         stoppedAt: new Date().toISOString(),
       },
     });
-
   } catch (err: any) {
     console.error("=".repeat(80));
     console.error("❌ RECORDING STOP FAILED");
@@ -465,7 +462,7 @@ router.post("/stop", async (req, res) => {
     console.error("Error:", err?.message);
     console.error("Stack:", err?.stack);
     console.error("=".repeat(80));
-    
+
     return res.status(500).json({
       success: false,
       error: "Failed to stop recording",
@@ -473,5 +470,4 @@ router.post("/stop", async (req, res) => {
     });
   }
 });
-
 export default router;
