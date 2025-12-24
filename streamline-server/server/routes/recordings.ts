@@ -237,26 +237,22 @@ router.post("/start", async (req, res) => {
       updatedAt: new Date(),
     }, { merge: true });
 
-    const responseData = {
+    const payload = {
       success: true,
       data: {
         recordingId: egressId,
         roomName,
         layout: chosenLayout,
-        filepath,
         status: "RECORDING",
         startedAt: new Date().toISOString(),
       },
     };
 
-    console.log("=".repeat(80));
-    console.log("📤 SENDING RESPONSE:");
-    console.log(JSON.stringify(responseData, null, 2));
-    console.log("=".repeat(80));
+    console.log("📤 FINAL recording response:", payload);
 
     res.status(200);
     res.setHeader("Content-Type", "application/json");
-    res.send(JSON.stringify(responseData));
+    res.send(JSON.stringify(payload));
     return;
 
   } catch (err: any) {
