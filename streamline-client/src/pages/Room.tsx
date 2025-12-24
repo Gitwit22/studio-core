@@ -800,13 +800,7 @@ const stopRecording = async () => {
       if (recordingStatus === "recording") {
         console.log("ℹ️ Stream stopped but recording still active");
       }
-        alert("Failed to stop multistream");
-        setStreamStatus("live");
-        return;
-      }
-
-      setEgressId(null);
-      setStreamStatus("idle");
+        
     } catch (err) {
       console.error("Error stopping multistream", err);
       alert("Error stopping multistream");
