@@ -665,7 +665,7 @@ const stopRecording = async () => {
         return;
       }
 
-      setEgressId(data.egressId);
+      setEgressId(data.data?.egressId || data.egressId); // ✅ Handle both formats
       setStreamStatus("live");
       streamStartTimeRef.current = Date.now();
       setDidStreamThisSession(true);

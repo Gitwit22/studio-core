@@ -311,17 +311,18 @@ router.post("/start", async (req, res) => {
     console.log("Layout:", chosenLayout);
     console.log("=".repeat(80));
 
-    // BULLETPROOF: Always return consistent JSON shape
-      const responseData = {
-        success: true,
-        recording: {
-          egressId,
-          roomName,
-          layout: chosenLayout,
-          status: "RECORDING",
-          startedAt: new Date().toISOString(),
-        },
-      };
+   // BULLETPROOF: Always return consistent JSON shape
+const responseData = {
+  success: true,
+  data: {
+    recordingId: egressId,  // ✅ Changed from recording.egressId
+    roomName,
+    layout: chosenLayout,
+    filepath,
+    status: "RECORDING",
+    startedAt: new Date().toISOString(),
+  },
+};
 
       console.log("📤 Sending recording response:", responseData);
 
