@@ -579,6 +579,8 @@ const startRecording = async (layout: "speaker" | "grid" = "grid") => {
   } catch (e) {  // ✅ Line 581
     console.error("❌ Failed to start recording:", e);
     setRecordingStatus("error");
+        alert(`Failed to start recording: ${(e as Error).message || "Unknown error"}`);
+
   }
 };
 
@@ -611,10 +613,12 @@ const stopRecording = async () => {
     
     setRecordingStatus("stopped");
     setRecordingId(id);  // Set this so modal can poll!
-    recordingRef.current = null;
+
   } catch (e) {
     console.error("❌ Failed to stop recording:", e);
     setRecordingStatus("error");
+        alert(`Failed to start recording: ${(e as Error).message || "Unknown error"}`);
+
   }
 };
 
