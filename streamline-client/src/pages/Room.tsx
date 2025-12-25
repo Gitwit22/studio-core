@@ -383,7 +383,8 @@ export default function Room() {
   // First person to join is the host (based on stored host ID for this room)
   const currentUserId = getOrCreateUid();
   const [isHost, setIsHost] = useState(false);
-  const [debugInfo, setDebugInfo] = useState({ roomName: '', userId: '', isHost: false });
+  const [userRole, setUserRole] = useState<string>("guest");
+  const [debugInfo, setDebugInfo] = useState({ roomName: '', userId: '', isHost: false, role: '' });
 
   // Effect to determine host status based on room creation
   useEffect(() => {
@@ -393,14 +394,19 @@ export default function Room() {
     const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
     const willBeHost = createdRooms.includes(roomName);
     setIsHost(willBeHost);
+
+    // Get role from localStorage (set during join process)
+    const currentRole = localStorage.getItem("sl_current_role") || "guest";
+    setUserRole(currentRole);
     
-    console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost });
+    console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost, role: currentRole });
     
     // Update debug info
     setDebugInfo({ 
       roomName: roomName || 'none', 
       userId: currentUserId.slice(-4) || 'none', 
-      isHost: willBeHost 
+      isHost: willBeHost,
+      role: currentRole
     });
   }, [roomName, currentUserId]);
 
@@ -1186,7 +1192,7 @@ const stopRecording = async () => {
 
           <span className="text-sm opacity-80">{roomName}</span>
 
-          {/* Invite Link Button - only for hosts */}
+          {/* Invite Menu - only for hosts */}
           {isHost && (
             <button
               onClick={() => {
@@ -1358,7 +1364,7 @@ const stopRecording = async () => {
           <RoleOverlay
             open={dashboardOpen}
             onClose={() => setDashboardOpen(false)}
-            role="host"
+            role={isHost ? "host" : (userRole === "moderator" ? "moderator" : "participant")}
             roomName={roomName}
           />
         </LiveKitRoom>

@@ -27,14 +27,19 @@ export default function Join() {
 
   // Check for invite link (room query parameter)
   const isParticipant = searchParams.get("room") !== null;
+  const role = searchParams.get("role") || "guest"; // Get role from URL
   
   useEffect(() => {
     const inviteRoom = searchParams.get("room");
     if (inviteRoom) {
       const decodedRoom = decodeURIComponent(inviteRoom);
       setRoomName(decodedRoom);
+      
+      // Store role for later use in room
+      console.log("👤 Joining as role:", role);
+      localStorage.setItem("sl_current_role", role);
     }
-  }, [searchParams]);
+  }, [searchParams, role]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
