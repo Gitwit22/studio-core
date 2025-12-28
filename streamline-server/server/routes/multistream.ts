@@ -10,6 +10,8 @@ import {
 import { firestore } from "../firebaseAdmin";
 import { addUsageForUser } from "../usageHelper";
 import { generateRecordingPath, getSignedDownloadUrl } from "../lib/storageClient";
+import { getCurrentMonthKey, canStartStream } from "../lib/usageTracker";
+import type { PlanDoc } from "../lib/usageTypes";
 
 const router = express.Router();
 
@@ -24,9 +26,26 @@ const egressClient = new EgressClient(
 interface ActiveStream {
   egressId: string;
   userId: string;
+  displayName?: string;
   roomName: string;
   startedAt: Date;
   guestCount?: number;
+  planIdAtStart: "free" | "starter" | "pro";
+  billingMonthKey: string;
+  enforcement: {
+    monthlyLimitMinutesAtStart: number;
+    overagesEnabledAtStart: boolean;
+    maxSessionMinutes: number;
+  };
+  flags: {
+    recording: boolean;
+    rtmpCount: number;
+  };
+  warningState: {
+    warned80: boolean;
+    warned90: boolean;
+    graceStartedAt?: Date;
+  };
 }
 
 const activeStreams = new Map<string, ActiveStream>();
@@ -102,6 +121,88 @@ router.post("/:roomName/start-multistream", async (req, res) => {
     });
   }
 
+  // =============================================================================
+  // 🚦 USAGE GATE: Check if user can start stream
+  // =============================================================================
+  
+  try {
+    console.log("🚦 Checking usage limits for user:", finalUserId);
+
+    // 1) Get user doc
+    const userSnap = await firestore.collection("users").doc(finalUserId).get();
+    if (!userSnap.exists) {
+      console.warn("⚠️ User not found, allowing stream (guest mode)");
+      // Allow guests to stream - they'll have no limits checked
+    } else {
+      const userData = userSnap.data() || {};
+      const planId = String(userData.planId || userData.plan || "free");
+      const overagesEnabled = !!userData.billing?.overagesEnabled || !!userData.overagesEnabled;
+
+      console.log("📋 User plan:", planId, "| Overages:", overagesEnabled);
+
+      // 2) Get plan doc
+      const planSnap = await firestore.collection("plans").doc(planId).get();
+      if (!planSnap.exists) {
+        console.warn("⚠️ Plan not found, using free plan defaults");
+        // Continue with free plan defaults
+      } else {
+        const plan = planSnap.data() as PlanDoc;
+
+        // 3) Get usage doc for this month
+        const monthKey = getCurrentMonthKey();
+        const usageDocId = `${finalUserId}_${monthKey}`;
+        const usageSnap = await firestore.collection("usageMonthly").doc(usageDocId).get();
+        const usageData = usageSnap.exists ? (usageSnap.data() as any) : null;
+        const currentUsage = {
+          participantMinutes: Number(usageData?.totals?.participantMinutes || 0),
+          transcodeMinutes: Number(usageData?.totals?.transcodeMinutes || 0),
+        };
+
+        console.log("📊 Current usage:", currentUsage);
+
+        // 4) Intent: destinations + recording
+        const selectedDestinationsCount = [youtubeStreamKey, facebookStreamKey, twitchStreamKey]
+          .filter((v) => !!v && String(v).trim().length > 0).length;
+
+        const wantsRTMP = selectedDestinationsCount > 0;
+        const wantsRecording = false; // TODO: Add recording flag to request body
+
+        console.log("🎯 Stream intent:", { destinations: selectedDestinationsCount, wantsRTMP, wantsRecording });
+
+        // 5) Gate check
+        const gateResult = canStartStream({
+          uid: finalUserId,
+          plan,
+          userOverages: { overagesEnabled },
+          selectedDestinationsCount,
+          wantsRecording,
+          wantsRTMP,
+          currentUsage,
+        });
+
+        if (!gateResult.allowed) {
+          console.log("🚫 Stream blocked:", gateResult.reason);
+          return res.status(403).json({
+            success: false,
+            error: gateResult.reason,
+            requiresUpgrade: gateResult.requiresUpgrade,
+            requiresOveragesEnabled: gateResult.requiresOveragesEnabled,
+          });
+        }
+
+        console.log("✅ Usage gate passed");
+      }
+    }
+  } catch (err: any) {
+    console.error("❌ Usage gate error:", err);
+    // Don't block stream on gate errors - log and continue
+    console.warn("⚠️ Continuing stream despite gate error");
+  }
+
+  // =============================================================================
+  // 🎥 START EGRESS
+  // =============================================================================
+
   try {
     console.log(`📡 Starting multistream for room: ${roomName}`);
     console.log(`   Streaming to ${urls.length} platform(s)`);
@@ -125,25 +226,18 @@ router.post("/:roomName/start-multistream", async (req, res) => {
     );
 
     console.log('✅ Egress API call completed');
-    console.log('   Response:', JSON.stringify(response, null, 2));
 
-    // BULLETPROOF: Extract egressId with fallbacks
-    // The response is EgressInfo which has egressId directly
+    // Extract egressId with fallbacks
     const egressId =
       response?.egressId ||
       (response as any)?.info?.egressId;
 
     if (!egressId) {
       console.error("❌ No egressId in response!");
-      console.error("   Response structure:", Object.keys(response || {}));
       
       return res.status(500).json({
         success: false,
         error: "Egress started but no egressId returned by LiveKit.",
-        details: {
-          responseKeys: Object.keys(response || {}),
-          fullResponse: process.env.NODE_ENV === "development" ? response : undefined,
-        },
       });
     }
 
@@ -156,6 +250,21 @@ router.post("/:roomName/start-multistream", async (req, res) => {
       roomName,
       startedAt: new Date(),
       guestCount,
+      planIdAtStart: "free",
+      billingMonthKey: getCurrentMonthKey(),
+      enforcement: {
+        monthlyLimitMinutesAtStart: 0,
+        overagesEnabledAtStart: false,
+        maxSessionMinutes: 0
+      },
+      flags: {
+        recording: false,
+        rtmpCount: urls.length
+      },
+      warningState: {
+        warned80: false,
+        warned90: false,
+      }
     });
 
     // Also store in Firestore for persistence
@@ -172,7 +281,6 @@ router.post("/:roomName/start-multistream", async (req, res) => {
 
     console.log('✅ Stream tracked in memory and Firestore');
 
-    // BULLETPROOF: Consistent response shape with required fields
     return res.status(200).json({
       success: true,
       data: {
@@ -195,7 +303,6 @@ router.post("/:roomName/start-multistream", async (req, res) => {
       urlCount: urls.length,
     });
     
-    // BULLETPROOF: Always return JSON
     return res.status(500).json({
       success: false,
       error: "Failed to start multistream",
@@ -212,7 +319,7 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
   const { roomName } = req.params;
   const { egressId } = req.body;
 
-  console.log('⏹️ Stop multistream request:', { roomName, egressId });
+  console.log('ℹ️ Stop multistream request:', { roomName, egressId });
 
   if (!roomName) {
     return res.status(400).json({
@@ -312,7 +419,6 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
       }
     }
 
-    // BULLETPROOF: Consistent response shape
     return res.status(200).json({
       success: true,
       data: {
@@ -330,7 +436,6 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
   } catch (err: any) {
     console.error("❌ Error stopping multistream:", err);
     
-    // BULLETPROOF: Always return JSON
     return res.status(500).json({
       success: false,
       error: "Failed to stop multistream",
@@ -346,7 +451,7 @@ router.post("/:roomName/stop-multistream", async (req, res) => {
 router.post("/stop-multistream", async (req, res) => {
   const { egressId } = req.body;
 
-  console.log('⏹️ Legacy stop multistream:', { egressId });
+  console.log('ℹ️ Legacy stop multistream:', { egressId });
 
   if (!egressId) {
     return res.status(400).json({
@@ -375,10 +480,8 @@ router.post("/stop-multistream", async (req, res) => {
 
     console.log(`✅ Stopped egress: ${egressId}`);
     
-    // BULLETPROOF: Extract egressId from response
     const stoppedEgressId = response?.egressId || egressId;
     
-    // BULLETPROOF: Consistent response shape
     return res.status(200).json({
       success: true,
       data: {
@@ -391,7 +494,6 @@ router.post("/stop-multistream", async (req, res) => {
   } catch (error: any) {
     console.error("❌ Error stopping multistream:", error?.message);
     
-    // BULLETPROOF: Always return JSON
     return res.status(500).json({
       success: false,
       error: "Failed to stop multistream",
@@ -413,7 +515,6 @@ router.get("/status", (_req, res) => {
     durationMinutes: Math.floor((Date.now() - stream.startedAt.getTime()) / 60000),
   }));
 
-  // BULLETPROOF: Consistent response shape
   return res.status(200).json({
     success: true,
     data: {

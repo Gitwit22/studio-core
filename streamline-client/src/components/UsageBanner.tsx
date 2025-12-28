@@ -22,14 +22,8 @@ export default function UsageBanner() {
   useEffect(() => {
     const load = async () => {
       try {
-        const uid = localStorage.getItem("sl_userId"); // TEMP until real auth
-        if (!uid) {
-          setLoading(false);
-          return;
-        }
-
         const res = await fetch(
-          `${API_BASE}/api/usage/summary?uid=${encodeURIComponent(uid)}`
+          `${API_BASE}/api/usage/summary`
         );
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);

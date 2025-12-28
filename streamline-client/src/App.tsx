@@ -1,4 +1,5 @@
 import { Routes, Route } from "react-router-dom";
+import AdminUsage from './pages/AdminUsage';
 
 import Welcome from "./pages/Welcome";
 import { LoginPage } from "./pages/LoginPage";
@@ -19,6 +20,8 @@ import EditorDisabled from "./pages/EditorDisabled";
 function App() {
   return (
     <Routes>
+
+      <Route path="/admin/usage" element={<AdminUsage />} />
       {/* Public / auth flow */}
       <Route path="/" element={<Welcome />} />
       <Route path="/login" element={<LoginPage />} />

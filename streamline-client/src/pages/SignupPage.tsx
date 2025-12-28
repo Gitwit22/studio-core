@@ -5,70 +5,87 @@ import { useNavigate } from "react-router-dom";
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 // Email validation function
-function validateEmail(email) {
-  const re = /^[^\s@]+@[^\s@]+\.com$/;
+function validateEmail(email: string): boolean {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return re.test(email);
 }
 
 export const SignupPage = () => {
   const nav = useNavigate();
-  const [planId, setPlanId] = useState("free");
+
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [timeZone, setTimeZone] = useState("");
-  
-  // Streaming defaults
+
+  // Streaming defaults (user choices)
   const [defaultResolution, setDefaultResolution] = useState("720p");
   const [defaultDestinations, setDefaultDestinations] = useState({
     youtube: false,
     facebook: false,
+    twitch: false,
   });
   const [defaultPrivacy, setDefaultPrivacy] = useState("public");
   const [skipOnboarding, setSkipOnboarding] = useState(false);
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Auto-fill timezone using browser
   useEffect(() => {
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       setTimeZone(tz || "");
     } catch {
-      // ignore if not available
+      // ignore
     }
   }, []);
 
-  const handleSubmit = async (e) => {
+  const toggleDestination = (platform: "youtube" | "facebook" | "twitch") => {
+    setDefaultDestinations((prev) => ({
+      ...prev,
+      [platform]: !prev[platform],
+    }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    // Validate email format
     if (!validateEmail(email)) {
       setError("Please enter a valid email address.");
       setLoading(false);
       return;
     }
 
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      const body = {
-        displayName,
-        email,
+      const body: Record<string, any> = {
+        displayName: displayName.trim(),
+        email: email.trim().toLowerCase(),
         password,
-        timeZone,
-        planId,
+        timeZone: timeZone || "America/Chicago",
         skipOnboarding,
-        defaultResolution: skipOnboarding ? undefined : defaultResolution,
-        defaultDestinations: skipOnboarding ? undefined : defaultDestinations,
-        defaultPrivacy: skipOnboarding ? undefined : defaultPrivacy,
       };
+
+      if (!skipOnboarding) {
+        body.defaultResolution = defaultResolution;
+        body.defaultDestinations = defaultDestinations;
+        body.defaultPrivacy = defaultPrivacy;
+      }
+
+      console.log("📤 Sending signup request:", { email, displayName });
 
       const res = await fetch(`${API_BASE}/api/auth/signup`, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true"
+          "ngrok-skip-browser-warning": "true",
         },
         body: JSON.stringify(body),
       });
@@ -76,29 +93,28 @@ export const SignupPage = () => {
       const data = await res.json();
 
       if (!res.ok) {
-        setLoading(false);
         setError(data.error || "Signup failed");
+        setLoading(false);
         return;
       }
 
+      console.log("✅ Signup successful:", data);
+
+      // Store user data and token in localStorage
       localStorage.setItem("sl_user", JSON.stringify(data.user));
       localStorage.setItem("sl_token", data.token);
       localStorage.setItem("sl_userId", data.user.id || data.user.uid);
+      localStorage.setItem("sl_displayName", data.user.displayName);
 
-      // After signup, go to create-room page
-      nav("/join");
-    } catch (err) {
-      console.error(err);
       setLoading(false);
-      setError("Something went wrong. Try again.");
+      
+      // Redirect to join page
+      nav("/join");
+    } catch (err: any) {
+      console.error("❌ Signup error:", err);
+      setLoading(false);
+      setError(err?.message || "Something went wrong. Try again.");
     }
-  };
-
-  const toggleDestination = (key) => {
-    setDefaultDestinations((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
   };
 
   return (
@@ -182,7 +198,7 @@ export const SignupPage = () => {
             marginBottom: '0.5rem',
             color: '#dc2626'
           }}>
-            Step 1 – Basic StreamLine Profile
+            Step 1 – Basic Profile
           </h3>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -202,10 +218,11 @@ export const SignupPage = () => {
                   transition: 'all 0.3s ease',
                   backdropFilter: 'blur(10px)'
                 }}
-                onFocus={(e) => e.target.style.borderColor = '#dc2626'}
-                onBlur={(e) => e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+                onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
+                onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
+                required
               />
             </div>
 
@@ -225,10 +242,11 @@ export const SignupPage = () => {
                   transition: 'all 0.3s ease',
                   backdropFilter: 'blur(10px)'
                 }}
-                onFocus={(e) => e.target.style.borderColor = '#dc2626'}
-                onBlur={(e) => e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+                onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
+                onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                required
               />
             </div>
 
@@ -236,7 +254,7 @@ export const SignupPage = () => {
               <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Password</label>
               <input
                 type="password"
-                placeholder="••••••••"
+                placeholder="At least 6 characters"
                 style={{
                   width: '100%',
                   padding: '0.75rem',
@@ -248,135 +266,39 @@ export const SignupPage = () => {
                   transition: 'all 0.3s ease',
                   backdropFilter: 'blur(10px)'
                 }}
-                onFocus={(e) => e.target.style.borderColor = '#dc2626'}
-                onBlur={(e) => e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+                onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
+                onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            
-            <div>
-              <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Timezone</label>
-              <input
-                type="text"
-                placeholder="Your timezone"
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  borderRadius: '0.5rem',
-                  background: 'rgba(31, 41, 55, 0.8)',
-                  color: '#ffffff',
-                  border: '1px solid rgba(75, 85, 99, 0.5)',
-                  outline: 'none',
-                  transition: 'all 0.3s ease',
-                  backdropFilter: 'blur(10px)'
-                }}
-                onFocus={(e) => e.target.style.borderColor = '#dc2626'}
-                onBlur={(e) => e.target.style.borderColor = 'rgba(75, 85, 99, 0.5)'}
-                value={timeZone}
-                onChange={(e) => setTimeZone(e.target.value)}
+                required
               />
             </div>
           </div>
         </div>
 
-        {/* Plan selection */}
+        {/* Plan info display (read-only, always starts as free) */}
         <div>
-          <p style={{
-            display: 'block',
-            fontSize: '0.875rem',
-            marginBottom: '0.5rem',
+          <h3 style={{
+            fontSize: '1.125rem',
             fontWeight: '600',
+            marginBottom: '0.5rem',
             color: '#dc2626'
-          }}>Choose your plan</p>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {/* Free */}
-            <label style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '0.5rem',
-              cursor: 'pointer',
-              padding: '0.75rem',
-              borderRadius: '0.5rem',
-              background: 'rgba(31, 41, 55, 0.5)',
-              border: planId === 'free' ? '1px solid #dc2626' : '1px solid rgba(75, 85, 99, 0.3)',
-              transition: 'all 0.3s ease',
-              backdropFilter: 'blur(10px)'
-            }}>
-              <input
-                type="radio"
-                name="plan"
-                value="free"
-                checked={planId === "free"}
-                onChange={(e) => setPlanId(e.target.value)}
-                style={{ marginTop: '0.25rem', accentColor: '#dc2626' }}
-              />
-              <div>
-                <div style={{ fontWeight: '500' }}>Free</div>
-                <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
-                  Get started with StreamLine at no cost.
-                </div>
-              </div>
-            </label>
-
-            {/* Starter */}
-            <label style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '0.5rem',
-              cursor: 'pointer',
-              padding: '0.75rem',
-              borderRadius: '0.5rem',
-              background: 'rgba(31, 41, 55, 0.5)',
-              border: planId === 'starter' ? '1px solid #dc2626' : '1px solid rgba(75, 85, 99, 0.3)',
-              transition: 'all 0.3s ease',
-              backdropFilter: 'blur(10px)'
-            }}>
-              <input
-                type="radio"
-                name="plan"
-                value="starter"
-                checked={planId === "starter"}
-                onChange={(e) => setPlanId(e.target.value)}
-                style={{ marginTop: '0.25rem', accentColor: '#dc2626' }}
-              />
-              <div>
-                <div style={{ fontWeight: '500' }}>Starter</div>
-                <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
-                  For new creators streaming a few times a month.
-                </div>
-              </div>
-            </label>
-
-            {/* Pro */}
-            <label style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '0.5rem',
-              cursor: 'pointer',
-              padding: '0.75rem',
-              borderRadius: '0.5rem',
-              background: 'rgba(31, 41, 55, 0.5)',
-              border: planId === 'pro' ? '1px solid #dc2626' : '1px solid rgba(75, 85, 99, 0.3)',
-              transition: 'all 0.3s ease',
-              backdropFilter: 'blur(10px)'
-            }}>
-              <input
-                type="radio"
-                name="plan"
-                value="pro"
-                checked={planId === "pro"}
-                onChange={(e) => setPlanId(e.target.value)}
-                style={{ marginTop: '0.25rem', accentColor: '#dc2626' }}
-              />
-              <div>
-                <div style={{ fontWeight: '500' }}>Pro</div>
-                <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
-                  For serious streamers who go live weekly.
-                </div>
-              </div>
-            </label>
+          }}>
+            Your Plan
+          </h3>
+          <div style={{
+            padding: '0.75rem',
+            borderRadius: '0.5rem',
+            background: 'rgba(31, 41, 55, 0.5)',
+            border: '1px solid rgba(34, 197, 94, 0.3)',
+            backdropFilter: 'blur(10px)'
+          }}>
+            <div style={{ fontWeight: '500', color: '#22c55e', marginBottom: '0.25rem' }}>
+              Free Plan
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
+              Perfect for getting started with StreamLine. You can upgrade anytime!
+            </div>
           </div>
         </div>
 
@@ -412,7 +334,7 @@ export const SignupPage = () => {
                 marginBottom: '0.5rem',
                 color: '#dc2626'
               }}>
-                Step 2 – Streaming defaults (optional)
+                Step 2 – Streaming Defaults (optional)
               </h3>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -478,6 +400,23 @@ export const SignupPage = () => {
                       />
                       <span>Use Facebook by default when I go live</span>
                     </label>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                      background: 'rgba(31, 41, 55, 0.3)',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={defaultDestinations.twitch}
+                        onChange={() => toggleDestination("twitch")}
+                        style={{ accentColor: '#dc2626' }}
+                      />
+                      <span>Use Twitch by default when I go live</span>
+                    </label>
                   </div>
                 </div>
 
@@ -525,14 +464,14 @@ export const SignupPage = () => {
           }}
           onMouseEnter={(e) => {
             if (!loading) {
-              e.target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
-              e.target.style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
+              (e.target as HTMLButtonElement).style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+              (e.target as HTMLButtonElement).style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
             }
           }}
           onMouseLeave={(e) => {
             if (!loading) {
-              e.target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
-              e.target.style.boxShadow = 'none';
+              (e.target as HTMLButtonElement).style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+              (e.target as HTMLButtonElement).style.boxShadow = 'none';
             }
           }}
         >
@@ -556,6 +495,28 @@ export const SignupPage = () => {
           {error}
         </p>
       )}
+
+      <p style={{
+        marginTop: '1rem',
+        fontSize: '0.875rem',
+        color: 'rgba(255, 255, 255, 0.7)',
+        position: 'relative',
+        zIndex: 1
+      }}>
+        Already have an account?{' '}
+        <a
+          href="/login"
+          style={{
+            color: '#dc2626',
+            textDecoration: 'none',
+            fontWeight: '600'
+          }}
+          onMouseEnter={(e) => (e.target as HTMLAnchorElement).style.textDecoration = 'underline'}
+          onMouseLeave={(e) => (e.target as HTMLAnchorElement).style.textDecoration = 'none'}
+        >
+          Sign in
+        </a>
+      </p>
     </div>
   );
 };

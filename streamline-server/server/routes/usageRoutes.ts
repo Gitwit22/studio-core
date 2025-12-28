@@ -1,153 +1,164 @@
-// server/index.ts (or routes/usageRoutes.ts)
+// server/routes/usageRoutes.ts
 import express from "express";
+import { Timestamp } from "firebase-admin/firestore";
 import { firestore } from "../firebaseAdmin";
- // your initialized admin SDK
+import { getCurrentMonthKey } from "../lib/usageTracker";
 
-const app = express();
-app.post("/api/usage/streamEnded", async (req, res) => {
-  try {
-    const { uid, minutes = 0, guestCount = 0 } = req.body as {
-      uid?: string;
-      minutes?: number;
-      guestCount?: number;
-    };
-
-    if (!uid) {
-      return res.status(400).json({ error: "uid required" });
-    }
-
-    // Normalize minutes
-    const safeMinutes = Math.max(0, Number(minutes) || 0);
-
-    const now = new Date();
-    const monthKey = `${now.getFullYear()}-${String(
-      now.getMonth() + 1
-    ).padStart(2, "0")}`;
-
-    const usageRef = firestore.doc(`usage/${uid}_${monthKey}`);
-    const snap = await usageRef.get();
-    const existing = snap.exists ? (snap.data() as any) : {};
-
-    const totalMinutes = (existing.totalMinutes || 0) + safeMinutes;
-    const ytdMinutes = (existing.ytdMinutes || 0) + safeMinutes;
-
-    await usageRef.set(
-      {
-        totalMinutes,
-        ytdMinutes,
-        lastUpdated: now.toISOString(),
-        lastGuestCount: guestCount,
-      },
-      { merge: true }
-    );
-
-    return res.json({ ok: true, totalMinutes, ytdMinutes });
-  } catch (err) {
-    console.error("streamEnded error", err);
-    return res.status(500).json({ error: "internal error" });
-  }
-});
-
-app.get("/api/usage/summary", async (req, res) => {
-  try {
-    const uid =
-  (req.query.uid as string | undefined) || (req as any).uid;
-
-if (!uid) {
-  return res.status(401).json({ error: "unauthorized" });
+// Helper function to get the next reset date (start of next month)
+function getNextResetDate(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
 }
 
+const router = express.Router();
 
+/**
+ * GET /api/usage/summary
+ * Source of truth for:
+ * - user planId + overagesEnabled
+ * - plan features + limits
+ * - current month usage from usageMonthly
+ * - computed over-limit + remaining + resetDate
+ */
+router.get("/summary", async (req, res) => {
+  try {
+    const uid = (req.query.uid as string | undefined) || (req as any).uid;
 
+    if (!uid) {
+      return res.status(401).json({ success: false, error: "unauthorized" });
+    }
+
+    // 1) User doc (planId + overages setting)
     const userRef = firestore.collection("users").doc(uid);
     const userSnap = await userRef.get();
 
     if (!userSnap.exists) {
-      return res.status(404).json({ error: "user not found" });
+      return res.status(404).json({ success: false, error: "user not found" });
     }
 
     const userData = userSnap.data() || {};
-    const usage = (userData.usage || {}) as any;
+    const planId = String(userData.planId || userData.plan || "free");
+    const overagesEnabled = !!userData.overagesEnabled;
 
-    const planId: string = userData.plan || "free";
-
-    // ---- read the plan doc from /plans/{planId} ----
+    // 2) Plan doc
     const planRef = firestore.collection("plans").doc(planId);
     const planSnap = await planRef.get();
 
     if (!planSnap.exists) {
-      return res.status(500).json({ error: `plan ${planId} not found` });
+      return res.status(500).json({
+        success: false,
+        error: "plan not found",
+        planId,
+      });
     }
 
     const planData = planSnap.data() || {};
-    const maxHoursFromPlan = planData.maxHoursPerMonth || 0;
-    const maxGuests = planData.maxGuests || 0;
-    const multistreamEnabled = !!planData.multistreamEnabled;
+    const features = (planData.features || {}) as any;
+    const limits = (planData.limits || {}) as any;
 
-    const now = new Date();
-    const usedHours = usage.hoursStreamedThisMonth || 0;
-    const ytdHours = usage.ytdHours || 0;
+    // 3) Usage monthly doc (source of truth)
+    const monthKey = getCurrentMonthKey();
+    const usageDocId = `${uid}_${monthKey}`;
 
-    
+    const usageRef = firestore.collection("usageMonthly").doc(usageDocId);
+    const usageSnap = await usageRef.get();
 
-    // if you want to allow per-user overrides, use usage.maxHours first:
-    const maxHours =
-      (usage.maxHours && usage.maxHours > 0
-        ? usage.maxHours
-        : maxHoursFromPlan) || 0;
+    // If missing, do NOT fail—return a zeroed shape so the UI is stable.
+    const usageMonthly = usageSnap.exists
+      ? (usageSnap.data() as any)
+      : {
+          uid,
+          monthKey,
+          usage: { participantMinutes: 0, transcodeMinutes: 0 },
+          ytd: { participantMinutes: 0, transcodeMinutes: 0 },
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        };
 
-// ----------------------------------------------
-// Compute resetDate based on user.createdAt date
-// ----------------------------------------------
-let resetDate: string | null = null;
+    const usage = usageMonthly.usage || {};
+    const ytd = usageMonthly.ytd || {};
 
-if (userData.createdAt) {
-  const createdAtDate = new Date(userData.createdAt);
-  const createdDay = createdAtDate.getDate();
+    const participantUsed = Number(usage.participantMinutes || 0);
+    const transcodeUsed = Number(usage.transcodeMinutes || 0);
 
-  const now = new Date();
-  const thisMonthReset = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    createdDay
-  );
+    const participantLimit = Number(limits.participantMinutes || 0); // 0 = unlimited
+    const transcodeLimit = Number(limits.transcodeMinutes || 0);     // 0 = unlimited
 
-  const nextMonthReset = new Date(
-    now.getFullYear(),
-    now.getMonth() + 1,
-    createdDay
-  );
+    const isOverParticipant =
+      participantLimit > 0 ? participantUsed >= participantLimit : false;
 
-  // If today's date is past this month's reset day,
-  // next reset is next month. Otherwise it's this month.
-  const finalReset =
-    now.getDate() >= createdDay ? nextMonthReset : thisMonthReset;
+    const isOverTranscode =
+      transcodeLimit > 0 ? transcodeUsed >= transcodeLimit : false;
 
-  resetDate = finalReset.toISOString();
-}
+    const isOverLimit = isOverParticipant || isOverTranscode;
 
+    const remainingParticipantMinutes =
+      participantLimit > 0 ? Math.max(0, participantLimit - participantUsed) : null;
 
+    const remainingTranscodeMinutes =
+      transcodeLimit > 0 ? Math.max(0, transcodeLimit - transcodeUsed) : null;
 
+    const resetDateISO = getNextResetDate().toISOString();
 
     return res.json({
-  displayName: userData.displayName || "",
-  planId,
-  usedHours,
-  maxHours,
-  resetDate,
-  ytdHours,
-  // extra plan info for UI:
-  maxGuests,
-  multistreamEnabled,
-   priceWeekly: planData.priceWeekly || 0,
-  priceMonthly: planData.priceMonthly || 0,
-  priceYearly: planData.priceYearly || 0,
-});
+      success: true,
+      uid,
+      monthKey,
+      resetDate: resetDateISO,
 
-  } catch (err) {
-    console.error("usage summary error", err);
-    return res.status(500).json({ error: "internal error" });
+      user: {
+        planId,
+        overagesEnabled,
+      },
+
+      plan: {
+        id: planId,
+        name: planData.name || planId,
+        priceMonthly: planData.priceMonthly ?? null,
+        features: {
+          recording: !!features.recording,
+          rtmpMultistream: !!features.rtmpMultistream,
+          overagesAllowed: !!features.overagesAllowed,
+        },
+        limits: {
+          maxDestinations: Number(limits.maxDestinations || 0),
+          participantMinutes: participantLimit,
+          transcodeMinutes: transcodeLimit,
+        },
+      },
+
+      usageMonthly: {
+        id: usageDocId,
+        usage: {
+          participantMinutes: participantUsed,
+          transcodeMinutes: transcodeUsed,
+          participantHours: Math.round((participantUsed / 60) * 100) / 100,
+          transcodeHours: Math.round((transcodeUsed / 60) * 100) / 100,
+        },
+        ytd: {
+          participantMinutes: Number(ytd.participantMinutes || 0),
+          transcodeMinutes: Number(ytd.transcodeMinutes || 0),
+        },
+      },
+
+      computed: {
+        isOverLimit,
+        isOverParticipant,
+        isOverTranscode,
+        remaining: {
+          participantMinutes: remainingParticipantMinutes, // null = unlimited
+          transcodeMinutes: remainingTranscodeMinutes,     // null = unlimited
+        },
+      },
+    });
+  } catch (err: any) {
+    console.error("❌ /api/usage/summary error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "internal_error",
+      details: err?.message || String(err),
+    });
   }
-
-  
 });
+
+export default router;
