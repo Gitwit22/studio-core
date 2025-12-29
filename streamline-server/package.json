@@ -4,10 +4,11 @@
   "description": "",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
-    "dev": "tsx server/index.ts",
-    "start": "node dist/index.js"
-  },
+  "build": "tsc -p tsconfig.json",
+  "dev": "tsx server/index.ts",
+  "start": "node dist/index.js"
+}
+,
   "keywords": [],
   "author": "",
   "license": "ISC",
