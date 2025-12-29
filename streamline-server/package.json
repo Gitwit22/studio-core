@@ -21,7 +21,7 @@
     "express": "^5.2.1",
     "firebase-admin": "^13.6.0",
     "jsonwebtoken": "^9.0.2",
-    "livekit-server-sdk": "^2.15.0",
+    "livekit-server-sdk": "2.6.1",
     "lucide-react": "^0.561.0",
     "multer": "^1.4.5-lts.1"
   },
