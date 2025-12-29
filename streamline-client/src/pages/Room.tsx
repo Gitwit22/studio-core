@@ -9,8 +9,7 @@ import { HostAVControls } from "../components/HostAVControls";
 
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
-const API_BASE = import.meta.env.VITE_API_BASE || "";
-
+const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/+$/, "");
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 type RecordingStatus = "idle" | "recording" | "stopping" | "stopped" | "error";
 

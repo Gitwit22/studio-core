@@ -331,6 +331,9 @@ router.post("/:roomName/start-multistream", async (req, res) => {
 // =============================================================================
 // STOP (preferred endpoint)
 // =============================================================================
+// -----------------------------------------------------------------------------
+// STOP (new)
+// -----------------------------------------------------------------------------
 router.post("/stop", async (req, res) => {
   const { roomName, egressId } = req.body as { roomName?: string; egressId?: string };
 
@@ -338,10 +341,9 @@ router.post("/stop", async (req, res) => {
     return res.status(400).json({ success: false, error: "roomName is required" });
   }
 
-  // capture metadata BEFORE cleanup
+  // Grab metadata BEFORE we delete it
   const activeStream = activeStreams.get(roomName);
 
-  // resolve which egress to stop
   const targetEgressId = egressId || activeStream?.egressId;
   if (!targetEgressId) {
     return res.status(400).json({
@@ -352,7 +354,6 @@ router.post("/stop", async (req, res) => {
 
   const now = new Date();
 
-  // defaults so response is always stable
   let durationSeconds = 0;
   let durationMinutes = 0;
   let recordingId: string | null = null;
@@ -360,32 +361,30 @@ router.post("/stop", async (req, res) => {
   let recordingPath: string | null = null;
 
   try {
-    // stop egress (dynamic import safe via getEgressClient)
     console.log("🛑 Stopping egress:", targetEgressId);
-    const egressClient = await getEgressClient();
-    const stopResp: import("livekit-server-sdk").EgressInfo = await egressClient.stopEgress(
-      targetEgressId
-    );
-    console.log("✅ Egress stopped:", stopResp?.egressId ?? targetEgressId);
 
-    // cleanup tracking
+    const egressClient = await getEgressClient();
+    const stopResp = await egressClient.stopEgress(targetEgressId);
+
+    console.log("✅ Egress stop requested:", (stopResp as any)?.egressId ?? targetEgressId);
+
+    // Cleanup tracking (best-effort)
     activeStreams.delete(roomName);
     try {
       await firestore.collection("activeStreams").doc(roomName).delete();
     } catch (cleanupErr) {
-      console.warn("Failed to cleanup activeStreams doc:", cleanupErr);
+      console.warn("⚠️ Failed to cleanup activeStreams doc:", cleanupErr);
     }
 
-    // post-stream tasks only if we stopped the one we were tracking
+    // Post-stream tasks (only if we have metadata AND it's the same egress)
     if (activeStream && targetEgressId === activeStream.egressId) {
-      // duration
       const durationMs = now.getTime() - activeStream.startedAt.getTime();
       durationSeconds = Math.max(0, Math.floor(durationMs / 1000));
       durationMinutes = Math.max(0, Math.ceil(durationMs / 60000));
 
       console.log("⏱️ Duration:", durationMinutes, "minutes");
 
-      // usage tracking (best-effort)
+      // Usage tracking (best-effort)
       try {
         await addUsageForUser(activeStream.userId, durationMinutes, {
           guestCount: activeStream.guestCount,
@@ -393,20 +392,20 @@ router.post("/stop", async (req, res) => {
         });
         console.log("✅ Usage tracked");
       } catch (usageErr) {
-        console.warn("Failed to update usage:", usageErr);
+        console.warn("⚠️ Failed to update usage:", usageErr);
       }
 
-      // recording URL (best-effort)
+      // Recording URL (best-effort)
       try {
-        const timestamp = Date.now();
-        recordingPath = generateRecordingPath(activeStream.userId, activeStream.roomName, timestamp);
+        const ts = Date.now();
+        recordingPath = generateRecordingPath(activeStream.userId, activeStream.roomName, ts);
         videoUrl = await getSignedDownloadUrl(recordingPath);
         console.log("🎬 Recording path:", recordingPath);
       } catch (storageErr) {
-        console.warn("Failed to generate recording URL:", storageErr);
+        console.warn("⚠️ Failed to generate recording URL:", storageErr);
       }
 
-      // recording doc (best-effort)
+      // Firestore recording doc (best-effort)
       try {
         const recordingRef = await firestore.collection("recordings").add({
           userId: activeStream.userId,
@@ -424,10 +423,11 @@ router.post("/stop", async (req, res) => {
           createdAt: activeStream.startedAt,
           updatedAt: now,
         });
+
         recordingId = recordingRef.id;
         console.log("✅ Created recording doc:", recordingId);
       } catch (firestoreErr) {
-        console.warn("Failed to create recording doc:", firestoreErr);
+        console.warn("⚠️ Failed to create recording doc:", firestoreErr);
       }
     }
 
@@ -446,6 +446,7 @@ router.post("/stop", async (req, res) => {
     });
   } catch (err: any) {
     console.error("❌ Error stopping multistream:", err);
+
     return res.status(500).json({
       success: false,
       error: "Failed to stop multistream",
@@ -454,9 +455,9 @@ router.post("/stop", async (req, res) => {
   }
 });
 
-// =============================================================================
-// LEGACY STOP ENDPOINT (backward compatibility)
-// =============================================================================
+// -----------------------------------------------------------------------------
+// LEGACY STOP (backward compatibility)
+// -----------------------------------------------------------------------------
 router.post("/stop-multistream", async (req, res) => {
   const { egressId } = req.body as { egressId?: string };
 
@@ -467,20 +468,16 @@ router.post("/stop-multistream", async (req, res) => {
   }
 
   try {
-    console.log("🛑 Stopping egress:", egressId);
-
     const egressClient = await getEgressClient();
-    const response: import("livekit-server-sdk").EgressInfo = await egressClient.stopEgress(egressId);
+    const stopResp = await egressClient.stopEgress(egressId);
 
-    // remove any matching tracked stream
+    // remove from tracking map (best-effort)
     for (const [roomName, stream] of activeStreams.entries()) {
       if (stream.egressId === egressId) {
         activeStreams.delete(roomName);
         try {
           await firestore.collection("activeStreams").doc(roomName).delete();
-        } catch {
-          // ignore cleanup errors
-        }
+        } catch {}
         break;
       }
     }
@@ -488,13 +485,14 @@ router.post("/stop-multistream", async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
-        egressId: response?.egressId ?? egressId,
+        egressId: (stopResp as any)?.egressId ?? egressId,
         status: "stopped",
         stoppedAt: new Date().toISOString(),
       },
     });
   } catch (err: any) {
     console.error("❌ Legacy stop multistream failed:", err);
+
     return res.status(500).json({
       success: false,
       error: "Failed to stop multistream",
@@ -504,7 +502,7 @@ router.post("/stop-multistream", async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// Status endpoint (debug)
+// STATUS (debug)
 // -----------------------------------------------------------------------------
 router.get("/status", (req, res) => {
   const streams = Array.from(activeStreams.entries()).map(([roomName, stream]) => ({
