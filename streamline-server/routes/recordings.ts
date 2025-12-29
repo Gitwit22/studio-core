@@ -1,14 +1,14 @@
 import express from "express";
 import { firestore } from "../firebaseAdmin";
-import { EgressClient, EncodedFileOutput, EncodedFileType, EgressInfo } from "livekit-server-sdk";
-import { S3Upload } from "livekit-server-sdk";
 import crypto from "crypto";
 import { r2GetStream, r2Delete } from "../lib/r2";
 import { r2HeadObjectSize } from "../lib/r2Head";
 import { Readable } from "stream";
 import { getFileMetadata } from "../lib/storageClient";
 
-const router = express.Router();
+export const router = express.Router();
+type EgressInfo = import("livekit-server-sdk").EgressInfo;
+
 
 router.use((req, res, next) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -235,6 +235,9 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// =============================================================================
+// START RECORDING (Room Composite Egress -> R2/S3)
+// =============================================================================
 router.post("/start", async (req, res) => {
   const { roomName, layout } = req.body as {
     roomName?: string;
@@ -246,26 +249,29 @@ router.post("/start", async (req, res) => {
   console.log("Room:", roomName, "Layout:", layout);
 
   if (!roomName) {
-    const errorData = { success: false, error: "roomName is required" };
-    console.log("📤 Sending error:", errorData);
-    return res.status(400).json(errorData);
+    return res.status(400).json({ success: false, error: "roomName is required" });
   }
 
   const chosenLayout: "speaker" | "grid" = layout === "speaker" ? "speaker" : "grid";
 
   try {
-    console.log("🔑 Initializing LiveKit client...");
-    
+    // Env
     const LIVEKIT_URL = mustGetEnv("LIVEKIT_URL");
     const LIVEKIT_API_KEY = mustGetEnv("LIVEKIT_API_KEY");
     const LIVEKIT_API_SECRET = mustGetEnv("LIVEKIT_API_SECRET");
+
     const R2_ACCESS_KEY_ID = mustGetEnv("R2_ACCESS_KEY_ID");
     const R2_SECRET_ACCESS_KEY = mustGetEnv("R2_SECRET_ACCESS_KEY");
     const R2_BUCKET = mustGetEnv("R2_BUCKET");
     const R2_ENDPOINT = mustGetEnv("R2_ENDPOINT");
     const R2_REGION = process.env.R2_REGION ?? "auto";
 
+    // IMPORTANT: LiveKit SDK is ESM. Must load via dynamic import in CJS builds.
+    const { EgressClient, EncodedFileOutput, EncodedFileType, S3Upload } =
+      await import("livekit-server-sdk");
+
     const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+
     const filepath = `recordings/${roomName}/${Date.now()}.mp4`;
 
     const output = new EncodedFileOutput({
@@ -296,9 +302,7 @@ router.post("/start", async (req, res) => {
       (info as any)?.data?.egressId;
 
     if (!egressId) {
-      const errorData = { success: false, error: "No egressId returned" };
-      console.log("📤 Sending error:", errorData);
-      return res.status(500).json(errorData);
+      return res.status(500).json({ success: false, error: "No egressId returned" });
     }
 
     console.log("✅ Egress ID:", egressId);
@@ -316,7 +320,7 @@ router.post("/start", async (req, res) => {
       { merge: true }
     );
 
-    const payload = {
+    return res.status(200).json({
       success: true,
       data: {
         recordingId: egressId,
@@ -325,36 +329,28 @@ router.post("/start", async (req, res) => {
         status: "RECORDING",
         startedAt: new Date().toISOString(),
       },
-    };
-
-    console.log("📤 FINAL recording response:", payload);
-    return res.status(200).json(payload);
-
+    });
   } catch (err: any) {
-    console.error("❌ ERROR:", err?.message);
-    const errorData = {
+    console.error("❌ /api/recordings/start ERROR:", err);
+    return res.status(500).json({
       success: false,
       error: err?.message ?? "Failed to start recording",
-    };
-    console.log("📤 Sending error:", errorData);
-    return res.status(500).json(errorData);
+    });
   }
 });
 
+// =============================================================================
+// STOP RECORDING
+// =============================================================================
 router.post("/stop", async (req, res) => {
-  const { recordingId } = req.body;
+  const { recordingId } = req.body as { recordingId?: string };
 
   console.log("=".repeat(80));
   console.log("ℹ️ /api/recordings/stop called");
-  console.log("=".repeat(80));
   console.log("Recording ID:", recordingId);
 
   if (!recordingId) {
-    console.error("❌ Missing recordingId");
-    return res.status(400).json({
-      success: false,
-      error: "recordingId is required",
-    });
+    return res.status(400).json({ success: false, error: "recordingId is required" });
   }
 
   try {
@@ -362,18 +358,18 @@ router.post("/stop", async (req, res) => {
     const LIVEKIT_API_KEY = mustGetEnv("LIVEKIT_API_KEY");
     const LIVEKIT_API_SECRET = mustGetEnv("LIVEKIT_API_SECRET");
 
-    console.log("🔑 LiveKit credentials loaded");
+    // IMPORTANT: LiveKit SDK is ESM. Must load via dynamic import in CJS builds.
+    const { EgressClient } = await import("livekit-server-sdk");
 
     const egressClient = new EgressClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 
     console.log("🛑 Stopping egress...");
     const response: EgressInfo = await egressClient.stopEgress(recordingId);
 
-    const stoppedEgressId = response?.egressId || recordingId;
+    const stoppedEgressId = (response as any)?.egressId || recordingId;
 
     console.log("✅ Egress stop requested:", stoppedEgressId);
 
-    console.log("💾 Updating Firestore status...");
     const ref = firestore.collection("recordings").doc(stoppedEgressId);
 
     await ref.set(
@@ -385,18 +381,12 @@ router.post("/stop", async (req, res) => {
       { merge: true }
     );
 
+    // Ensure objectKey exists (some old docs only had filepath)
     const snap = await ref.get();
     if (snap.exists) {
       const data = snap.data() as any;
-
       if (data?.filepath && !data?.objectKey) {
-        await ref.set(
-          {
-            objectKey: data.filepath,
-            updatedAt: new Date(),
-          },
-          { merge: true }
-        );
+        await ref.set({ objectKey: data.filepath, updatedAt: new Date() }, { merge: true });
       }
     }
 
@@ -409,13 +399,7 @@ router.post("/stop", async (req, res) => {
       },
     });
   } catch (err: any) {
-    console.error("=".repeat(80));
-    console.error("❌ RECORDING STOP FAILED");
-    console.error("=".repeat(80));
-    console.error("Error:", err?.message);
-    console.error("Stack:", err?.stack);
-    console.error("=".repeat(80));
-
+    console.error("❌ /api/recordings/stop ERROR:", err);
     return res.status(500).json({
       success: false,
       error: "Failed to stop recording",
@@ -423,5 +407,3 @@ router.post("/stop", async (req, res) => {
     });
   }
 });
-
-export default router;

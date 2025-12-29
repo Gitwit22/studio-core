@@ -1,6 +1,5 @@
 import express from "express";
 import crypto from "crypto";
-import { WebhookReceiver } from "livekit-server-sdk";
 import { firestore } from "../firebaseAdmin";
 
 const router = express.Router();
@@ -10,11 +9,6 @@ function mustGetEnv(name: string): string {
   if (!v) throw new Error(`Missing env var: ${name}`);
   return v;
 }
-
-// ✅ Use LiveKit API key + secret for verification
-const LIVEKIT_API_KEY = mustGetEnv("LIVEKIT_API_KEY");
-const LIVEKIT_API_SECRET = mustGetEnv("LIVEKIT_API_SECRET");
-const receiver = new WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 
 // Try multiple shapes LiveKit might send
 function extractObjectKey(egressInfo: any): string | null {
@@ -36,8 +30,8 @@ function extractObjectKey(egressInfo: any): string | null {
 }
 
 // POST /api/livekit/webhook
-// IMPORTANT: mount this route with express.raw({ type: "application/json" })
-router.post("/", async (req, res) => {
+// IMPORTANT: this route MUST receive raw body (Buffer)
+router.post("/", express.raw({ type: "*/*" }), async (req, res) => {
   try {
     const authHeader = String(req.headers["authorization"] || "");
     const rawBody = req.body as Buffer;
@@ -46,7 +40,16 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Expected raw body Buffer" });
     }
 
-    // ✅ Verify + parse event (use the raw string)
+    // ✅ Lazy env reads (so dev/test can boot)
+    const LIVEKIT_API_KEY = mustGetEnv("LIVEKIT_API_KEY");
+    const LIVEKIT_API_SECRET = mustGetEnv("LIVEKIT_API_SECRET");
+
+    // ✅ ESM-safe dynamic import (prevents ERR_REQUIRE_ESM in CommonJS)
+    const { WebhookReceiver } = await import("livekit-server-sdk");
+
+    const receiver = new WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+
+    // ✅ receive() is async -> MUST await (fixes your TS errors)
     const event = await receiver.receive(rawBody.toString("utf8"), authHeader);
 
     const eventName = String((event as any)?.event || "");
@@ -62,10 +65,10 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing egressId" });
     }
 
-    // 1) Try to pull the objectKey from the webhook payload
+    // 1) Try to pull objectKey from webhook payload
     let objectKey = extractObjectKey(egressInfo);
 
-    // 2) ✅ Fallback: if missing, use Firestore filepath (your doc already has it)
+    // 2) Fallback: if missing, use Firestore filepath (your doc already has it)
     const ref = firestore.collection("recordings").doc(recordingId);
     const snap = await ref.get();
     const existing = snap.exists ? (snap.data() as any) : null;
@@ -99,7 +102,6 @@ router.post("/", async (req, res) => {
       { merge: true }
     );
 
-    // Helpful for testing (you can remove later)
     console.log("✅ Webhook finalized recording:", {
       recordingId,
       status: finalStatus,

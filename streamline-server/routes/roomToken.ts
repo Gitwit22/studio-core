@@ -1,50 +1,48 @@
 import express from "express";
-import { AccessToken } from "livekit-server-sdk";
+import { requireAuth } from "../middleware/requireAuth";
 
 const router = express.Router();
 
-router.post("/", async (req, res) => {
+function mustGetEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
+}
+
+router.post("/", requireAuth, async (req, res) => {
   try {
-    const { roomName, identity, uid } = req.body as {
-      roomName?: string;
-      identity?: string;
-      uid?: string | null;
-    };
+    const { roomName, identity, isAdmin } = req.body;
 
-    console.log("roomToken request", { roomName, identity, uid });
-
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    const livekitUrl = process.env.LIVEKIT_URL;
-
-    if (!apiKey || !apiSecret || !livekitUrl) {
-      console.error("Missing LiveKit env vars");
-      return res.status(500).json({ error: "server not configured" });
+    if (!roomName || !identity) {
+      return res.status(400).json({ error: "roomName and identity required" });
     }
 
-    const room = roomName || "default";
-    const userIdentity = identity || "Guest";
+    // ✅ Lazy env reads
+    const apiKey = mustGetEnv("LIVEKIT_API_KEY");
+    const apiSecret = mustGetEnv("LIVEKIT_API_SECRET");
 
-    const at = new AccessToken(apiKey, apiSecret, {
-      identity: userIdentity,
+    // ✅ ESM-safe dynamic import
+    const { AccessToken } = await import("livekit-server-sdk");
+
+    const token = new AccessToken(apiKey, apiSecret, {
+      identity,
+      ttl: "1h",
     });
 
-    at.addGrant({
-      room,
+    token.addGrant({
+      room: roomName,
       roomJoin: true,
       canPublish: true,
       canSubscribe: true,
+      roomAdmin: Boolean(isAdmin),
     });
 
-    const token = await at.toJwt();
+    const jwt = await token.toJwt();
 
-    return res.json({
-      token,
-      serverUrl: livekitUrl,
-    });
-  } catch (err) {
-    console.error("roomToken error", err);
-    return res.status(500).json({ error: "internal_error" });
+    return res.json({ token: jwt });
+  } catch (err: any) {
+    console.error("Room token error:", err?.message || err);
+    return res.status(500).json({ error: "Failed to create token" });
   }
 });
 

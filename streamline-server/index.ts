@@ -3,10 +3,11 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import path from "path";
-import { RoomServiceClient } from "livekit-server-sdk";
+import { getLiveKitSdk } from "./lib/livekit"; // adjust path
+import type { RoomServiceClient } from "livekit-server-sdk";
 import multistreamRoutes from "./routes/multistream";
 import roomTokenRoute from "./routes/roomToken";
-import recordingsRouter from "./routes/recordings";
+import { router as recordingsRoutes } from "./routes/recordings";
 import usageRoutes from "./routes/usageRoutes";
 import admin from "firebase-admin";
 import adminRoutes from './routes/admin';
@@ -24,6 +25,7 @@ dotenv.config();
 const PORT = process.env.PORT || 5137;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
+
 const app = express();
 
 
@@ -38,15 +40,16 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
+
 app.use(
   "/api/livekit/webhook", 
   express.raw({ type: "application/json" }), 
   webhookRouter
 );
-
-
-
 app.use("/api/livekit/webhook", express.raw({ type: "application/json" }), webhookRouter);
+
+
+
 
 
 
@@ -56,7 +59,7 @@ app.use("/api/admin", adminStatusRouter);
 
 
 // Recordings API - This handles GET /:id and POST /start, /stop
-app.use("/api/recordings", recordingsRouter);
+app.use("/api/recordings", recordingsRoutes);
 
 // Health check
 app.get("/", (_req, res) => res.send("API up"));
@@ -100,23 +103,36 @@ app.get("/api/storage/test", async (req, res) => {
 // =============================================================================
 // Admin Controls (Host/Mod Only)
 // =============================================================================
-const roomService = new RoomServiceClient(
-  process.env.LIVEKIT_URL!,
-  process.env.LIVEKIT_API_KEY!,
-  process.env.LIVEKIT_API_SECRET!
-);
+
+async function getRoomService(): Promise<RoomServiceClient> {
+  const { RoomServiceClient } = await getLiveKitSdk();
+
+  return new RoomServiceClient(
+    process.env.LIVEKIT_URL!,
+    process.env.LIVEKIT_API_KEY!,
+    process.env.LIVEKIT_API_SECRET!
+  );
+}
 
 // Remove/kick a participant
 app.post("/api/admin/remove", async (req, res) => {
   try {
     const { room, identity } = req.body;
+
+    if (!room || !identity) {
+      return res.status(400).json({ ok: false, error: "room and identity are required" });
+    }
+
+    const roomService = await getRoomService(); // or getRoomServiceClient()
     await roomService.removeParticipant(room, identity);
-    res.json({ ok: true });
+
+    return res.json({ ok: true });
   } catch (e: any) {
     console.error("remove error", e);
-    res.status(500).json({ error: e.message || "remove_error" });
+    return res.status(500).json({ ok: false, error: e?.message || "remove_error" });
   }
 });
+
 
 // =============================================================================
 // AUTH ENDPOINTS
