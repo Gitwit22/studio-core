@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { AccessToken } from "livekit-server-sdk";
+// Dynamic import for AccessToken constructor
+async function getAccessTokenCtor() {
+  const mod = await import("livekit-server-sdk");
+  return mod.AccessToken;
+}
 import { requireAuth } from "../middleware/requireAuth";
 
 const router = Router();
@@ -26,7 +30,8 @@ router.post("/", requireAuth, async (req, res) => {
       return res.status(500).json({ error: "LiveKit keys missing in env" });
     }
 
-    const at = new AccessToken(apiKey, apiSecret, { identity: uid });
+      const AccessToken = await getAccessTokenCtor();
+      const at = new AccessToken(apiKey, apiSecret, { identity: uid });
 
     at.addGrant({
       room: roomName,

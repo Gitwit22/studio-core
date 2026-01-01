@@ -19,8 +19,27 @@ export async function canAccessFeature(
     return { allowed: false, reason: "User not found" };
   }
 
+
   const user = userSnap.data()!;
   const planId = user.planId || "free";
+
+  // Strict billing enforcement for paid plans
+  const paidPlans = ["starter", "pro"];
+  if (paidPlans.includes(planId)) {
+    const billingStatus = user.billingStatus || "";
+    const billingActive = user.billingActive;
+    const subscriptionId = user.billing?.subscriptionId || user.billing?.stripeSubscriptionId;
+    if (
+      ["past_due", "unpaid", "incomplete", "canceled"].includes(billingStatus) ||
+      billingActive === false ||
+      !subscriptionId
+    ) {
+      return {
+        allowed: false,
+        reason: "Billing issue: access to paid features is blocked. Please resolve your payment in billing settings.",
+      };
+    }
+  }
 
   // Load plan
   const planSnap = await firestore.collection("plans").doc(planId).get();
