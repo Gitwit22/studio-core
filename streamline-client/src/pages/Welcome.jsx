@@ -252,7 +252,7 @@ const Welcome = () => {
           </button>
           
           <button
-            onClick={() => nav("/login")}
+            onClick={() => nav("/learnmore")}
             style={{
               width: window.innerWidth < 640 ? '100%' : 'auto',
               background: 'rgba(255, 255, 255, 0.05)',

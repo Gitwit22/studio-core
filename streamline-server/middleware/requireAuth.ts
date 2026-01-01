@@ -1,21 +1,23 @@
 import type { Request, Response, NextFunction } from "express";
+import jwt from "jsonwebtoken";
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const user = (req as any).user;
+  try {
+    const token =
+      (req as any).cookies?.token ||
+      req.headers.authorization?.replace("Bearer ", "");
 
-  if (!user) {
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+
+    // ✅ read env at runtime
+    const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
+
+    const decoded = jwt.verify(token, JWT_SECRET) as { uid: string };
+
+    (req as any).user = { uid: decoded.uid };
+    return next();
+  } catch (err) {
+    console.error("[requireAuth] Unauthorized:", (err as any)?.message || err);
     return res.status(401).json({ error: "Unauthorized" });
   }
-
-  // Normalize uid so other code can rely on req.user.uid
-  const uid = user.uid || user.id;
-
-  if (!uid) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  // Ensure we always have uid present
-  (req as any).user = { ...user, uid };
-
-  next();
 }

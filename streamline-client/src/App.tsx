@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import AdminUsage from './pages/AdminUsage';
+import AdminDashboard from './pages/AdminDashboard';
 
 import Welcome from "./pages/Welcome";
 import { LoginPage } from "./pages/LoginPage";
@@ -16,10 +17,16 @@ import EditorPage from "./editing/EditorPage";
 import RenderAndUploadPage from "./editing/pages/RenderAndUploadPage";
 import ThankYou from "./pages/ThankYou";
 import EditorDisabled from "./pages/EditorDisabled";
+import LearnMore from "./pages/LearnMore";
+
+// Stripe/Billing pages
+import SettingsBilling from "./pages/SettingsBilling";
+
 
 function App() {
   return (
     <Routes>
+      <Route path="/learnmore" element={<LearnMore />} />
 
       <Route path="/admin/usage" element={<AdminUsage />} />
       {/* Public / auth flow */}
@@ -29,7 +36,7 @@ function App() {
 
       {/* User dashboard */}
       <Route path="/dashboard" element={<Dashboard />} />
-
+      <Route path="/admin/dashboard" element={<AdminDashboard />} />
       {/* Streaming flow */}
       <Route path="/join" element={<Join />} />
       <Route path="/room/:roomName" element={<Room />} />
@@ -51,9 +58,12 @@ function App() {
       <Route path="/editing/projects" element={<EditorDisabled />} />
       <Route path="/editing/editor/:projectId" element={<EditorDisabled />} />
       <Route path="/editing/export/:projectId" element={<EditorDisabled />} />
+
+      {/* Stripe/Billing routes */}
+      <Route path="/settings/billing" element={<SettingsBilling />} />
+      
     </Routes>
   );
 }
 
 export default App;
-

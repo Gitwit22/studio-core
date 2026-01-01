@@ -1,6 +1,8 @@
 import express from "express";
 import crypto from "crypto";
-import { firestore } from "../firebaseAdmin";
+import Stripe from "stripe";
+import { firestore as db } from "../firebaseAdmin";
+import { stripe } from "../lib/stripe";
 
 const router = express.Router();
 
@@ -24,14 +26,200 @@ function extractObjectKey(egressInfo: any): string | null {
     egressInfo?.outputs?.[0]?.filename,
     egressInfo?.outputs?.[0]?.location,
   ];
-
   const hit = candidates.find((x) => typeof x === "string" && x.length > 0);
   return hit ?? null;
 }
 
-// POST /api/livekit/webhook
-// IMPORTANT: this route MUST receive raw body (Buffer)
-router.post("/", express.raw({ type: "*/*" }), async (req, res) => {
+function planIdFromPrice(priceId?: string) {
+  if (!priceId) return "free";
+  if (priceId === process.env.STRIPE_PRICE_STARTER) return "starter";
+  if (priceId === process.env.STRIPE_PRICE_PRO) return "pro";
+  return "free";
+}
+
+function mapBillingStatus(status: string) {
+  if (status === "active" || status === "trialing") return status;
+  if (status === "past_due") return "past_due";
+  if (status === "unpaid") return "unpaid";
+  if (status === "canceled") return "canceled";
+  return "past_due";
+}
+
+/**
+ * STRIPE WEBHOOK
+ * POST /api/webhooks/stripe
+ * MUST use express.raw() and be mounted before express.json()
+ */
+router.post(
+  "/stripe",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"];
+    if (!sig) return res.status(400).send("Missing stripe-signature");
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        String(sig),
+        mustGetEnv("STRIPE_WEBHOOK_SECRET")
+      );
+    } catch (err: any) {
+      console.error("Stripe webhook signature error:", err?.message || err);
+      return res.status(400).send(`Webhook Error: ${err?.message || "Bad signature"}`);
+    }
+
+    try {
+      switch (event.type) {
+        case "customer.subscription.created":
+        case "customer.subscription.updated":
+        case "customer.subscription.deleted": {
+          // Cast to any to avoid Stripe type mismatch issues
+          const sub: any = event.data.object;
+
+          const userId = sub?.metadata?.userId;
+          if (!userId) break;
+
+          const priceId = sub?.items?.data?.[0]?.price?.id as string | undefined;
+          const planId = planIdFromPrice(priceId);
+
+          const billingStatus = mapBillingStatus(String(sub?.status || ""));
+          const billingActive = billingStatus === "active" || billingStatus === "trialing";
+
+          const currentPeriodEndMs =
+            typeof sub?.current_period_end === "number" ? sub.current_period_end * 1000 : null;
+
+          await db.collection("users").doc(userId).set(
+            {
+              planId: billingActive ? planId : "free",
+              pendingPlan: null,
+
+              billingActive,
+              billingStatus,
+
+              billing: {
+                provider: "stripe",
+                customerId: sub?.customer ?? null,
+                subscriptionId: sub?.id ?? null,
+                priceId: priceId ?? null,
+                cancelAtPeriodEnd: !!sub?.cancel_at_period_end,
+                currentPeriodEnd: currentPeriodEndMs,
+                updatedAt: Date.now(),
+              },
+            },
+            { merge: true }
+          );
+          break;
+        }
+
+        case "checkout.session.completed": {
+  const session = event.data.object as Stripe.Checkout.Session;
+
+  const userId = session.metadata?.userId;
+  if (!userId) {
+    console.warn("checkout.session.completed missing userId");
+    break;
+  }
+
+  const customerId =
+    typeof session.customer === "string" ? session.customer : null;
+
+  const subscriptionId =
+    typeof session.subscription === "string"
+      ? session.subscription
+      : null;
+
+  if (!subscriptionId) {
+    console.warn("Checkout completed without subscriptionId");
+    break;
+  }
+
+  // Pull subscription to get price + status
+const sub = await stripe.subscriptions.retrieve(subscriptionId);
+
+// This usually types fine without any:
+const priceId = sub.items.data?.[0]?.price?.id;
+
+const planId = planIdFromPrice(priceId);
+const billingStatus = mapBillingStatus(sub.status);
+const billingActive = billingStatus === "active" || billingStatus === "trialing";
+
+// Stripe returns seconds; store ms
+const currentPeriodEndSec = (sub as any).current_period_end as number | undefined;
+const currentPeriodEnd =
+  typeof currentPeriodEndSec === "number" ? currentPeriodEndSec * 1000 : null;
+
+
+  await db.collection("users").doc(userId).set(
+    {
+      planId: billingActive ? planId : "free",
+      billingActive,
+      billingStatus,
+
+      billing: {
+        provider: "stripe",
+        customerId: customerId ?? sub.customer,
+        subscriptionId: sub.id,
+        priceId,
+        cancelAtPeriodEnd: sub.cancel_at_period_end,
+        currentPeriodEnd,
+        updatedAt: Date.now(),
+      },
+    },
+    { merge: true }
+  );
+
+  console.log("✅ Billing written from checkout.session.completed", {
+    userId,
+    planId,
+    billingStatus,
+  });
+
+  break;
+}
+
+
+        case "invoice.payment_failed": {
+          const invoice: any = event.data.object;
+          const subId = invoice?.subscription as string | undefined;
+          if (!subId) break;
+
+          const sub = await stripe.subscriptions.retrieve(subId);
+          const userId = (sub as any)?.metadata?.userId;
+          if (!userId) break;
+
+          // STRICT BLOCK immediately
+          await db.collection("users").doc(userId).set(
+            {
+              planId: "free",
+              billingActive: false,
+              billingStatus: "past_due",
+              billing: { updatedAt: Date.now() },
+            },
+            { merge: true }
+          );
+          break;
+        }
+
+        default:
+          // Ignore unknown/unhandled event types but still acknowledge with 200
+          return res.status(200).json({ received: true });
+      }
+
+      return res.json({ received: true });
+    } catch (err: any) {
+      console.error("Stripe webhook handler failed:", err?.message || err);
+      return res.status(500).send(err?.message || "Webhook handler failed");
+    }
+  }
+);
+
+/**
+ * LIVEKIT WEBHOOK
+ * POST /api/webhooks/livekit
+ * MUST receive raw body (Buffer)
+ */
+router.post("/livekit", express.raw({ type: "*/*" }), async (req, res) => {
   try {
     const authHeader = String(req.headers["authorization"] || "");
     const rawBody = req.body as Buffer;
@@ -40,16 +228,12 @@ router.post("/", express.raw({ type: "*/*" }), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Expected raw body Buffer" });
     }
 
-    // ✅ Lazy env reads (so dev/test can boot)
     const LIVEKIT_API_KEY = mustGetEnv("LIVEKIT_API_KEY");
     const LIVEKIT_API_SECRET = mustGetEnv("LIVEKIT_API_SECRET");
 
-    // ✅ ESM-safe dynamic import (prevents ERR_REQUIRE_ESM in CommonJS)
     const { WebhookReceiver } = await import("livekit-server-sdk");
-
     const receiver = new WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 
-    // ✅ receive() is async -> MUST await (fixes your TS errors)
     const event = await receiver.receive(rawBody.toString("utf8"), authHeader);
 
     const eventName = String((event as any)?.event || "");
@@ -65,11 +249,9 @@ router.post("/", express.raw({ type: "*/*" }), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing egressId" });
     }
 
-    // 1) Try to pull objectKey from webhook payload
     let objectKey = extractObjectKey(egressInfo);
 
-    // 2) Fallback: if missing, use Firestore filepath (your doc already has it)
-    const ref = firestore.collection("recordings").doc(recordingId);
+    const ref = db.collection("recordings").doc(recordingId);
     const snap = await ref.get();
     const existing = snap.exists ? (snap.data() as any) : null;
 
@@ -77,18 +259,13 @@ router.post("/", express.raw({ type: "*/*" }), async (req, res) => {
       objectKey = existing.filepath;
     }
 
-    // Generate one-time token
     const rawToken = crypto.randomBytes(32).toString("hex");
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
 
-    // Only mark READY if egressInfo.status is COMPLETE
     const egressStatus = String(egressInfo?.status || "").toUpperCase();
     let finalStatus = "PROCESSING";
-    if (egressStatus === "COMPLETE" && objectKey) {
-      finalStatus = "READY";
-    } else if (!objectKey) {
-      finalStatus = "FAILED";
-    }
+    if (egressStatus === "COMPLETE" && objectKey) finalStatus = "READY";
+    else if (!objectKey) finalStatus = "FAILED";
 
     await ref.set(
       {
@@ -102,17 +279,9 @@ router.post("/", express.raw({ type: "*/*" }), async (req, res) => {
       { merge: true }
     );
 
-    console.log("✅ Webhook finalized recording:", {
-      recordingId,
-      status: finalStatus,
-      objectKey,
-      livekitStatus: egressStatus,
-      testDownloadUrl: `/api/recordings/${recordingId}/download?token=${rawToken}`,
-    });
-
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, testDownloadUrl: `/api/recordings/${recordingId}/download?token=${rawToken}` });
   } catch (err: any) {
-    console.error("❌ LiveKit webhook error:", err?.message || err);
+    console.error("LiveKit webhook error:", err?.message || err);
     return res.status(400).json({ ok: false, error: err?.message || "Webhook error" });
   }
 });

@@ -137,6 +137,32 @@ export default function Dashboard() {
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Settings & Billing button (left side) */}
+            <button
+              onClick={() => nav("/settings/billing")}
+              style={{
+                padding: '12px 24px',
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                color: '#fff',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                e.currentTarget.style.borderColor = 'rgba(34,197,94,0.6)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
+              }}
+            >
+              ⚙️ Settings & Billing
+            </button>
+            {/* Content and New Stream buttons (right side) */}
             <button
               onClick={() => nav("/join")}
               style={{
@@ -159,7 +185,7 @@ export default function Dashboard() {
                 e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
               }}
             >
-              ← Back
+              🎬 My Content
             </button>
             <button
               onClick={() => nav("/join")}

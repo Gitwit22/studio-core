@@ -1,4 +1,6 @@
+console.log("✅ admin.ts loaded");
 import express from "express";
+
 import { firestore } from "../firebaseAdmin";
 import { requireAdmin, logAdminAction } from "../middleware/adminAuth";
 import type { PlanId, UserUsageSummary } from "../types/admin.types";
@@ -8,8 +10,35 @@ const router = express.Router();
 // All routes require admin authentication
 router.use(requireAdmin);
 // In routes/admin.ts
-router.get('/me', requireAdmin, (req, res) => {
+router.use((req, res, next) => {
+  console.log("🚀 Admin router received:", req.method, req.path);
+  next();
+});
+
+router.get('/me', (req, res) => {
   res.json({ isAdmin: true, user: req.adminUser });
+});
+
+
+
+router.get("/plans", async (req, res) => {
+  console.log("🎯 1. Plans route handler started");
+  try {
+    console.log("🎯 2. About to query Firestore");
+    const snap = await firestore.collection("plans").get();
+    console.log("🎯 3. Firestore returned, docs count:", snap.size);
+
+    const plans = snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as any),
+    }));
+
+    console.log("🎯 4. Mapped plans:", JSON.stringify(plans));
+    return res.json({ plans });
+  } catch (err: any) {
+    console.error("🎯 ERROR in plans route:", err);
+    return res.status(500).json({ error: "Failed to load plans", details: err.message });
+  }
 });
 
 /**
@@ -46,7 +75,32 @@ router.get("/users", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch users", details: error.message });
   }
 });
-
+//delete user
+/**
+ * DELETE /api/admin/users/:userId
+ * Delete a user by userId
+ */
+router.delete("/users/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const userRef = firestore.collection("users").doc(userId);
+    const userDoc = await userRef.get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    await userRef.delete();
+    // Optionally, delete related usage records
+    // const usageSnap = await firestore.collection("usage").where("userId", "==", userId).get();
+    // const batch = firestore.batch();
+    // usageSnap.forEach(doc => batch.delete(doc.ref));
+    // await batch.commit();
+    await logAdminAction(req.adminUser!.uid, "delete_user", { userId });
+    res.json({ success: true, userId });
+  } catch (error) {
+    console.error("Failed to delete user:", error);
+    res.status(500).json({ error: "Failed to delete user", details: error.message });
+  }
+});
 /**
  * GET /api/admin/users/:userId
  * Get detailed information about a specific user
@@ -95,6 +149,13 @@ router.get("/users/:userId", async (req, res) => {
       ...doc.data(),
     }));
 
+    // ---- Fetch plan limits live from Firestore ----
+    const planId = (userData?.planId || userData?.plan || "free").toLowerCase();
+    const planSnap = await firestore.collection("plans").doc(planId).get();
+    const planData = planSnap.exists ? (planSnap.data() as any) : null;
+    // Safe fallback if plan doc missing
+    const includedMinutes = planData?.limits?.monthlyMinutesIncluded ?? 60;
+
     const userSummary: UserUsageSummary = {
       user: {
         uid: userId,
@@ -102,9 +163,9 @@ router.get("/users/:userId", async (req, res) => {
       } as any,
       currentMonthUsage,
       allTimeUsage,
-      planLimit: getPlanLimit(userData?.planId || "free"),
-      percentUsed: (currentMonthUsage / getPlanLimit(userData?.planId || "free")) * 100,
-      isBlocked: currentMonthUsage >= getPlanLimit(userData?.planId || "free"),
+      planLimit: includedMinutes,
+      percentUsed: Math.round((currentMonthUsage / includedMinutes) * 100),
+      isBlocked: currentMonthUsage >= includedMinutes,
       recentActivity: recentActivity as any,
     };
 
@@ -178,7 +239,9 @@ router.post("/users/:userId/change-plan", async (req, res) => {
     const { userId } = req.params;
     const { newPlan, reason } = req.body;
 
-    const validPlans: PlanId[] = ["free", "starter", "pro", "enterprise"];
+    // Dynamically fetch all valid plan IDs from Firestore
+    const plansSnap = await firestore.collection("plans").get();
+const validPlans: string[] = plansSnap.docs.map((d) => d.id);
     if (!validPlans.includes(newPlan)) {
       return res.status(400).json({ error: "Invalid plan", validPlans });
     }
@@ -310,11 +373,17 @@ router.get("/usage", async (req, res) => {
       usageByUser[userId] = (usageByUser[userId] || 0) + (data.minutes || 0);
     });
 
+    // Fetch all plans once for efficiency
+    const plansSnap = await firestore.collection("plans").get();
+    const plansMap = Object.fromEntries(plansSnap.docs.map(d => [d.id, d.data()]));
+
     const usageData = usersSnapshot.docs.map((doc) => {
       const userData = doc.data();
       const userId = doc.id;
       const minutesUsed = usageByUser[userId] || 0;
-      const planLimit = getPlanLimit(userData.planId || "free");
+      const planId = userData.planId || "free";
+      const planData = plansMap[planId] || {};
+      const planLimit = planData.limits?.monthlyMinutesIncluded ?? 60;
       const bonusMinutes = userData.bonusMinutes || 0;
       const effectiveLimit = planLimit + bonusMinutes;
 
@@ -322,7 +391,7 @@ router.get("/usage", async (req, res) => {
         userId,
         email: userData.email,
         displayName: userData.displayName,
-        planId: userData.planId || "free",
+        planId,
         minutesUsed,
         bonusMinutes,
         planLimit,
@@ -480,15 +549,6 @@ router.get("/features", async (req, res) => {
   }
 });
 
-// Helper function to get plan limits
-function getPlanLimit(planId: string): number {
-  const limits: Record<string, number> = {
-    free: 60, // 60 minutes
-    starter: 300, // 300 minutes
-    pro: 1200, // 1200 minutes
-    enterprise: 99999, // Unlimited
-  };
-  return limits[planId] || 60;
-}
+
 
 export default router;

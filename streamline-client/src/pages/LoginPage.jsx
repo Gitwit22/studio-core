@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 // Email validation function
 function validateEmail(email) {
@@ -39,27 +38,42 @@ export const LoginPage = () => {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        setError(data.error || "Login failed");
+        const err = await res.json().catch(() => ({}));
+        setError(err?.error || "Invalid credentials");
         setLoading(false);
         return;
       }
 
-      localStorage.setItem("sl_user", JSON.stringify(data.user));
-      localStorage.setItem("sl_token", data.token);
-      localStorage.setItem("sl_userId", data.user.id || data.user.uid);
-      
-      nav("/join");
+      // ✅ LOGIN SUCCEEDED — cookie is now set
+      // Hydrate user from /me
+      const meRes = await fetch("/api/auth/me", {
+        credentials: "include",
+      });
+
+      if (!meRes.ok) {
+        setError("Logged in, but failed to load profile");
+        setLoading(false);
+        return;
+      }
+
+      const me = await meRes.json();
+
+      // Optional: store user for UI convenience
+      localStorage.setItem("sl_user", JSON.stringify(me));
+
+      setLoading(false);
+      if (typeof document !== "undefined") {
+        console.log('[Login] Cookies after login:', document.cookie);
+      }
+      nav("/join"); // or /dashboard
     } catch (err) {
       console.error(err);
       setError("Something went wrong. Try again.");

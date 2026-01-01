@@ -25,7 +25,7 @@ interface AdminStats {
   averageMinutesPerUser: number;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
 export default function AdminUsage() {
   const nav = useNavigate();

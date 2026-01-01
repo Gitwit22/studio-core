@@ -1,22 +1,25 @@
-import webhookRouter from "./routes/webhook";
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
+import webhookRouter from "./routes/webhook";
+import authRoutes from "./routes/auth";
+import adminRoutes from './routes/admin';
+import adminStatusRouter from "./routes/adminStatus";
+import billingRoutes from "./routes/billing";
+import recordingsRoutes from "./routes/recordings";
+import usageRoutes from "./routes/usageRoutes";
+import roomTokenRoute from "./routes/roomToken";
+import multistreamRoutes from "./routes/multistream";
+import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
 import type { RoomServiceClient } from "livekit-server-sdk";
-import multistreamRoutes from "./routes/multistream";
-import roomTokenRoute from "./routes/roomToken";
-import { router as recordingsRoutes } from "./routes/recordings";
-import usageRoutes from "./routes/usageRoutes";
 import admin from "firebase-admin";
-import adminRoutes from './routes/admin';
-import adminStatusRouter from "./routes/adminStatus";
-
-import { firestore as db } from "./firebaseAdmin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+
 
 import { uploadVideo } from "./lib/storageClient";
 
@@ -28,34 +31,49 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 const app = express();
 
-
 app.use(cors({
   origin: [
-    'https://streamline-platform-test.onrender.com',
-    'https://streamline-platform.onrender.com',  // Add production too
-    'http://localhost:5173',  // Local development
+    "http://localhost:5173",
+    "https://streamline-platform-test.onrender.com",
+    "https://streamline-platform.onrender.com",
   ],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control"],
 }));
 
 
-app.use(
-  "/api/livekit/webhook", 
-  express.raw({ type: "application/json" }), 
-  webhookRouter
-);
-app.use("/api/livekit/webhook", express.raw({ type: "application/json" }), webhookRouter);
 
 
-
-
-
-
+// Body parsers must come before any routes that need req.body
 app.use(express.json());
-app.use('/api/admin', adminRoutes);
-app.use("/api/admin", adminStatusRouter);
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// Stripe/Billing webhooks
+app.use("/api/webhooks", webhookRouter);
+app.use("/api/auth", authRoutes);
+
+// Admin routes
+app.use("/api/admin/status", adminStatusRouter);
+app.use("/api/admin", adminRoutes);
+
+
+// Health endpoint
+app.get("/api", (req, res) => {
+  res.json({
+    service: "StreamLine Backend API",
+    status: "running",
+    endpoints: [
+      "/api/billing",
+      "/api/webhooks",
+      "/api/recordings",
+      "/api/rooms",
+      "/api/admin"
+    ]
+  });
+});
+
 
 
 // Recordings API - This handles GET /:id and POST /start, /stop
@@ -74,6 +92,10 @@ app.use("/api/roomToken", roomTokenRoute);
 
 // Multistream routes (YouTube/FB/Twitch)
 app.use("/api/rooms", multistreamRoutes);
+
+// Billing routes
+app.use("/api/billing", billingRoutes);
+
 
 // Storage test route
 app.get("/api/storage/test", async (req, res) => {
@@ -349,6 +371,13 @@ console.log("✅ User document created:", uid);
 
     console.log("✅ Signup successful for:", email);
 
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+    // Also return token in response for frontend fallback (non-httpOnly)
     return res.json({ user, token });
   } catch (err) {
     console.error("❌ Signup error:", err);
@@ -402,6 +431,13 @@ app.post("/api/auth/login", async (req, res) => {
 
     const token = jwt.sign(user, JWT_SECRET, { expiresIn: "7d" });
 
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+    // Also return token in response for frontend fallback (non-httpOnly)
     return res.json({ user, token });
   } catch (err) {
     console.error("login error", err);
@@ -524,13 +560,10 @@ app.post("/api/usage/streamEnded", async (req, res) => {
 // SERVE FRONTEND - Must be LAST (catch-all route)
 // =============================================================================
 
-app.use((_req, res) => {
-  res.json({ 
-    service: "StreamLine Backend API",
-    status: "running",
-    endpoints: ["/api/auth", "/api/recordings", "/api/rooms"]
-  });
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found", path: req.originalUrl });
 });
+
 
 
 app.listen(PORT, () => {

@@ -1,19 +1,16 @@
 import { useEffect, useState, useRef } from "react";
+import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useParams } from "react-router-dom";
 import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
 import StreamSetupModalV2 from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
 import { HostAVControls } from "../components/HostAVControls";
-
-
+import { API_BASE } from "../lib/apiBase";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
-const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/+$/, "");
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 type RecordingStatus = "idle" | "recording" | "stopping" | "stopped" | "error";
-
-
 
 function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: boolean; onHome?: () => void }) {
   useEffect(() => {
@@ -66,7 +63,7 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
         filter: 'blur(25px)',
         animation: 'float 8s ease-in-out infinite reverse'
       }} />
-      
+
       <style>{`
         @keyframes float {
           0%, 100% { transform: translateY(0px) rotate(0deg); }
@@ -133,108 +130,83 @@ function StreamEndedModal({
   onExitRoom: () => void;
 }) {
   const [processing, setProcessing] = useState(true);
-const [ready, setReady] = useState(false);
-const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-const pollCountRef = useRef(0);
-  const MAX_POLLS = 100; // Stop after 5 minutes (100 * 3 seconds)
+  const [ready, setReady] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollCountRef = useRef(0);
+  const MAX_POLLS = 100;
 
   useEffect(() => {
-  if (!recordingId) return;
+    if (!recordingId) return;
 
-  const pollStatus = async () => {
-    // ✅ Safety limit: Stop after MAX_POLLS attempts
-    pollCountRef.current += 1;
-    if (pollCountRef.current > MAX_POLLS) {
-      console.warn("⚠️ Max polling attempts reached. Stopping.");
+    const pollStatus = async () => {
+      pollCountRef.current += 1;
+      if (pollCountRef.current > MAX_POLLS) {
+        console.warn("⚠️ Max polling attempts reached. Stopping.");
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        setProcessing(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/recordings/${recordingId}`);
+        if (!res.ok) throw new Error("Failed to fetch recording status");
+
+        const text = await res.text();
+        if (!text) throw new Error("Empty response from server");
+
+        const payload = JSON.parse(text);
+        console.log("🔍 Full response:", payload);
+
+        const status = payload?.data?.status ?? payload?.status ?? "PROCESSING";
+        const downloadReady = !!payload?.data?.downloadReady;
+
+        console.log("📊 Recording status:", status);
+        console.log("📦 downloadReady:", downloadReady);
+
+        if (downloadReady) {
+          console.log("✅ downloadReady is true - enabling download button!");
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+            console.log("🛑 Polling stopped - recording is ready!");
+          }
+          setProcessing(false);
+          setReady(true);
+          return;
+        }
+
+        setProcessing(true);
+      } catch (err) {
+        console.error("❌ Poll error:", err);
+        setProcessing(true);
+      }
+    };
+
+    pollStatus();
+    intervalRef.current = setInterval(pollStatus, 3000);
+
+    return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      setProcessing(false);
-      return;
-    }
+    };
+  }, [recordingId]);
 
-    try {
-      const res = await fetch(`${API_BASE}/api/recordings/${recordingId}`);
-      if (!res.ok) throw new Error("Failed to fetch recording status");
-
-      const text = await res.text();
-      if (!text) throw new Error("Empty response from server");
-
-      const payload = JSON.parse(text);
-      console.log("🔍 Full response:", payload);
-
-      const status = payload?.data?.status ?? payload?.status ?? "PROCESSING";
-      const downloadReady = !!payload?.data?.downloadReady;
-
-      console.log("📊 Recording status:", status);
-      console.log("📦 downloadReady:", downloadReady);
-      console.log("📊 Current state - Processing:", processing, "Ready:", ready);
-
-      // ✅ NEW SOURCE OF TRUTH: only unlock when downloadReady === true
-      if (downloadReady) {
-        console.log("✅ downloadReady is true - enabling download button!");
-
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-          console.log("🛑 Polling stopped - recording is ready!");
-        }
-
-        setProcessing(false);
-        setReady(true);
-        return;
-      }
-
-      // Not ready yet — keep processing indicator on
-      if (status === "RECORDING") {
-        setProcessing(true);
-      } else if (status === "STOP_REQUESTED" || status === "PROCESSING") {
-        setProcessing(true);
-      } else {
-        // Unknown status, still keep it "processing" until downloadReady flips
-        setProcessing(true);
-      }
-    } catch (err) {
-      console.error("❌ Poll error:", err);
-      setProcessing(true);
-    }
-  };
-
-  // Run once immediately, then poll
-  pollStatus();
-  intervalRef.current = setInterval(pollStatus, 3000);
-
-  return () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  };
-}, [API_BASE, recordingId]);
-
-
-    
-  // ✅ UPDATED download handler (this is the only change)
   const handleDownload = async () => {
     try {
-      // 1️⃣ Ask backend for a one-time download link
-      const res = await fetch(
-        `${API_BASE}/api/recordings/${recordingId}/download-link`
-      );
-
+      const res = await fetch(`/api/recordings/${recordingId}/download-link`);
       if (!res.ok) {
         throw new Error("Failed to get download link");
       }
-
       const data = await res.json();
-
       if (!data?.success || !data?.data?.path) {
         throw new Error(data?.error || "Invalid download link response");
       }
-
-      // 2️⃣ Open the real download URL (includes token)
-      window.open(`${API_BASE}${data.data.path}`, "_blank");
+      window.open(`${data.data.path}`, "_blank");
     } catch (err) {
       console.error(err);
       alert("Failed to download recording.");
@@ -267,58 +239,53 @@ const pollCountRef = useRef(0);
         textAlign: 'center',
         color: '#ffffff',
       }}>
-       {processing && (
-  <div style={{ marginBottom: '1rem', fontWeight: 600, color: '#fbbf24', textAlign: 'center' }}>
-    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
-    <div className="processing-text">Processing recording<span className="dots"></span></div>
-    <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-      This usually takes 1-2 minutes. The download button will activate when ready.
-    </div>
-  </div>
-)}
+        {processing && (
+          <div style={{ marginBottom: '1rem', fontWeight: 600, color: '#fbbf24', textAlign: 'center' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
+            <div>Processing recording...</div>
+            <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem' }}>
+              This usually takes 1-2 minutes. The download button will activate when ready.
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <button
-  onClick={onStartEditing}
-  style={{
-    width: '100%',
-    padding: '1rem',
-    background: 'linear-gradient(to right, #dc2626, #ef4444)',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '0.5rem',
-    fontSize: '1rem',
-    fontWeight: '600',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-  }}
-  disabled={processing}
->
-  ✂️ Start Editing
-</button>
-
-<button
-  onClick={handleDownload}
-  disabled={!ready}
-  style={{
-    width: "100%",
-    padding: "12px 16px",
-    borderRadius: "8px",
-    border: "none",
-    fontSize: "14px",
-    fontWeight: 600,
-    cursor: !ready ? "not-allowed" : "pointer",
-    opacity: !ready ? 0.6 : 1,
-    transition: "all 0.3s ease",
-    background: ready ? "#16a34a" : "#374151",  // ✅ green vs gray
-    color: "#fff",
-  }}
->
-  {ready ? "⬇️ Download Recording" : "⏳ Processing..."}
-</button>
-
-
-
-
+            onClick={onStartEditing}
+            style={{
+              width: '100%',
+              padding: '1rem',
+              background: 'linear-gradient(to right, #dc2626, #ef4444)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '0.5rem',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+            }}
+            disabled={processing}
+          >
+            ✂️ Start Editing
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={!ready}
+            style={{
+              width: "100%",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              border: "none",
+              fontSize: "14px",
+              fontWeight: 600,
+              cursor: !ready ? "not-allowed" : "pointer",
+              opacity: !ready ? 0.6 : 1,
+              transition: "all 0.3s ease",
+              background: ready ? "#16a34a" : "#374151",
+              color: "#fff",
+            }}
+          >
+            {ready ? "⬇️ Download Recording" : "⏳ Processing..."}
+          </button>
           <button
             onClick={onExitRoom}
             style={{
@@ -356,17 +323,13 @@ function getOrCreateUid() {
 }
 
 export default function Room() {
+  useEffect(() => {
+    logAuthDebugContext("Arrive Room Page");
+  }, []);
 
-    
-    // Separate ref for stream egress id
-    const streamEgressRef = useRef<string | null>(null);
-  
+  const streamEgressRef = useRef<string | null>(null);
   const nav = useNavigate();
   const { roomName } = useParams<{ roomName: string }>();
-  const onExitRoom = () => nav("/dashboard");
-  const onStartEditing = () => nav("/editor");
-
-  
 
   const [displayName, setDisplayName] = useState(
     () => localStorage.getItem("sl_displayName") ?? ""
@@ -379,37 +342,20 @@ export default function Room() {
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
-  // First person to join is the host (based on stored host ID for this room)
   const currentUserId = getOrCreateUid();
   const [isHost, setIsHost] = useState(false);
   const [userRole, setUserRole] = useState<string>("guest");
-  const [debugInfo, setDebugInfo] = useState({ roomName: '', userId: '', isHost: false, role: '' });
 
-  // Effect to determine host status based on room creation
   useEffect(() => {
     if (!roomName) return;
-    
-    // Check if user created this room (stored when they created it from /join)
     const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
     const willBeHost = createdRooms.includes(roomName);
     setIsHost(willBeHost);
-
-    // Get role from localStorage (set during join process)
     const currentRole = localStorage.getItem("sl_current_role") || "guest";
     setUserRole(currentRole);
-    
     console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost, role: currentRole });
-    
-    // Update debug info
-    setDebugInfo({ 
-      roomName: roomName || 'none', 
-      userId: currentUserId.slice(-4) || 'none', 
-      isHost: willBeHost,
-      role: currentRole
-    });
   }, [roomName, currentUserId]);
 
-  const [recordingEnabled, setRecordingEnabled] = useState(false);
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
   const recordingRef = useRef<string | null>(null);
@@ -424,7 +370,8 @@ export default function Room() {
 
     const fetchToken = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/roomToken`, {
+        console.log("[Room] Fetching room token...");
+        const res = await fetch(`/api/roomToken`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -432,48 +379,62 @@ export default function Room() {
             identity: displayName,
             uid: getOrCreateUid(),
           }),
+          credentials: 'include',
         });
+        console.log("[Room] roomToken status:", res.status);
+
+        let data = null;
+        let rawText = null;
+        try {
+          rawText = await res.text();
+          data = JSON.parse(rawText);
+        } catch (err) {
+          console.error("[Room] Failed to parse JSON from /roomToken:", err, rawText);
+          data = null;
+        }
 
         if (!res.ok) {
-          console.error("roomToken HTTP error", res.status);
+          console.error("[Room] roomToken HTTP error", res.status, rawText);
+          return;
+        }
+        if (!data) {
+          console.error("[Room] No data from /roomToken");
           return;
         }
 
-        const data = await res.json();
-        const tokenFromApi =
-          data.token || data.accessToken || data.jwt || data.roomToken;
-        const serverUrlFromApi =
-          data.serverUrl || data.server_url || data.url || data.livekitUrl;
-
-        if (tokenFromApi && serverUrlFromApi) {
-          setToken(tokenFromApi);
-          setServerUrl(serverUrlFromApi);
+        console.log("[roomToken] raw response:", data);
+        if (typeof data?.token !== "string" || !data.token) {
+          console.error("[Room] Invalid token returned:", data);
+          return;
+        }
+        const { token, serverUrl } = data;
+        const finalServerUrl = serverUrl || import.meta.env.VITE_LIVEKIT_URL;
+        setToken(token);
+        setServerUrl(finalServerUrl || null);
+        if (!token || !finalServerUrl) {
+          console.error("[Room] Missing token or serverUrl", { token, serverUrl });
         }
       } catch (err) {
-        console.error("fetchToken error:", err);
+        console.error("[Room] fetchToken error:", err);
       }
     };
 
     fetchToken();
   }, [roomName, displayName]);
 
-  // Timer effect - runs when stream goes live
   useEffect(() => {
     if (streamStatus === "live") {
       if (!streamStartTimeRef.current) {
         streamStartTimeRef.current = Date.now();
       }
-
       const interval = setInterval(() => {
         if (streamStartTimeRef.current) {
           const elapsed = Math.floor((Date.now() - streamStartTimeRef.current) / 1000);
           setElapsedTime(elapsed);
         }
       }, 1000);
-
       return () => clearInterval(interval);
     } else {
-      // Reset when stream ends
       streamStartTimeRef.current = null;
       setElapsedTime(0);
     }
@@ -487,202 +448,138 @@ export default function Room() {
     nav('/join', { replace: true });
   };
 
- async function apiStartRecording(roomName: string, layout: "speaker" | "grid" = "grid") {
-  console.log("🔧 apiStartRecording called:", { roomName, layout });
-  
-  const res = await fetch(`${API_BASE}/api/recordings/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ roomName, layout }),
-  });
-
-  console.log("🔧 Response status:", res.status);
-
-  // ✅ FIX: Read as text first (more reliable than res.json())
-  const text = await res.text();
-  console.log("🔧 Raw response:", text);
-
-  if (!res.ok) {
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-
-  // Now parse the text
-  const json = JSON.parse(text);
-  console.log("🔧 Parsed JSON:", json);
-  
-  return json;
-}
-  
-  // UPDATED: Return the full response (bulletproof format)
-  
-
-
-async function apiStopRecording(recordingId: string) {
-  console.log("🛑 apiStopRecording called:", { recordingId });
-  
-  const res = await fetch(`${API_BASE}/api/recordings/stop`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ recordingId }),
-  });
-
-  console.log("🛑 API response status:", res.status);
-
-  if (!res.ok) {
-    try {
-      const errorData = await res.json();
-      console.error("🛑 API error:", errorData);
-      throw new Error(errorData.error || `HTTP ${res.status}`);
-    } catch (parseError) {
-      const text = await res.text();
-      console.error("🛑 API error (text):", text);
+  async function apiStartRecording(roomName: string, layout: "speaker" | "grid" = "grid") {
+    console.log("🔧 apiStartRecording called:", { roomName, layout });
+    const res = await fetch(`/api/recordings/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomName, layout }),
+    });
+    console.log("🔧 Response status:", res.status);
+    const text = await res.text();
+    console.log("🔧 Raw response:", text);
+    if (!res.ok) {
       throw new Error(text || `HTTP ${res.status}`);
     }
+    const json = JSON.parse(text);
+    console.log("🔧 Parsed JSON:", json);
+    return json;
   }
 
-  const json = await res.json();
-  console.log("🛑 API response JSON:", json);
-  
-  // UPDATED: Return the full response
-  return json;
-}
-
-const startRecording = async (layout: "speaker" | "grid" = "grid") => {
-  if (!roomName) {
-    console.log("❌ No roomName, can't start recording");
-    return;
+  async function apiStopRecording(recordingId: string) {
+    console.log("🛑 apiStopRecording called:", { recordingId });
+    const res = await fetch(`/api/recordings/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recordingId }),
+    });
+    console.log("🛑 API response status:", res.status);
+    if (!res.ok) {
+      try {
+        const errorData = await res.json();
+        console.error("🛑 API error:", errorData);
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      } catch (parseError) {
+        const text = await res.text();
+        console.error("🛑 API error (text):", text);
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+    }
+    const json = await res.json();
+    console.log("🛑 API response JSON:", json);
+    return json;
   }
-  if (recordingRef.current) {
-    console.log("⏳ Recording already in progress, skipping startRecording call.");
-    return;
-  }
 
-  console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout);
-  setRecordingStatus("recording");
-  
-  try {  // ✅ ADD THIS LINE if missing
-    console.log("📡 Calling apiStartRecording...");
-    const response = await apiStartRecording(roomName, layout);
-    console.log("📡 Got response:", response);
-    
-    const { recordingId } = response.data;
-    console.log("🎬 Extracted recordingId:", recordingId);
-    
-    if (!recordingId || recordingId === "unknown") {
-      console.error("❌ Invalid recordingId:", recordingId);
+  const startRecording = async (layout: "speaker" | "grid" = "grid") => {
+    if (!roomName) {
+      console.log("❌ No roomName, can't start recording");
+      return;
+    }
+    if (recordingRef.current) {
+      console.log("⏳ Recording already in progress, skipping startRecording call.");
+      return;
+    }
+    console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout);
+    setRecordingStatus("recording");
+    try {
+      console.log("📡 Calling apiStartRecording...");
+      const response = await apiStartRecording(roomName, layout);
+      console.log("📡 Got response:", response);
+      const recId = response?.data?.recordingId ?? response?.recordingId;
+      console.log("🎬 Extracted recordingId:", recId);
+      if (!recId || recId === "unknown") {
+        console.error("❌ Invalid recordingId:", recId);
+        setRecordingStatus("error");
+        return;
+      }
+      recordingRef.current = recId;
+      setRecordingId(recId);
+      streamStartTimeRef.current = Date.now();
+      console.log("✅ Recording started!");
+    } catch (e) {
+      console.error("❌ Failed to start recording:", e);
+      setRecordingStatus("error");
+      alert(`Failed to start recording: ${(e as Error).message || "Unknown error"}`);
+    }
+  };
+
+  const stopRecording = async () => {
+    console.log("🛑 stopRecording called");
+    const id = recordingRef.current;
+    if (!id || id === "unknown") {
+      console.error("❌ No valid recording ID to stop!");
       setRecordingStatus("error");
       return;
     }
-    
-    recordingRef.current = recordingId;
-    setRecordingId(recordingId);
-    streamStartTimeRef.current = Date.now();
-    
-    console.log("✅ Recording started!");
-    console.log("   recordingRef.current:", recordingRef.current);
-    console.log("   recordingId state:", recordingId);
-  } catch (e) {  // ✅ Line 581
-    console.error("❌ Failed to start recording:", e);
-    setRecordingStatus("error");
-        alert(`Failed to start recording: ${(e as Error).message || "Unknown error"}`);
-
-  }
-};
-
-const stopRecording = async () => {
-  console.log("🛑 stopRecording called");
-  console.log("   recordingRef.current:", recordingRef.current);
-  console.log("   recordingId state:", recordingId);
-  
-  const id = recordingRef.current;
-  
-  if (!id || id === "unknown") {
-    console.error("❌ No valid recording ID to stop!");
-    console.error("   recordingRef.current:", recordingRef.current);
-    console.error("   This means recording never started properly");
-    setRecordingStatus("error");
-    return;
-  }
-
-  console.log("🛑 Stopping recording with ID:", id);
-  setRecordingStatus("stopping");
-  
-  try {
-    const response = await apiStopRecording(id);
-    console.log("✅ Recording stopped successfully:", response);
-    
-    // UPDATED: Check for success
-    if (!response.success) {
-      throw new Error(response.error || "Stop recording failed");
+    console.log("🛑 Stopping recording with ID:", id);
+    setRecordingStatus("stopping");
+    try {
+      const response = await apiStopRecording(id);
+      console.log("✅ Recording stopped successfully:", response);
+      if (!response.success) {
+        throw new Error(response.error || "Stop recording failed");
+      }
+      setRecordingStatus("stopped");
+      setRecordingId(id);
+    } catch (e) {
+      console.error("❌ Failed to stop recording:", e);
+      setRecordingStatus("error");
+      alert(`Failed to stop recording: ${(e as Error).message || "Unknown error"}`);
     }
-    
-    setRecordingStatus("stopped");
-    setRecordingId(id);  // Set this so modal can poll!
-
-  } catch (e) {
-    console.error("❌ Failed to stop recording:", e);
-    setRecordingStatus("error");
-        alert(`Failed to start recording: ${(e as Error).message || "Unknown error"}`);
-
-  }
-};
-
-  useEffect(() => {
-    if (isHost && token && !recordingRef.current) {
-      // Recording now starts when stream goes live, not on join
-    }
-  }, [isHost, token]);
+  };
 
   const handleEndStream = async () => {
-    // For hosts: if stream is still live, show message and wait
     if (isHost && streamStatus === "live") {
       alert("⏹️ Stream is still live. Stop the stream first.");
       return;
     }
-
-    // For hosts: if recording is still active, show message and wait
     if (isHost && recordingStatus === "recording") {
       alert("⏹️ Recording is still active. Stop the stream first.");
       return;
     }
-
-    // For hosts: show exit options menu
     if (isHost && didStreamThisSession) {
       setShowExitOptions(true);
       return;
     }
-
-    // For hosts who never streamed - just show goodbye
     if (isHost) {
       console.log('👋 User never streamed - showing goodbye');
       setShowGoodbye(true);
       return;
     }
-
-    // For guests: just leave the room with goodbye screen
     handleLeftRoom();
   };
 
   const handleStayAndRecord = () => {
-    // Reset recording state for next stream
     setRecordingId(null);
     setRecordingStatus("idle");
     recordingRef.current = null;
     setShowExitOptions(false);
-    // User stays in room, ready to click "Go Live" again
     console.log('🎬 Ready to record another session');
   };
 
   const handleViewSummary = () => {
-    const finalRecordingId = recordingId || recordingRef.current;
     setShowExitOptions(false);
-    
-    if (finalRecordingId && finalRecordingId !== 'unknown') {
-      nav('/thanks', { replace: true });
-    } else {
-      // Fallback to thanks page
-      nav('/thanks', { replace: true });
-    }
+    nav('/thanks', { replace: true });
   };
 
   const handleLeaveRoom = () => {
@@ -702,27 +599,13 @@ const stopRecording = async () => {
       alert("No room name");
       return;
     }
-
-    // Debug logging
     console.log("🎬 Room.tsx - handleStartMultistream called");
-    console.log("   Room:", roomName);
-    console.log("   Keys received:", {
-      youtube: keys.youtubeKey ? "✓ provided" : "✗ empty",
-      facebook: keys.facebookKey ? "✓ provided" : "✗ empty",
-      twitch: keys.twitchKey ? "✓ provided" : "✗ empty",
-      record: keys.record,
-      layout: keys.layout,
-    });
-
-    // Validate at least one key
     if (!keys.youtubeKey && !keys.facebookKey && !keys.twitchKey) {
       alert("At least one stream key is required");
       return;
     }
-
     try {
       setStreamStatus("starting");
-
       const requestBody = {
         youtubeStreamKey: keys.youtubeKey,
         facebookStreamKey: keys.facebookKey,
@@ -730,19 +613,15 @@ const stopRecording = async () => {
         userId: getOrCreateUid(),
         guestCount: viewerCount,
       };
-
       console.log("   Sending to API:", requestBody);
-
       const res = await fetch(
-        `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
+        `/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
         }
       );
-
-      // Bulletproof: try to parse as JSON, fallback to text
       let data;
       try {
         data = await res.json();
@@ -754,34 +633,22 @@ const stopRecording = async () => {
           data = { raw: text };
         }
       }
-
-      // Log the full response for debugging
       console.log("🔍 startMultistream full response:", data);
-
       if (!res.ok) {
         console.error("Start multistream failed", data);
         alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
         setStreamStatus("idle");
         return;
       }
-
-      // Bulletproof egressId extraction
-      const egressId =
-        data?.data?.egressId ??
-        data?.egressId ??
-        data?.data?.id ??
-        data?.id;
-
-     
-      streamEgressRef.current = egressId || null;
+      const egressIdVal = data?.data?.egressId ?? data?.egressId ?? data?.data?.id ?? data?.id;
+      streamEgressRef.current = egressIdVal || null;
       setStreamStatus("live");
       streamStartTimeRef.current = Date.now();
       setDidStreamThisSession(true);
-      // Start recording using passed-in values
       if (keys.record) {
         await startRecording(keys.layout ?? "grid");
       }
-      console.log("✅ Stream started! Egress ID:", egressId);
+      console.log("✅ Stream started! Egress ID:", egressIdVal);
     } catch (err) {
       console.error("Error starting multistream:", err);
       alert("Error starting multistream");
@@ -790,54 +657,44 @@ const stopRecording = async () => {
   };
 
   const handleStopMultistream = async () => {
-    // Use streamEgressRef for stopping stream
     const streamEgressId = streamEgressRef.current;
     if (!streamEgressId) {
       alert("No active stream");
       return;
     }
-
     if (!roomName) {
       alert("No room name");
       return;
     }
-
     try {
       setStreamStatus("stopping");
-
-      // ✅ DON'T stop recording - let user control that separately
-      // Recording continues even after stream ends
-
       const res = await fetch(
-        `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
+        `/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ egressId: streamEgressId }),
         }
       );
-
       if (!res.ok) {
         alert("Failed to stop multistream");
         setStreamStatus("live");
         return;
       }
-
       setEgressId(null);
       setStreamStatus("idle");
       streamEgressRef.current = null;
-      
-      // ✅ Show alert that recording is still active
       if (recordingStatus === "recording") {
         console.log("ℹ️ Stream stopped but recording still active");
       }
-        
     } catch (err) {
       console.error("Error stopping multistream", err);
       alert("Error stopping multistream");
       setStreamStatus("live");
     }
   };
+
+  // ==================== RENDER ====================
 
   if (!displayName) {
     return (
@@ -853,7 +710,6 @@ const stopRecording = async () => {
         position: 'relative',
         overflow: 'hidden'
       }}>
-        {/* Animated Background Orbs */}
         <div style={{
           position: 'absolute',
           top: '20%',
@@ -878,7 +734,7 @@ const stopRecording = async () => {
           filter: 'blur(25px)',
           animation: 'float 9s ease-in-out infinite reverse'
         }} />
-        
+
         <style>{`
           @keyframes float {
             0%, 100% { transform: translateY(0px) rotate(0deg); }
@@ -956,20 +812,6 @@ const stopRecording = async () => {
               transition: 'all 0.3s ease',
               opacity: !pendingName.trim() ? 0.6 : 1
             }}
-            onMouseEnter={(e) => {
-              if (pendingName.trim()) {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
-                target.style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (pendingName.trim()) {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
-                target.style.boxShadow = 'none';
-              }
-            }}
           >
             Join Room
           </button>
@@ -1001,7 +843,6 @@ const stopRecording = async () => {
     return <ThankYouScreen showHomeButton={isHost} onHome={handleHomeClick} />;
   }
 
-  // Exit Options Modal for hosts who streamed
   if (showExitOptions) {
     return (
       <div style={{
@@ -1024,16 +865,8 @@ const stopRecording = async () => {
           backdropFilter: 'blur(20px)',
           boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5)'
         }}>
-          <div style={{
-            textAlign: 'center',
-            marginBottom: '2rem'
-          }}>
-            <div style={{
-              fontSize: '3rem',
-              marginBottom: '1rem'
-            }}>
-              🎬
-            </div>
+          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎬</div>
             <h2 style={{
               fontSize: '1.75rem',
               fontWeight: '700',
@@ -1045,21 +878,12 @@ const stopRecording = async () => {
             }}>
               Recording Complete!
             </h2>
-            <p style={{
-              fontSize: '0.95rem',
-              color: '#9ca3af',
-              marginTop: '0.75rem'
-            }}>
+            <p style={{ fontSize: '0.95rem', color: '#9ca3af', marginTop: '0.75rem' }}>
               What would you like to do next?
             </p>
           </div>
 
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '1rem'
-          }}>
-            {/* Stay & Record Another */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <button
               onClick={handleStayAndRecord}
               style={{
@@ -1070,22 +894,9 @@ const stopRecording = async () => {
                 color: '#10b981',
                 cursor: 'pointer',
                 transition: 'all 0.3s ease',
-                backdropFilter: 'blur(10px)',
                 fontSize: '1rem',
                 fontWeight: '600',
                 textAlign: 'left'
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, rgba(34, 197, 94, 0.25) 0%, rgba(16, 185, 129, 0.2) 100%)';
-                target.style.borderColor = 'rgba(34, 197, 94, 0.8)';
-                target.style.boxShadow = '0 0 20px rgba(34, 197, 94, 0.3)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%)';
-                target.style.borderColor = 'rgba(34, 197, 94, 0.5)';
-                target.style.boxShadow = 'none';
               }}
             >
               <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>🎯 Stay & Record Another</div>
@@ -1094,7 +905,6 @@ const stopRecording = async () => {
               </div>
             </button>
 
-            {/* View Summary & Edit */}
             <button
               onClick={handleViewSummary}
               style={{
@@ -1105,22 +915,9 @@ const stopRecording = async () => {
                 color: '#3b82f6',
                 cursor: 'pointer',
                 transition: 'all 0.3s ease',
-                backdropFilter: 'blur(10px)',
                 fontSize: '1rem',
                 fontWeight: '600',
                 textAlign: 'left'
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.25) 0%, rgba(37, 99, 235, 0.2) 100%)';
-                target.style.borderColor = 'rgba(59, 130, 246, 0.8)';
-                target.style.boxShadow = '0 0 20px rgba(59, 130, 246, 0.3)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%)';
-                target.style.borderColor = 'rgba(59, 130, 246, 0.5)';
-                target.style.boxShadow = 'none';
               }}
             >
               <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>📊 View Summary & Edit</div>
@@ -1129,7 +926,6 @@ const stopRecording = async () => {
               </div>
             </button>
 
-            {/* Leave Room */}
             <button
               onClick={handleLeaveRoom}
               style={{
@@ -1140,22 +936,9 @@ const stopRecording = async () => {
                 color: '#d1d5db',
                 cursor: 'pointer',
                 transition: 'all 0.3s ease',
-                backdropFilter: 'blur(10px)',
                 fontSize: '1rem',
                 fontWeight: '600',
                 textAlign: 'left'
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(107, 114, 128, 0.25)';
-                target.style.borderColor = 'rgba(107, 114, 128, 0.8)';
-                target.style.boxShadow = '0 0 20px rgba(107, 114, 128, 0.3)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(107, 114, 128, 0.15)';
-                target.style.borderColor = 'rgba(107, 114, 128, 0.5)';
-                target.style.boxShadow = 'none';
               }}
             >
               <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>🚪 Leave Room</div>
@@ -1191,11 +974,10 @@ const stopRecording = async () => {
 
           <span className="text-sm opacity-80">{roomName}</span>
 
-          {/* Invite Menu - only for hosts */}
           {isHost && (
             <button
               onClick={() => {
-                const inviteUrl = `${window.location.origin}/join?room=${encodeURIComponent(roomName)}`;
+                const inviteUrl = `${window.location.origin}/join?room=${encodeURIComponent(roomName || '')}`;
                 navigator.clipboard.writeText(inviteUrl);
                 alert(`Invite link copied to clipboard!\n${inviteUrl}`);
               }}
@@ -1208,19 +990,7 @@ const stopRecording = async () => {
                 color: '#22c55e',
                 cursor: 'pointer',
                 transition: 'all 0.3s ease',
-                backdropFilter: 'blur(10px)',
                 fontWeight: '500'
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(34, 197, 94, 0.1)';
-                target.style.borderColor = 'rgba(220, 38, 38, 0.6)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(34, 197, 94, 0.05)';
-                target.style.borderColor = 'rgba(34, 197, 94, 0.4)';
-                target.style.boxShadow = 'none';
               }}
               title="Copy invite link to clipboard"
             >
@@ -1228,7 +998,6 @@ const stopRecording = async () => {
             </button>
           )}
 
-          {/* Stream Timer - only show when streaming */}
           {streamStatus === "live" && (
             <div
               style={{
@@ -1241,10 +1010,8 @@ const stopRecording = async () => {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
-                backdropFilter: 'blur(10px)',
                 fontWeight: '500',
-                fontFamily: 'monospace',
-                animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+                fontFamily: 'monospace'
               }}
             >
               🔴 {`${Math.floor(elapsedTime / 60)}:${String(elapsedTime % 60).padStart(2, '0')}`}
@@ -1254,8 +1021,8 @@ const stopRecording = async () => {
 
         {isHost && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <button
-              onClick={() => setDashboardOpen(true)}
+            <button
+              onClick={() => setDashboardOpen(v => !v)}
               style={{
                 fontSize: '0.75rem',
                 padding: '0.5rem 0.75rem',
@@ -1264,18 +1031,7 @@ const stopRecording = async () => {
                 background: 'rgba(255, 255, 255, 0.05)',
                 color: '#ffffff',
                 cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                backdropFilter: 'blur(10px)'
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(255, 255, 255, 0.1)';
-                target.style.borderColor = 'rgba(220, 38, 38, 0.6)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(255, 255, 255, 0.05)';
-                target.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+                transition: 'all 0.3s ease'
               }}
             >
               Dashboard
@@ -1295,7 +1051,7 @@ const stopRecording = async () => {
             </div>
 
             <button
-              onClick={() => setShowStreamSetup(true)}
+              onClick={() => setShowStreamSetup(v => !v)}
               style={{
                 padding: '0.375rem 0.75rem',
                 fontSize: '0.75rem',
@@ -1306,16 +1062,6 @@ const stopRecording = async () => {
                 cursor: 'pointer',
                 transition: 'all 0.3s ease',
                 fontWeight: '500'
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
-                target.style.boxShadow = '0 0 15px rgba(220, 38, 38, 0.4)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
-                target.style.boxShadow = 'none';
               }}
             >
               {streamStatus === "live" ? "Manage Stream" : "Setup Stream"}
@@ -1341,7 +1087,6 @@ const stopRecording = async () => {
           <div style={{ width: "100%", height: "100%", position: "relative" }}>
             {isHost && <HostAVControls />}
             <VideoConference />
-            {/* On-stream logo for hosts - visible to viewers */}
             {isHost && (
               <img
                 src="/logo.png"
@@ -1364,7 +1109,7 @@ const stopRecording = async () => {
             open={dashboardOpen}
             onClose={() => setDashboardOpen(false)}
             role={isHost ? "host" : (userRole === "moderator" ? "moderator" : "participant")}
-            roomName={roomName}
+            roomName={roomName || ''}
           />
         </LiveKitRoom>
       )}
@@ -1386,32 +1131,15 @@ const stopRecording = async () => {
           recordingId={recordingId}
           onStartEditing={() => nav('/edit', { replace: true })}
           onExitRoom={() => nav('/thanks', { replace: true })}
-
-          
         />
-      )} 
+      )}
 
       <style>{`
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
-  }
-  
-  @keyframes dots {
-    0%, 20% { content: '.'; }
-    40% { content: '..'; }
-    60%, 100% { content: '...'; }
-  }
-  
-  .processing-text {
-    display: inline-block;
-  }
-  
-  .dots::after {
-    content: '';
-    animation: dots 1.5s steps(1) infinite;
-  }
-`}</style>
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.7; }
+        }
+      `}</style>
     </>
   );
 }

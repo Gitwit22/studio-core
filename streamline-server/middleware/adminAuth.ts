@@ -40,57 +40,72 @@ async function isAdmin(uid: string): Promise<boolean> {
  * Middleware to require admin authentication
  * Expects JWT token in Authorization header or userId in request body
  */
+import jwt from "jsonwebtoken";
+
 export async function requireAdmin(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    // Extract user ID from JWT token or request body
-    const authHeader = req.headers.authorization;
     let userId: string | null = null;
+    let jwtSource = null;
 
-    if (authHeader?.startsWith("Bearer ")) {
-      // In production, decode JWT token here
-      // For now, we'll use a simple approach
-      const token = authHeader.substring(7);
-      
-      // TODO: Decode JWT and extract userId
-      // For MVP, we can pass userId directly in body or query
-      userId = req.body.adminUserId || req.query.adminUserId as string;
-    } else {
-      // Fallback: get from body or query
-      userId = req.body.adminUserId || req.query.adminUserId as string;
+    // 1. Try JWT in httpOnly cookie ('token')
+    if (req.cookies && req.cookies.token) {
+      try {
+        const user = jwt.verify(req.cookies.token, process.env.JWT_SECRET || "dev-secret") as any;
+        userId = user.uid || user.id || null;
+        jwtSource = 'cookie';
+      } catch (err) {
+        console.warn('[requireAdmin] Invalid JWT in cookie:', err?.message || err);
+      }
     }
 
+    // 2. Try JWT in Authorization header
     if (!userId) {
-      res.status(401).json({ 
-        error: "Unauthorized", 
-        message: "Admin authentication required" 
-      });
+      const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+      if (authHeader && typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.substring(7);
+        try {
+          const user = jwt.verify(token, process.env.JWT_SECRET || "dev-secret") as any;
+          userId = user.uid || user.id || null;
+          jwtSource = 'header';
+        } catch (err) {
+          console.warn('[requireAdmin] Invalid JWT in Authorization header:', err?.message || err);
+        }
+      }
+    }
+
+    // 3. Fallback: adminUserId in body or query
+    if (!userId) {
+      userId = (req.body && req.body.adminUserId) || (req.query && req.query.adminUserId) || null;
+      if (userId) jwtSource = 'body/query';
+    }
+
+    console.log(`[requireAdmin] userId: ${userId}, jwtSource: ${jwtSource}, path: ${req.path}`);
+
+    if (!userId) {
+      res.status(401).json({ error: "Missing admin user ID or valid token" });
       return;
     }
 
-    // Check if user is admin
-    const adminStatus = await isAdmin(userId);
-
-    if (!adminStatus) {
-      console.warn(`Non-admin user ${userId} attempted to access admin endpoint`);
-      res.status(403).json({ 
-        error: "Forbidden", 
-        message: "Admin privileges required" 
-      });
+    const isAdminUser = await isAdmin(userId);
+    if (!isAdminUser) {
+      res.status(403).json({ error: "Admin privileges required" });
       return;
     }
 
     // Get admin user details
-    const userDoc = await firestore.collection("users").doc(userId).get();
-    const userData = userDoc.data();
+    let userData: any = {};
+    try {
+      const userDoc = await firestore.collection("users").doc(userId).get();
+      userData = userDoc.data() || {};
+    } catch {}
 
-    // Attach admin user to request
     req.adminUser = {
       uid: userId,
-      email: userData?.email || "unknown",
+      email: userData.email || "unknown",
       isAdmin: true,
     };
 

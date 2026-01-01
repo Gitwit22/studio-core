@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
+import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate } from "react-router-dom";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+import { API_BASE } from "../services/apiBase";
 
 // Email validation function
 function validateEmail(email: string): boolean {
@@ -85,7 +86,6 @@ export const SignupPage = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true",
         },
         body: JSON.stringify(body),
       });
@@ -102,14 +102,48 @@ export const SignupPage = () => {
 
       // Store user data and token in localStorage
       localStorage.setItem("sl_user", JSON.stringify(data.user));
+
       localStorage.setItem("sl_token", data.token);
       localStorage.setItem("sl_userId", data.user.id || data.user.uid);
       localStorage.setItem("sl_displayName", data.user.displayName);
+      // Fallback: Set JWT as a non-httpOnly cookie for backend auth (for local dev)
+      if (typeof document !== "undefined" && data.token) {
+        document.cookie = `token=${data.token}; path=/; max-age=${60 * 60 * 24 * 7}`;
+        // Debug: Log cookies after setting
+        console.log('[Signup] Cookies after signup:', document.cookie);
+      }
 
       setLoading(false);
-      
-      // Redirect to join page
-      nav("/join");
+      // Log auth/user info after signup
+      logAuthDebugContext("After Signup Success");
+
+      // Billing after signup flow
+      // TODO: Replace this with your actual plan selection logic
+      const selectedPlan = data.user.planId || "free";
+      if (selectedPlan === "starter" || selectedPlan === "pro") {
+        try {
+          const billingRes = await fetch(`${API_BASE}/api/billing/checkout`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" }
+            , body: JSON.stringify(body),
+          });
+          if (billingRes.ok) {
+            const billingData = await billingRes.json();
+            if (billingData.url) {
+              window.location.href = billingData.url;
+              return;
+            }
+          }
+          // If billing fails, fallback to dashboard
+          nav("/dashboard");
+        } catch (err) {
+          nav("/dashboard");
+        }
+      } else {
+        // Free plan: continue to join page
+        nav("/join");
+      }
     } catch (err: any) {
       console.error("❌ Signup error:", err);
       setLoading(false);

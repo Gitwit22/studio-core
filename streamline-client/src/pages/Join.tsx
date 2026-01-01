@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { API_BASE } from "../lib/apiBase";
+import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 
 /**
@@ -18,6 +20,8 @@ type UsageData = {
 };
 
 export default function Join() {
+  // Log auth/user info when arriving at join page
+  useEffect(() => { logAuthDebugContext("Arrive Join Page"); }, []);
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -30,9 +34,17 @@ export default function Join() {
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState<string | null>(null);
 
-  // Pull user from localStorage (existing behavior)
-  const raw = localStorage.getItem("sl_user");
-  const user = raw ? JSON.parse(raw) : null;
+  // Pull user from localStorage (existing behavior) - useState so it's stable
+  const [user] = useState(() => {
+    const raw = localStorage.getItem("sl_user");
+    if (!raw || raw === "undefined") return null;
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      localStorage.removeItem("sl_user");
+      return null;
+    }
+  });
 
   // Check for invite link (room query parameter)
   const isParticipant = searchParams.get("room") !== null;
@@ -40,11 +52,24 @@ export default function Join() {
 const [isAdmin, setIsAdmin] = useState(false);
 const [adminLoading, setAdminLoading] = useState(true);
 
+// Swallow all errors from /api/admin/status so Join never blocks
 useEffect(() => {
-  fetch("/api/admin/status", { credentials: "include" })
-    .then(res => res.ok ? res.json() : { isAdmin: false })
-    .then(data => setIsAdmin(!!data.isAdmin))
-    .finally(() => setAdminLoading(false));
+  let cancelled = false;
+  (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/status`, { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setIsAdmin(!!data.isAdmin);
+      console.log("[DEBUG] isAdmin set to:", !!data.isAdmin);
+    } catch {
+      // ignore completely
+    } finally {
+      if (!cancelled) setAdminLoading(false);
+      console.log("[DEBUG] adminLoading set to false");
+    }
+  })();
+  return () => { cancelled = true; };
 }, []);
 
   useEffect(() => {
@@ -59,9 +84,10 @@ useEffect(() => {
     }
   }, [searchParams, role]);
 
-  // Fetch real usage summary (skip for participants)
+  // Fetch real usage summary (only for authenticated users, not guests or participants)
   useEffect(() => {
-    if (isParticipant) return;
+    let didCancel = false;
+    if (isParticipant || !user) return;
 
     setUsageLoading(true);
     setUsageError(null);
@@ -75,20 +101,27 @@ useEffect(() => {
         return res.json();
       })
       .then((data) => {
-        setUsageData({
-          streamingMinutes: data.usageMonthly?.usage?.participantMinutes ?? 0,
-          maxStreamingMinutes: data.plan?.limits?.participantMinutes ?? 0,
-          storageUsed: data.usageMonthly?.usage?.storageGB ?? 0,
-          maxStorage: data.plan?.limits?.storageGB ?? 0,
-          planId: data.plan?.id ?? "free",
-        });
-        setUsageLoading(false);
+        if (!didCancel) {
+          setUsageData({
+            streamingMinutes: data.usageMonthly?.usage?.participantMinutes ?? 0,
+            maxStreamingMinutes: data.plan?.limits?.participantMinutes ?? 0,
+            storageUsed: data.usageMonthly?.usage?.storageGB ?? 0,
+            maxStorage: data.plan?.limits?.storageGB ?? 0,
+            planId: data.plan?.id ?? "free",
+          });
+          setUsageLoading(false);
+        }
       })
       .catch((err) => {
-        setUsageError(err.message || "Failed to fetch usage data");
-        setUsageLoading(false);
+        if (!didCancel) {
+          setUsageError(err.message || "Failed to fetch usage data");
+          setUsageLoading(false);
+        }
       });
-  }, [isParticipant]);
+    return () => {
+      didCancel = true;
+    };
+  }, [isParticipant, user]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -108,6 +141,8 @@ useEffect(() => {
         createdRooms.push(room);
         localStorage.setItem("sl_created_rooms", JSON.stringify(createdRooms));
       }
+      // Set role to 'host' when creating a room
+      localStorage.setItem("sl_current_role", "host");
     }
 
     nav(`/room/${encodeURIComponent(room)}`);
@@ -169,9 +204,8 @@ useEffect(() => {
         />
       </div>
 
-      {/* USAGE BANNER - TOP BAR - Hidden for participants */}
-      
-      {!isParticipant && (
+      {/* USAGE BANNER - TOP BAR - Only for authenticated users, hidden for guests/participants */}
+      {!isParticipant && user && (
         <div
           style={{
             position: "fixed",
@@ -185,7 +219,6 @@ useEffect(() => {
             padding: "16px 24px",
           }}
         >
-          
           <div
             style={{
               maxWidth: "1200px",
@@ -349,18 +382,80 @@ useEffect(() => {
               </div>
 
               {/* Error message under usage stats */}
+              {/* Show a button if not admin or if there's a usage error */}
+              {!adminLoading && !isAdmin && (
+                <button
+                  style={{
+                    marginTop: "8px",
+                    background: "rgba(220, 38, 38, 0.15)",
+                    border: "1px solid #ef4444",
+                    color: "#ef4444",
+                    borderRadius: "6px",
+                    padding: "6px 16px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                  disabled
+                  title="You are not an admin."
+                >
+                  Not an admin
+                </button>
+              )}
               {usageError && (
-                <div style={{ color: "#ef4444", marginTop: "8px", fontSize: "13px" }}>
+                <button
+                  style={{
+                    marginTop: "8px",
+                    background: "rgba(220, 38, 38, 0.15)",
+                    border: "1px solid #ef4444",
+                    color: "#ef4444",
+                    borderRadius: "6px",
+                    padding: "6px 16px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                  disabled
+                  title={usageError}
+                >
                   {usageError}
-                </div>
+                </button>
               )}
             </div>
 
             {/* Right side actions */}
 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+  {/* Settings & Billing button, always visible to logged-in users */}
+  <button
+    onClick={() => nav("/settings/billing")}
+    style={{
+      fontSize: "13px",
+      padding: "8px 16px",
+      background: "rgba(255,255,255,0.05)",
+      border: "1px solid rgba(255,255,255,0.2)",
+      color: "#fff",
+      borderRadius: "8px",
+      fontWeight: 600,
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+      transition: "all 0.3s ease",
+    }}
+    onMouseEnter={e => {
+      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+      e.currentTarget.style.borderColor = 'rgba(34,197,94,0.6)';
+    }}
+    onMouseLeave={e => {
+      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
+    }}
+  >
+    ⚙️ Settings & Billing
+  </button>
+
+  {/* Admin Dashboard button (admin only) */}
   {!adminLoading && isAdmin && (
     <button
-      onClick={() => nav("/admin/usage")}
+      onClick={() => nav("/admin/dashboard")}
       style={{
         fontSize: "13px",
         padding: "8px 16px",
@@ -377,6 +472,7 @@ useEffect(() => {
     </button>
   )}
 
+  {/* My Content button */}
   <button
     onClick={() => setShowEditingModal(true)}
     style={{

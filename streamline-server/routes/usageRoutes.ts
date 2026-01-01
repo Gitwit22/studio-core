@@ -1,5 +1,6 @@
 // server/routes/usageRoutes.ts
 import express from "express";
+import { requireAuth } from "../middleware/requireAuth";
 import { Timestamp } from "firebase-admin/firestore";
 import { firestore } from "../firebaseAdmin";
 import { getCurrentMonthKey } from "../lib/usageTracker";
@@ -20,10 +21,10 @@ const router = express.Router();
  * - current month usage from usageMonthly
  * - computed over-limit + remaining + resetDate
  */
-router.get("/summary", async (req, res) => {
+router.get("/summary", requireAuth, async (req, res) => {
   try {
-    const uid = (req.query.uid as string | undefined) || (req as any).uid;
-
+    // Use normalized user id from requireAuth
+    const uid = (req as any).user?.uid;
     if (!uid) {
       return res.status(401).json({ success: false, error: "unauthorized" });
     }
