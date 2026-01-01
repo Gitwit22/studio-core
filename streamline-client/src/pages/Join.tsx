@@ -382,26 +382,7 @@ useEffect(() => {
               </div>
 
               {/* Error message under usage stats */}
-              {/* Show a button if not admin or if there's a usage error */}
-              {!adminLoading && !isAdmin && (
-                <button
-                  style={{
-                    marginTop: "8px",
-                    background: "rgba(220, 38, 38, 0.15)",
-                    border: "1px solid #ef4444",
-                    color: "#ef4444",
-                    borderRadius: "6px",
-                    padding: "6px 16px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                  disabled
-                  title="You are not an admin."
-                >
-                  Not an admin
-                </button>
-              )}
+              {/* Only show Admin Dashboard button for actual admins. No fallback for non-admins. */}
               {usageError && (
                 <button
                   style={{
@@ -453,7 +434,7 @@ useEffect(() => {
   </button>
 
   {/* Admin Dashboard button (admin only) */}
-  {!adminLoading && isAdmin && (
+  {!adminLoading && isAdmin === true && (
     <button
       onClick={() => nav("/admin/dashboard")}
       style={{
