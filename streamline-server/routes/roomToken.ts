@@ -8,7 +8,7 @@ import { requireAuth } from "../middleware/requireAuth";
 
 const router = Router();
 
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const { roomName } = req.body as { roomName?: string };
 
@@ -42,17 +42,12 @@ router.post("/", requireAuth, async (req, res) => {
 
     const jwt = await at.toJwt(); // ✅ now a real string
 
-console.log("✅ roomToken jwt typeof:", typeof jwt, "len:", jwt.length);
+    console.log("✅ roomToken jwt typeof:", typeof jwt, "len:", jwt.length);
 
-return res.json({
-  token: jwt,
-  identity: uid,
-  serverUrl: process.env.LIVEKIT_URL,
-});
-
-  } catch (err) {
+    return res.status(200).json({ token: jwt });
+  } catch (err: any) {
     console.error("roomToken error:", err);
-    return res.status(500).json({ error: "Failed to generate token" });
+    return res.status(500).json({ error: "Failed to create room token" });
   }
 });
 

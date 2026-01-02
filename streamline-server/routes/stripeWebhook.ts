@@ -5,8 +5,10 @@ import { firestore as db } from "../firebaseAdmin";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-12-15.clover",
 });
+console.log("⚡ Stripe webhook hit");
 
 const router = express.Router();
+router.get("/ping", (req, res) => res.status(200).json({ ok: true }));
 
 // IMPORTANT: raw body only
 router.post(

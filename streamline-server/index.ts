@@ -39,10 +39,12 @@ app.use("/api/stripe", stripeWebhook);
 
 
 app.use(cors({
-  origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL, "http://localhost:5173"] : true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control"],
+  origin: process.env.CLIENT_URL,   // exact frontend URL
+  credentials: true,                // 🔥 REQUIRED for cookies
+  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization","Cache-Control"],
 }));
+
 
 
 
