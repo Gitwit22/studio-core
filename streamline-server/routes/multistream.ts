@@ -3,6 +3,14 @@ import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { canAccessFeature } from "./featureAccess";
 
+// livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
+let _lkMod: any | null = null;
+async function getLiveKitSdk() {
+  if (_lkMod) return _lkMod;
+  _lkMod = await import("livekit-server-sdk");
+  return _lkMod;
+}
+
 const router = Router();
 
 router.post("/:roomName/start-multistream", requireAuth, async (req, res) => {
@@ -60,9 +68,8 @@ const ref = firestore.collection("activeStreams").doc(streamDocId);
     }
 
     try {
-      // Import LiveKit egress client and types
-      const { EgressClient, StreamOutput, StreamProtocol, EncodingOptionsPreset } = require("livekit-server-sdk");
-      // You may need to adjust import if using ES modules
+      // Import LiveKit egress client and types using dynamic helper
+      const { EgressClient, StreamOutput, StreamProtocol, EncodingOptionsPreset } = await getLiveKitSdk();
       const livekitUrl = process.env.LIVEKIT_URL;
       const livekitApiKey = process.env.LIVEKIT_API_KEY;
       const livekitApiSecret = process.env.LIVEKIT_API_SECRET;
@@ -140,8 +147,8 @@ router.post("/:roomName/stop-multistream", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "No egressId found for active stream" });
     }
 
-    // Import LiveKit egress client
-    const { EgressClient } = require("livekit-server-sdk");
+    // Import LiveKit egress client using dynamic helper
+    const { EgressClient } = await getLiveKitSdk();
     const livekitUrl = process.env.LIVEKIT_URL;
     const livekitApiKey = process.env.LIVEKIT_API_KEY;
     const livekitApiSecret = process.env.LIVEKIT_API_SECRET;

@@ -8,7 +8,6 @@ import adminRoutes from './routes/admin';
 import adminStatusRouter from "./routes/adminStatus";
 import { requireAuth } from "./middleware/requireAuth";
 import authRouter from "./routes/auth";
-import stripeWebhook from "./routes/stripeWebhook";
 import billingRoutes from "./routes/billing";
 import recordingsRoutes from "./routes/recordings";
 import usageRoutes from "./routes/usageRoutes";
@@ -35,7 +34,6 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 const app = express();
 
-app.use("/api/stripe", stripeWebhook);
 
 
 app.use(cors({

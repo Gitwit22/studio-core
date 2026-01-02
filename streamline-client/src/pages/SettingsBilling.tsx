@@ -1,6 +1,15 @@
+// Map canonical plan id to checkout variant for resubscribe
+type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro";
+function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
+  const p = getCanonicalPlanId(user); // "free" | "starter" | "pro" | maybe others
+  if (p === "pro" || p === "internal_unlimited") return "pro";
+  // For anything that isn't pro, resubscribe should go to paid Starter by default
+  return "starter_paid";
+}
 
 
 import React, { useEffect, useState } from "react";
+import { getCanonicalPlanId } from "../lib/planUtils";
 import { useNavigate } from "react-router-dom";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
@@ -17,6 +26,7 @@ interface BillingInfo {
   cancelAtPeriodEnd?: boolean;
   currentPeriodEnd?: number;
   updatedAt?: number;
+  hasHadTrial?: boolean;
 }
 
 interface UserData {
@@ -70,7 +80,7 @@ const DEFAULT_PLANS: PlanDefinition[] = [
     id: "free",
     name: "Free",
     price: 0,
-    description: "Get started with the StreamLine room and invite a few guest",
+    description: "Get started with the StreamLine room and invite a few guests",
     limits: {
       monthlyMinutesIncluded: 60,
       maxGuests: 1,
@@ -82,7 +92,7 @@ const DEFAULT_PLANS: PlanDefinition[] = [
     editing: { access: false, maxProjects: 0, maxStorageGB: 0 },
   },
   {
-    id: "starter",
+    id: "starter", // ✅ canonical id (NOT starter_paid)
     name: "Starter",
     price: 15,
     description: "For starting creators, just getting started",
@@ -112,6 +122,7 @@ const DEFAULT_PLANS: PlanDefinition[] = [
     editing: { access: true, maxProjects: 50, maxStorageGB: 100 },
   },
 ];
+
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -230,25 +241,32 @@ export default function SettingsBilling() {
     }
   };
 
-  const startCheckout = async (plan: "starter" | "pro") => {
-    setActionLoading(plan);
-    try {
-      const res = await fetch(`${API_BASE}/api/billing/checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ plan }),
-      });
-      const data = await res.json();
-      if (!data.success || !data.url) throw new Error(data.error || "Checkout failed");
-      window.location.href = data.url;
-    } catch (err: any) {
-      setError(err.message || "Failed to start checkout. Please try again.");
-      setActionLoading(null);
-      // Reset isProcessing if stuck (user.planId === 'free' and pendingPlan)
-      setUser((prev) => prev ? { ...prev, pendingPlan: null } : prev);
+type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro";
+
+const startCheckout = async (plan: CheckoutPlanVariant) => {
+  setActionLoading(plan);
+  try {
+    const res = await fetch(`${API_BASE}/api/billing/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ plan }),
+    });
+
+    const data = await res.json();
+    if (!data.success || !data.url) {
+      throw new Error(data.error || "Checkout failed");
     }
-  };
+
+    window.location.href = data.url;
+  } catch (err: any) {
+    setError(err.message || "Failed to start checkout. Please try again.");
+    setActionLoading(null);
+    setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
+  }
+};
+
+
 
   const openPortal = async () => {
     setActionLoading("portal");
@@ -267,15 +285,28 @@ export default function SettingsBilling() {
     }
   };
 
-  // Derived state
-  const currentPlan = plans.find(p => p.id === user?.planId) || plans[0];
-  const status = user?.billingStatus;
-  const isPaidPlan = user?.planId === "starter" || user?.planId === "pro";
-  const isBlocked = isPaidPlan && (status === "past_due" || status === "unpaid");
-  const isPaidValid = status === "active" || status === "trialing";
-  const isProcessing = !!user?.pendingPlan && user?.planId === "free";
-  const statusBadge = getStatusBadge(status, user?.billing?.cancelAtPeriodEnd);
-  const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
+
+// Canonicalize planId for display logic
+function canonicalPlanId(planId: string | undefined): string {
+  if (!planId) return "free";
+  if (planId === "starter_paid" || planId === "starter_trial") return "starter";
+  return planId;
+}
+
+const userPlanId = canonicalPlanId(user?.planId);
+const currentPlan = plans.find((p) => p.id === userPlanId) || plans[0];
+const status = user?.billingStatus;
+
+const isPaidPlan = userPlanId === "starter" || userPlanId === "pro";
+const isBlocked = isPaidPlan && (status === "past_due" || status === "unpaid");
+const isPaidValid = status === "active" || status === "trialing";
+
+// Processing should be based on pendingPlan regardless of starting plan
+const isProcessing = !!user?.pendingPlan;
+
+const statusBadge = getStatusBadge(status, user?.billing?.cancelAtPeriodEnd);
+const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
+
 
   if (loading) {
     return (
@@ -415,24 +446,34 @@ export default function SettingsBilling() {
           {/* Primary Actions */}
           <div style={S.actionButtons}>
             {/* Free user, no billing */}
-            {user?.planId === "free" && !status && !isProcessing && (
-              <>
-                <button
-onClick={() => nav(`/checkout?plan=starter`)}
-                  style={S.primaryBtn}
-                  disabled={!!actionLoading}
-                >
-                  {actionLoading === "starter" ? "⏳ Loading..." : "🚀 Start Starter Trial"}
-                </button>
-                <button
-onClick={() => nav(`/checkout?plan=pro`)}
-                  style={S.secondaryBtn}
-                  disabled={!!actionLoading}
-                >
-                  {actionLoading === "pro" ? "⏳ Loading..." : "⚡ Upgrade to Pro"}
-                </button>
-              </>
-            )}
+            {user?.planId === "free" && (!status || status === "none") && !isProcessing && (
+  <>
+    <button
+      onClick={() => startCheckout("starter_trial")}
+      style={S.primaryBtn}
+      disabled={!!actionLoading}
+    >
+      {actionLoading === "starter_trial" ? "⏳ Loading..." : "🚀 Start Free Trial"}
+    </button>
+
+    <button
+      onClick={() => startCheckout("starter_paid")}
+      style={S.secondaryBtn}
+      disabled={!!actionLoading}
+    >
+      {actionLoading === "starter_paid" ? "⏳ Loading..." : "Select Plan"}
+    </button>
+
+    <button
+      onClick={() => startCheckout("pro")}
+      style={S.secondaryBtn}
+      disabled={!!actionLoading}
+    >
+      {actionLoading === "pro" ? "⏳ Loading..." : "Select Pro"}
+    </button>
+  </>
+)}
+
 
             {/* Trialing */}
             {status === "trialing" && (
@@ -440,7 +481,7 @@ onClick={() => nav(`/checkout?plan=pro`)}
                 <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
                   {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
                 </button>
-                {user?.planId === "starter" && (
+                {user?.planId === "starter_paid" && (
                   <button
                     onClick={() => startCheckout("pro")}
                     style={S.secondaryBtn}
@@ -458,7 +499,7 @@ onClick={() => nav(`/checkout?plan=pro`)}
                 <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
                   {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
                 </button>
-                {user?.planId === "starter" && (
+                {user?.planId === "starter_paid" && (
                   <button
                     onClick={() => startCheckout("pro")}
                     style={S.secondaryBtn}
@@ -474,7 +515,7 @@ onClick={() => nav(`/checkout?plan=pro`)}
             {status === "canceled" && (
               <>
                 <button
-                  onClick={() => startCheckout(user?.planId === "pro" ? "pro" : "starter")}
+                  onClick={() => startCheckout(checkoutPlanForResubscribe(user))}
                   style={S.primaryBtn}
                   disabled={!!actionLoading}
                 >
@@ -550,7 +591,7 @@ onClick={() => nav(`/checkout?plan=pro`)}
 
   <div style={S.plansGrid}>
     {plans.map((plan) => {
-      const userPlan = user?.planId || "free";
+      const userPlan = userPlanId;
 
       const color =
         plan.id === "free"
@@ -559,8 +600,10 @@ onClick={() => nav(`/checkout?plan=pro`)}
           ? "#3b82f6"
           : "#8b5cf6";
 
+      // Treat starter_paid and starter_trial as "starter" for current overlay
       const isCurrent = plan.id === userPlan;
 
+      // Adjust upgrade/downgrade logic to use canonical plan id
       const isUpgrade =
         (userPlan === "free" && (plan.id === "starter" || plan.id === "pro")) ||
         (userPlan === "starter" && plan.id === "pro");
@@ -606,33 +649,82 @@ onClick={() => nav(`/checkout?plan=pro`)}
           </ul>
 
           <div style={S.planCardAction}>
-            {isCurrent ? (
-              <span style={S.currentLabel}>✓ Current Plan</span>
-            ) : isUpgrade ? (
-              <button
-                onClick={() => startCheckout(plan.id as "starter" | "pro")}
-                style={{
-                  ...S.planUpgradeBtn,
-                  background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-                }}
-                disabled={!!actionLoading || isBlocked || isProcessing}
-              >
-                {actionLoading === plan.id
-                  ? "⏳..."
-                  : "Upgrade"}
-              </button>
-            ) : isDowngrade ? (
-              <button
-                onClick={openPortal}
-                style={S.secondaryBtn}
-                disabled={!!actionLoading || isProcessing}
-              >
-                Downgrade in Portal
-              </button>
-            ) : (
-              <span style={S.downgradeLabel}>Manage in portal</span>
-            )}
-          </div>
+  {isCurrent ? (
+    <span style={S.currentLabel}>✓ Current Plan</span>
+  ) : plan.id === "starter" && userPlan === "free" ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <button
+        onClick={() => startCheckout("starter_paid")}
+        style={{
+          ...S.planUpgradeBtn,
+          background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+        }}
+        disabled={!!actionLoading || isBlocked || isProcessing}
+      >
+        {actionLoading === "starter_paid" ? "⏳..." : "Select Plan"}
+      </button>
+
+      <button
+        onClick={() => startCheckout("starter_trial")}
+        style={{
+          ...S.planUpgradeBtn,
+          background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+        }}
+        disabled={!!actionLoading || isBlocked || isProcessing}
+      >
+        {actionLoading === "starter_trial" ? "⏳..." : "🚀 Start Free Trial"}
+      </button>
+    </div>
+  ) : plan.id === "starter" && userPlan === "pro" ? (
+    <button
+      onClick={openPortal}
+      style={{
+        ...S.planUpgradeBtn,
+        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+        opacity: 0.85,
+      }}
+      disabled={!!actionLoading || isBlocked || isProcessing}
+    >
+      Manage in Billing Portal
+    </button>
+  ) : plan.id === "pro" && (userPlan === "free" || userPlan === "starter") ? (
+    <button
+      onClick={() => startCheckout("pro")}
+      style={{
+        ...S.planUpgradeBtn,
+        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+      }}
+      disabled={!!actionLoading || isBlocked || isProcessing}
+    >
+      {actionLoading === "pro" ? "⏳..." : "Select Plan"}
+    </button>
+  ) : plan.id === "free" && (userPlan === "starter" || userPlan === "pro") ? (
+    <button
+      onClick={openPortal}
+      style={{
+        ...S.planUpgradeBtn,
+        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+        opacity: 0.85,
+      }}
+      disabled={!!actionLoading || isBlocked || isProcessing}
+    >
+      Manage in Billing Portal
+    </button>
+  ) : (
+    <button
+      onClick={openPortal}
+      style={{
+        ...S.planUpgradeBtn,
+        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+        opacity: 0.85,
+      }}
+      disabled={!!actionLoading || isBlocked || isProcessing}
+    >
+      Manage in Billing Portal
+    </button>
+  )}
+</div>
+
         </div>
       );
     })}
@@ -688,9 +780,9 @@ onClick={() => nav(`/checkout?plan=pro`)}
               )}
             </div>
 
-            {user?.planId === "free" && (
+            {user?.planId === "free" && !user?.billing?.hasHadTrial && (
               <div style={S.lockedCta}>
-                <button onClick={() => startCheckout("starter")} style={S.primaryBtn} disabled={!!actionLoading}>
+                <button onClick={() => startCheckout("starter_trial")} style={S.primaryBtn} disabled={!!actionLoading}>
                   🚀 Start Free Trial to Unlock
                 </button>
               </div>

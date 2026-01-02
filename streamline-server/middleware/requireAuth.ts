@@ -1,3 +1,4 @@
+// StreamLine uses custom auth UID (JWT) as canonical user identity.
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 

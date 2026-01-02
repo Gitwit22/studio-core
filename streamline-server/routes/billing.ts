@@ -1,45 +1,75 @@
 import { Router } from "express";
+import type Stripe from "stripe";
 import { stripe } from "../lib/stripe";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 
+function getUserRef(uid: string) {
+  return db.collection("users").doc(uid);
+}
+
 const router = Router();
-const CLIENT_URL = process.env.CLIENT_URL!;
 
+/**
+ * Canonical Stripe price lookup:
+ * - We keep ONE Starter price and ONE Pro price
+ * - Trial is applied conditionally via subscription_data.trial_period_days
+ */
 function priceIdFor(plan: "starter" | "pro") {
-  const id =
-    plan === "starter"
-      ? process.env.STRIPE_PRICE_STARTER
-      : process.env.STRIPE_PRICE_PRO;
+  if (plan === "starter") {
+    const id = process.env.STRIPE_PRICE_STARTER;
+    if (!id) throw new Error("Missing STRIPE_PRICE_STARTER");
+    return id;
+  }
 
-  if (!id) throw new Error(`Missing Stripe price env for plan=${plan}`);
+  const id = process.env.STRIPE_PRICE_PRO;
+  if (!id) throw new Error("Missing STRIPE_PRICE_PRO");
   return id;
 }
 
+type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro";
+
 router.post("/checkout", requireAuth, async (req, res) => {
   try {
-    const userId = (req as any).user?.id || (req as any).user?.uid; // ✅ FIX
-    if (!userId) return res.status(401).json({ success: false, error: "Unauthorized" });
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
 
-    const { plan } = (req.body || {}) as { plan?: "starter" | "pro" }; // ✅ guard
-    if (plan !== "starter" && plan !== "pro") {
+    const { plan } = (req.body || {}) as { plan?: CheckoutPlanVariant };
+
+    if (plan !== "starter_trial" && plan !== "starter_paid" && plan !== "pro") {
       return res.status(400).json({ success: false, error: "Invalid plan" });
     }
 
-    const userRef = db.collection("users").doc(userId);
+    const CLIENT_URL = process.env.CLIENT_URL;
+    if (!CLIENT_URL) throw new Error("Missing env var: CLIENT_URL");
+
+    const userRef = getUserRef(uid);
     const snap = await userRef.get();
     if (!snap.exists) return res.status(404).json({ success: false, error: "User not found" });
 
     const user = snap.data() as any;
 
-    // 1) Ensure Stripe customer exists
-    let customerId = user?.stripeCustomerId || user?.billing?.customerId;
+    // Trial eligibility
+    const hasHadTrial = user?.billing?.hasHadTrial === true;
+    const DEFAULT_TRIAL_DAYS = Number(process.env.STRIPE_STARTER_TRIAL_DAYS || "5");
+
+    // Canonical plan (what your app stores as planId/pendingPlan)
+    const canonicalPlan: "starter" | "pro" = plan === "pro" ? "pro" : "starter";
+
+    // Trial logic: only when explicitly chosen AND not already used
+    const useTrial = plan === "starter_trial" && !hasHadTrial;
+    const trialDays = useTrial ? DEFAULT_TRIAL_DAYS : 0;
+
+    // Ensure Stripe customer exists
+    let customerId: string | undefined = user?.stripeCustomerId || user?.billing?.customerId;
+
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user?.email,
         name: user?.displayName,
-        metadata: { userId },
+        metadata: { userId: uid },
       });
+
       customerId = customer.id;
 
       await userRef.set(
@@ -55,30 +85,38 @@ router.post("/checkout", requireAuth, async (req, res) => {
       );
     }
 
-    // 2) Store pendingPlan (prevents "select pro but never pay" abuse)
-    await userRef.set({ pendingPlan: plan }, { merge: true });
+    // Set pendingPlan to canonical plan only
+    await userRef.set({ pendingPlan: canonicalPlan }, { merge: true });
 
-    const CLIENT_URL = process.env.CLIENT_URL;
-    if (!CLIENT_URL) throw new Error("Missing env var: CLIENT_URL");
+    // Create Checkout Session
+    const subscription_data: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
+      metadata: {
+        userId: uid,
+        plan: canonicalPlan,     // canonical
+        planVariant: plan,       // "starter_paid" | "starter_trial" | "pro"
+      },
+      ...(useTrial ? { trial_period_days: trialDays } : {}),
+      // Optional safety: cancel if no payment method by trial end
+      ...(useTrial
+        ? { trial_settings: { end_behavior: { missing_payment_method: "cancel" } } }
+        : {}),
+    };
 
-    const trialDays = Number(process.env.STARTER_TRIAL_DAYS || "7");
-
-    // 3) Create checkout session (subscription)
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
-      line_items: [{ price: priceIdFor(plan), quantity: 1 }],
+      line_items: [{ price: priceIdFor(canonicalPlan), quantity: 1 }],
 
-      // ✅ simpler MVP
-      success_url: `${CLIENT_URL}/settings/billing?success=1`,
-      cancel_url: `${CLIENT_URL}/settings/billing?canceled=1`,
+      success_url: `${CLIENT_URL}/billing/success`,
+      cancel_url: `${CLIENT_URL}/billing/canceled`,
 
-      metadata: { userId, plan },
-
-      subscription_data: {
-        metadata: { userId, plan },
-        ...(plan === "starter" ? { trial_period_days: trialDays } : {}), // ✅ no pro trials
+      metadata: {
+        userId: uid,
+        plan: canonicalPlan,
+        planVariant: plan,
       },
+
+      subscription_data,
     });
 
     return res.json({ success: true, url: session.url });
@@ -90,10 +128,10 @@ router.post("/checkout", requireAuth, async (req, res) => {
 
 router.post("/portal", requireAuth, async (req, res) => {
   try {
-const userId = (req as any).user?.id || (req as any).user?.uid;
-    if (!userId) return res.status(401).json({ success: false, error: "Unauthorized" });
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
 
-    const snap = await db.collection("users").doc(userId).get();
+    const snap = await getUserRef(uid).get();
     if (!snap.exists) return res.status(404).json({ success: false, error: "User not found" });
 
     const user = snap.data() as any;
@@ -118,13 +156,13 @@ const userId = (req as any).user?.id || (req as any).user?.uid;
 
 router.get("/me", requireAuth, async (req, res) => {
   try {
-    const userId = (req as any).user?.id || (req as any).user?.uid; // ✅ FIX
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
-    const snap = await db.collection("users").doc(userId).get();
+    const snap = await getUserRef(uid).get();
     if (!snap.exists) return res.status(404).json({ error: "User not found" });
 
-    return res.json({ id: userId, ...snap.data() });
+    return res.json({ id: uid, ...snap.data() });
   } catch (err: any) {
     console.error("GET /api/billing/me failed:", err?.message || err);
     return res.status(500).json({ error: "Failed to load user" });

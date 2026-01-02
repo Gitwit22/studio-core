@@ -1,8 +1,13 @@
+
 import express from "express";
 import crypto from "crypto";
 import Stripe from "stripe";
 import { firestore as db } from "../firebaseAdmin";
 import { stripe } from "../lib/stripe";
+
+function getUserRef(uid: string) {
+  return db.collection("users").doc(uid);
+}
 
 const router = express.Router();
 
@@ -77,11 +82,18 @@ router.post(
           // Cast to any to avoid Stripe type mismatch issues
           const sub: any = event.data.object;
 
-          const userId = sub?.metadata?.userId;
-          if (!userId) break;
+          const uid = sub?.metadata?.userId;
+          if (!uid) break;
 
           const priceId = sub?.items?.data?.[0]?.price?.id as string | undefined;
-          const planId = planIdFromPrice(priceId);
+          // Always read planVariant from metadata (not plan)
+          const planVariant = sub?.metadata?.planVariant;
+          let planId = planIdFromPrice(priceId);
+          if (planVariant === "starter_trial" || planVariant === "starter_paid") {
+            planId = "starter";
+          } else if (planVariant === "pro") {
+            planId = "pro";
+          }
 
           const billingStatus = mapBillingStatus(String(sub?.status || ""));
           const billingActive = billingStatus === "active" || billingStatus === "trialing";
@@ -89,7 +101,9 @@ router.post(
           const currentPeriodEndMs =
             typeof sub?.current_period_end === "number" ? sub.current_period_end * 1000 : null;
 
-          await db.collection("users").doc(userId).set(
+          // If planVariant is starter_trial, set hasHadTrial = true (robust against missed status)
+          const setHasHadTrial = (planVariant === "starter_trial") ? { hasHadTrial: true } : {};
+          await getUserRef(uid).set(
             {
               planId: billingActive ? planId : "free",
               pendingPlan: null,
@@ -105,7 +119,9 @@ router.post(
                 cancelAtPeriodEnd: !!sub?.cancel_at_period_end,
                 currentPeriodEnd: currentPeriodEndMs,
                 updatedAt: Date.now(),
+                ...setHasHadTrial,
               },
+              ...(planVariant === "starter_trial" ? { hasHadTrial: true } : {}),
             },
             { merge: true }
           );
@@ -115,8 +131,8 @@ router.post(
         case "checkout.session.completed": {
   const session = event.data.object as Stripe.Checkout.Session;
 
-  const userId = session.metadata?.userId;
-  if (!userId) {
+  const uid = session.metadata?.userId;
+  if (!uid) {
     console.warn("checkout.session.completed missing userId");
     break;
   }
@@ -135,22 +151,30 @@ router.post(
   }
 
   // Pull subscription to get price + status
-const sub = await stripe.subscriptions.retrieve(subscriptionId);
+  const sub = await stripe.subscriptions.retrieve(subscriptionId);
 
-// This usually types fine without any:
-const priceId = sub.items.data?.[0]?.price?.id;
+  // This usually types fine without any:
+  const priceId = sub.items.data?.[0]?.price?.id;
 
-const planId = planIdFromPrice(priceId);
-const billingStatus = mapBillingStatus(sub.status);
-const billingActive = billingStatus === "active" || billingStatus === "trialing";
+  // Always read planVariant from metadata (not plan)
+  let planId = planIdFromPrice(priceId);
+  const planVariant = sub?.metadata?.planVariant;
+  if (planVariant === "starter_trial" || planVariant === "starter_paid") {
+    planId = "starter";
+  } else if (planVariant === "pro") {
+    planId = "pro";
+  }
+  const billingStatus = mapBillingStatus(sub.status);
+  const billingActive = billingStatus === "active" || billingStatus === "trialing";
 
-// Stripe returns seconds; store ms
-const currentPeriodEndSec = (sub as any).current_period_end as number | undefined;
-const currentPeriodEnd =
-  typeof currentPeriodEndSec === "number" ? currentPeriodEndSec * 1000 : null;
+  // Stripe returns seconds; store ms
+  const currentPeriodEndSec = (sub as any).current_period_end as number | undefined;
+  const currentPeriodEnd =
+    typeof currentPeriodEndSec === "number" ? currentPeriodEndSec * 1000 : null;
 
-
-  await db.collection("users").doc(userId).set(
+  // If planVariant is starter_trial, set hasHadTrial = true (robust against missed status)
+  const setHasHadTrial = (planVariant === "starter_trial") ? { hasHadTrial: true } : {};
+  await getUserRef(uid).set(
     {
       planId: billingActive ? planId : "free",
       billingActive,
@@ -164,13 +188,15 @@ const currentPeriodEnd =
         cancelAtPeriodEnd: sub.cancel_at_period_end,
         currentPeriodEnd,
         updatedAt: Date.now(),
+        ...setHasHadTrial,
       },
+      ...(planVariant === "starter_trial" ? { hasHadTrial: true } : {}),
     },
     { merge: true }
   );
 
   console.log("✅ Billing written from checkout.session.completed", {
-    userId,
+    uid,
     planId,
     billingStatus,
   });

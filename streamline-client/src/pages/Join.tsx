@@ -366,7 +366,25 @@ useEffect(() => {
                 </div>
 
                 <button
-                  onClick={() => alert("Upgrade modal coming soon")}
+                  onClick={async () => {
+                    // Start checkout for starter_trial
+                    try {
+                      const res = await fetch("/api/billing/checkout", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({ plan: "starter_trial" }),
+                      });
+                      const data = await res.json();
+                      if (!data.success || !data.url) {
+                        alert(data.error || "Checkout failed");
+                        return;
+                      }
+                      window.location.href = data.url;
+                    } catch (err) {
+                      alert("Failed to start checkout. Please try again.");
+                    }
+                  }}
                   style={{
                     fontSize: "12px",
                     color: "#ef4444",
