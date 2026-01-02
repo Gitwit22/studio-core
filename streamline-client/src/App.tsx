@@ -18,6 +18,8 @@ import RenderAndUploadPage from "./editing/pages/RenderAndUploadPage";
 import ThankYou from "./pages/ThankYou";
 import EditorDisabled from "./pages/EditorDisabled";
 import LearnMore from "./pages/LearnMore";
+import Checkout from "./pages/Checkout";
+
 
 // Stripe/Billing pages
 import SettingsBilling from "./pages/SettingsBilling";
@@ -33,6 +35,8 @@ function App() {
       <Route path="/" element={<Welcome />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/checkout" element={<Checkout />} />
+
 
       {/* User dashboard */}
       <Route path="/dashboard" element={<Dashboard />} />

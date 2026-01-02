@@ -6,6 +6,9 @@ import webhookRouter from "./routes/webhook";
 import authRoutes from "./routes/auth";
 import adminRoutes from './routes/admin';
 import adminStatusRouter from "./routes/adminStatus";
+import { requireAuth } from "./middleware/requireAuth";
+import authRouter from "./routes/auth";
+import stripeWebhook from "./routes/stripeWebhook";
 import billingRoutes from "./routes/billing";
 import recordingsRoutes from "./routes/recordings";
 import usageRoutes from "./routes/usageRoutes";
@@ -18,12 +21,13 @@ import type { RoomServiceClient } from "livekit-server-sdk";
 import admin from "firebase-admin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import dotenv from "dotenv";
+
 
 
 import { uploadVideo } from "./lib/storageClient";
 
-dotenv.config();
+
+console.log("CLIENT_URL:", process.env.CLIENT_URL);
 
 const PORT = process.env.PORT || 5137;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
@@ -31,13 +35,11 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 const app = express();
 
+app.use("/api/stripe", stripeWebhook);
+
+
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://streamline-platform-test.onrender.com",
-    "https://streamline-platform.onrender.com",
-  ],
-  credentials: true,
+  origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL, "http://localhost:5173"] : true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Cache-Control"],
 }));

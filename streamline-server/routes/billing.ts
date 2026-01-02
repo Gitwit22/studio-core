@@ -4,6 +4,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 
 const router = Router();
+const CLIENT_URL = process.env.CLIENT_URL!;
 
 function priceIdFor(plan: "starter" | "pro") {
   const id =
@@ -17,7 +18,7 @@ function priceIdFor(plan: "starter" | "pro") {
 
 router.post("/checkout", requireAuth, async (req, res) => {
   try {
-    const userId = (req as any).user?.uid; // ✅ FIX
+    const userId = (req as any).user?.id || (req as any).user?.uid; // ✅ FIX
     if (!userId) return res.status(401).json({ success: false, error: "Unauthorized" });
 
     const { plan } = (req.body || {}) as { plan?: "starter" | "pro" }; // ✅ guard
@@ -89,7 +90,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
 
 router.post("/portal", requireAuth, async (req, res) => {
   try {
-    const userId = (req as any).user?.uid; // ✅ FIX
+const userId = (req as any).user?.id || (req as any).user?.uid;
     if (!userId) return res.status(401).json({ success: false, error: "Unauthorized" });
 
     const snap = await db.collection("users").doc(userId).get();
@@ -117,7 +118,7 @@ router.post("/portal", requireAuth, async (req, res) => {
 
 router.get("/me", requireAuth, async (req, res) => {
   try {
-    const userId = (req as any).user?.uid; // ✅ FIX
+    const userId = (req as any).user?.id || (req as any).user?.uid; // ✅ FIX
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     const snap = await db.collection("users").doc(userId).get();

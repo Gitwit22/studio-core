@@ -41,24 +41,24 @@ router.get("/ping", (_req, res) => res.json({ ok: true }));
  */
 router.get("/me", requireAuth, async (req, res) => {
   try {
-    const uid = (req as any).user?.uid; // requireAuth guarantees this
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    const user = (req as any).user || {};
+    const userId = user.id || user.uid;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-    const snap = await db.collection("users").doc(uid).get();
+    const snap = await db.collection("users").doc(userId).get();
     if (!snap.exists) return res.status(404).json({ error: "User not found" });
 
-    return res.json({ id: uid, ...stripSensitiveUserFields(snap.data()) });
+    return res.json({ id: userId, ...stripSensitiveUserFields(snap.data()) });
   } catch (err: any) {
     console.error("GET /api/auth/me failed:", err?.message || err);
     return res.status(500).json({ error: "Failed to load user" });
   }
 });
 
-/**
- * POST /api/auth/login
- * Body: { email, password }
- * Sets httpOnly cookie "token" so requireAuth works.
- */
+ //POST /api/auth/login
+  //Body: { email, password }
+ //Sets httpOnly cookie "token" so requireAuth works.
+ 
 router.post("/login", async (req, res) => {
   try {
     // ✅ never destructure blindly

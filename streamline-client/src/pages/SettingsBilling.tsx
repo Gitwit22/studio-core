@@ -1,7 +1,4 @@
-// ============================================================================
-// STREAMLINE SETTINGS BILLING PAGE
-// Place in: src/pages/SettingsBilling.tsx
-// ============================================================================
+
 
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -73,7 +70,7 @@ const DEFAULT_PLANS: PlanDefinition[] = [
     id: "free",
     name: "Free",
     price: 0,
-    description: "Get started with streaming",
+    description: "Get started with the StreamLine room and invite a few guest",
     limits: {
       monthlyMinutesIncluded: 60,
       maxGuests: 1,
@@ -88,7 +85,7 @@ const DEFAULT_PLANS: PlanDefinition[] = [
     id: "starter",
     name: "Starter",
     price: 15,
-    description: "For growing creators",
+    description: "For starting creators, just getting started",
     limits: {
       monthlyMinutesIncluded: 300,
       maxGuests: 2,
@@ -103,7 +100,7 @@ const DEFAULT_PLANS: PlanDefinition[] = [
     id: "pro",
     name: "Pro",
     price: 49,
-    description: "For professional streamers",
+    description: "For professional streamers who want reach",
     limits: {
       monthlyMinutesIncluded: 1200,
       maxGuests: 10,
@@ -156,6 +153,7 @@ function getStatusBadge(status: string | undefined, cancelAtPeriodEnd?: boolean)
   }
 }
 
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -173,6 +171,13 @@ export default function SettingsBilling() {
   useEffect(() => {
     loadAllData();
   }, []);
+
+  // If user is on free plan but has a pendingPlan, clear it to prevent stuck processing state
+  useEffect(() => {
+    if (user && user.planId === "free" && user.pendingPlan) {
+      setUser({ ...user, pendingPlan: null });
+    }
+  }, [user]);
 
   const loadAllData = async () => {
     setLoading(true);
@@ -235,11 +240,13 @@ export default function SettingsBilling() {
         body: JSON.stringify({ plan }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Checkout failed");
+      if (!data.success || !data.url) throw new Error(data.error || "Checkout failed");
       window.location.href = data.url;
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || "Failed to start checkout. Please try again.");
       setActionLoading(null);
+      // Reset isProcessing if stuck (user.planId === 'free' and pendingPlan)
+      setUser((prev) => prev ? { ...prev, pendingPlan: null } : prev);
     }
   };
 
@@ -263,7 +270,8 @@ export default function SettingsBilling() {
   // Derived state
   const currentPlan = plans.find(p => p.id === user?.planId) || plans[0];
   const status = user?.billingStatus;
-  const isBlocked = status === "past_due" || status === "unpaid";
+  const isPaidPlan = user?.planId === "starter" || user?.planId === "pro";
+  const isBlocked = isPaidPlan && (status === "past_due" || status === "unpaid");
   const isPaidValid = status === "active" || status === "trialing";
   const isProcessing = !!user?.pendingPlan && user?.planId === "free";
   const statusBadge = getStatusBadge(status, user?.billing?.cancelAtPeriodEnd);
@@ -410,14 +418,14 @@ export default function SettingsBilling() {
             {user?.planId === "free" && !status && !isProcessing && (
               <>
                 <button
-                  onClick={() => startCheckout("starter")}
+onClick={() => nav(`/checkout?plan=starter`)}
                   style={S.primaryBtn}
                   disabled={!!actionLoading}
                 >
                   {actionLoading === "starter" ? "⏳ Loading..." : "🚀 Start Starter Trial"}
                 </button>
                 <button
-                  onClick={() => startCheckout("pro")}
+onClick={() => nav(`/checkout?plan=pro`)}
                   style={S.secondaryBtn}
                   disabled={!!actionLoading}
                 >
@@ -534,72 +542,104 @@ export default function SettingsBilling() {
           </div>
         )}
 
-        {/* ================================================================ */}
-        {/* SECTION 4: PLAN COMPARISON */}
-        {/* ================================================================ */}
-        <div style={S.card}>
-          <h2 style={S.cardTitle}>📋 Compare Plans</h2>
-          
-          <div style={S.plansGrid}>
-            {plans.map((plan) => {
-              const isCurrent = plan.id === user?.planId;
-              const isUpgrade = plans.indexOf(plan) > plans.findIndex(p => p.id === user?.planId);
-              const color = plan.id === "free" ? "#6b7280" : plan.id === "starter" ? "#3b82f6" : "#8b5cf6";
+       {/* ================================================================ */}
+{/* SECTION 4: PLAN COMPARISON */}
+{/* ================================================================ */}
+<div style={S.card}>
+  <h2 style={S.cardTitle}>📋 Compare Plans</h2>
 
-              return (
-                <div
-                  key={plan.id}
-                  style={{
-                    ...S.planCard,
-                    borderColor: isCurrent ? color : "rgba(63,63,70,0.5)",
-                    boxShadow: isCurrent ? `0 0 20px ${color}30` : "none",
-                  }}
-                >
-                  {isCurrent && <div style={{ ...S.currentBadge, background: color }}>Current</div>}
-                  
-                  <div style={S.planCardHeader}>
-                    <h3 style={{ ...S.planCardName, color }}>{plan.name}</h3>
-                    <div style={S.planCardPrice}>
-                      <span style={S.planCardAmount}>${plan.price}</span>
-                      <span style={S.planCardPeriod}>/mo</span>
-                    </div>
-                  </div>
+  <div style={S.plansGrid}>
+    {plans.map((plan) => {
+      const userPlan = user?.planId || "free";
 
-                  <ul style={S.featureList}>
-                    <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
-                    <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
-                    <FeatureRow label="RTMP destinations" value={plan.limits.rtmpDestinationsMax} />
-                    <FeatureRow label="Recording" value={plan.features.recording} />
-                    <FeatureRow label="Multistream" value={plan.features.multistream} />
-                    <FeatureRow label="Editing suite" value={plan.editing?.access} />
-                    {plan.editing?.access && (
-                      <>
-                        <FeatureRow label="Projects" value={plan.editing.maxProjects} />
-                        <FeatureRow label="Storage" value={`${plan.editing.maxStorageGB}GB`} />
-                      </>
-                    )}
-                  </ul>
+      const color =
+        plan.id === "free"
+          ? "#6b7280"
+          : plan.id === "starter"
+          ? "#3b82f6"
+          : "#8b5cf6";
 
-                  <div style={S.planCardAction}>
-                    {isCurrent ? (
-                      <span style={S.currentLabel}>✓ Current Plan</span>
-                    ) : isUpgrade ? (
-                      <button
-                        onClick={() => startCheckout(plan.id as "starter" | "pro")}
-                        style={{ ...S.planUpgradeBtn, background: `linear-gradient(135deg, ${color}, ${color}dd)` }}
-                        disabled={!!actionLoading || isBlocked}
-                      >
-                        {actionLoading === plan.id ? "⏳..." : plan.id === "starter" ? "Start Trial" : "Upgrade"}
-                      </button>
-                    ) : (
-                      <span style={S.downgradeLabel}>Downgrade in portal</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+      const isCurrent = plan.id === userPlan;
+
+      const isUpgrade =
+        (userPlan === "free" && (plan.id === "starter" || plan.id === "pro")) ||
+        (userPlan === "starter" && plan.id === "pro");
+
+      const isDowngrade =
+        (userPlan === "pro" && (plan.id === "starter" || plan.id === "free")) ||
+        (userPlan === "starter" && plan.id === "free");
+
+      return (
+        <div
+          key={plan.id}
+          style={{
+            ...S.planCard,
+            borderColor: isCurrent ? color : "rgba(63,63,70,0.5)",
+            boxShadow: isCurrent ? `0 0 20px ${color}30` : "none",
+          }}
+        >
+          {isCurrent && (
+            <div style={{ ...S.currentBadge, background: color }}>Current</div>
+          )}
+
+          <div style={S.planCardHeader}>
+            <h3 style={{ ...S.planCardName, color }}>{plan.name}</h3>
+            <div style={S.planCardPrice}>
+              <span style={S.planCardAmount}>${plan.price}</span>
+              <span style={S.planCardPeriod}>/mo</span>
+            </div>
+          </div>
+
+          <ul style={S.featureList}>
+            <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
+            <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
+            <FeatureRow label="RTMP destinations" value={plan.limits.rtmpDestinationsMax} />
+            <FeatureRow label="Recording" value={plan.features.recording} />
+            <FeatureRow label="Multistream" value={plan.features.multistream} />
+            <FeatureRow label="Editing suite" value={plan.editing?.access} />
+            {plan.editing?.access && (
+              <>
+                <FeatureRow label="Projects" value={plan.editing.maxProjects} />
+                <FeatureRow label="Storage" value={`${plan.editing.maxStorageGB}GB`} />
+              </>
+            )}
+          </ul>
+
+          <div style={S.planCardAction}>
+            {isCurrent ? (
+              <span style={S.currentLabel}>✓ Current Plan</span>
+            ) : isUpgrade ? (
+              <button
+                onClick={() => startCheckout(plan.id as "starter" | "pro")}
+                style={{
+                  ...S.planUpgradeBtn,
+                  background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                }}
+                disabled={!!actionLoading || isBlocked || isProcessing}
+              >
+                {actionLoading === plan.id
+                  ? "⏳..."
+                  : "Upgrade"}
+              </button>
+            ) : isDowngrade ? (
+              <button
+                onClick={openPortal}
+                style={S.secondaryBtn}
+                disabled={!!actionLoading || isProcessing}
+              >
+                Downgrade in Portal
+              </button>
+            ) : (
+              <span style={S.downgradeLabel}>Manage in portal</span>
+            )}
           </div>
         </div>
+      );
+    })}
+  </div>
+</div>
+
+
 
         {/* ================================================================ */}
         {/* SECTION 5: WHAT'S LOCKED (if blocked or free) */}
@@ -648,7 +688,7 @@ export default function SettingsBilling() {
               )}
             </div>
 
-            {!isBlocked && user?.planId === "free" && (
+            {user?.planId === "free" && (
               <div style={S.lockedCta}>
                 <button onClick={() => startCheckout("starter")} style={S.primaryBtn} disabled={!!actionLoading}>
                   🚀 Start Free Trial to Unlock
