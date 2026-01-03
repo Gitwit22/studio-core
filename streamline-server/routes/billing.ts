@@ -154,6 +154,19 @@ router.post("/portal", requireAuth, async (req, res) => {
   }
 });
 
+// Allow clients to clear a stale pendingPlan (e.g., user canceled checkout)
+router.post("/clear-pending", requireAuth, async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
+    await getUserRef(uid).set({ pendingPlan: null }, { merge: true });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("POST /api/billing/clear-pending failed:", err?.message || err);
+    return res.status(500).json({ success: false, error: err?.message || "Server error" });
+  }
+});
+
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;

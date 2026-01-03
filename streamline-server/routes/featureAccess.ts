@@ -14,13 +14,19 @@ const BAD_BILLING_STATUSES = new Set([
 ]);
 
 function isPaidPlan(planId?: string) {
-  return planId === "starter" || planId === "pro";
+  return planId === "starter" || planId === "pro" || planId === "internal_unlimited";
 }
 
 function billingBlocks(user: any): string | null {
   const planId = user?.planId;
   const billingStatus = user?.billingStatus;
   const billingActive = user?.billingActive;
+
+
+  // Admin override bypasses all billing blocks
+  if (user?.adminOverride) {
+    return null;
+  }
 
   if (!isPaidPlan(planId)) {
     return null; // free users don’t need billing
@@ -61,6 +67,33 @@ export async function canAccessFeature(
 
   const user = userSnap.data() as any;
   const planId = user?.planId || "free";
+  if (process.env.DEBUG_FEATURE_ACCESS === "1") {
+    console.log(
+      `[featureAccess] uid=${uid} feature=${featureKey} planId=${planId} adminOverride=${!!user?.adminOverride}`
+    );
+  }
+
+  // Admin override grants access to all features
+  // Source 1: flag on user doc
+  if (user?.adminOverride) {
+    return { allowed: true };
+  }
+  // Source 2: membership in /admins collection
+  try {
+    const adminSnap = await db.collection("admins").doc(uid).get();
+    const isAdmin = adminSnap.exists && adminSnap.data()?.isAdmin === true;
+    if (process.env.DEBUG_FEATURE_ACCESS === "1") {
+      console.log(`[featureAccess] admin collection isAdmin=${isAdmin}`);
+    }
+    if (isAdmin) {
+      return { allowed: true };
+    }
+  } catch {}
+
+  // Internal unlimited plan unlocks all features
+  if (String(planId).toLowerCase() === "internal_unlimited") {
+    return { allowed: true };
+  }
 
   // 2) STRICT BILLING BLOCK (NEW)
   const billingBlockReason = billingBlocks(user);
@@ -79,8 +112,29 @@ export async function canAccessFeature(
 
   const plan = planSnap.data() as any;
 
-  // 4) Feature flag check
-  const enabled = Boolean(plan?.features?.[featureKey]);
+  // 4) Feature flag check (with aliases for multistream)
+  let enabled = Boolean(plan?.features?.[featureKey]);
+  if (process.env.DEBUG_FEATURE_ACCESS === "1") {
+    console.log(
+      `[featureAccess] initial flag check features.${featureKey}=${plan?.features?.[featureKey]} multistreamEnabled=${plan?.multistreamEnabled}`
+    );
+  }
+
+  if (!enabled) {
+    if (featureKey === "multistream") {
+      enabled = Boolean(
+        plan?.features?.multistream ||
+        plan?.features?.rtmp ||
+        plan?.features?.rtmpMultistream ||
+        plan?.multistreamEnabled
+      );
+      if (process.env.DEBUG_FEATURE_ACCESS === "1") {
+        console.log(
+          `[featureAccess] alias check result enabled=${enabled} via multistream|rtmp|rtmpMultistream|multistreamEnabled`
+        );
+      }
+    }
+  }
 
   if (!enabled) {
     return {

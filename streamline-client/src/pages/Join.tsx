@@ -1,21 +1,14 @@
 import { useState, useEffect } from "react";
 import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
-import { useNavigate, useSearchParams, Link } from "react-router-dom";
-
-/**
- * STREAMLINE JOIN PAGE WITH USAGE BANNER - REDESIGNED
- * Glassmorphism black/red/white theme with integrated usage stats
- */
-
-
+import { useNavigate, useSearchParams,} from "react-router-dom";
 
 
 type UsageData = {
   streamingMinutes: number;
-  maxStreamingMinutes: number;
+  maxStreamingMinutes: 500;
   storageUsed: number;
-  maxStorage: number;
+  maxStorage: 10;
   planId: string;
 };
 
@@ -84,34 +77,35 @@ useEffect(() => {
     }
   }, [searchParams, role]);
 
-  // Fetch real usage summary (only for authenticated users, not guests or participants)
+  // Fetch real usage summary (for all authenticated users)
   useEffect(() => {
     let didCancel = false;
-    if (isParticipant || !user) return;
+   
 
     setUsageLoading(true);
     setUsageError(null);
 
-    fetch("/api/usage/summary", { credentials: "include" })
-      .then(async (res) => {
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || "Failed to fetch usage data");
-        }
-        return res.json();
-      })
-      .then((data) => {
-        if (!didCancel) {
-          setUsageData({
-            streamingMinutes: data.usageMonthly?.usage?.participantMinutes ?? 0,
-            maxStreamingMinutes: data.plan?.limits?.participantMinutes ?? 0,
-            storageUsed: data.usageMonthly?.usage?.storageGB ?? 0,
-            maxStorage: data.plan?.limits?.storageGB ?? 0,
-            planId: data.plan?.id ?? "free",
-          });
-          setUsageLoading(false);
-        }
-      })
+    fetch(`${API_BASE}/api/usage/me`, { credentials: "include" })
+  .then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || "Failed to fetch usage data");
+    }
+    return res.json();
+  })
+  .then((data) => {
+    if (!didCancel) {
+      const um = data?.usageMonthly || {};
+      setUsageData({
+        streamingMinutes: um?.participantMinutes ?? um?.usage?.participantMinutes ?? 0,
+        maxStreamingMinutes: data?.plan?.limits?.participantMinutes ?? 0,
+        storageUsed: um?.storageGB ?? um?.usage?.storageGB ?? 0,
+        maxStorage: data?.plan?.limits?.storageGB ?? 0,
+        planId: data?.plan?.id ?? data?.user?.planId ?? "free",
+      });
+      setUsageLoading(false);
+    }
+  })
       .catch((err) => {
         if (!didCancel) {
           setUsageError(err.message || "Failed to fetch usage data");
@@ -121,7 +115,7 @@ useEffect(() => {
     return () => {
       didCancel = true;
     };
-  }, [isParticipant, user]);
+  }, [user]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -204,8 +198,8 @@ useEffect(() => {
         />
       </div>
 
-      {/* USAGE BANNER - TOP BAR - Only for authenticated users, hidden for guests/participants */}
-      {!isParticipant && user && (
+      {/* USAGE BANNER - TOP BAR - For all authenticated users */}
+      {user && (
         <div
           style={{
             position: "fixed",
@@ -365,38 +359,7 @@ useEffect(() => {
                     : "—"}
                 </div>
 
-                <button
-                  onClick={async () => {
-                    // Start checkout for starter_trial
-                    try {
-                      const res = await fetch("/api/billing/checkout", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        credentials: "include",
-                        body: JSON.stringify({ plan: "starter_trial" }),
-                      });
-                      const data = await res.json();
-                      if (!data.success || !data.url) {
-                        alert(data.error || "Checkout failed");
-                        return;
-                      }
-                      window.location.href = data.url;
-                    } catch (err) {
-                      alert("Failed to start checkout. Please try again.");
-                    }
-                  }}
-                  style={{
-                    fontSize: "12px",
-                    color: "#ef4444",
-                    background: "none",
-                    border: "none",
-                    textDecoration: "underline",
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Upgrade
-                </button>
+                {/* Upgrade button removed */}
               </div>
 
               {/* Error message under usage stats */}

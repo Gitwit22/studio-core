@@ -78,50 +78,43 @@ router.post(
       switch (event.type) {
         case "customer.subscription.created":
         case "customer.subscription.updated":
+        case "invoice.paid":
         case "customer.subscription.deleted": {
           // Cast to any to avoid Stripe type mismatch issues
+          // Canonical reconciliation block for all subscription-valid events
           const sub: any = event.data.object;
-
           const uid = sub?.metadata?.userId;
           if (!uid) break;
-
-          const priceId = sub?.items?.data?.[0]?.price?.id as string | undefined;
-          // Always read planVariant from metadata (not plan)
-          const planVariant = sub?.metadata?.planVariant;
-          let planId = planIdFromPrice(priceId);
-          if (planVariant === "starter_trial" || planVariant === "starter_paid") {
-            planId = "starter";
-          } else if (planVariant === "pro") {
-            planId = "pro";
+          // For invoice.paid, fetch the subscription object
+          let subscription = sub;
+          if (event.type === "invoice.paid" && sub.subscription) {
+            subscription = await stripe.subscriptions.retrieve(sub.subscription);
           }
-
-          const billingStatus = mapBillingStatus(String(sub?.status || ""));
-          const billingActive = billingStatus === "active" || billingStatus === "trialing";
-
-          const currentPeriodEndMs =
-            typeof sub?.current_period_end === "number" ? sub.current_period_end * 1000 : null;
-
-          // If planVariant is starter_trial, set hasHadTrial = true (robust against missed status)
-          const setHasHadTrial = (planVariant === "starter_trial") ? { hasHadTrial: true } : {};
+          const planVariant = subscription?.metadata?.planVariant;
+          const canonicalPlan = planVariant === "pro" ? "pro" : "starter";
+          const isActive = subscription.status === "active" || subscription.status === "trialing";
+          // Fetch user for hasHadTrial logic
+          const userSnap = await getUserRef(uid).get();
+          const user = userSnap.exists ? userSnap.data() : {};
           await getUserRef(uid).set(
             {
-              planId: billingActive ? planId : "free",
-              pendingPlan: null,
-
-              billingActive,
-              billingStatus,
-
+              planId: canonicalPlan,
+              pendingPlan: null, // CRITICAL
+              billingActive: isActive,
+              billingStatus: subscription.status,
               billing: {
+                ...(user.billing || {}),
                 provider: "stripe",
-                customerId: sub?.customer ?? null,
-                subscriptionId: sub?.id ?? null,
-                priceId: priceId ?? null,
-                cancelAtPeriodEnd: !!sub?.cancel_at_period_end,
-                currentPeriodEnd: currentPeriodEndMs,
+                customerId: subscription.customer ?? null,
+                subscriptionId: subscription.id ?? null,
+                priceId: subscription.items?.data?.[0]?.price?.id ?? null,
+                cancelAtPeriodEnd: !!subscription.cancel_at_period_end,
+                currentPeriodEnd: typeof subscription.current_period_end === "number" ? subscription.current_period_end * 1000 : null,
+                hasHadTrial:
+                  (user.billing?.hasHadTrial === true) || planVariant === "starter_trial",
                 updatedAt: Date.now(),
-                ...setHasHadTrial,
               },
-              ...(planVariant === "starter_trial" ? { hasHadTrial: true } : {}),
+              updatedAt: Date.now(),
             },
             { merge: true }
           );

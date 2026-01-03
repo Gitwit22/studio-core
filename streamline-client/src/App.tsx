@@ -19,6 +19,11 @@ import ThankYou from "./pages/ThankYou";
 import EditorDisabled from "./pages/EditorDisabled";
 import LearnMore from "./pages/LearnMore";
 import Checkout from "./pages/Checkout";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import Support from "./pages/Support";
+import BillingCanceled from "./pages/BillingCanceled";
+import BillingSuccess from "./pages/BillingSuccess";
 
 
 // Stripe/Billing pages
@@ -36,6 +41,13 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/checkout" element={<Checkout />} />
+      {/* Policy & Support */}
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/support" element={<Support />} />
+      {/* Stripe Checkout return routes */}
+      <Route path="/billing/canceled" element={<BillingCanceled />} />
+      <Route path="/billing/success" element={<BillingSuccess />} />
 
 
       {/* User dashboard */}

@@ -1,16 +1,11 @@
-// Map canonical plan id to checkout variant for resubscribe
-type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro";
-function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
-  const p = getCanonicalPlanId(user); // "free" | "starter" | "pro" | maybe others
-  if (p === "pro" || p === "internal_unlimited") return "pro";
-  // For anything that isn't pro, resubscribe should go to paid Starter by default
-  return "starter_paid";
-}
+
 
 
 import React, { useEffect, useState } from "react";
 import { getCanonicalPlanId } from "../lib/planUtils";
 import { useNavigate } from "react-router-dom";
+import "./SettingsBilling.css";
+import { S } from "./SettingsBilling.styles";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -38,6 +33,8 @@ interface UserData {
   billingStatus?: string;
   billingActive?: boolean;
   billing?: BillingInfo;
+  hasHadTrial?: boolean;
+
 }
 
 interface PlanDefinition {
@@ -163,6 +160,47 @@ function getStatusBadge(status: string | undefined, cancelAtPeriodEnd?: boolean)
       return { text: "Free", color: "#6b7280", bg: "rgba(107,114,128,0.15)", icon: "○" };
   }
 }
+// Button label logic (frontend-only)
+function getPlanActionLabel(
+  currentPlan: string,
+  targetPlan: "free" | "starter" | "pro",
+  isProcessing: boolean
+) {
+  if (isProcessing) return "Processing…";
+
+  // Normalize variants to canonical plan ids
+  const plan =
+    currentPlan === "starter_paid" || currentPlan === "starter_trial"
+      ? "starter"
+      : currentPlan;
+
+  if (plan === targetPlan) return "Current";
+
+  // Free users upgrade to paid plans
+  if (plan === "free") return targetPlan === "pro" || targetPlan === "starter" ? "Upgrade" : "Manage";
+
+  // Starter -> Pro is an upgrade
+  if (plan === "starter" && targetPlan === "pro") return "Upgrade";
+  // Downgrades to Starter only; to Free we direct to portal -> label Manage
+  if (plan === "pro" && targetPlan === "starter") return "Downgrade";
+  if ((plan === "pro" || plan === "starter") && targetPlan === "free") return "Manage";
+
+  return "Manage";
+}
+
+
+// Map canonical plan id to checkout variant for resubscribe
+type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro";
+
+// Loading state key for actions like checkout and portal
+type ActionLoading = CheckoutPlanVariant | "portal" | null;
+
+function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
+  const p = getCanonicalPlanId(user); // expected: "free" | "starter" | "pro" | ...
+  if (p === "pro" || p === "internal_unlimited") return "pro";
+  // default resubscribe goes to paid Starter
+  return "starter_paid";
+}
 
 
 // ============================================================================
@@ -172,23 +210,69 @@ function getStatusBadge(status: string | undefined, cancelAtPeriodEnd?: boolean)
 export default function SettingsBilling() {
   const nav = useNavigate();
 
-  const [user, setUser] = useState<UserData | null>(null);
-  const [plans, setPlans] = useState<PlanDefinition[]>(DEFAULT_PLANS);
-  const [usage, setUsage] = useState<UsageData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  
+  const DEFAULT_USAGE: UsageData = {
+  streamingMinutes: { used: 0, limit: 60 },
+  rtmpDestinations: { used: 0, limit: 1 },
+  storage: { used: 0, limit: 5 },
+  projects: { used: 0, limit: 1 },
+};
 
+const [user, setUser] = useState<UserData | null>(null);
+  const [plans, setPlans] = useState<PlanDefinition[]>(DEFAULT_PLANS);
+  const [usage, setUsage] = useState<UsageData>(DEFAULT_USAGE);
+
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<ActionLoading>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showManagePicker, setShowManagePicker] = useState(false);
   useEffect(() => {
     loadAllData();
   }, []);
 
-  // If user is on free plan but has a pendingPlan, clear it to prevent stuck processing state
+  // If user is on free plan but has a pendingPlan, clear it server-side to prevent stuck processing state
   useEffect(() => {
-    if (user && user.planId === "free" && user.pendingPlan) {
-      setUser({ ...user, pendingPlan: null });
+    (async () => {
+      if (user && user.planId === "free" && user.pendingPlan) {
+        try {
+          await fetch(`${API_BASE}/api/billing/clear-pending`, {
+            method: "POST",
+            credentials: "include",
+          });
+        } catch {}
+        setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
+      }
+    })();
+  }, [user?.planId, user?.pendingPlan]);
+
+  // If billing is active or trialing, ensure pendingPlan is cleared to avoid stuck UI
+  useEffect(() => {
+    if (!user) return;
+    if ((user.billingStatus === "active" || user.billingStatus === "trialing") && user.pendingPlan) {
+      setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
     }
-  }, [user]);
+  }, [user?.billingStatus]);
+
+  // Reset transient actionLoading when page regains visibility (e.g., returning from Stripe)
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        setActionLoading(null);
+        // Refresh data to clear any stale pendingPlan
+        loadAllData();
+      }
+    };
+    const onPageShow = () => {
+      setActionLoading(null);
+      loadAllData();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, []);
 
   const loadAllData = async () => {
     setLoading(true);
@@ -196,7 +280,7 @@ export default function SettingsBilling() {
     try {
       await Promise.all([loadUser(), loadPlans(), loadUsage()]);
     } catch (err: any) {
-      setError(err.message || "Failed to load data");
+      setError(err?.message || "Failed to load data");
     } finally {
       setLoading(false);
     }
@@ -216,32 +300,62 @@ export default function SettingsBilling() {
       const res = await fetch(`${API_BASE}/api/plans`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
-        if (data.plans?.length) setPlans(data.plans);
+        if (data.plans?.length) {
+          const first = data.plans[0];
+          if (typeof first === "string") {
+            const ids = new Set<string>(data.plans as string[]);
+            const resolved = DEFAULT_PLANS.filter((p) => ids.has(p.id));
+            if (resolved.length) {
+              setPlans(resolved);
+            } else {
+              // If API returns unknown ids, keep defaults
+              setPlans(DEFAULT_PLANS);
+            }
+          } else {
+            // Assume server returned full plan objects
+            setPlans(data.plans as PlanDefinition[]);
+          }
+        }
       }
     } catch {
       // Use defaults
     }
   };
 
+ 
   const loadUsage = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/usage/me`, { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        setUsage(data);
-      }
-    } catch {
-      // Mock usage for demo
+      if (!res.ok) throw new Error("usage endpoint failed");
+
+      const data = await res.json();
+      const limits = data?.plan?.limits || {};
+
       setUsage({
-        streamingMinutes: { used: 45, limit: 60 },
-        rtmpDestinations: { used: 1, limit: 1 },
-        storage: { used: 0, limit: 0 },
-        projects: { used: 0, limit: 0 },
+        streamingMinutes: {
+          used: Number(data?.usage?.participantMinutes ?? 0),
+          limit: Number(limits.participantMinutes ?? 0) || (data?.plan?.id === "pro" ? 1200 : data?.plan?.id === "starter" ? 300 : 60),
+        },
+        rtmpDestinations: {
+          used: 0,
+          limit: Number(limits.maxDestinations ?? 0) || (data?.plan?.id === "pro" ? 5 : data?.plan?.id === "starter" ? 2 : 1),
+        },
+        storage: {
+          used: 0,
+          limit: Number(limits.storageGB ?? 0) || (data?.plan?.id === "pro" ? 100 : data?.plan?.id === "starter" ? 10 : 1),
+        },
+        projects: {
+          used: 0,
+          limit: Number(limits.maxProjects ?? 0) || (data?.plan?.id === "pro" ? 50 : data?.plan?.id === "starter" ? 5 : 1),
+        },
       });
+    } catch (err) {
+      console.warn("loadUsage failed; using defaults", err);
+      setUsage(DEFAULT_USAGE);
     }
   };
 
-type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro";
+
 
 const startCheckout = async (plan: CheckoutPlanVariant) => {
   setActionLoading(plan);
@@ -271,6 +385,12 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   const openPortal = async () => {
     setActionLoading("portal");
     try {
+      // If no Stripe customer, guide user into Checkout to create one
+      if (!hasStripeCustomer) {
+        setShowManagePicker(true);
+        setActionLoading(null);
+        return;
+      }
       const res = await fetch(`${API_BASE}/api/billing/portal`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -296,13 +416,14 @@ function canonicalPlanId(planId: string | undefined): string {
 const userPlanId = canonicalPlanId(user?.planId);
 const currentPlan = plans.find((p) => p.id === userPlanId) || plans[0];
 const status = user?.billingStatus;
+const hasStripeCustomer = !!(user?.billing?.customerId || (user as any)?.stripeCustomerId);
 
 const isPaidPlan = userPlanId === "starter" || userPlanId === "pro";
 const isBlocked = isPaidPlan && (status === "past_due" || status === "unpaid");
 const isPaidValid = status === "active" || status === "trialing";
 
-// Processing should be based on pendingPlan regardless of starting plan
-const isProcessing = !!user?.pendingPlan;
+// Only treat pendingPlan as processing for paid plans; always consider active action loads
+const isProcessing = !!actionLoading || (userPlanId !== "free" && !!user?.pendingPlan);
 
 const statusBadge = getStatusBadge(status, user?.billing?.cancelAtPeriodEnd);
 const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
@@ -310,18 +431,18 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
   if (loading) {
     return (
-      <div style={S.container}>
+      <div className="billing" style={S.container}>
         <div style={S.loadingScreen}>
           <div style={S.spinner} />
           <p>Loading billing information...</p>
         </div>
-        <style>{CSS}</style>
+        {/* styles moved to SettingsBilling.css */}
       </div>
     );
   }
 
   return (
-    <div style={S.container}>
+    <div className="billing" style={S.container}>
       <div style={S.orb1} />
       <div style={S.orb2} />
 
@@ -394,7 +515,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             <h2 style={S.cardTitle}>Your Plan</h2>
             {isProcessing && (
               <span style={S.processingBadge}>
-                ⏳ Processing upgrade to {user?.pendingPlan}...
+                📅 Changes take effect at the end of this billing period
               </span>
             )}
           </div>
@@ -446,7 +567,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           {/* Primary Actions */}
           <div style={S.actionButtons}>
             {/* Free user, no billing */}
-            {user?.planId === "free" && (!status || status === "none") && !isProcessing && (
+            {userPlanId === "free" && (!status || status === "none") && !isProcessing && (
   <>
     <button
       onClick={() => startCheckout("starter_trial")}
@@ -481,7 +602,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
                   {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
                 </button>
-                {user?.planId === "starter_paid" && (
+                {userPlanId === "starter" && (
                   <button
                     onClick={() => startCheckout("pro")}
                     style={S.secondaryBtn}
@@ -499,7 +620,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
                   {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
                 </button>
-                {user?.planId === "starter_paid" && (
+                {userPlanId === "starter" && (
                   <button
                     onClick={() => startCheckout("pro")}
                     style={S.secondaryBtn}
@@ -554,13 +675,21 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               <UsageBar
                 label="Streaming Minutes"
                 used={usage.streamingMinutes.used}
-                limit={usage.streamingMinutes.limit || currentPlan.limits.monthlyMinutesIncluded}
+                limit={
+                  usage.streamingMinutes.limit ||
+                  currentPlan.limits?.monthlyMinutesIncluded ||
+                  0
+                }
                 unit="min"
               />
               <UsageBar
                 label="RTMP Destinations"
                 used={usage.rtmpDestinations.used}
-                limit={usage.rtmpDestinations.limit || currentPlan.limits.rtmpDestinationsMax}
+                limit={
+                  usage.rtmpDestinations.limit ||
+                  currentPlan.limits?.rtmpDestinationsMax ||
+                  0
+                }
                 unit=""
               />
               {(isPaidValid || usage.storage.limit > 0) && (
@@ -661,7 +790,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         }}
         disabled={!!actionLoading || isBlocked || isProcessing}
       >
-        {actionLoading === "starter_paid" ? "⏳..." : "Select Plan"}
+        {actionLoading === "starter_paid" ? "⏳..." : getPlanActionLabel(userPlan, "starter", isProcessing)}
       </button>
 
       <button
@@ -685,7 +814,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
       }}
       disabled={!!actionLoading || isBlocked || isProcessing}
     >
-      Manage in Billing Portal
+      {getPlanActionLabel(userPlan, "starter", isProcessing)}
     </button>
   ) : plan.id === "pro" && (userPlan === "free" || userPlan === "starter") ? (
     <button
@@ -696,7 +825,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
       }}
       disabled={!!actionLoading || isBlocked || isProcessing}
     >
-      {actionLoading === "pro" ? "⏳..." : "Select Plan"}
+      {actionLoading === "pro" ? "⏳..." : getPlanActionLabel(userPlan, "pro", isProcessing)}
     </button>
   ) : plan.id === "free" && (userPlan === "starter" || userPlan === "pro") ? (
     <button
@@ -720,7 +849,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
       }}
       disabled={!!actionLoading || isBlocked || isProcessing}
     >
-      Manage in Billing Portal
+      {getPlanActionLabel(userPlan, plan.id as "starter" | "pro", isProcessing)}
     </button>
   )}
 </div>
@@ -736,7 +865,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         {/* ================================================================ */}
         {/* SECTION 5: WHAT'S LOCKED (if blocked or free) */}
         {/* ================================================================ */}
-        {(isBlocked || user?.planId === "free") && (
+        {(isBlocked || userPlanId === "free") && (
           <div style={S.card}>
             <h2 style={S.cardTitle}>🔒 Locked Features</h2>
             <p style={S.lockedSubtitle}>
@@ -780,7 +909,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               )}
             </div>
 
-            {user?.planId === "free" && !user?.billing?.hasHadTrial && (
+            {userPlanId === "free" && !user?.billing?.hasHadTrial && (
               <div style={S.lockedCta}>
                 <button onClick={() => startCheckout("starter_trial")} style={S.primaryBtn} disabled={!!actionLoading}>
                   🚀 Start Free Trial to Unlock
@@ -791,7 +920,99 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         )}
       </div>
 
-      <style>{CSS}</style>
+      {/* Manage Picker Modal */}
+      {showManagePicker && (
+        <div
+          onClick={() => setShowManagePicker(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              background: "#0b0b0c",
+              border: "1px solid #27272a",
+              borderRadius: 16,
+              padding: 20,
+              boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 18 }}>Choose a plan to get started</h3>
+              <button onClick={() => setShowManagePicker(false)} style={{ background: "transparent", border: 0, color: "#a1a1aa", fontSize: 18, cursor: "pointer" }}>×</button>
+            </div>
+            <p style={{ color: "#a1a1aa", marginTop: 0, marginBottom: 16 }}>You don't have a billing profile yet. Pick a plan and we'll create one for you.</p>
+
+            {(() => {
+              const trialEligible = !(user?.hasHadTrial || user?.billing?.hasHadTrial);
+              return (
+                <div style={{ display: "grid", gap: 12 }}>
+                  {trialEligible && (
+                    <button
+                      onClick={() => startCheckout("starter_trial")}
+                      style={{
+                        ...S.planUpgradeBtn,
+                        background: "linear-gradient(135deg,#22c55e,#16a34a)",
+                        border: 0,
+                      }}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading === "starter_trial" ? "⏳ Starting Trial..." : "🚀 Start Starter Trial"}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => startCheckout("starter_paid")}
+                    style={{
+                      ...S.planUpgradeBtn,
+                      background: "linear-gradient(135deg,#3b82f6,#2563eb)",
+                      border: 0,
+                    }}
+                    disabled={!!actionLoading}
+                  >
+                    {actionLoading === "starter_paid" ? "⏳ Redirecting..." : "Starter — $15/mo"}
+                  </button>
+
+                  <button
+                    onClick={() => startCheckout("pro")}
+                    style={{
+                      ...S.planUpgradeBtn,
+                      background: "linear-gradient(135deg,#8b5cf6,#7c3aed)",
+                      border: 0,
+                    }}
+                    disabled={!!actionLoading}
+                  >
+                    {actionLoading === "pro" ? "⏳ Redirecting..." : "Pro — $49/mo"}
+                  </button>
+
+                  <button
+                    onClick={() => setShowManagePicker(false)}
+                    style={{
+                      ...S.secondaryBtn,
+                      width: "100%",
+                      marginTop: 4,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              );
+            })()}
+
+          </div>
+        </div>
+      )}
+
+      {/* styles moved to SettingsBilling.css */}
     </div>
   );
 }
@@ -863,424 +1084,5 @@ function LockedFeature({ icon, title, description, requiredPlan }: { icon: strin
 // STYLES
 // ============================================================================
 
-const S: Record<string, React.CSSProperties> = {
-  container: {
-    minHeight: "100vh",
-    background: "#000",
-    color: "#fff",
-    fontFamily: "system-ui, -apple-system, sans-serif",
-    position: "relative",
-    overflow: "hidden",
-  },
-  orb1: {
-    position: "fixed",
-    top: "5%",
-    left: "5%",
-    width: 400,
-    height: 400,
-    background: "rgba(220,38,38,0.1)",
-    borderRadius: "50%",
-    filter: "blur(100px)",
-    pointerEvents: "none",
-  },
-  orb2: {
-    position: "fixed",
-    bottom: "10%",
-    right: "10%",
-    width: 500,
-    height: 500,
-    background: "rgba(59,130,246,0.08)",
-    borderRadius: "50%",
-    filter: "blur(120px)",
-    pointerEvents: "none",
-  },
-  content: {
-    position: "relative",
-    zIndex: 10,
-    maxWidth: 900,
-    margin: "0 auto",
-    padding: "32px 24px",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 32,
-  },
-  title: {
-    margin: 0,
-    fontSize: 28,
-    fontWeight: 700,
-    background: "linear-gradient(to right, #fff, #fecaca)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-  },
-  refreshBtn: {
-    padding: "10px 20px",
-    background: "rgba(255,255,255,0.05)",
-    border: "1px solid rgba(255,255,255,0.2)",
-    borderRadius: 10,
-    color: "#fff",
-    cursor: "pointer",
-    fontSize: 14,
-  },
-  loadingScreen: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "100vh",
-    gap: 16,
-  },
-  spinner: {
-    width: 40,
-    height: 40,
-    border: "3px solid rgba(220,38,38,0.3)",
-    borderTopColor: "#dc2626",
-    borderRadius: "50%",
-    animation: "spin 1s linear infinite",
-  },
-  errorBanner: {
-    background: "rgba(239,68,68,0.15)",
-    border: "1px solid rgba(239,68,68,0.4)",
-    borderRadius: 12,
-    padding: "16px 20px",
-    marginBottom: 24,
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    color: "#fca5a5",
-  },
-  errorClose: {
-    background: "transparent",
-    border: "none",
-    color: "#fca5a5",
-    fontSize: 20,
-    cursor: "pointer",
-  },
-  warningCard: {
-    background: "linear-gradient(135deg, rgba(239,68,68,0.15), rgba(220,38,38,0.1))",
-    border: "2px solid rgba(239,68,68,0.5)",
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    display: "flex",
-    gap: 20,
-    alignItems: "flex-start",
-  },
-  warningIcon: {
-    fontSize: 40,
-    flexShrink: 0,
-  },
-  warningContent: {
-    flex: 1,
-  },
-  warningTitle: {
-    margin: "0 0 8px",
-    fontSize: 20,
-    fontWeight: 700,
-    color: "#fca5a5",
-  },
-  warningText: {
-    margin: "0 0 16px",
-    color: "#fecaca",
-    lineHeight: 1.5,
-  },
-  warningActions: {
-    display: "flex",
-    gap: 12,
-    alignItems: "center",
-  },
-  fixPaymentBtn: {
-    padding: "12px 24px",
-    background: "linear-gradient(135deg, #ef4444, #dc2626)",
-    border: "none",
-    borderRadius: 10,
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: "pointer",
-  },
-  supportLink: {
-    color: "#fca5a5",
-    textDecoration: "underline",
-    fontSize: 14,
-  },
-  card: {
-    background: "rgba(15,15,15,0.7)",
-    backdropFilter: "blur(20px)",
-    border: "1px solid rgba(63,63,70,0.5)",
-    borderRadius: 20,
-    padding: 28,
-    marginBottom: 24,
-  },
-  cardHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  cardTitle: {
-    margin: 0,
-    fontSize: 20,
-    fontWeight: 600,
-  },
-  processingBadge: {
-    fontSize: 13,
-    padding: "6px 12px",
-    background: "rgba(245,158,11,0.2)",
-    color: "#fbbf24",
-    borderRadius: 20,
-  },
-  planDisplay: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 24,
-    marginBottom: 24,
-    flexWrap: "wrap",
-  },
-  planInfo: {},
-  planNameRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 8,
-  },
-  planName: {
-    fontSize: 32,
-    fontWeight: 700,
-  },
-  statusBadge: {
-    padding: "6px 14px",
-    borderRadius: 20,
-    fontSize: 13,
-    fontWeight: 600,
-  },
-  planPrice: {
-    marginBottom: 8,
-  },
-  priceAmount: {
-    fontSize: 24,
-    fontWeight: 700,
-    color: "#ef4444",
-  },
-  pricePeriod: {
-    fontSize: 14,
-    color: "#9ca3af",
-  },
-  planDescription: {
-    margin: 0,
-    color: "#9ca3af",
-    fontSize: 14,
-  },
-  billingDetails: {
-    textAlign: "right",
-  },
-  detailRow: {
-    marginBottom: 8,
-  },
-  detailLabel: {
-    fontSize: 13,
-    color: "#6b7280",
-    marginRight: 8,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: 500,
-  },
-  daysLeft: {
-    marginLeft: 8,
-    color: "#3b82f6",
-    fontSize: 13,
-  },
-  actionButtons: {
-    display: "flex",
-    gap: 12,
-    flexWrap: "wrap",
-  },
-  primaryBtn: {
-    padding: "14px 28px",
-    background: "linear-gradient(135deg, #dc2626, #ef4444)",
-    border: "none",
-    borderRadius: 12,
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: "pointer",
-    boxShadow: "0 4px 20px rgba(220,38,38,0.3)",
-  },
-  secondaryBtn: {
-    padding: "14px 28px",
-    background: "rgba(255,255,255,0.05)",
-    border: "1px solid rgba(255,255,255,0.2)",
-    borderRadius: 12,
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: 500,
-    cursor: "pointer",
-  },
-  resetDate: {
-    fontSize: 13,
-    color: "#6b7280",
-  },
-  usageGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-    gap: 20,
-  },
-  usageItem: {},
-  usageHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  usageLabel: {
-    fontSize: 14,
-    color: "#d1d5db",
-  },
-  usageValue: {
-    fontSize: 13,
-    color: "#9ca3af",
-  },
-  usageTrack: {
-    height: 8,
-    background: "rgba(63,63,70,0.5)",
-    borderRadius: 4,
-    overflow: "hidden",
-  },
-  usageFill: {
-    height: "100%",
-    borderRadius: 4,
-    transition: "width 0.5s",
-  },
-  plansGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-    gap: 20,
-    marginTop: 20,
-  },
-  planCard: {
-    background: "rgba(0,0,0,0.3)",
-    border: "2px solid",
-    borderRadius: 16,
-    padding: 20,
-    position: "relative",
-    overflow: "hidden",
-  },
-  currentBadge: {
-    position: "absolute",
-    top: 12,
-    right: -30,
-    padding: "4px 40px",
-    fontSize: 11,
-    fontWeight: 700,
-    color: "#fff",
-    transform: "rotate(45deg)",
-    textTransform: "uppercase",
-  },
-  planCardHeader: {
-    marginBottom: 16,
-  },
-  planCardName: {
-    margin: 0,
-    fontSize: 22,
-    fontWeight: 700,
-  },
-  planCardPrice: {
-    marginTop: 4,
-  },
-  planCardAmount: {
-    fontSize: 28,
-    fontWeight: 700,
-  },
-  planCardPeriod: {
-    fontSize: 14,
-    color: "#9ca3af",
-  },
-  featureList: {
-    margin: "0 0 16px",
-    padding: 0,
-    listStyle: "none",
-  },
-  featureItem: {
-    display: "flex",
-    justifyContent: "space-between",
-    padding: "8px 0",
-    borderBottom: "1px solid rgba(63,63,70,0.3)",
-    fontSize: 13,
-  },
-  featureLabel: {
-    color: "#d1d5db",
-  },
-  featureValue: {
-    fontWeight: 600,
-  },
-  planCardAction: {
-    marginTop: 16,
-    textAlign: "center",
-  },
-  currentLabel: {
-    color: "#22c55e",
-    fontWeight: 600,
-  },
-  planUpgradeBtn: {
-    width: "100%",
-    padding: "12px",
-    border: "none",
-    borderRadius: 10,
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: "pointer",
-  },
-  downgradeLabel: {
-    fontSize: 13,
-    color: "#6b7280",
-  },
-  lockedSubtitle: {
-    margin: "0 0 20px",
-    color: "#9ca3af",
-  },
-  lockedGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-    gap: 16,
-  },
-  lockedItem: {
-    display: "flex",
-    gap: 16,
-    padding: 16,
-    background: "rgba(255,255,255,0.03)",
-    border: "1px solid rgba(63,63,70,0.3)",
-    borderRadius: 12,
-  },
-  lockedIcon: {
-    fontSize: 28,
-    flexShrink: 0,
-  },
-  lockedTitle: {
-    fontWeight: 600,
-    marginBottom: 4,
-  },
-  lockedDesc: {
-    fontSize: 13,
-    color: "#9ca3af",
-    marginBottom: 4,
-  },
-  lockedRequired: {
-    fontSize: 12,
-    color: "#ef4444",
-    fontWeight: 500,
-  },
-  lockedCta: {
-    marginTop: 24,
-    textAlign: "center",
-  },
-};
 
-const CSS = `
-  @keyframes spin { to { transform: rotate(360deg); } }
-  button:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
-  button:disabled { opacity: 0.6; cursor: not-allowed; }
-`;
+// Styles moved to external files: SettingsBilling.styles.ts and SettingsBilling.css

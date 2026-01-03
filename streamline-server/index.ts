@@ -11,8 +11,10 @@ import authRouter from "./routes/auth";
 import billingRoutes from "./routes/billing";
 import recordingsRoutes from "./routes/recordings";
 import usageRoutes from "./routes/usageRoutes";
+import plansRoutes from "./routes/plans";
 import roomTokenRoute from "./routes/roomToken";
 import multistreamRoutes from "./routes/multistream";
+import statsRoutes from "./routes/stats";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
@@ -97,6 +99,11 @@ app.use("/api/rooms", multistreamRoutes);
 
 // Billing routes
 app.use("/api/billing", billingRoutes);
+
+// Plans route (for Billing page)
+app.use("/api/plans", plansRoutes);
+// Public stats for landing page
+app.use("/api/stats", statsRoutes);
 
 
 // Storage test route

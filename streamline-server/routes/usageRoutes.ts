@@ -13,17 +13,8 @@ function getNextResetDate(): Date {
 
 const router = express.Router();
 
-/**
- * GET /api/usage/summary
- * Source of truth for:
- * - user planId + overagesEnabled
- * - plan features + limits
- * - current month usage from usageMonthly
- * - computed over-limit + remaining + resetDate
- */
-router.get("/summary", requireAuth, async (req, res) => {
+async function handleUsageSummary(req: any, res: any) {
   try {
-    // Use normalized user id from requireAuth
     const uid = (req as any).user?.uid;
     if (!uid) {
       return res.status(401).json({ success: false, error: "unauthorized" });
@@ -110,6 +101,7 @@ router.get("/summary", requireAuth, async (req, res) => {
       user: {
         planId,
         overagesEnabled,
+        pendingPlan: userData.pendingPlan ?? null,
       },
 
       plan: {
@@ -118,7 +110,7 @@ router.get("/summary", requireAuth, async (req, res) => {
         priceMonthly: planData.priceMonthly ?? null,
         features: {
           recording: !!features.recording,
-          rtmpMultistream: !!features.rtmpMultistream,
+          rtmpMultistream: !!features.rtmpMultistream || !!features.rtmp || !!planData.multistreamEnabled,
           overagesAllowed: !!features.overagesAllowed,
         },
         limits: {
@@ -160,6 +152,8 @@ router.get("/summary", requireAuth, async (req, res) => {
       details: err?.message || String(err),
     });
   }
-});
-
+}
+// Expose both endpoints with the same stable payload
+router.get("/summary", requireAuth, handleUsageSummary);
+router.get("/me", requireAuth, handleUsageSummary);
 export default router;

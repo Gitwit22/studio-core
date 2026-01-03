@@ -1,3 +1,8 @@
+/**
+ * PUT /api/admin/plans/:planId
+ * Update a plan document (any field except id)
+ */
+
 console.log("✅ admin.ts loaded");
 import express from "express";
 
@@ -41,6 +46,27 @@ router.get("/plans", async (req, res) => {
   }
 });
 
+router.put("/plans/:planId", async (req, res) => {
+  try {
+    const { planId } = req.params;
+    const updateData = { ...req.body };
+    // Prevent changing the id field
+    if ("id" in updateData) {
+      delete updateData.id;
+    }
+    const planRef = firestore.collection("plans").doc(planId);
+    const planSnap = await planRef.get();
+    if (!planSnap.exists) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+    await planRef.update(updateData);
+    await logAdminAction(req.adminUser!.uid, "update_plan", { planId, updateData });
+    res.json({ success: true, planId, updated: updateData });
+  } catch (error: any) {
+    console.error("Failed to update plan:", error);
+    res.status(500).json({ error: "Failed to update plan", details: error.message });
+  }
+});
 /**
  * GET /api/admin/users
  * List all users with usage information
@@ -238,6 +264,7 @@ router.post("/users/:userId/change-plan", async (req, res) => {
   try {
     const { userId } = req.params;
     const { newPlan, reason } = req.body;
+    
 
     // Dynamically fetch all valid plan IDs from Firestore
     const plansSnap = await firestore.collection("plans").get();
@@ -260,6 +287,8 @@ const validPlans: string[] = plansSnap.docs.map((d) => d.id);
       updatedAt: new Date(),
       planChangedBy: "admin",
       planChangedAt: new Date(),
+      pendingPlan: null,
+
     });
 
     // Log the action
