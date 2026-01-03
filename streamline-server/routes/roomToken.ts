@@ -12,7 +12,7 @@ const router = Router();
 
 router.post("/", requireAuth, async (req, res) => {
   try {
-    const { roomName } = req.body as { roomName?: string };
+    const { roomName, identity } = req.body as { roomName?: string; identity?: string };
     const uid = (req as any).user.uid;
     if (!uid) return res.status(401).json({ error: "Missing uid on request" });
     if (!roomName || !roomName.trim())
@@ -25,7 +25,8 @@ router.post("/", requireAuth, async (req, res) => {
     }
 
     const AccessToken = await getAccessTokenCtor();
-    const at = new AccessToken(apiKey, apiSecret, { identity: uid });
+    const tokenIdentity = (identity && identity.trim()) || uid; // prefer provided identity, fallback to uid
+    const at = new AccessToken(apiKey, apiSecret, { identity: tokenIdentity });
     at.addGrant({
       room: roomName,
       roomJoin: true,
@@ -34,7 +35,8 @@ router.post("/", requireAuth, async (req, res) => {
     });
     const jwt = await at.toJwt();
     console.log("✅ roomToken jwt typeof:", typeof jwt, "len:", jwt.length);
-    return res.status(200).json({ token: jwt });
+    const serverUrl = process.env.LIVEKIT_URL || null;
+    return res.status(200).json({ token: jwt, serverUrl });
   } catch (err: any) {
     console.error("roomToken error:", err);
     return res.status(500).json({ error: "Failed to create room token" });

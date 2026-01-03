@@ -364,6 +364,7 @@ export default function Room() {
   const streamStartTimeRef = useRef<number | null>(null);
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);
   const [showExitOptions, setShowExitOptions] = useState(false);
+  const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
   useEffect(() => {
     if (!roomName || !displayName) return;
@@ -371,7 +372,7 @@ export default function Room() {
     const fetchToken = async () => {
       try {
         console.log("[Room] Fetching room token...");
-        const res = await fetch(`/api/roomToken`, {
+        const res = await fetch(`${API_BASE}/api/roomToken`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -383,13 +384,23 @@ export default function Room() {
         });
         console.log("[Room] roomToken status:", res.status);
 
-        let data = null;
-        let rawText = null;
+        let data: any = null;
+        let rawText: string | null = null;
+        const ct = res.headers.get("content-type") || "";
         try {
-          rawText = await res.text();
-          data = JSON.parse(rawText);
+          if (ct.includes("application/json")) {
+            data = await res.json();
+          } else {
+            rawText = await res.text();
+            try {
+              data = JSON.parse(rawText);
+            } catch (err) {
+              console.error("[Room] Non-JSON response from /roomToken:", rawText);
+              data = null;
+            }
+          }
         } catch (err) {
-          console.error("[Room] Failed to parse JSON from /roomToken:", err, rawText);
+          console.error("[Room] Failed to parse response from /roomToken:", err);
           data = null;
         }
 
@@ -409,6 +420,7 @@ export default function Room() {
         }
         const { token, serverUrl } = data;
         const finalServerUrl = serverUrl || import.meta.env.VITE_LIVEKIT_URL;
+        console.log("[Room] token received:", !!token, "serverUrl:", finalServerUrl);
         setToken(token);
         setServerUrl(finalServerUrl || null);
         if (!token || !finalServerUrl) {
