@@ -359,12 +359,14 @@ export default function Room() {
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
   const recordingRef = useRef<string | null>(null);
-  const [viewerCount] = useState(Math.floor(Math.random() * 200) + 10);
+  const [viewerCount] = useState<number>(0);
   const [elapsedTime, setElapsedTime] = useState(0);
   const streamStartTimeRef = useRef<number | null>(null);
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);
   const [showExitOptions, setShowExitOptions] = useState(false);
   const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+  const [canMultistream, setCanMultistream] = useState<boolean>(false);
+  const [userPlanId, setUserPlanId] = useState<string>("free");
 
   useEffect(() => {
     if (!roomName || !displayName) return;
@@ -433,6 +435,21 @@ export default function Room() {
 
     fetchToken();
   }, [roomName, displayName]);
+
+  // Load usage/plan to gate multistream for free users
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/usage/me`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const planId = data?.plan?.id || data?.user?.planId || 'free';
+        setUserPlanId(String(planId));
+        const allowed = !!(data?.plan?.features?.rtmpMultistream) || String(planId) === 'internal_unlimited';
+        setCanMultistream(allowed);
+      } catch {}
+    })();
+  }, [API_BASE]);
 
   useEffect(() => {
     if (streamStatus === "live") {
@@ -611,6 +628,10 @@ export default function Room() {
       alert("No room name");
       return;
     }
+    if (!canMultistream) {
+      alert("Multistream is not available on your current plan. Please upgrade to enable streaming to external platforms.");
+      return;
+    }
     console.log("🎬 Room.tsx - handleStartMultistream called");
     if (!keys.youtubeKey && !keys.facebookKey && !keys.twitchKey) {
       alert("At least one stream key is required");
@@ -623,7 +644,6 @@ export default function Room() {
         facebookStreamKey: keys.facebookKey,
         twitchStreamKey: keys.twitchKey,
         userId: getOrCreateUid(),
-        guestCount: viewerCount,
       };
       console.log("   Sending to API:", requestBody);
       const res = await fetch(
@@ -632,6 +652,7 @@ export default function Room() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
+          credentials: 'include',
         }
       );
       // Read body once to avoid 'body stream already read' errors
@@ -695,6 +716,7 @@ export default function Room() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ egressId: streamEgressId }),
+          credentials: 'include',
         }
       );
       if (!res.ok) {
