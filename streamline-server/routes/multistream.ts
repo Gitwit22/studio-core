@@ -26,6 +26,12 @@ const ref = firestore.collection("activeStreams").doc(streamDocId);
 
     // if your client sends individual keys:
     const { youtubeStreamKey, facebookStreamKey, twitchStreamKey, guestCount } = req.body || {};
+    console.log("[multistream:start] uid:", uid, "room:", roomName, {
+      youtubeStreamKey: !!youtubeStreamKey,
+      facebookStreamKey: !!facebookStreamKey,
+      twitchStreamKey: !!twitchStreamKey,
+      guestCount,
+    });
 
     if (!youtubeStreamKey && !facebookStreamKey && !twitchStreamKey) {
       return res.status(400).json({ error: "At least one stream key is required" });
@@ -66,6 +72,7 @@ const ref = firestore.collection("activeStreams").doc(streamDocId);
     if (urls.length === 0) {
       return res.status(400).json({ error: "At least one stream key is required" });
     }
+    console.log("[multistream:start] RTMP URLs:", urls);
 
     try {
       // Import LiveKit egress client and types using dynamic helper
@@ -84,6 +91,11 @@ const ref = firestore.collection("activeStreams").doc(streamDocId);
         { stream: streamOutput },
         { layout: "grid", encodingOptions: EncodingOptionsPreset.H264_1080P_30 }
       );
+      console.log("[multistream:start] Egress response:", {
+        egressId: (response as any)?.egressId,
+        room: roomName,
+        raw: response,
+      });
 
       if (response.egressId) {
         // Save to Firestore only after success
@@ -99,16 +111,18 @@ const ref = firestore.collection("activeStreams").doc(streamDocId);
           updatedAt: Date.now(),
         }, { merge: true });
 
-        return res.json({ success: true, egressId: response.egressId, status: "started" });
+        // Ensure non-empty JSON body
+        return res.status(200).json({ success: true, egressId: response.egressId, status: "started" });
       } else {
+        console.error("[multistream:start] No egressId returned from LiveKit");
         return res.status(500).json({ error: "Failed to start egress - no ID returned" });
       }
     } catch (err) {
-      console.error("multistream error:", err);
-      return res.status(500).json({ error: "Failed to start multistream", details: err?.message });
+      console.error("[multistream:start] error:", err);
+      return res.status(500).json({ error: "Failed to start multistream", details: (err as any)?.message || String(err) });
     }
   } catch (err) {
-    console.error("multistream error:", err);
+    console.error("[multistream:start] outer error:", err);
     return res.status(500).json({ error: "Failed to start multistream" });
   }
 });

@@ -627,27 +627,36 @@ export default function Room() {
       };
       console.log("   Sending to API:", requestBody);
       const res = await fetch(
-        `/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
+        `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
         }
       );
-      let data;
-      try {
-        data = await res.json();
-      } catch (e) {
-        const text = await res.text();
+      // Read body once to avoid 'body stream already read' errors
+      const raw = await res.text();
+      let data: any = {};
+      if (raw && raw.trim().length > 0) {
         try {
-          data = JSON.parse(text);
-        } catch {
-          data = { raw: text };
+          data = JSON.parse(raw);
+        } catch (parseErr) {
+          console.error("start-multistream parse error", parseErr, raw);
+          data = { raw };
         }
+      } else {
+        console.warn("start-multistream empty response body");
+        data = { raw: "" };
       }
       console.log("🔍 startMultistream full response:", data);
       if (!res.ok) {
         console.error("Start multistream failed", data);
+        alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
+        setStreamStatus("idle");
+        return;
+      }
+      if (data?.success === false || data?.error) {
+        console.error("Start multistream API indicated failure", data);
         alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
         setStreamStatus("idle");
         return;
@@ -681,7 +690,7 @@ export default function Room() {
     try {
       setStreamStatus("stopping");
       const res = await fetch(
-        `/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
+        `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
