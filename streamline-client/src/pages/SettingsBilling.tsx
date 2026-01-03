@@ -166,26 +166,20 @@ function getPlanActionLabel(
   targetPlan: "free" | "starter" | "pro",
   isProcessing: boolean
 ) {
-  if (isProcessing) return "Processing…";
-
   // Normalize variants to canonical plan ids
   const plan =
     currentPlan === "starter_paid" || currentPlan === "starter_trial"
       ? "starter"
       : currentPlan;
 
+  // Current plan label
   if (plan === targetPlan) return "Current";
 
-  // Free users upgrade to paid plans
-  if (plan === "free") return targetPlan === "pro" || targetPlan === "starter" ? "Upgrade" : "Manage";
-
-  // Starter -> Pro is an upgrade
-  if (plan === "starter" && targetPlan === "pro") return "Upgrade";
-  // Downgrades to Starter only; to Free we direct to portal -> label Manage
-  if (plan === "pro" && targetPlan === "starter") return "Downgrade";
+  // Moving to Free is managed in portal; keep label readable
   if ((plan === "pro" || plan === "starter") && targetPlan === "free") return "Manage";
 
-  return "Manage";
+  // For all other non-current targets, prefer a simple CTA
+  return "Choose Plan";
 }
 
 
@@ -230,20 +224,26 @@ const [user, setUser] = useState<UserData | null>(null);
     loadAllData();
   }, []);
 
-  // If user is on free plan but has a pendingPlan, clear it server-side to prevent stuck processing state
+  // Safe pending cleanup: only clear under safe conditions
   useEffect(() => {
     (async () => {
-      if (user && user.planId === "free" && user.pendingPlan) {
-        try {
-          await fetch(`${API_BASE}/api/billing/clear-pending`, {
-            method: "POST",
-            credentials: "include",
-          });
-        } catch {}
-        setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
-      }
+      if (!user?.pendingPlan) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/billing/pending-change`, { credentials: "include" });
+        if (!res.ok) return;
+        const info = await res.json();
+        const isFreeNoSub = user.planId === "free" && !info?.hasSubscription && !info?.billingActive;
+        const noScheduled = info?.scheduledChange === false;
+        const completed = user.billingStatus === "active" || user.billingStatus === "trialing";
+        if (isFreeNoSub || noScheduled || completed) {
+          try {
+            await fetch(`${API_BASE}/api/billing/clear-pending`, { method: "POST", credentials: "include" });
+          } catch {}
+          setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
+        }
+      } catch {}
     })();
-  }, [user?.planId, user?.pendingPlan]);
+  }, [user?.planId, user?.pendingPlan, user?.billingStatus]);
 
   // If billing is active or trialing, ensure pendingPlan is cleared to avoid stuck UI
   useEffect(() => {
@@ -515,7 +515,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             <h2 style={S.cardTitle}>Your Plan</h2>
             {isProcessing && (
               <span style={S.processingBadge}>
-                📅 Changes take effect at the end of this billing period
+                {user?.billing?.cancelAtPeriodEnd
+                  ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
+                  : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
               </span>
             )}
           </div>
@@ -582,7 +584,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
       style={S.secondaryBtn}
       disabled={!!actionLoading}
     >
-      {actionLoading === "starter_paid" ? "⏳ Loading..." : "Select Plan"}
+      {actionLoading === "starter_paid" ? "⏳ Loading..." : "Choose Plan"}
     </button>
 
     <button
@@ -590,7 +592,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
       style={S.secondaryBtn}
       disabled={!!actionLoading}
     >
-      {actionLoading === "pro" ? "⏳ Loading..." : "Select Pro"}
+      {actionLoading === "pro" ? "⏳ Loading..." : "Choose Plan"}
     </button>
   </>
 )}
@@ -812,7 +814,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         background: `linear-gradient(135deg, ${color}, ${color}dd)`,
         opacity: 0.85,
       }}
-      disabled={!!actionLoading || isBlocked || isProcessing}
+      disabled={!!actionLoading || isBlocked}
     >
       {getPlanActionLabel(userPlan, "starter", isProcessing)}
     </button>
@@ -835,7 +837,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         background: `linear-gradient(135deg, ${color}, ${color}dd)`,
         opacity: 0.85,
       }}
-      disabled={!!actionLoading || isBlocked || isProcessing}
+      disabled={!!actionLoading || isBlocked}
     >
       Manage in Billing Portal
     </button>
@@ -847,7 +849,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         background: `linear-gradient(135deg, ${color}, ${color}dd)`,
         opacity: 0.85,
       }}
-      disabled={!!actionLoading || isBlocked || isProcessing}
+      disabled={!!actionLoading || isBlocked}
     >
       {getPlanActionLabel(userPlan, plan.id as "starter" | "pro", isProcessing)}
     </button>
@@ -954,6 +956,8 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
             {(() => {
               const trialEligible = !(user?.hasHadTrial || user?.billing?.hasHadTrial);
+              const starterPlan = plans.find((p) => p.id === "starter");
+              const proPlan = plans.find((p) => p.id === "pro");
               return (
                 <div style={{ display: "grid", gap: 12 }}>
                   {trialEligible && (
@@ -979,7 +983,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     }}
                     disabled={!!actionLoading}
                   >
-                    {actionLoading === "starter_paid" ? "⏳ Redirecting..." : "Starter — $15/mo"}
+                    {actionLoading === "starter_paid" ? "⏳ Redirecting..." : `Starter — $${starterPlan?.price ?? 15}/mo`}
                   </button>
 
                   <button
@@ -991,7 +995,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     }}
                     disabled={!!actionLoading}
                   >
-                    {actionLoading === "pro" ? "⏳ Redirecting..." : "Pro — $49/mo"}
+                    {actionLoading === "pro" ? "⏳ Redirecting..." : `Pro — $${proPlan?.price ?? 49}/mo`}
                   </button>
 
                   <button

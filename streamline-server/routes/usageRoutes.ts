@@ -117,6 +117,7 @@ async function handleUsageSummary(req: any, res: any) {
           maxDestinations: Number(limits.maxDestinations || 0),
           participantMinutes: participantLimit,
           transcodeMinutes: transcodeLimit,
+          maxGuests: Number(limits.maxGuests || (planId === "pro" ? 10 : planId === "starter" ? 2 : 1)),
         },
       },
 

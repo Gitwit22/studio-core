@@ -80,6 +80,7 @@ interface Plan {
   name: string;
   description: string;
   price: number;
+  visibility?: "public" | "hidden" | "admin";
   limits: {
     maxSessionMinutes: number;
     monthlyMinutesIncluded: number;
@@ -776,7 +777,7 @@ export default function AdminDashboard() {
                           }}
                         >
                           <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                               <span style={{ fontWeight: 700, fontSize: 18 }}>{plan.name}</span>
                               <span
                                 style={{
@@ -790,6 +791,30 @@ export default function AdminDashboard() {
                               >
                                 {plan.id.toUpperCase()}
                               </span>
+                              {/* Visibility badge */}
+                              {(() => {
+                                const v = plan.visibility || "public";
+                                const styles: Record<string, any> = {
+                                  public: { bg: "rgba(34,197,94,0.15)", fg: "#22c55e", label: "Public" },
+                                  hidden: { bg: "rgba(107,114,128,0.2)", fg: "#9ca3af", label: "Hidden" },
+                                  admin: { bg: "rgba(239,68,68,0.15)", fg: "#ef4444", label: "Admin-only" },
+                                };
+                                const st = styles[v];
+                                return (
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      padding: "2px 6px",
+                                      background: st.bg,
+                                      color: st.fg,
+                                      borderRadius: 4,
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {st.label}
+                                  </span>
+                                );
+                              })()}
                             </div>
                             <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>{plan.description}</p>
                           </div>
@@ -842,6 +867,47 @@ export default function AdminDashboard() {
                         {/* Expanded Edit Section */}
                         {isExpanded && (
                           <div style={S.expandedSection}>
+                            {/* Top Save Bar (sticky) */}
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "flex-end",
+                                alignItems: "center",
+                                gap: 8,
+                                position: "sticky",
+                                top: 0,
+                                zIndex: 2,
+                                background: "rgba(10,10,12,0.7)",
+                                backdropFilter: "blur(6px)",
+                                borderBottom: "1px solid #1f2937",
+                                padding: "10px 12px",
+                                borderRadius: 8,
+                                marginBottom: 12,
+                              }}
+                            >
+                              <button
+                                onClick={() => savePlan(plan)}
+                                disabled={isSaving}
+                                style={{ ...S.saveBtn, opacity: isSaving ? 0.7 : 1 }}
+                              >
+                                {isSaving ? "⏳ Saving..." : "💾 Save changes"}
+                              </button>
+                            </div>
+
+                            <PlanSection title="🔒 Availability">
+                              <div style={S.editRow}>
+                                <label style={S.editLabel}>Visibility</label>
+                                <select
+                                  value={plan.visibility || "public"}
+                                  onChange={(e) => updatePlanField(plan.id, "visibility", e.target.value)}
+                                  style={{ ...S.editInput, width: 220 }}
+                                >
+                                  <option value="public">Public (visible to users)</option>
+                                  <option value="hidden">Hidden (not shown to users)</option>
+                                  <option value="admin">Admin-only (internal)</option>
+                                </select>
+                              </div>
+                            </PlanSection>
                             <PlanSection title="📊 Limits">
                               <EditRow
                                 label="Monthly Minutes"

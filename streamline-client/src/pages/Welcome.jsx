@@ -17,7 +17,7 @@ import { API_BASE } from "../lib/apiBase";
 const Welcome = () => {
   const nav = useNavigate();
 
-  const [stats, setStats] = useState({ streamers: null, hoursStreamed: null });
+  const [stats, setStats] = useState({ streamers: null, hoursStreamed: null, streamersActive: null });
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState(null);
 
@@ -32,6 +32,7 @@ const Welcome = () => {
           setStats({
             streamers: data?.streamers ?? null,
             hoursStreamed: data?.hoursStreamed ?? null,
+            streamersActive: data?.streamersActive ?? null,
           });
         }
       } catch (e) {
@@ -343,10 +344,23 @@ const Welcome = () => {
           </div>
           <div style={{ width: '1px', background: 'rgba(255, 255, 255, 0.1)' }}></div>
           <div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>99.9%</div>
-            <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-              Uptime
-            </div>
+            {stats.streamersActive != null ? (
+              <>
+                <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>
+                  {fmtK(stats.streamersActive)}
+                </div>
+                <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  Active Now
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>99.9%</div>
+                <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  Uptime
+                </div>
+              </>
+            )}
           </div>
         </div>
 

@@ -182,4 +182,85 @@ router.get("/me", requireAuth, async (req, res) => {
   }
 });
 
+// Safely check if a subscription change is scheduled
+// Returns: { scheduledChange, effectiveDate, hasSubscription, status, cancelAtPeriodEnd, billingActive }
+router.get("/pending-change", requireAuth, async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+
+    const snap = await getUserRef(uid).get();
+    if (!snap.exists) return res.status(404).json({ error: "User not found" });
+    const user = snap.data() as any;
+
+    const subscriptionId: string | undefined =
+      user?.billing?.subscriptionId || user?.stripeSubscriptionId;
+
+    const hasSubscription = !!subscriptionId;
+    const billingActive = !!(user?.billingStatus === "active" || user?.billingStatus === "trialing");
+
+    if (!subscriptionId) {
+      return res.json({
+        scheduledChange: false,
+        effectiveDate: null,
+        hasSubscription,
+        status: user?.billingStatus || "none",
+        cancelAtPeriodEnd: false,
+        billingActive,
+      });
+    }
+
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    const cancelAtPeriodEnd = !!(sub as any).cancel_at_period_end;
+    const status = (sub as any).status as string | undefined;
+    const currentPeriodEnd = (sub as any).current_period_end
+      ? new Date((sub as any).current_period_end * 1000).toISOString()
+      : null;
+
+    let scheduledChange = false;
+    let effectiveDate: string | null = null;
+
+    // If set to cancel at period end, consider that a scheduled change
+    if (cancelAtPeriodEnd) {
+      scheduledChange = true;
+      effectiveDate = currentPeriodEnd;
+    }
+
+    // If there is a schedule attached, treat it as scheduled
+    if (!scheduledChange) {
+      const scheduleId = (sub as any).schedule || (sub as any).subscription_schedule;
+      if (scheduleId) {
+        scheduledChange = true;
+        // Best-effort: try to read schedule
+        try {
+          const schedule = await stripe.subscriptionSchedules.retrieve(String(scheduleId));
+          const phases = (schedule.phases || []) as any[];
+          const last = phases[phases.length - 1];
+          if (last?.end_date) {
+            effectiveDate = new Date(last.end_date * 1000).toISOString();
+          }
+        } catch {}
+      }
+    }
+
+    // Some accounts expose pending_update
+    if (!scheduledChange && (sub as any).pending_update) {
+      scheduledChange = true;
+      effectiveDate = currentPeriodEnd;
+    }
+
+    return res.json({
+      scheduledChange,
+      effectiveDate,
+      hasSubscription,
+      status,
+      cancelAtPeriodEnd,
+      billingActive,
+    });
+  } catch (err: any) {
+    console.error("GET /api/billing/pending-change failed:", err?.message || err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 export default router;

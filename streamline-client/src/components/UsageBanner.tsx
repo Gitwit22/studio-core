@@ -35,9 +35,7 @@ export default function UsageBanner() {
         const ytdHours = Math.round((ytdMinutes / 60) * 10) / 10;
         const resetDate = json?.resetDate || null;
         const multistreamEnabled = !!json?.plan?.features?.rtmpMultistream;
-
-        // No maxGuests in server payload; derive by plan for display
-        const maxGuests = planId === "pro" ? 10 : planId === "starter" ? 2 : 1;
+        const maxGuests = Number(json?.plan?.limits?.maxGuests ?? (planId === "pro" ? 10 : planId === "starter" ? 2 : 1));
 
         setData({
           displayName: "",
