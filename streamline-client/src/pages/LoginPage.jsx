@@ -24,6 +24,7 @@ export const LoginPage = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -38,7 +39,7 @@ export const LoginPage = () => {
     }
 
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -46,7 +47,10 @@ export const LoginPage = () => {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const ct = res.headers.get("content-type") || "";
+        const err = ct.includes("application/json")
+          ? await res.json().catch(() => ({}))
+          : { error: "Login failed: backend returned non-JSON (check API base / server)" };
         setError(err?.error || "Invalid credentials");
         setLoading(false);
         return;
@@ -54,7 +58,7 @@ export const LoginPage = () => {
 
       // ✅ LOGIN SUCCEEDED — cookie is now set
       // Hydrate user from /me
-      const meRes = await fetch("/api/auth/me", {
+      const meRes = await fetch(`${API_BASE}/api/auth/me`, {
         credentials: "include",
       });
 
@@ -64,6 +68,12 @@ export const LoginPage = () => {
         return;
       }
 
+      const ctMe = meRes.headers.get("content-type") || "";
+      if (!ctMe.includes("application/json")) {
+        setError("Profile load returned non-JSON. Verify backend URL and CORS.");
+        setLoading(false);
+        return;
+      }
       const me = await meRes.json();
 
       // Optional: store user for UI convenience
