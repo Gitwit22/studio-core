@@ -5,6 +5,7 @@ import { useLocalParticipantPermissions } from "@livekit/components-react";
 import "@livekit/components-styles";
 import InviteButton from "../shared/InviteButton";
 import StreamSetupModal from "../components/StreamSetupModal";
+import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
 import RoleOverlay from "../components/RoleOverlay";
 
 
@@ -67,6 +68,12 @@ useEffect(() => {
   const [showStreamSetup, setShowStreamSetup] = useState(false);
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
+  const [destinations, setDestinations] = useState<DestinationItem[]>([]);
+  const [destinationsLoading, setDestinationsLoading] = useState(false);
+  const [destinationsReady, setDestinationsReady] = useState(false);
+  const [preflightResult, setPreflightResult] = useState<any>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [canGoLive, setCanGoLive] = useState(false);
 
   const [showGoodbye, setShowGoodbye] = useState(false);
   const isHost = displayName === roomName;
@@ -140,6 +147,69 @@ useEffect(() => {
   fetchToken();
 }, [roomName, displayName]);
 
+  // Load destinations (soft gate)
+  useEffect(() => {
+    const loadDestinations = async () => {
+      try {
+        setDestinationsLoading(true);
+        const res = await fetchDestinations({ includeDisabled: false });
+        const items = res.items || [];
+        setDestinations(items);
+        const connectedEnabled = items.filter((d) => d.enabled && d.status === "connected");
+        setDestinationsReady(connectedEnabled.length > 0);
+      } catch (e) {
+        console.error("destinations load failed", e);
+        setDestinationsReady(false);
+      } finally {
+        setDestinationsLoading(false);
+      }
+    };
+    loadDestinations();
+  }, []);
+
+  async function refreshDestinations() {
+    try {
+      const res = await fetchDestinations({ includeDisabled: false });
+      const items = res.items || [];
+      setDestinations(items);
+      const connectedEnabled = items.filter((d) => d.enabled && d.status === "connected");
+      setDestinationsReady(connectedEnabled.length > 0);
+    } catch (e) {
+      // no-op
+    }
+  }
+
+  // Run preflight when modal opens (hard gate)
+  useEffect(() => {
+    const runPreflight = async () => {
+      setPreflightLoading(true);
+      try {
+        const res = await preflight({});
+        setPreflightResult(res);
+        const connected = (res.destinations || []).filter((d: any) => d.status === "connected");
+        setCanGoLive(connected.length > 0);
+      } catch (e) {
+        console.error("preflight failed", e);
+        setCanGoLive(false);
+      } finally {
+        setPreflightLoading(false);
+      }
+    };
+    if (showStreamSetup) runPreflight();
+  }, [showStreamSetup]);
+
+  function buildPreflightItems(): Array<{ id: string; label: string; ok: boolean; detail?: string }> {
+    const dests = (preflightResult?.destinations || []) as Array<{ id: string; platform: string; status: string; statusReason?: string | null }>;
+    const items: Array<{ id: string; label: string; ok: boolean; detail?: string }> = [];
+    dests.forEach((d) => {
+      const ok = d.status === "connected";
+      items.push({ id: d.id, label: `${d.platform} destination`, ok, detail: d.statusReason || undefined });
+    });
+    // Static note for Facebook
+    items.push({ id: "fb_note", label: "Facebook requires Go Live in FB console", ok: true });
+    return items;
+  }
+
 
 
   const handleLeftRoom = () => {
@@ -182,6 +252,10 @@ useEffect(() => {
   facebookKey?: string;
   twitchKey?: string;   // 👈 NEW
 }) => {
+  if (!canGoLive) {
+    alert("Preflight not passed. Connect destinations and try again.");
+    return;
+  }
   if (!roomName) {
     alert("No room name");
     return;
@@ -214,6 +288,7 @@ useEffect(() => {
     const data = await res.json();
     setEgressId(data.egressId);
     setStreamStatus("live");
+    await refreshDestinations();
   } catch (err) {
     console.error("Error starting multistream", err);
     alert("Error starting multistream");
@@ -258,6 +333,7 @@ useEffect(() => {
 
     setEgressId(null);
     setStreamStatus("idle");
+    await refreshDestinations();
   } catch (err) {
     console.error("Error stopping multistream", err);
     alert("Error stopping multistream");
@@ -397,6 +473,13 @@ useEffect(() => {
   )}
 </div>
 
+      {/* Soft gate prompt for destinations */}
+      {isHost && !destinationsLoading && !destinationsReady && (
+        <div className="mx-4 mt-2 p-2 border border-yellow-600 text-yellow-400 rounded text-xs">
+          Connect destinations to go live. <button className="underline ml-2" onClick={() => nav("/settings/destinations")}>Open settings</button>
+        </div>
+      )}
+
       {/* Debug status – remove later */}
       <div className="mt-4 text-xs text-zinc-400 px-4">
         <div>DisplayName: {displayName || "(none)"}</div>
@@ -450,6 +533,9 @@ useEffect(() => {
         onStart={handleStartMultistream}
         onStop={handleStopMultistream}
         status={streamStatus}
+        canGoLive={canGoLive}
+        preflightLoading={preflightLoading}
+        preflightItems={buildPreflightItems()}
       />
     </>
   );

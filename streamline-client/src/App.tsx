@@ -5,6 +5,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import Join from "./pages/Join";
 import Room from "./pages/Room";
+import SettingsDestinations from "./pages/SettingsDestinations";
 
 // existing imports like Room, Dashboard, etc.
 
@@ -19,6 +20,7 @@ function App() {
       {/* Streaming flow */}
       <Route path="/join" element={<Join />} />
       <Route path="/room/:roomName" element={<Room />} />
+      <Route path="/settings/destinations" element={<SettingsDestinations />} />
     </Routes>
   );
 }

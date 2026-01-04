@@ -10,6 +10,9 @@ interface Props {
   }) => Promise<void>;
   onStop: () => Promise<void>;
   status: string;
+  canGoLive?: boolean;
+  preflightLoading?: boolean;
+  preflightItems?: Array<{ id: string; label: string; ok: boolean; detail?: string }>;
 }
 
 export default function StreamSetupModal({
@@ -18,6 +21,9 @@ export default function StreamSetupModal({
   onStart,
   onStop,
   status,
+  canGoLive = true,
+  preflightLoading = false,
+  preflightItems = [],
 }: Props) {
   const [useYouTube, setUseYouTube] = useState(true);
   const [useFacebook, setUseFacebook] = useState(false);
@@ -66,6 +72,29 @@ export default function StreamSetupModal({
             ✕
           </button>
         </div>
+
+        {!isLive && (
+          <div className="mb-3 text-xs">
+            {preflightLoading ? (
+              <span className="text-neutral-400">Running preflight…</span>
+            ) : canGoLive ? (
+              <span className="text-green-400">Preflight passed. You’re ready to go live.</span>
+            ) : (
+              <span className="text-yellow-400">Connect destinations and pass preflight to enable Go Live.</span>
+            )}
+          </div>
+        )}
+
+        {!isLive && preflightItems.length > 0 && (
+          <div className="mb-2 text-xs">
+            {preflightItems.map(item => (
+              <div key={item.id} className="flex items-center gap-2 py-0.5">
+                <span className={item.ok ? "text-green-400" : "text-red-400"}>{item.ok ? "✅" : "❌"}</span>
+                <span>{item.label}{item.detail ? ` — ${item.detail}` : ""}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <p className="text-xs text-neutral-400 mb-3">
           Paste your <strong>stream keys</strong> for any platform you want to
@@ -147,7 +176,7 @@ export default function StreamSetupModal({
          {!isLive ? (
   <button
     onClick={handleStart}
-    disabled={isBusy}
+    disabled={isBusy || !canGoLive}
     className="px-3 py-1 text-xs rounded bg-green-600 disabled:bg-green-900"
   >
     {(status as string) === "starting" ? "Starting…" : "Go Live"}
