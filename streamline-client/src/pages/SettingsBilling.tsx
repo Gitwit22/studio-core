@@ -6,6 +6,7 @@ import { getCanonicalPlanId } from "../lib/planUtils";
 import { useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
+import SettingsDestinations from "./SettingsDestinations";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -220,6 +221,7 @@ const [user, setUser] = useState<UserData | null>(null);
   const [actionLoading, setActionLoading] = useState<ActionLoading>(null);
   const [error, setError] = useState<string | null>(null);
   const [showManagePicker, setShowManagePicker] = useState(false);
+  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations">("plan");
   useEffect(() => {
     loadAllData();
   }, []);
@@ -482,187 +484,419 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             ← Back to Join
           </button>
         </div>
+        {/* Tabs */}
+        <div style={S.tabsRow}>
+          <button
+            type="button"
+            style={activeTab === "plan" ? { ...S.tab, ...S.tabActive } : S.tab}
+            onClick={() => setActiveTab("plan")}
+          >
+            Plan & Billing
+          </button>
+          <button
+            type="button"
+            style={activeTab === "usage" ? { ...S.tab, ...S.tabActive } : S.tab}
+            onClick={() => setActiveTab("usage")}
+          >
+            Usage
+          </button>
+          <button
+            type="button"
+            style={activeTab === "destinations" ? { ...S.tab, ...S.tabActive } : S.tab}
+            onClick={() => setActiveTab("destinations")}
+          >
+            Destinations
+          </button>
+        </div>
 
         {/* ================================================================ */}
         {/* SECTION 1: PAYMENT WARNING (if blocked) */}
         {/* ================================================================ */}
-        {isBlocked && (
-          <div style={S.warningCard}>
-            <div style={S.warningIcon}>⚠️</div>
-            <div style={S.warningContent}>
-              <h3 style={S.warningTitle}>Payment Issue — Features Blocked</h3>
-              <p style={S.warningText}>
-                Your payment failed or is past due. Paid features like recording, multistream, 
-                and downloads are temporarily disabled until payment is resolved.
-              </p>
-              <div style={S.warningActions}>
-                <button onClick={openPortal} style={S.fixPaymentBtn} disabled={!!actionLoading}>
-                  {actionLoading === "portal" ? "⏳ Loading..." : "💳 Fix Payment"}
-                </button>
-                <a href="mailto:support@streamline.app" style={S.supportLink}>
-                  Contact Support
-                </a>
+        {activeTab === "plan" && (
+          <>
+            {isBlocked && (
+              <div style={S.warningCard}>
+                <div style={S.warningIcon}>⚠️</div>
+                <div style={S.warningContent}>
+                  <h3 style={S.warningTitle}>Payment Issue — Paid Features Blocked</h3>
+                  <p style={S.warningText}>
+                    Your payment failed or is past due. Paid features like recording, multistream, 
+                    and downloads are temporarily disabled until payment is resolved.
+                  </p>
+                  <div style={S.warningActions}>
+                    <button onClick={openPortal} style={S.fixPaymentBtn} disabled={!!actionLoading}>
+                      {actionLoading === "portal" ? "⏳ Loading..." : "💳 Fix Payment"}
+                    </button>
+                    <a href="mailto:support@streamline.app" style={S.supportLink}>
+                      Contact Support
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ================================================================ */}
+            {/* SECTION 2: YOUR PLAN (current plan card) */}
+            {/* ================================================================ */}
+            <div style={{ ...S.card, opacity: isBlocked ? 0.6 : 1 }}>
+              <div style={S.cardHeader}>
+                <h2 style={S.cardTitle}>Your Plan</h2>
+                {isProcessing && (
+                  <span style={S.processingBadge}>
+                    {user?.billing?.cancelAtPeriodEnd
+                      ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
+                      : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
+                  </span>
+                )}
+              </div>
+
+              <div style={S.planDisplay}>
+                <div style={S.planInfo}>
+                  <div style={S.planNameRow}>
+                    <span style={S.planName}>{currentPlan.name}</span>
+                    <span style={{ ...S.statusBadge, color: statusBadge.color, background: statusBadge.bg }}>
+                      {statusBadge.icon} {statusBadge.text}
+                    </span>
+                  </div>
+                  <div style={S.planPrice}>
+                    <span style={S.priceAmount}>${currentPlan.price}</span>
+                    <span style={S.pricePeriod}>/month</span>
+                  </div>
+                  {currentPlan.description && (
+                    <p style={S.planDescription}>{currentPlan.description}</p>
+                  )}
+                </div>
+
+                <div style={S.billingDetails}>
+                  {status === "trialing" && (
+                    <div style={S.detailRow}>
+                      <span style={S.detailLabel}>Trial ends</span>
+                      <span style={S.detailValue}>
+                        {formatDate(user?.billing?.currentPeriodEnd)}
+                        <span style={S.daysLeft}>({daysLeft} days left)</span>
+                      </span>
+                    </div>
+                  )}
+                  {status === "active" && !user?.billing?.cancelAtPeriodEnd && (
+                    <div style={S.detailRow}>
+                      <span style={S.detailLabel}>Next billing</span>
+                      <span style={S.detailValue}>{formatDate(user?.billing?.currentPeriodEnd)}</span>
+                    </div>
+                  )}
+                  {user?.billing?.cancelAtPeriodEnd && (
+                    <div style={S.detailRow}>
+                      <span style={S.detailLabel}>Access ends</span>
+                      <span style={{ ...S.detailValue, color: "#f59e0b" }}>
+                        {formatDate(user?.billing?.currentPeriodEnd)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Primary Actions */}
+              <div style={S.actionButtons}>
+                {/* Free user, no billing */}
+                {userPlanId === "free" && (!status || status === "none") && !isProcessing && (
+                  <>
+                    <button
+                      onClick={() => startCheckout("starter_trial")}
+                      style={S.primaryBtn}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading === "starter_trial" ? "⏳ Loading..." : "🚀 Start Free Trial"}
+                    </button>
+
+                    <button
+                      onClick={() => startCheckout("starter_paid")}
+                      style={S.secondaryBtn}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading === "starter_paid" ? "⏳ Loading..." : "Choose Plan"}
+                    </button>
+
+                    <button
+                      onClick={() => startCheckout("pro")}
+                      style={S.secondaryBtn}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading === "pro" ? "⏳ Loading..." : "Choose Plan"}
+                    </button>
+                  </>
+                )}
+
+                {/* Trialing */}
+                {status === "trialing" && (
+                  <>
+                    <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
+                      {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
+                    </button>
+                    {userPlanId === "starter" && (
+                      <button
+                        onClick={() => startCheckout("pro")}
+                        style={S.secondaryBtn}
+                        disabled={!!actionLoading}
+                      >
+                        {actionLoading === "pro" ? "⏳ Loading..." : "Upgrade to Pro"}
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {/* Active */}
+                {status === "active" && (
+                  <>
+                    <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
+                      {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
+                    </button>
+                    {userPlanId === "starter" && (
+                      <button
+                        onClick={() => startCheckout("pro")}
+                        style={S.secondaryBtn}
+                        disabled={!!actionLoading}
+                      >
+                        {actionLoading === "pro" ? "⏳ Loading..." : "Upgrade to Pro"}
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {/* Canceled but still has access */}
+                {status === "canceled" && (
+                  <>
+                    <button
+                      onClick={() => startCheckout(checkoutPlanForResubscribe(user))}
+                      style={S.primaryBtn}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading ? "⏳ Loading..." : "🔁 Resubscribe"}
+                    </button>
+                    <button onClick={openPortal} style={S.secondaryBtn} disabled={!!actionLoading}>
+                      Manage Billing
+                    </button>
+                  </>
+                )}
+
+                {/* Processing */}
+                {isProcessing && (
+                  <button onClick={loadAllData} style={S.secondaryBtn}>
+                    🔄 Refresh Status
+                  </button>
+                )}
               </div>
             </div>
-          </div>
+
+            {/* ================================================================ */}
+            {/* SECTION 4: PLAN COMPARISON */}
+            {/* ================================================================ */}
+            <div style={S.card}>
+              <h2 style={S.cardTitle}>📊 Compare Plans</h2>
+
+              <div style={S.plansGrid}>
+                {plans.map((plan) => {
+                  const userPlan = userPlanId;
+
+                  const color =
+                    plan.id === "free"
+                      ? "#6b7280"
+                      : plan.id === "starter"
+                      ? "#3b82f6"
+                      : "#8b5cf6";
+
+                  // Treat starter_paid and starter_trial as "starter" for current overlay
+                  const isCurrent = plan.id === userPlan;
+
+                  // Adjust upgrade/downgrade logic to use canonical plan id
+                  const isUpgrade =
+                    (userPlan === "free" && (plan.id === "starter" || plan.id === "pro")) ||
+                    (userPlan === "starter" && plan.id === "pro");
+
+                  const isDowngrade =
+                    (userPlan === "pro" && (plan.id === "starter" || plan.id === "free")) ||
+                    (userPlan === "starter" && plan.id === "free");
+
+                  return (
+                    <div
+                      key={plan.id}
+                      style={{
+                        ...S.planCard,
+                        borderColor: isCurrent ? color : "rgba(63,63,70,0.5)",
+                        boxShadow: isCurrent ? `0 0 20px ${color}30` : "none",
+                      }}
+                    >
+                      {isCurrent && (
+                        <div style={{ ...S.currentBadge, background: color }}>Current</div>
+                      )}
+
+                      <div style={S.planCardHeader}>
+                        <h3 style={{ ...S.planCardName, color }}>{plan.name}</h3>
+                        <div style={S.planCardPrice}>
+                          <span style={S.planCardAmount}>${plan.price}</span>
+                          <span style={S.planCardPeriod}>/mo</span>
+                        </div>
+                      </div>
+
+                      <ul style={S.featureList}>
+                        <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
+                        <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
+                        <FeatureRow label="RTMP destinations" value={plan.limits.rtmpDestinationsMax} />
+                        <FeatureRow label="Recording" value={plan.features.recording} />
+                        <FeatureRow label="Multistream" value={plan.features.multistream} />
+                        <FeatureRow label="Editing suite" value={plan.editing?.access} />
+                        {plan.editing?.access && (
+                          <>
+                            <FeatureRow label="Projects" value={plan.editing.maxProjects} />
+                            <FeatureRow label="Storage" value={`${plan.editing.maxStorageGB}GB`} />
+                          </>
+                        )}
+                      </ul>
+
+                      <div style={S.planCardAction}>
+                        {isCurrent ? (
+                          <span style={S.currentLabel}>✅ Current Plan</span>
+                        ) : plan.id === "starter" && userPlan === "free" ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                            <button
+                              onClick={() => startCheckout("starter_paid")}
+                              style={{
+                                ...S.planUpgradeBtn,
+                                background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                              }}
+                              disabled={!!actionLoading || isBlocked || isProcessing}
+                            >
+                              {actionLoading === "starter_paid" ? "⏳..." : getPlanActionLabel(userPlan, "starter", isProcessing)}
+                            </button>
+
+                            <button
+                              onClick={() => startCheckout("starter_trial")}
+                              style={{
+                                ...S.planUpgradeBtn,
+                                background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                              }}
+                              disabled={!!actionLoading || isBlocked || isProcessing}
+                            >
+                              {actionLoading === "starter_trial" ? "⏳..." : "🚀 Start Free Trial"}
+                            </button>
+                          </div>
+                        ) : plan.id === "starter" && userPlan === "pro" ? (
+                          <button
+                            onClick={openPortal}
+                            style={{
+                              ...S.planUpgradeBtn,
+                              background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                              opacity: 0.85,
+                            }}
+                            disabled={!!actionLoading || isBlocked}
+                          >
+                            {getPlanActionLabel(userPlan, "starter", isProcessing)}
+                          </button>
+                        ) : plan.id === "pro" && (userPlan === "free" || userPlan === "starter") ? (
+                          <button
+                            onClick={() => startCheckout("pro")}
+                            style={{
+                              ...S.planUpgradeBtn,
+                              background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                            }}
+                            disabled={!!actionLoading || isBlocked || isProcessing}
+                          >
+                            {actionLoading === "pro" ? "⏳..." : getPlanActionLabel(userPlan, "pro", isProcessing)}
+                          </button>
+                        ) : plan.id === "free" && (userPlan === "starter" || userPlan === "pro") ? (
+                          <button
+                            onClick={openPortal}
+                            style={{
+                              ...S.planUpgradeBtn,
+                              background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                              opacity: 0.85,
+                            }}
+                            disabled={!!actionLoading || isBlocked}
+                          >
+                            Manage in Billing Portal
+                          </button>
+                        ) : (
+                          <button
+                            onClick={openPortal}
+                            style={{
+                              ...S.planUpgradeBtn,
+                              background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                              opacity: 0.85,
+                            }}
+                            disabled={!!actionLoading || isBlocked}
+                          >
+                            {getPlanActionLabel(userPlan, plan.id as "starter" | "pro", isProcessing)}
+                          </button>
+                        )}
+                      </div>
+
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ================================================================ */}
+            {/* SECTION 5: WHAT'S LOCKED (if blocked or free) */}
+            {/* ================================================================ */}
+            {(isBlocked || userPlanId === "free") && (
+              <div style={S.card}>
+                <h2 style={S.cardTitle}>🔒 Locked Features</h2>
+                <p style={S.lockedSubtitle}>
+                  {isBlocked
+                    ? "These features are blocked due to payment issues:"
+                    : "Upgrade to unlock these features:"}
+                </p>
+                
+                <div style={S.lockedGrid}>
+                  {!currentPlan.features.recording && (
+                    <LockedFeature
+                      icon="🎥"
+                      title="Recording"
+                      description="Record your streams and download them"
+                      requiredPlan="Starter"
+                    />
+                  )}
+                  {!currentPlan.features.multistream && (
+                    <LockedFeature
+                      icon="📡"
+                      title="Multistream"
+                      description="Stream to YouTube, Twitch, and Facebook simultaneously"
+                      requiredPlan="Starter"
+                    />
+                  )}
+                  {!currentPlan.editing?.access && (
+                    <LockedFeature
+                      icon="🎬"
+                      title="Editing Suite"
+                      description="Edit your recordings with our built-in editor"
+                      requiredPlan="Starter"
+                    />
+                  )}
+                  {currentPlan.limits.maxGuests < 10 && (
+                    <LockedFeature
+                      icon="👥"
+                      title="More Guests"
+                      description="Invite up to 10 guests to your streams"
+                      requiredPlan="Pro"
+                    />
+                  )}
+                </div>
+
+                {userPlanId === "free" && !user?.billing?.hasHadTrial && (
+                  <div style={S.lockedCta}>
+                    <button onClick={() => startCheckout("starter_trial")} style={S.primaryBtn} disabled={!!actionLoading}>
+                      🚀 Start Free Trial to Unlock
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
-
-        {/* ================================================================ */}
-        {/* SECTION 2: YOUR PLAN (current plan card) */}
-        {/* ================================================================ */}
-        <div style={{ ...S.card, opacity: isBlocked ? 0.6 : 1 }}>
-          <div style={S.cardHeader}>
-            <h2 style={S.cardTitle}>Your Plan</h2>
-            {isProcessing && (
-              <span style={S.processingBadge}>
-                {user?.billing?.cancelAtPeriodEnd
-                  ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
-                  : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
-              </span>
-            )}
-          </div>
-
-          <div style={S.planDisplay}>
-            <div style={S.planInfo}>
-              <div style={S.planNameRow}>
-                <span style={S.planName}>{currentPlan.name}</span>
-                <span style={{ ...S.statusBadge, color: statusBadge.color, background: statusBadge.bg }}>
-                  {statusBadge.icon} {statusBadge.text}
-                </span>
-              </div>
-              <div style={S.planPrice}>
-                <span style={S.priceAmount}>${currentPlan.price}</span>
-                <span style={S.pricePeriod}>/month</span>
-              </div>
-              {currentPlan.description && (
-                <p style={S.planDescription}>{currentPlan.description}</p>
-              )}
-            </div>
-
-            <div style={S.billingDetails}>
-              {status === "trialing" && (
-                <div style={S.detailRow}>
-                  <span style={S.detailLabel}>Trial ends</span>
-                  <span style={S.detailValue}>
-                    {formatDate(user?.billing?.currentPeriodEnd)}
-                    <span style={S.daysLeft}>({daysLeft} days left)</span>
-                  </span>
-                </div>
-              )}
-              {status === "active" && !user?.billing?.cancelAtPeriodEnd && (
-                <div style={S.detailRow}>
-                  <span style={S.detailLabel}>Next billing</span>
-                  <span style={S.detailValue}>{formatDate(user?.billing?.currentPeriodEnd)}</span>
-                </div>
-              )}
-              {user?.billing?.cancelAtPeriodEnd && (
-                <div style={S.detailRow}>
-                  <span style={S.detailLabel}>Access ends</span>
-                  <span style={{ ...S.detailValue, color: "#f59e0b" }}>
-                    {formatDate(user?.billing?.currentPeriodEnd)}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Primary Actions */}
-          <div style={S.actionButtons}>
-            {/* Free user, no billing */}
-            {userPlanId === "free" && (!status || status === "none") && !isProcessing && (
-  <>
-    <button
-      onClick={() => startCheckout("starter_trial")}
-      style={S.primaryBtn}
-      disabled={!!actionLoading}
-    >
-      {actionLoading === "starter_trial" ? "⏳ Loading..." : "🚀 Start Free Trial"}
-    </button>
-
-    <button
-      onClick={() => startCheckout("starter_paid")}
-      style={S.secondaryBtn}
-      disabled={!!actionLoading}
-    >
-      {actionLoading === "starter_paid" ? "⏳ Loading..." : "Choose Plan"}
-    </button>
-
-    <button
-      onClick={() => startCheckout("pro")}
-      style={S.secondaryBtn}
-      disabled={!!actionLoading}
-    >
-      {actionLoading === "pro" ? "⏳ Loading..." : "Choose Plan"}
-    </button>
-  </>
-)}
-
-
-            {/* Trialing */}
-            {status === "trialing" && (
-              <>
-                <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
-                  {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
-                </button>
-                {userPlanId === "starter" && (
-                  <button
-                    onClick={() => startCheckout("pro")}
-                    style={S.secondaryBtn}
-                    disabled={!!actionLoading}
-                  >
-                    {actionLoading === "pro" ? "⏳ Loading..." : "⚡ Upgrade to Pro"}
-                  </button>
-                )}
-              </>
-            )}
-
-            {/* Active */}
-            {status === "active" && (
-              <>
-                <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
-                  {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
-                </button>
-                {userPlanId === "starter" && (
-                  <button
-                    onClick={() => startCheckout("pro")}
-                    style={S.secondaryBtn}
-                    disabled={!!actionLoading}
-                  >
-                    {actionLoading === "pro" ? "⏳ Loading..." : "⚡ Upgrade to Pro"}
-                  </button>
-                )}
-              </>
-            )}
-
-            {/* Canceled but still has access */}
-            {status === "canceled" && (
-              <>
-                <button
-                  onClick={() => startCheckout(checkoutPlanForResubscribe(user))}
-                  style={S.primaryBtn}
-                  disabled={!!actionLoading}
-                >
-                  {actionLoading ? "⏳ Loading..." : "🔄 Resubscribe"}
-                </button>
-                <button onClick={openPortal} style={S.secondaryBtn} disabled={!!actionLoading}>
-                  Manage Billing
-                </button>
-              </>
-            )}
-
-            {/* Processing */}
-            {isProcessing && (
-              <button onClick={loadAllData} style={S.secondaryBtn}>
-                🔄 Refresh Status
-              </button>
-            )}
-          </div>
-        </div>
 
         {/* ================================================================ */}
         {/* SECTION 3: USAGE THIS MONTH */}
         {/* ================================================================ */}
-        {usage && (
+        {activeTab === "usage" && usage && (
           <div style={{ ...S.card, opacity: isBlocked ? 0.6 : 1 }}>
             <div style={S.cardHeader}>
               <h2 style={S.cardTitle}>📊 Usage This Month</h2>
@@ -714,210 +948,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           </div>
         )}
 
-       {/* ================================================================ */}
-{/* SECTION 4: PLAN COMPARISON */}
-{/* ================================================================ */}
-<div style={S.card}>
-  <h2 style={S.cardTitle}>📋 Compare Plans</h2>
-
-  <div style={S.plansGrid}>
-    {plans.map((plan) => {
-      const userPlan = userPlanId;
-
-      const color =
-        plan.id === "free"
-          ? "#6b7280"
-          : plan.id === "starter"
-          ? "#3b82f6"
-          : "#8b5cf6";
-
-      // Treat starter_paid and starter_trial as "starter" for current overlay
-      const isCurrent = plan.id === userPlan;
-
-      // Adjust upgrade/downgrade logic to use canonical plan id
-      const isUpgrade =
-        (userPlan === "free" && (plan.id === "starter" || plan.id === "pro")) ||
-        (userPlan === "starter" && plan.id === "pro");
-
-      const isDowngrade =
-        (userPlan === "pro" && (plan.id === "starter" || plan.id === "free")) ||
-        (userPlan === "starter" && plan.id === "free");
-
-      return (
-        <div
-          key={plan.id}
-          style={{
-            ...S.planCard,
-            borderColor: isCurrent ? color : "rgba(63,63,70,0.5)",
-            boxShadow: isCurrent ? `0 0 20px ${color}30` : "none",
-          }}
-        >
-          {isCurrent && (
-            <div style={{ ...S.currentBadge, background: color }}>Current</div>
-          )}
-
-          <div style={S.planCardHeader}>
-            <h3 style={{ ...S.planCardName, color }}>{plan.name}</h3>
-            <div style={S.planCardPrice}>
-              <span style={S.planCardAmount}>${plan.price}</span>
-              <span style={S.planCardPeriod}>/mo</span>
-            </div>
-          </div>
-
-          <ul style={S.featureList}>
-            <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
-            <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
-            <FeatureRow label="RTMP destinations" value={plan.limits.rtmpDestinationsMax} />
-            <FeatureRow label="Recording" value={plan.features.recording} />
-            <FeatureRow label="Multistream" value={plan.features.multistream} />
-            <FeatureRow label="Editing suite" value={plan.editing?.access} />
-            {plan.editing?.access && (
-              <>
-                <FeatureRow label="Projects" value={plan.editing.maxProjects} />
-                <FeatureRow label="Storage" value={`${plan.editing.maxStorageGB}GB`} />
-              </>
-            )}
-          </ul>
-
-          <div style={S.planCardAction}>
-  {isCurrent ? (
-    <span style={S.currentLabel}>✓ Current Plan</span>
-  ) : plan.id === "starter" && userPlan === "free" ? (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <button
-        onClick={() => startCheckout("starter_paid")}
-        style={{
-          ...S.planUpgradeBtn,
-          background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-        }}
-        disabled={!!actionLoading || isBlocked || isProcessing}
-      >
-        {actionLoading === "starter_paid" ? "⏳..." : getPlanActionLabel(userPlan, "starter", isProcessing)}
-      </button>
-
-      <button
-        onClick={() => startCheckout("starter_trial")}
-        style={{
-          ...S.planUpgradeBtn,
-          background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-        }}
-        disabled={!!actionLoading || isBlocked || isProcessing}
-      >
-        {actionLoading === "starter_trial" ? "⏳..." : "🚀 Start Free Trial"}
-      </button>
-    </div>
-  ) : plan.id === "starter" && userPlan === "pro" ? (
-    <button
-      onClick={openPortal}
-      style={{
-        ...S.planUpgradeBtn,
-        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-        opacity: 0.85,
-      }}
-      disabled={!!actionLoading || isBlocked}
-    >
-      {getPlanActionLabel(userPlan, "starter", isProcessing)}
-    </button>
-  ) : plan.id === "pro" && (userPlan === "free" || userPlan === "starter") ? (
-    <button
-      onClick={() => startCheckout("pro")}
-      style={{
-        ...S.planUpgradeBtn,
-        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-      }}
-      disabled={!!actionLoading || isBlocked || isProcessing}
-    >
-      {actionLoading === "pro" ? "⏳..." : getPlanActionLabel(userPlan, "pro", isProcessing)}
-    </button>
-  ) : plan.id === "free" && (userPlan === "starter" || userPlan === "pro") ? (
-    <button
-      onClick={openPortal}
-      style={{
-        ...S.planUpgradeBtn,
-        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-        opacity: 0.85,
-      }}
-      disabled={!!actionLoading || isBlocked}
-    >
-      Manage in Billing Portal
-    </button>
-  ) : (
-    <button
-      onClick={openPortal}
-      style={{
-        ...S.planUpgradeBtn,
-        background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-        opacity: 0.85,
-      }}
-      disabled={!!actionLoading || isBlocked}
-    >
-      {getPlanActionLabel(userPlan, plan.id as "starter" | "pro", isProcessing)}
-    </button>
-  )}
-</div>
-
-        </div>
-      );
-    })}
-  </div>
-</div>
-
-
-
         {/* ================================================================ */}
-        {/* SECTION 5: WHAT'S LOCKED (if blocked or free) */}
+        {/* SECTION 4: DESTINATIONS / STREAM KEYS */}
         {/* ================================================================ */}
-        {(isBlocked || userPlanId === "free") && (
-          <div style={S.card}>
-            <h2 style={S.cardTitle}>🔒 Locked Features</h2>
-            <p style={S.lockedSubtitle}>
-              {isBlocked
-                ? "These features are blocked due to payment issues:"
-                : "Upgrade to unlock these features:"}
-            </p>
-            
-            <div style={S.lockedGrid}>
-              {!currentPlan.features.recording && (
-                <LockedFeature
-                  icon="🎬"
-                  title="Recording"
-                  description="Record your streams and download them"
-                  requiredPlan="Starter"
-                />
-              )}
-              {!currentPlan.features.multistream && (
-                <LockedFeature
-                  icon="📡"
-                  title="Multistream"
-                  description="Stream to YouTube, Twitch, and Facebook simultaneously"
-                  requiredPlan="Starter"
-                />
-              )}
-              {!currentPlan.editing?.access && (
-                <LockedFeature
-                  icon="✂️"
-                  title="Editing Suite"
-                  description="Edit your recordings with our built-in editor"
-                  requiredPlan="Starter"
-                />
-              )}
-              {currentPlan.limits.maxGuests < 10 && (
-                <LockedFeature
-                  icon="👥"
-                  title="More Guests"
-                  description="Invite up to 10 guests to your streams"
-                  requiredPlan="Pro"
-                />
-              )}
-            </div>
-
-            {userPlanId === "free" && !user?.billing?.hasHadTrial && (
-              <div style={S.lockedCta}>
-                <button onClick={() => startCheckout("starter_trial")} style={S.primaryBtn} disabled={!!actionLoading}>
-                  🚀 Start Free Trial to Unlock
-                </button>
-              </div>
-            )}
+        {activeTab === "destinations" && (
+          <div style={{ marginTop: 16 }}>
+            <SettingsDestinations />
           </div>
         )}
       </div>

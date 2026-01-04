@@ -117,16 +117,23 @@ export const SignupPage = () => {
       // Log auth/user info after signup
       logAuthDebugContext("After Signup Success");
 
-      // Billing after signup flow
-      // TODO: Replace this with your actual plan selection logic
+      // After signup, send users to Streaming settings first (unless they explicitly
+      // skipped onboarding). From there they can configure destinations/keys and
+      // then navigate to Join or Dashboard.
+      if (!skipOnboarding) {
+        nav("/settings/destinations");
+        return;
+      }
+
+      // If onboarding was skipped, fall back to the existing plan/billing flow.
       const selectedPlan = data.user.planId || "free";
       if (selectedPlan === "starter" || selectedPlan === "pro") {
         try {
           const billingRes = await fetch(`${API_BASE}/api/billing/checkout`, {
             method: "POST",
             credentials: "include",
-            headers: { "Content-Type": "application/json" }
-            , body: JSON.stringify(body),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
           });
           if (billingRes.ok) {
             const billingData = await billingRes.json();

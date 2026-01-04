@@ -644,6 +644,37 @@ useEffect(() => {
           </form>
         </div>
 
+        {/* Streaming setup hint - hosts only */}
+        {!isParticipant && (
+          <div
+            style={{
+              marginBottom: "24px",
+              fontSize: "12px",
+              color: "#9ca3af",
+              textAlign: "center",
+            }}
+          >
+            Want one-click Go Live to YouTube, Facebook, or Twitch?
+            {" "}
+            <button
+              type="button"
+              onClick={() => nav("/settings/destinations")}
+              style={{
+                marginLeft: "4px",
+                fontSize: "12px",
+                color: "#f97316",
+                textDecoration: "underline",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              Configure streaming settings
+            </button>
+          </div>
+        )}
+
         {/* LOGOUT BUTTON */}
         <div style={{ textAlign: "center" }}>
           <button

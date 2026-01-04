@@ -11,6 +11,7 @@ interface Props {
     youtubeKey?: string;
     facebookKey?: string;
     twitchKey?: string;
+    destinationIds?: string[];
   }) => Promise<void>;
   onStopStream: () => Promise<void>;
   
@@ -18,6 +19,15 @@ interface Props {
   recordingStatus: "idle" | "recording" | "stopping" | "stopped" | "error";
   onStartRecording: (layout: "speaker" | "grid") => Promise<void>;
   onStopRecording: () => Promise<void>;
+
+  // Optional: saved destinations with stored keys (from Settings Destinations)
+  savedDestinations?: Array<{
+    id: string;
+    label: string;
+    status: string;
+    hasKey: boolean;
+    keyPreview?: string | null;
+  }>;
 }
 
 export default function StreamSetupModalV2({
@@ -30,6 +40,7 @@ export default function StreamSetupModalV2({
   recordingStatus,
   onStartRecording,
   onStopRecording,
+  savedDestinations,
 }: Props) {
   const [useYouTube, setUseYouTube] = useState(false);
   const [useFacebook, setUseFacebook] = useState(false);
@@ -38,6 +49,8 @@ export default function StreamSetupModalV2({
   const [youtubeKey, setYoutubeKey] = useState("");
   const [facebookKey, setFacebookKey] = useState("");
   const [twitchKey, setTwitchKey] = useState("");
+
+  const [selectedDestinationIds, setSelectedDestinationIds] = useState<string[]>([]);
 
   const [layout, setLayout] = useState<"speaker" | "grid">("speaker");
 
@@ -49,13 +62,23 @@ export default function StreamSetupModalV2({
   const recordingIsActive = recordingStatus === "recording";
   const recordingIsBusy = recordingStatus === "stopping";
 
+  const hasSavedDestinations = Array.isArray(savedDestinations) && savedDestinations.length > 0;
+
+  const toggleDestination = (id: string) => {
+    setSelectedDestinationIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
   const handleStartStream = async () => {
     const yt = useYouTube ? youtubeKey.trim() : "";
     const fb = useFacebook ? facebookKey.trim() : "";
     const tw = useTwitch ? twitchKey.trim() : "";
 
-    if (!yt && !fb && !tw) {
-      alert("Enter at least one stream key (YouTube, Facebook, or Twitch).");
+    const destIds = hasSavedDestinations ? selectedDestinationIds.filter(Boolean) : [];
+
+    if (!yt && !fb && !tw && destIds.length === 0) {
+      alert("Select at least one saved destination or enter a stream key (YouTube, Facebook, or Twitch).");
       return;
     }
 
@@ -63,14 +86,11 @@ export default function StreamSetupModalV2({
       youtubeKey: yt || undefined,
       facebookKey: fb || undefined,
       twitchKey: tw || undefined,
+      destinationIds: destIds.length ? destIds : undefined,
     });
   };
 
   const handleStartRecording = async () => {
-    if (!streamIsLive) {
-      alert("Start streaming first before recording!");
-      return;
-    }
     await onStartRecording(layout);
   };
 
@@ -155,6 +175,20 @@ export default function StreamSetupModalV2({
             borderRadius: '0.5rem',
             padding: '0.75rem'
           }}>
+            {!hasSavedDestinations && (
+              <div style={{
+                marginBottom: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                borderRadius: '0.375rem',
+                background: 'rgba(15, 23, 42, 0.9)',
+                border: '1px dashed rgba(148, 163, 184, 0.6)',
+                fontSize: '0.7rem',
+                color: 'rgba(148, 163, 184, 0.95)'
+              }}>
+                For one-click Go Live next time, add your destinations and stream keys in
+                {' '}<span style={{ color: '#f97316' }}>Settings → Streaming / Stream Keys</span>.
+              </div>
+            )}
             <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#3b82f6', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
               📡 Stream Destinations
             </div>
@@ -263,24 +297,81 @@ export default function StreamSetupModalV2({
             {/* Stream Control Button */}
             <div style={{ marginTop: '0.75rem' }}>
               {(streamStatus === "idle" || streamStatus === "starting") ? (
-                <button
-                  onClick={handleStartStream}
-                  disabled={streamIsBusy}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    fontSize: '0.875rem',
-                    borderRadius: '0.5rem',
-                    background: streamIsBusy ? 'rgba(59, 130, 246, 0.5)' : 'linear-gradient(135deg, #22c55e, #16a34a)',
-                    color: '#ffffff',
-                    border: 'none',
-                    fontWeight: '600',
-                    cursor: streamIsBusy ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.3s ease',
-                  }}
-                >
-                  {streamStatus === "starting" ? "🔄 Starting Stream..." : "📡 Start Stream"}
-                </button>
+                <>
+                  <button
+                    onClick={handleStartStream}
+                    disabled={streamIsBusy}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      fontSize: '0.875rem',
+                      borderRadius: '0.5rem',
+                      background: streamIsBusy ? 'rgba(59, 130, 246, 0.5)' : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontWeight: '600',
+                      cursor: streamIsBusy ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.3s ease',
+                    }}
+                  >
+                    {streamStatus === "starting" ? "🔄 Starting Stream..." : "📡 Start Stream"}
+                  </button>
+
+                  {/* Saved Destinations (optional) */}
+                  {hasSavedDestinations && (
+                    <div style={{
+                      marginTop: '0.5rem',
+                      paddingTop: '0.5rem',
+                      borderTop: '1px dashed rgba(75, 85, 99, 0.6)'
+                    }}>
+                      <div style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        marginBottom: '0.25rem',
+                        color: 'rgba(255, 255, 255, 0.8)'
+                      }}>
+                        Saved destinations
+                      </div>
+                      <div style={{
+                        fontSize: '0.7rem',
+                        color: 'rgba(156, 163, 175, 0.9)',
+                        marginBottom: '0.5rem'
+                      }}>
+                        These use the keys you saved in Destinations. Facebook still requires you to click "Go Live" in Facebook.
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        {savedDestinations!.map((d) => (
+                          <label
+                            key={d.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '0.5rem',
+                              fontSize: '0.75rem',
+                              opacity: d.status === 'connected' && d.hasKey ? 1 : 0.6
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <input
+                                type="checkbox"
+                                disabled={streamIsLive || d.status !== 'connected' || !d.hasKey}
+                                checked={selectedDestinationIds.includes(d.id)}
+                                onChange={() => toggleDestination(d.id)}
+                                style={{ cursor: streamIsLive ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
+                              />
+                              <span>{d.label}</span>
+                            </div>
+                            <span style={{ fontSize: '0.7rem', color: d.status === 'connected' ? '#22c55e' : '#f59e0b' }}>
+                              {d.status}
+                              {d.hasKey && d.keyPreview ? ` • ••••${d.keyPreview}` : ''}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <button
                   onClick={onStopStream}
@@ -321,7 +412,7 @@ export default function StreamSetupModalV2({
               <select
                 value={layout}
                 onChange={e => setLayout(e.target.value as "speaker" | "grid")}
-                disabled={recordingIsActive || !streamIsLive}
+                disabled={recordingIsActive}
                 style={{
                   padding: '0.4rem 0.7rem',
                   borderRadius: '0.3rem',
@@ -331,8 +422,8 @@ export default function StreamSetupModalV2({
                   fontWeight: 600,
                   fontSize: '0.85rem',
                   outline: 'none',
-                  cursor: (recordingIsActive || !streamIsLive) ? 'not-allowed' : 'pointer',
-                  opacity: (recordingIsActive || !streamIsLive) ? 0.5 : 1
+                  cursor: recordingIsActive ? 'not-allowed' : 'pointer',
+                  opacity: recordingIsActive ? 0.5 : 1
                 }}
               >
                 <option value="speaker">Speaker</option>
@@ -341,17 +432,6 @@ export default function StreamSetupModalV2({
             </label>
 
             {/* Status */}
-            {!streamIsLive && (
-              <div style={{ 
-                fontSize: '0.75rem', 
-                color: 'rgba(255, 255, 255, 0.5)', 
-                marginBottom: '0.75rem',
-                fontStyle: 'italic'
-              }}>
-                ⚠️ Start stream first to enable recording
-              </div>
-            )}
-
             {recordingStatus === "error" && (
               <div style={{ 
                 fontSize: '0.75rem', 
@@ -369,19 +449,19 @@ export default function StreamSetupModalV2({
             {!recordingIsActive ? (
               <button
                 onClick={handleStartRecording}
-                disabled={!streamIsLive || recordingIsBusy}
+                disabled={recordingIsBusy}
                 style={{
                   width: '100%',
                   padding: '0.75rem',
                   fontSize: '0.875rem',
                   borderRadius: '0.5rem',
-                  background: (!streamIsLive || recordingIsBusy) ? 'rgba(220, 38, 38, 0.3)' : 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                  background: recordingIsBusy ? 'rgba(220, 38, 38, 0.3)' : 'linear-gradient(135deg, #dc2626, #b91c1c)',
                   color: '#ffffff',
                   border: 'none',
                   fontWeight: '600',
-                  cursor: (!streamIsLive || recordingIsBusy) ? 'not-allowed' : 'pointer',
+                  cursor: recordingIsBusy ? 'not-allowed' : 'pointer',
                   transition: 'all 0.3s ease',
-                  opacity: (!streamIsLive || recordingIsBusy) ? 0.6 : 1
+                  opacity: recordingIsBusy ? 0.6 : 1
                 }}
               >
                 🎬 Start Recording

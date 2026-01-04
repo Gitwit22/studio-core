@@ -1,10 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useParams } from "react-router-dom";
+import { apiStartRecording, apiStopRecording } from "../lib/api";
 import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
-import InviteButton from "../shared/InviteButton";
-import StreamSetupModal from "../components/StreamSetupModal";
 import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
 import StreamSetupModalV2 from "../components/StreamSetupModal";
 import RoleOverlay from "../components/RoleOverlay";
@@ -367,9 +366,14 @@ export default function Room() {
   const streamStartTimeRef = useRef<number | null>(null);
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);
   const [showExitOptions, setShowExitOptions] = useState(false);
-  const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
   const [canMultistream, setCanMultistream] = useState<boolean>(false);
   const [userPlanId, setUserPlanId] = useState<string>("free");
+  const [destinations, setDestinations] = useState<DestinationItem[]>([]);
+  const [destinationsLoading, setDestinationsLoading] = useState(false);
+  const [destinationsReady, setDestinationsReady] = useState(false);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflightResult, setPreflightResult] = useState<any>(null);
+  const [canGoLive, setCanGoLive] = useState(false);
 
   useEffect(() => {
     if (!roomName || !displayName) return;
@@ -470,10 +474,7 @@ export default function Room() {
       streamStartTimeRef.current = null;
       setElapsedTime(0);
     }
-  };
-
-  fetchToken();
-}, [roomName, displayName]);
+  }, [streamStatus]);
 
   // Load destinations (soft gate)
   useEffect(() => {
@@ -538,9 +539,6 @@ export default function Room() {
     return items;
   }
 
-
-  }, [streamStatus]);
-
   const handleLeftRoom = () => {
     setShowGoodbye(true);
   };
@@ -548,64 +546,6 @@ export default function Room() {
   const handleHomeClick = () => {
     nav('/join', { replace: true });
   };
-
-  async function apiStartRecording(roomName: string, layout: "speaker" | "grid" = "grid") {
-    console.log("🔧 apiStartRecording called:", { roomName, layout });
-    const res = await fetch(`/api/recordings/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roomName, layout }),
-    });
-    console.log("🔧 Response status:", res.status);
-    const text = await res.text();
-    console.log("🔧 Raw response:", text);
-    if (!res.ok) {
-      throw new Error(text || `HTTP ${res.status}`);
-    }
-    const json = JSON.parse(text);
-    console.log("🔧 Parsed JSON:", json);
-    return json;
-  }
-
-  handleLeftRoom();
-};
-
-
-  const handleStartMultistream = async (keys: {
-  youtubeKey?: string;
-  facebookKey?: string;
-  twitchKey?: string;   // 👈 NEW
-}) => {
-  if (!canGoLive) {
-    alert("Preflight not passed. Connect destinations and try again.");
-    return;
-  }
-  if (!roomName) {
-    alert("No room name");
-    return;
-  async function apiStopRecording(recordingId: string) {
-    console.log("🛑 apiStopRecording called:", { recordingId });
-    const res = await fetch(`/api/recordings/stop`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recordingId }),
-    });
-    console.log("🛑 API response status:", res.status);
-    if (!res.ok) {
-      try {
-        const errorData = await res.json();
-        console.error("🛑 API error:", errorData);
-        throw new Error(errorData.error || `HTTP ${res.status}`);
-      } catch (parseError) {
-        const text = await res.text();
-        console.error("🛑 API error (text):", text);
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-    }
-    const json = await res.json();
-    console.log("🛑 API response JSON:", json);
-    return json;
-  }
 
   const startRecording = async (layout: "speaker" | "grid" = "grid") => {
     if (!roomName) {
@@ -651,11 +591,8 @@ export default function Room() {
     console.log("🛑 Stopping recording with ID:", id);
     setRecordingStatus("stopping");
     try {
-      const response = await apiStopRecording(id);
-      console.log("✅ Recording stopped successfully:", response);
-      if (!response.success) {
-        throw new Error(response.error || "Stop recording failed");
-      }
+      await apiStopRecording(id);
+      console.log("✅ Recording stopped successfully");
       setRecordingStatus("stopped");
       setRecordingId(id);
     } catch (e) {
@@ -665,16 +602,6 @@ export default function Room() {
     }
   };
 
-    const data = await res.json();
-    setEgressId(data.egressId);
-    setStreamStatus("live");
-    await refreshDestinations();
-  } catch (err) {
-    console.error("Error starting multistream", err);
-    alert("Error starting multistream");
-    setStreamStatus("idle");
-  }
-};
   const handleEndStream = async () => {
     if (isHost && streamStatus === "live") {
       alert("⏹️ Stream is still live. Stop the stream first.");
@@ -720,6 +647,7 @@ export default function Room() {
     twitchKey?: string;
     record?: boolean;
     layout?: "speaker" | "grid";
+    destinationIds?: string[];
   }) => {
     if (streamStatus === "starting" || streamStatus === "live") return;
     if (!roomName) {
@@ -731,8 +659,11 @@ export default function Room() {
       return;
     }
     console.log("🎬 Room.tsx - handleStartMultistream called");
-    if (!keys.youtubeKey && !keys.facebookKey && !keys.twitchKey) {
-      alert("At least one stream key is required");
+    const destIds = Array.isArray(keys.destinationIds)
+      ? keys.destinationIds.filter((id) => !!id)
+      : [];
+    if (!keys.youtubeKey && !keys.facebookKey && !keys.twitchKey && destIds.length === 0) {
+      alert("Select at least one saved destination or enter a stream key.");
       return;
     }
     try {
@@ -741,6 +672,7 @@ export default function Room() {
         youtubeStreamKey: keys.youtubeKey,
         facebookStreamKey: keys.facebookKey,
         twitchStreamKey: keys.twitchKey,
+        destinationIds: destIds.length ? destIds : undefined,
         userId: getOrCreateUid(),
       };
       console.log("   Sending to API:", requestBody);
@@ -795,16 +727,6 @@ export default function Room() {
       setStreamStatus("idle");
     }
   };
-
-    setEgressId(null);
-    setStreamStatus("idle");
-    await refreshDestinations();
-  } catch (err) {
-    console.error("Error stopping multistream", err);
-    alert("Error stopping multistream");
-    setStreamStatus("live");
-  }
-};
 
   const handleStopMultistream = async () => {
     const streamEgressId = streamEgressRef.current;
@@ -1275,6 +1197,15 @@ export default function Room() {
         recordingStatus={recordingStatus}
         onStartRecording={startRecording}
         onStopRecording={stopRecording}
+        savedDestinations={destinations
+          .filter((d) => d.enabled && d.status === "connected" && d.hasKey)
+          .map((d) => ({
+            id: d.id,
+            label: d.name ? `${d.platform} – ${d.name}` : d.platform,
+            status: d.status,
+            hasKey: d.hasKey,
+            keyPreview: d.keyPreview ?? null,
+          }))}
       />
 
       {recordingStatus === "stopped" && recordingId && (

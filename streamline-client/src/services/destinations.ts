@@ -14,7 +14,7 @@ export interface DestinationItem {
   updatedAt?: number;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE;
+const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
 async function parseJsonSafe(res: Response) {
   const ct = res.headers.get("content-type") || "";
@@ -37,7 +37,7 @@ export async function fetchDestinations(params?: { platform?: string; includeDis
   return data as { ok: boolean; items: DestinationItem[]; usedCount?: number; limit?: number };
 }
 
-export async function createDestination(body: { platform: string; name?: string; rtmpUrlBase: string; enabled?: boolean }) {
+export async function createDestination(body: { platform: string; name?: string; rtmpUrlBase: string; enabled?: boolean; streamKeyPlain?: string }) {
   const res = await fetch(`${API_BASE}/api/destinations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,7 +49,7 @@ export async function createDestination(body: { platform: string; name?: string;
   return data as { ok: boolean; destination: DestinationItem; validation?: { status: DestinationStatus; statusReason?: DestinationStatusReason | null }; usedCount?: number; limit?: number };
 }
 
-export async function updateDestination(id: string, body: { platform?: string; name?: string; rtmpUrlBase?: string; enabled?: boolean }) {
+export async function updateDestination(id: string, body: { platform?: string; name?: string; rtmpUrlBase?: string; enabled?: boolean; streamKeyPlain?: string; streamKeyEnc?: any }) {
   const res = await fetch(`${API_BASE}/api/destinations/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -71,7 +71,7 @@ export async function deleteDestination(id: string) {
   return data as { ok: boolean };
 }
 
-export async function validateDestinationPreCreate(body: { platform: string; rtmpUrlBase: string }) {
+export async function validateDestinationPreCreate(body: { platform: string; rtmpUrlBase: string; streamKeyPlain?: string }) {
   const res = await fetch(`${API_BASE}/api/destinations/validate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

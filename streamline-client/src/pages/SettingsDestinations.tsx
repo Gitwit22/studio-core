@@ -19,8 +19,21 @@ export default function SettingsDestinations() {
 
   const [platform, setPlatform] = useState("youtube");
   const [name, setName] = useState("");
-  const [rtmpUrlBase, setRtmpUrlBase] = useState("");
+  const [streamKey, setStreamKey] = useState("");
   const [validation, setValidation] = useState<{ status: string; statusReason?: string | null } | null>(null);
+
+  function getDefaultRtmpBase(p: string): string {
+    switch (p) {
+      case "youtube":
+        return "rtmp://a.rtmp.youtube.com/live2";
+      case "facebook":
+        return "rtmps://live-api-s.facebook.com:443/rtmp/";
+      case "twitch":
+        return "rtmp://live.twitch.tv/app";
+      default:
+        return "rtmp://example.com/live";
+    }
+  }
 
   async function load() {
     try {
@@ -43,7 +56,8 @@ export default function SettingsDestinations() {
   async function onValidate() {
     setError(null);
     try {
-      const res = await validateDestinationPreCreate({ platform, rtmpUrlBase });
+      const base = getDefaultRtmpBase(platform);
+      const res = await validateDestinationPreCreate({ platform, rtmpUrlBase: base, streamKeyPlain: streamKey || undefined });
       setValidation({ status: res.status, statusReason: res.statusReason ?? null });
     } catch (e: any) {
       setError(e?.message || String(e));
@@ -54,26 +68,45 @@ export default function SettingsDestinations() {
     e.preventDefault();
     setError(null);
     try {
-      const res = await createDestination({ platform, name, rtmpUrlBase });
-      setValidation(res.validation || null);
+      const base = getDefaultRtmpBase(platform);
+      const res = await createDestination({ platform, name, rtmpUrlBase: base, streamKeyPlain: streamKey || undefined });
+      // After creating, clear validation so the form is "fresh" for the next key
+      setValidation(null);
       setUsedCount(res.usedCount);
       setLimit(res.limit);
       setPlatform("youtube");
       setName("");
-      setRtmpUrlBase("");
+      setStreamKey("");
       await load();
-      async function onDelete(id: string) {
-        setError(null);
-        try {
-          await deleteDestination(id);
-          setItems(prev => prev.filter(i => i.id !== id));
-          // Recompute usedCount quickly without refetch
-          const newUsed = (items.filter(i => i.id !== id && i.enabled).length);
-          setUsedCount(newUsed);
-        } catch (e: any) {
-          setError(e?.message || String(e));
-        }
-      }
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    }
+  }
+
+  async function onDelete(id: string) {
+    setError(null);
+    try {
+      await deleteDestination(id);
+      setItems(prev => {
+        const filtered = prev.filter(i => i.id !== id);
+        const newUsed = filtered.filter(i => i.enabled).length;
+        setUsedCount(newUsed);
+        return filtered;
+      });
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    }
+  }
+
+  async function onClearKey(id: string) {
+    setError(null);
+    const confirmClear = window.confirm("Clear the stored stream key for this destination?");
+    if (!confirmClear) return;
+    try {
+      const res = await updateDestination(id, { streamKeyPlain: "" });
+      setItems(prev => prev.map(i => (i.id === id ? res.destination : i)));
+      if (typeof res.usedCount !== "undefined") setUsedCount(res.usedCount);
+      if (typeof res.limit !== "undefined") setLimit(res.limit);
     } catch (e: any) {
       setError(e?.message || String(e));
     }
@@ -90,74 +123,225 @@ export default function SettingsDestinations() {
   }
 
   return (
-    <div style={{ maxWidth: 800, margin: "24px auto", padding: 16 }}>
-      <h2>Destinations</h2>
-      <p>Manage manual RTMP destinations. Keys are encrypted server-side and never returned.</p>
+    <div style={{ maxWidth: 1040, margin: "32px auto", padding: "0 24px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>Streaming / Stream Keys</h1>
+          <p style={{ marginTop: 4, fontSize: 13, color: "#6b7280", maxWidth: 520 }}>
+            Configure where StreamLine sends your live stream. Add YouTube, Facebook, Twitch, or custom RTMP
+            destinations and save your stream keys once here for one-click Go Live in the room.
+          </p>
+        </div>
+        <div style={{ textAlign: "right", fontSize: 12, color: "#6b7280" }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>RTMP Destinations</div>
+          <div>
+            Used <span style={{ fontWeight: 600 }}>{typeof usedCount !== "undefined" ? usedCount : "—"}</span>
+            {" / "}
+            <span>{typeof limit !== "undefined" ? limit : "Plan limit"}</span>
+          </div>
+        </div>
+      </div>
 
-      <div style={{ marginTop: 16, padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }}>
-        <h3>Add Destination</h3>
+      {/* Main layout: stack add form and existing destinations */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        {/* Top: add / validate destination */}
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 16,
+            border: "1px solid rgba(248, 113, 113, 0.7)",
+            background: "linear-gradient(135deg, rgba(24, 24, 27, 0.92), rgba(127, 29, 29, 0.9))",
+            boxShadow: "0 18px 45px rgba(0,0,0,0.65)",
+            backdropFilter: "blur(20px)",
+            color: "#f9fafb",
+          }}
+        >
+          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Add streaming destination</h3>
+          <p style={{ fontSize: 12, color: "#e5e7eb", marginBottom: 12 }}>
+            Paste your stream key from your platform. Keys are stored encrypted and will be used automatically when
+            you go live.
+          </p>
+
         {validation && (
           <div style={{ marginBottom: 8 }}>
             <StatusBadge status={validation.status} reason={validation.statusReason || undefined} />
           </div>
         )}
         <form onSubmit={onCreate}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <select value={platform} onChange={e => setPlatform(e.target.value)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+            <select
+              value={platform}
+              onChange={e => setPlatform(e.target.value)}
+              style={{
+                border: "1px solid rgba(248, 250, 252, 0.2)",
+                borderRadius: 6,
+                padding: "6px 8px",
+                color: "#f9fafb",
+                background: "rgba(15, 23, 42, 0.7)",
+              }}
+            >
               <option value="youtube">YouTube</option>
               <option value="facebook">Facebook</option>
               <option value="twitch">Twitch</option>
               <option value="custom">Custom</option>
             </select>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Name (optional)" />
-            <input value={rtmpUrlBase} onChange={e => setRtmpUrlBase(e.target.value)} placeholder="RTMP base (no key)" style={{ flex: 1 }} />
-            <button type="button" onClick={onValidate}>Validate</button>
-            <button type="submit">Create</button>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. Main YouTube channel (optional)"
+              style={{
+                border: "1px solid rgba(248, 250, 252, 0.2)",
+                borderRadius: 6,
+                padding: "6px 8px",
+                color: "#f9fafb",
+                background: "rgba(15, 23, 42, 0.7)",
+              }}
+            />
+            <input
+              type="password"
+              value={streamKey}
+              onChange={e => setStreamKey(e.target.value)}
+              placeholder="Enter stream key (optional, stored encrypted)"
+              style={{
+                border: "1px solid rgba(248, 250, 252, 0.2)",
+                borderRadius: 6,
+                padding: "6px 8px",
+                color: "#f9fafb",
+                background: "rgba(15, 23, 42, 0.7)",
+              }}
+              autoComplete="off"
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                type="button"
+                onClick={onValidate}
+                style={{
+                  borderRadius: 999,
+                  padding: "6px 12px",
+                  border: "1px solid rgba(248, 113, 113, 0.8)",
+                  background: "transparent",
+                  color: "#fecaca",
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                Validate
+              </button>
+              <button
+                type="submit"
+                style={{
+                  borderRadius: 999,
+                  padding: "6px 14px",
+                  border: "none",
+                  background: "linear-gradient(135deg,#ef4444,#b91c1c)",
+                  color: "white",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Create
+              </button>
+            </div>
           </div>
         </form>
         {error && <div style={{ color: "#b91c1c" }}>{error}</div>}
-      </div>
-
-      <div style={{ marginTop: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3>Existing Destinations</h3>
-          <button onClick={onPreflight}>Run Preflight</button>
         </div>
-        {typeof usedCount !== "undefined" && (
-          <div style={{ marginTop: 8, fontSize: 12, color: "#9ca3af" }}>
-            Used {usedCount} / Limit {typeof limit !== "undefined" ? limit : "—"}
+
+        {/* Below: existing destinations list */}
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 16,
+            border: "1px solid rgba(248, 113, 113, 0.7)",
+            background: "linear-gradient(135deg, rgba(24, 24, 27, 0.9), rgba(127, 29, 29, 0.85))",
+            boxShadow: "0 18px 45px rgba(0,0,0,0.65)",
+            backdropFilter: "blur(20px)",
+            color: "#f9fafb",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Existing destinations</h3>
+            <button
+              onClick={onPreflight}
+              style={{
+                fontSize: 12,
+                borderRadius: 999,
+                padding: "4px 10px",
+                border: "1px solid rgba(248, 250, 252, 0.25)",
+                background: "rgba(15, 23, 42, 0.7)",
+                color: "#e5e7eb",
+                cursor: "pointer",
+              }}
+            >
+              Run Preflight
+            </button>
           </div>
-        )}
-        {loading ? (
-          <div>Loading…</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th align="left">Platform</th>
-                <th align="left">Name</th>
-                <th align="left">Base</th>
-                <th align="left">Status</th>
-                <th align="left">Key</th>
-                <th align="left">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(item => (
-                <tr key={item.id}>
-                  <td>{item.platform}</td>
-                  <td>{item.name || "—"}</td>
-                  <td>{item.rtmpUrlBase}</td>
-                  <td><StatusBadge status={item.status} reason={item.statusReason || undefined} /></td>
-                  <td>{item.hasKey ? `••••${item.keyPreview ?? ""}` : "no key"}</td>
-                  <td>
-                    <button onClick={() => onDelete(item.id)} style={{ fontSize: 12, color: "#ef4444" }}>Delete</button>
-                  </td>
+          {loading ? (
+            <div style={{ padding: 12, fontSize: 13 }}>Loading…</div>
+          ) : items.length === 0 ? (
+            <div style={{ padding: 12, fontSize: 13, color: "#e5e7eb" }}>
+              No destinations yet. Add YouTube, Facebook, Twitch, or custom RTMP targets on the left to reuse them
+              from the room.
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid rgba(248, 250, 252, 0.1)" }}>
+                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Platform</th>
+                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Name</th>
+                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Base</th>
+                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Status</th>
+                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Key</th>
+                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {items.map(item => (
+                  <tr key={item.id} style={{ borderBottom: "1px solid rgba(248, 250, 252, 0.06)" }}>
+                    <td style={{ padding: "6px 4px", textTransform: "capitalize", color: "#f9fafb" }}>{item.platform}</td>
+                    <td style={{ padding: "6px 4px", color: "#e5e7eb" }}>{item.name || "—"}</td>
+                    <td style={{ padding: "6px 4px", fontFamily: "monospace", fontSize: 12, color: "#e5e7eb" }}>{item.rtmpUrlBase}</td>
+                    <td style={{ padding: "6px 4px" }}>
+                      <StatusBadge status={item.status} reason={item.statusReason || undefined} />
+                    </td>
+                    <td style={{ padding: "6px 4px", color: "#e5e7eb" }}>{item.hasKey ? `••••${item.keyPreview ?? ""}` : "no key"}</td>
+                    <td style={{ padding: "6px 4px" }}>
+                      {item.hasKey && (
+                        <button
+                          onClick={() => onClearKey(item.id)}
+                          style={{
+                            fontSize: 12,
+                            color: "#e5e7eb",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                            marginRight: 8,
+                          }}
+                        >
+                          Clear Key
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onDelete(item.id)}
+                        style={{
+                          fontSize: 12,
+                          color: "#fecaca",
+                          border: "none",
+                          background: "transparent",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );

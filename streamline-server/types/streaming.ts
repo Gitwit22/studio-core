@@ -57,7 +57,11 @@ export interface DestinationPostResponse {
 export interface ValidateRequestBody {
   platform: string;
   rtmpUrlBase: string; // can be raw; server normalizes
-  streamKeyEnc?: any; // encrypted payload (ciphertext/iv/tag/alg/kid)
+  // Optional encrypted payload (ciphertext/iv/tag/alg/kid) for callers that
+  // encrypt client-side. Browser UI can instead send plain text via
+  // streamKeyPlain so the server handles encryption.
+  streamKeyEnc?: any;
+  streamKeyPlain?: string;
 }
 
 export interface ValidateResponse {

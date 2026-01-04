@@ -414,4 +414,25 @@ export const S: Record<string, CSSProperties> = {
     marginTop: 24,
     textAlign: "center",
   },
+  tabsRow: {
+    display: "flex",
+    gap: 12,
+    borderBottom: "1px solid rgba(63,63,70,0.6)",
+    marginBottom: 24,
+  },
+  tab: {
+    padding: "8px 16px",
+    background: "transparent",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    color: "#9ca3af",
+    fontSize: 14,
+    fontWeight: 500,
+    cursor: "pointer",
+  },
+  tabActive: {
+    color: "#ffffff",
+    borderBottomColor: "#ef4444",
+    fontWeight: 600,
+  },
 };

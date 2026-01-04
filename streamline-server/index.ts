@@ -151,8 +151,193 @@ async function getRoomService(): Promise<RoomServiceClient> {
   );
 }
 
+// In-memory room-level flags (non-persistent across server restarts)
+const roomMuteLocks = new Map<string, boolean>();
+
+// Mute/unmute a single participant's audio (host/mod tools, not platform admin)
+app.post("/api/roomModeration/mute", requireAuth, async (req, res) => {
+  try {
+    const { room, identity, muted } = req.body as {
+      room?: string;
+      identity?: string;
+      muted?: boolean;
+    };
+
+    if (!room || !identity || typeof muted !== "boolean") {
+      return res.status(400).json({ error: "room, identity and muted are required" });
+    }
+
+    console.log("ADMIN MUTE", { room, identity, muted });
+
+    const roomService = await getRoomService();
+    const sdk = (await getLiveKitSdk()) as any;
+    const TrackType = sdk.TrackType;
+    const TrackSource = sdk.TrackSource;
+
+    const participant = await roomService.getParticipant(room, identity);
+    const audioTrack = participant.tracks?.find((t: any) => {
+      const isAudioType = t.type === TrackType.AUDIO;
+      const isMicSource = t.source === TrackSource.MICROPHONE;
+      return isAudioType || isMicSource;
+    });
+
+    if (!audioTrack) {
+      console.warn("No audio track found for", { room, identity });
+      return res.status(404).json({ error: "no audio track found" });
+    }
+
+    await roomService.mutePublishedTrack(room, identity, audioTrack.sid, muted);
+
+    return res.json({
+      ok: true,
+      muted,
+      trackSid: audioTrack.sid,
+      identity,
+    });
+  } catch (e: any) {
+    console.error("mute error", e);
+    const msg =
+      typeof e?.message === "string"
+        ? e.message
+        : typeof e?.toString === "function"
+        ? e.toString()
+        : "mute_error";
+    return res.status(500).json({ error: msg });
+  }
+});
+
+// Mute/unmute ALL participants' audio
+app.post("/api/roomModeration/mute-all", requireAuth, async (req, res) => {
+  try {
+    const { room, muted } = req.body as { room?: string; muted?: boolean };
+
+    if (!room || typeof muted !== "boolean") {
+      return res.status(400).json({ error: "room and muted are required" });
+    }
+
+    console.log("ADMIN MUTE-ALL", { room, muted });
+
+    const roomService = await getRoomService();
+    const sdk = (await getLiveKitSdk()) as any;
+    const TrackType = sdk.TrackType;
+    const TrackSource = sdk.TrackSource;
+
+    const participants = await roomService.listParticipants(room);
+    const results: Array<{ identity: string; trackSid: string | null; changed: boolean }> = [];
+
+    for (const p of participants) {
+      const audioTrack = p.tracks?.find((t: any) => {
+        const isAudioType = t.type === TrackType.AUDIO;
+        const isMicSource = t.source === TrackSource.MICROPHONE;
+        return isAudioType || isMicSource;
+      });
+
+      if (!audioTrack) {
+        results.push({ identity: p.identity, trackSid: null, changed: false });
+        continue;
+      }
+
+      await roomService.mutePublishedTrack(room, p.identity, audioTrack.sid, muted);
+      results.push({ identity: p.identity, trackSid: audioTrack.sid, changed: true });
+    }
+
+    return res.json({ ok: true, muted, results });
+  } catch (e: any) {
+    console.error("mute-all error", e);
+    const msg =
+      typeof e?.message === "string"
+        ? e.message
+        : typeof e?.toString === "function"
+        ? e.toString()
+        : "mute_all_error";
+    return res.status(500).json({ error: msg });
+  }
+});
+
+// Room-level mute lock flag (in-memory) + LiveKit permissions update
+app.post("/api/roomModeration/mute-lock", requireAuth, async (req, res) => {
+  try {
+    const { room, muteLock, hostIdentity } = req.body as {
+      room?: string;
+      muteLock?: boolean;
+      hostIdentity?: string;
+    };
+
+    if (!room || typeof muteLock !== "boolean") {
+      return res.status(400).json({ error: "room and muteLock are required" });
+    }
+
+    roomMuteLocks.set(room, muteLock);
+    console.log("ROOM MODERATION MUTE-LOCK", { room, muteLock, hostIdentity });
+
+    // Update LiveKit participant permissions so guests can't re-enable mic
+    try {
+      const roomService = await getRoomService();
+      const sdk = (await getLiveKitSdk()) as any;
+      const TrackSource = sdk.TrackSource;
+
+      const participants = await roomService.listParticipants(room);
+
+      for (const p of participants) {
+        if (hostIdentity && p.identity === hostIdentity) continue; // never restrict host
+
+        const currentPerms: any = (p as any).permission || {};
+        const currentSources: any[] = currentPerms.canPublishSources || [];
+
+        if (muteLock) {
+          // Remove audio-related publish sources (mic + screen share audio)
+          const blocked = new Set([TrackSource.MICROPHONE, TrackSource.SCREEN_SHARE_AUDIO]);
+          const nextSources = currentSources.filter((s) => !blocked.has(s));
+
+          await roomService.updateParticipant(room, p.identity, {
+            permission: {
+              ...currentPerms,
+              canPublishSources: nextSources,
+            },
+          });
+        } else {
+          // Restore audio publish ability while preserving any existing sources
+          const toEnsure = [TrackSource.MICROPHONE, TrackSource.SCREEN_SHARE_AUDIO];
+          const merged = Array.from(new Set([...currentSources, ...toEnsure]));
+
+          await roomService.updateParticipant(room, p.identity, {
+            permission: {
+              ...currentPerms,
+              canPublishSources: merged,
+            },
+          });
+        }
+      }
+    } catch (permErr) {
+      // Don't fail the whole request if permissions update has issues; just log
+      console.error("mute-lock permissions update error", permErr);
+    }
+
+    return res.json({ ok: true, muteLock });
+  } catch (e: any) {
+    console.error("mute-lock error", e);
+    const msg =
+      typeof e?.message === "string"
+        ? e.message
+        : typeof e?.toString === "function"
+        ? e.toString()
+        : "mute_lock_error";
+    return res.status(500).json({ error: msg });
+  }
+});
+
+// Public room settings (currently only muteLock)
+app.get("/api/roomSettings/:room", (req, res) => {
+  const roomParam = String(req.params.room || "").trim();
+  if (!roomParam) {
+    return res.status(400).json({ error: "room is required" });
+  }
+  const muteLock = !!roomMuteLocks.get(roomParam);
+  return res.json({ muteLock });
+});
+
 // Remove/kick a participant
-app.post("/api/admin/remove", async (req, res) => {
+app.post("/api/roomModeration/remove", requireAuth, async (req, res) => {
   try {
     const { room, identity } = req.body;
 

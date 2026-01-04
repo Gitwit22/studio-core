@@ -4,6 +4,7 @@ const express_1 = require("express");
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const requireAuth_1 = require("../middleware/requireAuth");
 const featureAccess_1 = require("./featureAccess");
+const crypto_1 = require("../lib/crypto");
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
 let _lkMod = null;
 async function getLiveKitSdk() {
@@ -23,15 +24,19 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
             return res.status(400).json({ error: "Missing roomName param" });
         const streamDocId = `${uid}_${roomName}`; // always non-empty if checks passed
         const ref = firebaseAdmin_1.firestore.collection("activeStreams").doc(streamDocId);
-        // if your client sends individual keys:
-        const { youtubeStreamKey, facebookStreamKey, twitchStreamKey, guestCount } = req.body || {};
+        // if your client sends individual keys or destination IDs:
+        const { youtubeStreamKey, facebookStreamKey, twitchStreamKey, guestCount, destinationIds } = req.body || {};
         console.log("[multistream:start] uid:", uid, "room:", roomName, {
             youtubeStreamKey: !!youtubeStreamKey,
             facebookStreamKey: !!facebookStreamKey,
             twitchStreamKey: !!twitchStreamKey,
             guestCount,
+            destinationIdsCount: Array.isArray(destinationIds) ? destinationIds.length : 0,
         });
-        if (!youtubeStreamKey && !facebookStreamKey && !twitchStreamKey) {
+        const destIds = Array.isArray(destinationIds)
+            ? destinationIds.map((id) => String(id)).filter(Boolean)
+            : [];
+        if (!youtubeStreamKey && !facebookStreamKey && !twitchStreamKey && destIds.length === 0) {
             return res.status(400).json({ error: "At least one stream key is required" });
         }
         // Load user (optional, but fine)
@@ -49,11 +54,12 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
             youtubeStreamKey: youtubeStreamKey || null,
             facebookStreamKey: facebookStreamKey || null,
             twitchStreamKey: twitchStreamKey || null,
+            destinationIds: destIds,
             guestCount: Number(guestCount || 0),
             status: "starting",
             updatedAt: Date.now(),
         }, { merge: true });
-        // Build RTMP URLs for each platform
+        // Build RTMP URLs for each platform and any stored destinations
         const urls = [];
         if (youtubeStreamKey)
             urls.push(`rtmp://a.rtmp.youtube.com/live2/${youtubeStreamKey}`);
@@ -61,6 +67,31 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
             urls.push(`rtmps://live-api-s.facebook.com:443/rtmp/${facebookStreamKey}`);
         if (twitchStreamKey)
             urls.push(`rtmp://live.twitch.tv/app/${twitchStreamKey}`);
+        if (destIds.length > 0) {
+            try {
+                const col = firebaseAdmin_1.firestore.collection("users").doc(uid).collection("destinations");
+                const snaps = await Promise.all(destIds.map((id) => col.doc(id).get()));
+                for (const snap of snaps) {
+                    if (!snap.exists)
+                        continue;
+                    const data = snap.data();
+                    if (!data || data.enabled === false)
+                        continue;
+                    const baseRaw = String(data.rtmpUrlBase || "");
+                    const base = (0, crypto_1.normalizeRtmpBase)(baseRaw);
+                    if (!base)
+                        continue;
+                    const dec = data.streamKeyEnc ? (0, crypto_1.decryptStreamKey)(data.streamKeyEnc) : null;
+                    if (!dec)
+                        continue;
+                    const url = `${base}/${dec}`;
+                    urls.push(url);
+                }
+            }
+            catch (e) {
+                console.error("[multistream:start] failed to resolve destinationIds", e);
+            }
+        }
         if (urls.length === 0) {
             return res.status(400).json({ error: "At least one stream key is required" });
         }

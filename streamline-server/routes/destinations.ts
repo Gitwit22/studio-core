@@ -2,7 +2,7 @@ import { Router } from "express";
 import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import type { DestinationStatus, DestinationStatusReason, ApiErrorCode, DestinationItem, DestinationsGetResponse, DestinationPostResponse, ValidateRequestBody, ValidateResponse } from "../types/streaming";
-import { decryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
+import { decryptStreamKey, encryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
 
 const router = Router();
 
@@ -99,7 +99,7 @@ router.post("/", requireAuth, async (req: any, res) => {
   try {
     const uid = req.user?.uid;
     if (!uid) return res.status(401).json({ error: "unauthorized" as ApiErrorCode });
-    const { platform, name, rtmpUrlBase, streamKeyEnc, enabled } = req.body || {};
+    const { platform, name, rtmpUrlBase, streamKeyEnc, streamKeyPlain, enabled } = req.body || {};
     if (!platform || !rtmpUrlBase) {
       return res.status(400).json({ error: "missing_required_fields" as ApiErrorCode, details: "platform and rtmpUrlBase are required" });
     }
@@ -116,6 +116,17 @@ router.post("/", requireAuth, async (req: any, res) => {
       return res.status(409).json({ error: "duplicate_target" as ApiErrorCode });
     }
 
+    // Resolve encrypted key: prefer freshly provided plaintext (server-encrypted),
+    // otherwise allow callers to supply an already-encrypted payload.
+    let finalEnc: any = streamKeyEnc || null;
+    if (typeof streamKeyPlain === "string" && streamKeyPlain.trim()) {
+      const enc = encryptStreamKey(streamKeyPlain.trim());
+      if (!enc) {
+        return res.status(500).json({ error: "server_error" as ApiErrorCode, details: "stream key encryption is not configured" });
+      }
+      finalEnc = enc;
+    }
+
     // Build doc data
     const now = Date.now();
     const docData: any = {
@@ -123,7 +134,7 @@ router.post("/", requireAuth, async (req: any, res) => {
       name: name ? String(name) : null,
       enabled: enabled === false ? false : true,
       rtmpUrlBase: normalizedBase,
-      streamKeyEnc: streamKeyEnc || null,
+      streamKeyEnc: finalEnc || null,
       updatedAt: now,
     };
 
@@ -158,8 +169,16 @@ router.post("/validate", requireAuth, async (req: any, res) => {
       return res.status(400).json({ error: "missing_required_fields" as ApiErrorCode });
     }
     const normalizedBase = normalizeRtmpBase(body.rtmpUrlBase);
-    const dec = body.streamKeyEnc ? decryptStreamKey(body.streamKeyEnc as any) : null;
-    const { status, statusReason } = deriveStatus(dec, true);
+    let dec: string | null = null;
+    let hasEnc = false;
+    if (typeof body.streamKeyPlain === "string" && body.streamKeyPlain.trim()) {
+      dec = body.streamKeyPlain.trim();
+      hasEnc = true;
+    } else if (body.streamKeyEnc) {
+      dec = decryptStreamKey(body.streamKeyEnc as any);
+      hasEnc = !!body.streamKeyEnc;
+    }
+    const { status, statusReason } = deriveStatus(hasEnc, dec, true);
     const payload: ValidateResponse = { ok: true, status, statusReason: statusReason ?? null };
     return res.json(payload);
   } catch (err: any) {
@@ -217,12 +236,32 @@ router.put("/:id", requireAuth, async (req: any, res) => {
       }
     }
 
+    // Resolve encrypted key updates. If a new plaintext key is provided, encrypt
+    // and store it. If streamKeyEnc is explicitly provided, honor it. Otherwise
+    // keep the existing value.
+    let nextEnc: any = current.streamKeyEnc ?? null;
+    if (typeof updates.streamKeyPlain === "string") {
+      const trimmed = updates.streamKeyPlain.trim();
+      if (trimmed) {
+        const enc = encryptStreamKey(trimmed);
+        if (!enc) {
+          return res.status(500).json({ error: "server_error" as ApiErrorCode, details: "stream key encryption is not configured" });
+        }
+        nextEnc = enc;
+      } else {
+        // Empty string clears the key
+        nextEnc = null;
+      }
+    } else if (Object.prototype.hasOwnProperty.call(updates, "streamKeyEnc")) {
+      nextEnc = updates.streamKeyEnc ?? null;
+    }
+
     const docData: any = {
       platform: nextPlatform,
       rtmpUrlBase: nextBase,
       name: typeof updates.name === "string" ? String(updates.name) : (current.name || null),
       enabled: typeof updates.enabled === "boolean" ? !!updates.enabled : !!current.enabled,
-      streamKeyEnc: updates.streamKeyEnc ?? current.streamKeyEnc ?? null,
+      streamKeyEnc: nextEnc,
       updatedAt: Date.now(),
     };
     await ref.set(docData, { merge: true });

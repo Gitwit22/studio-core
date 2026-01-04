@@ -7,7 +7,11 @@ const router = Router();
 
 router.post("/start", requireAuth, async (req, res) => {
   try {
-    const uid = req.user.id;
+    const uid = (req as any).user?.uid || (req as any).user?.id;
+
+    if (!uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     // Feature access gate
     const access = await canAccessFeature(uid, "recording");
@@ -15,7 +19,6 @@ router.post("/start", requireAuth, async (req, res) => {
       return res.status(403).json({ success: false, error: access.reason || "Recording requires upgrade" });
     }
 
-    // ...existing code for starting recording...
     // Load user
     const userSnap = await firestore.collection("users").doc(uid).get();
     if (!userSnap.exists) {
@@ -32,14 +35,42 @@ router.post("/start", requireAuth, async (req, res) => {
     }
 
     const plan = planSnap.data()!;
-    // ...existing code for plan logic if needed...
+    // You can use plan data here in the future if recording tiers differ
 
-    // ✅ Start recording (pass watermark flag into your pipeline)
-    // await startRecording({ watermark: watermarkRequired });
+    const { roomName, layout } = req.body as {
+      roomName?: string;
+      layout?: "speaker" | "grid" | string;
+    };
+
+    if (!roomName) {
+      return res.status(400).json({ error: "roomName is required" });
+    }
+
+    const now = new Date();
+    const recordingRef = firestore.collection("recordings").doc();
+    const recordingId = recordingRef.id;
+
+    const recordingData = {
+      id: recordingId,
+      userId: uid,
+      roomName,
+      layout: (layout as any) || "grid",
+      status: "recording",
+      startedAt: now,
+      stoppedAt: null as Date | null,
+      duration: 0,
+      viewerCount: 0,
+      peakViewers: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await recordingRef.set(recordingData);
 
     return res.json({
       success: true,
-      // Optionally include watermark or other info if needed
+      recordingId,
+      recording: recordingData,
     });
   } catch (err) {
     console.error("recording error:", err);

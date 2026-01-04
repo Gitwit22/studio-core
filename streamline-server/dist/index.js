@@ -11,12 +11,15 @@ const webhook_1 = __importDefault(require("./routes/webhook"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const admin_1 = __importDefault(require("./routes/admin"));
 const adminStatus_1 = __importDefault(require("./routes/adminStatus"));
+const requireAuth_1 = require("./middleware/requireAuth");
 const billing_1 = __importDefault(require("./routes/billing"));
 const recordings_1 = __importDefault(require("./routes/recordings"));
 const usageRoutes_1 = __importDefault(require("./routes/usageRoutes"));
 const plans_1 = __importDefault(require("./routes/plans"));
 const roomToken_1 = __importDefault(require("./routes/roomToken"));
 const multistream_1 = __importDefault(require("./routes/multistream"));
+const destinations_1 = __importDefault(require("./routes/destinations"));
+const live_1 = __importDefault(require("./routes/live"));
 const stats_1 = __importDefault(require("./routes/stats"));
 const firebaseAdmin_1 = require("./firebaseAdmin");
 const livekit_1 = require("./lib/livekit"); // adjust path
@@ -70,6 +73,10 @@ app.use("/api/usage", usageRoutes_1.default); // gives /api/usage/summary
 app.use("/api/roomToken", roomToken_1.default);
 // Multistream routes (YouTube/FB/Twitch)
 app.use("/api/rooms", multistream_1.default);
+// Destinations management (encrypted keys)
+app.use("/api/destinations", destinations_1.default);
+// Live preflight
+app.use("/api/live", live_1.default);
 // Billing routes
 app.use("/api/billing", billing_1.default);
 // Plans route (for Billing page)
@@ -106,8 +113,158 @@ async function getRoomService() {
     const { RoomServiceClient } = await (0, livekit_1.getLiveKitSdk)();
     return new RoomServiceClient(process.env.LIVEKIT_URL, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
 }
+// In-memory room-level flags (non-persistent across server restarts)
+const roomMuteLocks = new Map();
+// Mute/unmute a single participant's audio (host/mod tools, not platform admin)
+app.post("/api/roomModeration/mute", requireAuth_1.requireAuth, async (req, res) => {
+    try {
+        const { room, identity, muted } = req.body;
+        if (!room || !identity || typeof muted !== "boolean") {
+            return res.status(400).json({ error: "room, identity and muted are required" });
+        }
+        console.log("ADMIN MUTE", { room, identity, muted });
+        const roomService = await getRoomService();
+        const sdk = (await (0, livekit_1.getLiveKitSdk)());
+        const TrackType = sdk.TrackType;
+        const TrackSource = sdk.TrackSource;
+        const participant = await roomService.getParticipant(room, identity);
+        const audioTrack = participant.tracks?.find((t) => {
+            const isAudioType = t.type === TrackType.AUDIO;
+            const isMicSource = t.source === TrackSource.MICROPHONE;
+            return isAudioType || isMicSource;
+        });
+        if (!audioTrack) {
+            console.warn("No audio track found for", { room, identity });
+            return res.status(404).json({ error: "no audio track found" });
+        }
+        await roomService.mutePublishedTrack(room, identity, audioTrack.sid, muted);
+        return res.json({
+            ok: true,
+            muted,
+            trackSid: audioTrack.sid,
+            identity,
+        });
+    }
+    catch (e) {
+        console.error("mute error", e);
+        const msg = typeof e?.message === "string"
+            ? e.message
+            : typeof e?.toString === "function"
+                ? e.toString()
+                : "mute_error";
+        return res.status(500).json({ error: msg });
+    }
+});
+// Mute/unmute ALL participants' audio
+app.post("/api/roomModeration/mute-all", requireAuth_1.requireAuth, async (req, res) => {
+    try {
+        const { room, muted } = req.body;
+        if (!room || typeof muted !== "boolean") {
+            return res.status(400).json({ error: "room and muted are required" });
+        }
+        console.log("ADMIN MUTE-ALL", { room, muted });
+        const roomService = await getRoomService();
+        const sdk = (await (0, livekit_1.getLiveKitSdk)());
+        const TrackType = sdk.TrackType;
+        const TrackSource = sdk.TrackSource;
+        const participants = await roomService.listParticipants(room);
+        const results = [];
+        for (const p of participants) {
+            const audioTrack = p.tracks?.find((t) => {
+                const isAudioType = t.type === TrackType.AUDIO;
+                const isMicSource = t.source === TrackSource.MICROPHONE;
+                return isAudioType || isMicSource;
+            });
+            if (!audioTrack) {
+                results.push({ identity: p.identity, trackSid: null, changed: false });
+                continue;
+            }
+            await roomService.mutePublishedTrack(room, p.identity, audioTrack.sid, muted);
+            results.push({ identity: p.identity, trackSid: audioTrack.sid, changed: true });
+        }
+        return res.json({ ok: true, muted, results });
+    }
+    catch (e) {
+        console.error("mute-all error", e);
+        const msg = typeof e?.message === "string"
+            ? e.message
+            : typeof e?.toString === "function"
+                ? e.toString()
+                : "mute_all_error";
+        return res.status(500).json({ error: msg });
+    }
+});
+// Room-level mute lock flag (in-memory) + LiveKit permissions update
+app.post("/api/roomModeration/mute-lock", requireAuth_1.requireAuth, async (req, res) => {
+    try {
+        const { room, muteLock, hostIdentity } = req.body;
+        if (!room || typeof muteLock !== "boolean") {
+            return res.status(400).json({ error: "room and muteLock are required" });
+        }
+        roomMuteLocks.set(room, muteLock);
+        console.log("ROOM MODERATION MUTE-LOCK", { room, muteLock, hostIdentity });
+        // Update LiveKit participant permissions so guests can't re-enable mic
+        try {
+            const roomService = await getRoomService();
+            const sdk = (await (0, livekit_1.getLiveKitSdk)());
+            const TrackSource = sdk.TrackSource;
+            const participants = await roomService.listParticipants(room);
+            for (const p of participants) {
+                if (hostIdentity && p.identity === hostIdentity)
+                    continue; // never restrict host
+                const currentPerms = p.permission || {};
+                const currentSources = currentPerms.canPublishSources || [];
+                if (muteLock) {
+                    // Remove audio-related publish sources (mic + screen share audio)
+                    const blocked = new Set([TrackSource.MICROPHONE, TrackSource.SCREEN_SHARE_AUDIO]);
+                    const nextSources = currentSources.filter((s) => !blocked.has(s));
+                    await roomService.updateParticipant(room, p.identity, {
+                        permission: {
+                            ...currentPerms,
+                            canPublishSources: nextSources,
+                        },
+                    });
+                }
+                else {
+                    // Restore audio publish ability while preserving any existing sources
+                    const toEnsure = [TrackSource.MICROPHONE, TrackSource.SCREEN_SHARE_AUDIO];
+                    const merged = Array.from(new Set([...currentSources, ...toEnsure]));
+                    await roomService.updateParticipant(room, p.identity, {
+                        permission: {
+                            ...currentPerms,
+                            canPublishSources: merged,
+                        },
+                    });
+                }
+            }
+        }
+        catch (permErr) {
+            // Don't fail the whole request if permissions update has issues; just log
+            console.error("mute-lock permissions update error", permErr);
+        }
+        return res.json({ ok: true, muteLock });
+    }
+    catch (e) {
+        console.error("mute-lock error", e);
+        const msg = typeof e?.message === "string"
+            ? e.message
+            : typeof e?.toString === "function"
+                ? e.toString()
+                : "mute_lock_error";
+        return res.status(500).json({ error: msg });
+    }
+});
+// Public room settings (currently only muteLock)
+app.get("/api/roomSettings/:room", (req, res) => {
+    const roomParam = String(req.params.room || "").trim();
+    if (!roomParam) {
+        return res.status(400).json({ error: "room is required" });
+    }
+    const muteLock = !!roomMuteLocks.get(roomParam);
+    return res.json({ muteLock });
+});
 // Remove/kick a participant
-app.post("/api/admin/remove", async (req, res) => {
+app.post("/api/roomModeration/remove", requireAuth_1.requireAuth, async (req, res) => {
     try {
         const { room, identity } = req.body;
         if (!room || !identity) {
