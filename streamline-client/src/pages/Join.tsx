@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useSearchParams,} from "react-router-dom";
@@ -6,10 +7,10 @@ import { useNavigate, useSearchParams,} from "react-router-dom";
 
 type UsageData = {
   streamingMinutes: number;
-  maxStreamingMinutes: 500;
+  maxStreamingMinutes: number;
   storageUsed: number;
-  maxStorage: 10;
-  planId: string;
+  maxStorage: number;
+  planId: PlanId;
 };
 
 export default function Join() {
@@ -96,12 +97,20 @@ useEffect(() => {
   .then((data) => {
     if (!didCancel) {
       const um = data?.usageMonthly || {};
+      // Canonicalize plan id
+      let planIdRaw = data?.plan?.id ?? data?.user?.planId ?? "free";
+      let canonicalPlanId: PlanId = "free";
+      if (planIdRaw === "starter_paid" || planIdRaw === "starter_trial") {
+        canonicalPlanId = "starter";
+      } else if (isPlanId(planIdRaw)) {
+        canonicalPlanId = planIdRaw;
+      }
       setUsageData({
-        streamingMinutes: um?.participantMinutes ?? um?.usage?.participantMinutes ?? 0,
+        streamingMinutes: um?.participantMinutes ?? um?.usage?.participantMinutes ?? Math.max(0, Math.round((data?.user?.usage?.hoursStreamedThisMonth || 0) * 60)),
         maxStreamingMinutes: data?.plan?.limits?.participantMinutes ?? 0,
         storageUsed: um?.storageGB ?? um?.usage?.storageGB ?? 0,
         maxStorage: data?.plan?.limits?.storageGB ?? 0,
-        planId: data?.plan?.id ?? data?.user?.planId ?? "free",
+        planId: canonicalPlanId,
       });
       setUsageLoading(false);
     }
@@ -526,10 +535,10 @@ useEffect(() => {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              Create or Join Room
+              Join Room
             </h1>
             <p style={{ fontSize: "16px", color: "#9ca3af" }}>
-              Start streaming in seconds
+              Once you enter the room, click the camera and mic icons.
             </p>
           </div>
         )}

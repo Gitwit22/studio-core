@@ -21,6 +21,7 @@ import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
 import type { RoomServiceClient } from "livekit-server-sdk";
+import { getCurrentMonthKey } from "./lib/usageTracker";
 import admin from "firebase-admin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -38,11 +39,24 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 const app = express();
 
+// Allow primary client plus local dev hosts for testing/incognito shares
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  process.env.CLIENT_URL_2,
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+].filter(Boolean) as string[];
+
 
 
 app.use(cors({
-  origin: process.env.CLIENT_URL,   // exact frontend URL
-  credentials: true,                // 🔥 REQUIRED for cookies
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
+  },
+  credentials: true,
   methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
   allowedHeaders: ["Content-Type","Authorization","Cache-Control"],
 }));
@@ -359,12 +373,6 @@ app.post("/api/roomModeration/remove", requireAuth, async (req, res) => {
 // =============================================================================
 // AUTH ENDPOINTS
 // =============================================================================
-
-// Helper function to generate month key (YYYY-MM)
-function getCurrentMonthKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
 
 // Helper function to calculate next reset date based on signup date
 function calculateNextResetDate(createdAt: Date): Date {
@@ -684,14 +692,32 @@ app.get("/api/usage/summary", async (req, res) => {
 
 app.post("/api/usage/streamEnded", async (req, res) => {
   try {
-    const { uid, minutes, guestCount } = req.body as {
+    const authedUid = (req as any).user?.uid as string | undefined;
+    const { uid: bodyUid, minutes, guestCount } = req.body as {
       uid?: string;
       minutes?: number;
       guestCount?: number;
+      transcodeMinutes?: number;
     };
 
+    const uid = bodyUid || authedUid;
     if (!uid) {
       return res.status(400).json({ error: "uid required" });
+    }
+
+    console.log("[usage] streamEnded start", {
+      authedUid,
+      bodyUid,
+      uid,
+      minutes,
+      guestCount,
+      transcodeMinutes: (req.body as any)?.transcodeMinutes,
+    });
+
+    const participantMinutes = Math.max(1, Math.round(Number(minutes || 0)));
+    const transcodeMinutes = Math.max(0, Math.round(Number((req.body as any)?.transcodeMinutes || 0)));
+    if (!participantMinutes) {
+      return res.status(400).json({ error: "minutes required" });
     }
 
     const userRef = db.collection("users").doc(uid);
@@ -705,8 +731,15 @@ app.post("/api/usage/streamEnded", async (req, res) => {
     const usage = (userData.usage || {}) as any;
     const now = new Date();
 
-    const durationMinutes = Math.max(1, minutes || 0);
+    const durationMinutes = participantMinutes;
     const durationHours = durationMinutes / 60;
+
+    console.log("[usage] calculated durations", {
+      uid,
+      participantMinutes,
+      transcodeMinutes,
+      durationHours,
+    });
 
     // Handle monthly reset
     const resetDate: Date | null =
@@ -736,6 +769,14 @@ app.post("/api/usage/streamEnded", async (req, res) => {
     const ytdHours = (usage.ytdHours || 0) + durationHours;
     const guestCountToday = (usage.guestCountToday || 0) + (guestCount || 0);
 
+    console.log("[usage] updating legacy usage", {
+      uid,
+      hoursStreamedToday,
+      hoursStreamedThisMonth,
+      ytdHours,
+      guestCountToday,
+    });
+
     await userRef.update({
       "usage.hoursStreamedToday": hoursStreamedToday,
       "usage.hoursStreamedThisMonth": hoursStreamedThisMonth,
@@ -744,14 +785,60 @@ app.post("/api/usage/streamEnded", async (req, res) => {
       "usage.lastUsageUpdate": now,
     });
 
+    // Also track canonical usageMonthly participant/transcode minutes
+    const monthKey = getCurrentMonthKey();
+    const usageDocId = `${uid}_${monthKey}`;
+    const usageRef = db.collection("usageMonthly").doc(usageDocId);
+    const usageSnap = await usageRef.get();
+    const existing = usageSnap.exists ? (usageSnap.data() as any) : {};
+
+    const prevUsage = existing.usage || {};
+    const prevYtd = existing.ytd || {};
+
+    const nextUsage = {
+      participantMinutes: Number(prevUsage.participantMinutes || 0) + durationMinutes,
+      transcodeMinutes: Number(prevUsage.transcodeMinutes || 0) + transcodeMinutes,
+    };
+
+    const nextYtd = {
+      participantMinutes: Number(prevYtd.participantMinutes || 0) + durationMinutes,
+      transcodeMinutes: Number(prevYtd.transcodeMinutes || 0) + transcodeMinutes,
+    };
+
+    await usageRef.set(
+      {
+        uid,
+        monthKey,
+        usage: nextUsage,
+        ytd: nextYtd,
+        createdAt: existing.createdAt || new Date(),
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    console.log("[usage] updated usageMonthly", {
+      uid,
+      monthKey,
+      usageDocId,
+      nextUsage,
+      nextYtd,
+    });
+
     return res.json({
       ok: true,
       durationHours,
       hoursStreamedThisMonth,
       ytdHours,
+      usageMonthly: {
+        id: usageDocId,
+        usage: nextUsage,
+        ytd: nextYtd,
+        monthKey,
+      },
     });
   } catch (err) {
-    console.error("streamEnded error", err);
+    console.error("[usage] streamEnded error", err);
     return res.status(500).json({ error: "internal error" });
   }
 });

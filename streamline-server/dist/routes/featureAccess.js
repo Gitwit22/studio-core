@@ -9,8 +9,23 @@ const BAD_BILLING_STATUSES = new Set([
     "incomplete_expired",
     "canceled",
 ]);
+// List of paid plans (update as needed, or drive from plan config)
+const PAID_PLANS = [
+    "starter",
+    "pro",
+    "basic",
+    "enterprise",
+    // Add any other paid plans here
+];
 function isPaidPlan(planId) {
-    return planId === "starter" || planId === "pro" || planId === "internal_unlimited";
+    if (!planId)
+        return false;
+    // Accept legacy or variant ids (e.g., "starter_paid")
+    let canonical = String(planId).toLowerCase();
+    if (canonical.endsWith("_paid") || canonical.endsWith("_trial")) {
+        canonical = canonical.replace(/_(paid|trial)$/i, "");
+    }
+    return PAID_PLANS.includes(canonical) || canonical === "internal_unlimited";
 }
 function billingBlocks(user) {
     const planId = user?.planId;

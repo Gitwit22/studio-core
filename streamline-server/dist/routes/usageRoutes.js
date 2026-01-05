@@ -49,16 +49,28 @@ async function handleUsageSummary(req, res) {
         const usageRef = firebaseAdmin_1.firestore.collection("usageMonthly").doc(usageDocId);
         const usageSnap = await usageRef.get();
         // If missing, do NOT fail—return a zeroed shape so the UI is stable.
-        const usageMonthly = usageSnap.exists
-            ? usageSnap.data()
-            : {
+        const legacyUsage = userData.usage || {};
+        const legacyHours = Number(legacyUsage.hoursStreamedThisMonth || 0);
+        const legacyParticipantMinutes = Math.max(0, Math.round(legacyHours * 60));
+        let usageMonthly;
+        if (usageSnap.exists) {
+            usageMonthly = usageSnap.data();
+        }
+        else {
+            usageMonthly = {
                 uid,
                 monthKey,
-                usage: { participantMinutes: 0, transcodeMinutes: 0 },
-                ytd: { participantMinutes: 0, transcodeMinutes: 0 },
+                usage: { participantMinutes: legacyParticipantMinutes, transcodeMinutes: 0 },
+                ytd: {
+                    participantMinutes: Math.max(0, Math.round(Number(legacyUsage.ytdHours || 0) * 60)),
+                    transcodeMinutes: 0,
+                },
                 createdAt: firestore_1.Timestamp.now(),
                 updatedAt: firestore_1.Timestamp.now(),
             };
+            // Persist seeded doc so subsequent calls don't lose legacy hours
+            await usageRef.set(usageMonthly, { merge: true });
+        }
         const usage = usageMonthly.usage || {};
         const ytd = usageMonthly.ytd || {};
         const participantUsed = Number(usage.participantMinutes || 0);
@@ -76,6 +88,8 @@ async function handleUsageSummary(req, res) {
             uid,
             monthKey,
             resetDate: resetDateISO,
+            participantMinutes: participantUsed,
+            transcodeMinutes: transcodeUsed,
             user: {
                 planId,
                 overagesEnabled,

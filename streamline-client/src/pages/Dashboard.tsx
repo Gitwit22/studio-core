@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { useNavigate } from "react-router-dom";
 import { editingApi } from "../lib/editingApi";
 import { DashboardAVControls } from "../components/DashboardAVControls";
@@ -32,6 +33,13 @@ export default function Dashboard() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [user, setUser] = useState<any>(null);
+  // Canonical plan id for display
+  function canonicalPlanId(planId: string | undefined): PlanId {
+    if (!planId) return "free";
+    if (planId === "starter_paid" || planId === "starter_trial") return "starter";
+    if (isPlanId(planId)) return planId;
+    return "free";
+  }
   const [totalViewers, setTotalViewers] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
 
@@ -133,7 +141,7 @@ export default function Dashboard() {
               Welcome back, {user?.displayName || "Streamer"}! 👋
             </h1>
             <p style={{ fontSize: '14px', color: '#6b7280' }}>
-              {user?.planId?.toUpperCase() || "FREE"} Plan
+              {canonicalPlanId(user?.planId).toUpperCase()} Plan
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

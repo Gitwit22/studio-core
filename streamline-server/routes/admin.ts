@@ -8,7 +8,9 @@ import express from "express";
 
 import { firestore } from "../firebaseAdmin";
 import { requireAdmin, logAdminAction } from "../middleware/adminAuth";
-import type { PlanId, UserUsageSummary } from "../types/admin.types";
+
+import type { UserUsageSummary } from "../types/admin.types";
+import { PLAN_IDS, PlanId, isPlanId, getAllPlanIds } from "../types/plan";
 
 const router = express.Router();
 
@@ -27,9 +29,9 @@ router.get('/me', (req, res) => {
 
 
 router.get("/plans", async (req, res) => {
-  console.log("🎯 1. Plans route handler started");
+  console.log("🎯 1. Plans route handler started (admin, all plans)");
   try {
-    console.log("🎯 2. About to query Firestore");
+    console.log("🎯 2. About to query Firestore for ALL plans");
     const snap = await firestore.collection("plans").get();
     console.log("🎯 3. Firestore returned, docs count:", snap.size);
 
@@ -38,7 +40,7 @@ router.get("/plans", async (req, res) => {
       ...(d.data() as any),
     }));
 
-    console.log("🎯 4. Mapped plans:", JSON.stringify(plans));
+    console.log("🎯 4. Mapped all plans:", JSON.stringify(plans));
     return res.json({ plans });
   } catch (err: any) {
     console.error("🎯 ERROR in plans route:", err);
@@ -410,7 +412,9 @@ router.get("/usage", async (req, res) => {
       const userData = doc.data();
       const userId = doc.id;
       const minutesUsed = usageByUser[userId] || 0;
-      const planId = userData.planId || "free";
+      const planIdRaw = userData.planId || "free";
+      // Canonicalize planId using isPlanId
+      const planId: PlanId | string = isPlanId(planIdRaw) ? planIdRaw : planIdRaw;
       const planData = plansMap[planId] || {};
       const planLimit = planData.limits?.monthlyMinutesIncluded ?? 60;
       const bonusMinutes = userData.bonusMinutes || 0;
@@ -459,12 +463,10 @@ router.get("/stats", async (req, res) => {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
     let totalUsers = 0;
-    let usersByPlan: Record<PlanId, number> = {
-      free: 0,
-      starter: 0,
-      pro: 0,
-      enterprise: 0,
-    };
+    let usersByPlan: Record<string, number> = {};
+    for (const plan of PLAN_IDS) {
+      usersByPlan[plan] = 0;
+    }
     let activeToday = 0;
     let activeThisWeek = 0;
     let activeThisMonth = 0;
@@ -473,8 +475,13 @@ router.get("/stats", async (req, res) => {
       const data = doc.data();
       totalUsers++;
       
-      const plan = (data.planId || "free") as PlanId;
-      usersByPlan[plan]++;
+      const plan = (data.planId || "free");
+      if (isPlanId(plan)) {
+        usersByPlan[plan]++;
+      } else {
+        // Track unknown plans if needed
+        usersByPlan[plan] = (usersByPlan[plan] || 0) + 1;
+      }
 
       const lastActive = data.lastActive?.toDate();
       if (lastActive) {

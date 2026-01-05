@@ -218,7 +218,7 @@ function HostPanel({ roomName }: { roomName: string }) {
         <ParticipantList
           participants={parts}
           onRemove={(id) => apiRemove(roomName, id)}
-          onMute={(id) => apiMute(roomName, id, true)}
+          onMute={(id, muted) => apiMute(roomName, id, muted)}
           canModerate
           muteLock={muteLock}
         />
@@ -308,8 +308,8 @@ function ModeratorPanel({ roomName }: { roomName: string }) {
       <Section title="Live Participants">
         <ParticipantList
           participants={parts}
-          
           onRemove={(id) => apiRemove(roomName, id)}
+          onMute={(id, muted) => apiMute(roomName, id, muted)}
           canModerate
         />
       </Section>
@@ -362,7 +362,7 @@ function ParticipantList({
   participants: ReturnType<typeof useParticipants>;
   canModerate?: boolean;
   onRemove?: (identity: string) => void;
-  onMute?: (identity: string) => void;
+  onMute?: (identity: string, muted: boolean) => void;
   muteLock?: boolean;
 }) {
   if (!participants?.length) {
@@ -393,6 +393,12 @@ function ParticipantList({
           </div>
           {canModerate && (
             <div style={{ display: 'flex', gap: '0.25rem' }}>
+              {(() => {
+                const micEnabled = (p as any).isMicrophoneEnabled as boolean | undefined;
+                const isMuted = micEnabled === false;
+                const nextMuted = !isMuted; // true to mute, false to unmute
+
+                return (
               <button
                 style={{
                   borderRadius: '0.25rem',
@@ -407,10 +413,15 @@ function ParticipantList({
                   opacity: muteLock ? 0.6 : 1
                 }}
                 disabled={muteLock}
-                onClick={() => onMute?.(p.identity)}
+                onClick={() => {
+                  if (muteLock) return;
+                  onMute?.(p.identity, nextMuted);
+                }}
               >
-                Mute
+                {isMuted ? 'Unmute' : 'Mute'}
               </button>
+                );
+              })()}
               <button
                 style={{
                   borderRadius: '0.25rem',

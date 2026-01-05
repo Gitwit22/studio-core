@@ -239,18 +239,25 @@ router.post("/livekit", express_1.default.raw({ type: "*/*" }), async (req, res)
         const hashedToken = crypto_1.default.createHash("sha256").update(rawToken).digest("hex");
         const egressStatus = String(egressInfo?.status || "").toUpperCase();
         let finalStatus = "PROCESSING";
+        const now = new Date();
         if (egressStatus === "COMPLETE" && objectKey)
             finalStatus = "READY";
         else if (!objectKey)
             finalStatus = "FAILED";
-        await ref.set({
+        const updates = {
             objectKey: objectKey ?? null,
             oneTimeToken: hashedToken,
             status: finalStatus,
-            updatedAt: new Date(),
-            endedAt: new Date(),
+            updatedAt: now,
+            endedAt: now,
             livekitStatus: egressStatus,
-        }, { merge: true });
+        };
+        if (finalStatus === "READY") {
+            updates.downloadReady = true;
+            updates.readyAt = now;
+            updates.downloadPath = objectKey ?? null;
+        }
+        await ref.set(updates, { merge: true });
         return res.status(200).json({ ok: true, testDownloadUrl: `/api/recordings/${recordingId}/download?token=${rawToken}` });
     }
     catch (err) {

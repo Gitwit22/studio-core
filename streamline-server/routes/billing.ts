@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { stripe } from "../lib/stripe";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
+import { PLAN_IDS, PlanId, isPlanId } from "../types/plan";
 
 function getUserRef(uid: string) {
   return db.collection("users").doc(uid);
@@ -10,24 +11,33 @@ function getUserRef(uid: string) {
 
 const router = Router();
 
-/**
- * Canonical Stripe price lookup:
- * - We keep ONE Starter price and ONE Pro price
- * - Trial is applied conditionally via subscription_data.trial_period_days
- */
-function priceIdFor(plan: "starter" | "pro") {
+
+// Canonical Stripe price lookup for any plan
+function priceIdFor(plan: PlanId, planMeta?: any) {
   if (plan === "starter") {
     const id = process.env.STRIPE_PRICE_STARTER;
     if (!id) throw new Error("Missing STRIPE_PRICE_STARTER");
     return id;
   }
-
-  const id = process.env.STRIPE_PRICE_PRO;
-  if (!id) throw new Error("Missing STRIPE_PRICE_PRO");
-  return id;
+  if (plan === "pro") {
+    const id = process.env.STRIPE_PRICE_PRO;
+    if (!id) throw new Error("Missing STRIPE_PRICE_PRO");
+    return id;
+  }
+  if (plan === "basic") {
+    const id = process.env.STRIPE_PRICE_BASIC;
+    if (!id) throw new Error("Missing STRIPE_PRICE_BASIC");
+    return id;
+  }
+  // For new plans, expect a stripePriceId in Firestore plan doc
+  if (planMeta && typeof planMeta.stripePriceId === "string" && planMeta.stripePriceId.trim().length > 0) {
+    return planMeta.stripePriceId;
+  }
+  throw new Error(`No Stripe price configured for plan: ${plan}`);
 }
 
-type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro";
+// Accept any PlanId + variant for checkout
+type CheckoutPlanVariant = `${PlanId}_paid` | `${PlanId}_trial` | PlanId;
 
 router.post("/checkout", requireAuth, async (req, res) => {
   try {
@@ -35,8 +45,24 @@ router.post("/checkout", requireAuth, async (req, res) => {
     if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
 
     const { plan } = (req.body || {}) as { plan?: CheckoutPlanVariant };
+    if (!plan || typeof plan !== "string") {
+      return res.status(400).json({ success: false, error: "Missing plan" });
+    }
 
-    if (plan !== "starter_trial" && plan !== "starter_paid" && plan !== "pro") {
+    // Parse canonical plan id from variant
+    let canonicalPlan: PlanId | undefined;
+    let variant: string = "";
+    if (plan.endsWith("_trial")) {
+      canonicalPlan = plan.slice(0, -6) as PlanId;
+      variant = "trial";
+    } else if (plan.endsWith("_paid")) {
+      canonicalPlan = plan.slice(0, -5) as PlanId;
+      variant = "paid";
+    } else {
+      canonicalPlan = plan as PlanId;
+      variant = "paid";
+    }
+    if (!isPlanId(canonicalPlan)) {
       return res.status(400).json({ success: false, error: "Invalid plan" });
     }
 
@@ -53,11 +79,8 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const hasHadTrial = user?.billing?.hasHadTrial === true;
     const DEFAULT_TRIAL_DAYS = Number(process.env.STRIPE_STARTER_TRIAL_DAYS || "5");
 
-    // Canonical plan (what your app stores as planId/pendingPlan)
-    const canonicalPlan: "starter" | "pro" = plan === "pro" ? "pro" : "starter";
-
     // Trial logic: only when explicitly chosen AND not already used
-    const useTrial = plan === "starter_trial" && !hasHadTrial;
+    const useTrial = variant === "trial" && !hasHadTrial;
     const trialDays = useTrial ? DEFAULT_TRIAL_DAYS : 0;
 
     // Ensure Stripe customer exists
@@ -88,15 +111,21 @@ router.post("/checkout", requireAuth, async (req, res) => {
     // Set pendingPlan to canonical plan only
     await userRef.set({ pendingPlan: canonicalPlan }, { merge: true });
 
+    // Fetch plan metadata from Firestore for custom plans
+    let planMeta: any = {};
+    try {
+      const planSnap = await db.collection("plans").doc(canonicalPlan).get();
+      if (planSnap.exists) planMeta = planSnap.data();
+    } catch {}
+
     // Create Checkout Session
     const subscription_data: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
       metadata: {
         userId: uid,
-        plan: canonicalPlan,     // canonical
-        planVariant: plan,       // "starter_paid" | "starter_trial" | "pro"
+        plan: canonicalPlan,
+        planVariant: plan,
       },
       ...(useTrial ? { trial_period_days: trialDays } : {}),
-      // Optional safety: cancel if no payment method by trial end
       ...(useTrial
         ? { trial_settings: { end_behavior: { missing_payment_method: "cancel" } } }
         : {}),
@@ -105,7 +134,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
-      line_items: [{ price: priceIdFor(canonicalPlan), quantity: 1 }],
+      line_items: [{ price: priceIdFor(canonicalPlan, planMeta), quantity: 1 }],
 
       success_url: `${CLIENT_URL}/billing/success`,
       cancel_url: `${CLIENT_URL}/billing/canceled`,

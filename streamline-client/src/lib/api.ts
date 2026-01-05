@@ -25,6 +25,7 @@ export async function apiStartRecording(
   const res = await fetch(`${API_BASE}/api/recordings/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ roomName, layout }),
   });
   const text = await res.text();
@@ -41,6 +42,7 @@ export async function apiStopRecording(recordingId: string) {
   const res = await fetch(`${API_BASE}/api/recordings/stop`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ recordingId }),
   });
   if (!res.ok) throw new Error(await res.text());

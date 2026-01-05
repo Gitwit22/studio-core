@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate } from "react-router-dom";
 
@@ -126,7 +127,13 @@ export const SignupPage = () => {
       }
 
       // If onboarding was skipped, fall back to the existing plan/billing flow.
-      const selectedPlan = data.user.planId || "free";
+      let planIdRaw = data.user.planId || "free";
+      let selectedPlan: PlanId = "free";
+      if (planIdRaw === "starter_paid" || planIdRaw === "starter_trial") {
+        selectedPlan = "starter";
+      } else if (isPlanId(planIdRaw)) {
+        selectedPlan = planIdRaw;
+      }
       if (selectedPlan === "starter" || selectedPlan === "pro") {
         try {
           const billingRes = await fetch(`${API_BASE}/api/billing/checkout`, {
@@ -338,7 +345,7 @@ export const SignupPage = () => {
               Free Plan
             </div>
             <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
-              Perfect for getting started with StreamLine. You can upgrade anytime!
+              Perfect for getting started with StreamLine. You can upgrade anytime—just head to Settings → Billing when you're ready.
             </div>
           </div>
         </div>
@@ -377,6 +384,14 @@ export const SignupPage = () => {
               }}>
                 Step 2 – Streaming Defaults (optional)
               </h3>
+
+              <p style={{
+                fontSize: '0.875rem',
+                color: 'rgba(156, 163, 175, 0.85)',
+                marginBottom: '0.75rem'
+              }}>
+                Add your stream keys once here—they're saved for future streams, so you can go live faster next time.
+              </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <div>

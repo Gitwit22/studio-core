@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiStartRecording, apiStopRecording } from "../lib/api";
@@ -133,6 +134,8 @@ function StreamEndedModal({
 }) {
   const [processing, setProcessing] = useState(true);
   const [ready, setReady] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
   const MAX_POLLS = 100;
@@ -201,18 +204,52 @@ function StreamEndedModal({
   const handleDownload = async () => {
     try {
       const res = await fetch(`/api/recordings/${recordingId}/download-link`);
-      if (!res.ok) {
-        throw new Error("Failed to get download link");
+      if (res.status === 410) {
+        alert("This recording link expired. Use Settings → Usage → Emergency Download.");
+        return;
       }
+      if (res.status === 402) {
+        alert("Upgrade required to download this recording.");
+        return;
+      }
+      if (!res.ok) throw new Error("Failed to get download link");
+
       const data = await res.json();
-      if (!data?.success || !data?.data?.path) {
+      const url = data?.data?.url;
+      if (!data?.success || !url) {
         throw new Error(data?.error || "Invalid download link response");
       }
-      window.open(`${data.data.path}`, "_blank");
+
+      window.open(url, "_blank");
+      setConfirmMessage(null);
+      setShowConfirmModal(true);
     } catch (err) {
       console.error(err);
-      alert("Failed to download recording.");
+      alert("Failed to download recording. Use Settings → Usage → Emergency Download.");
     }
+  };
+
+  const handleConfirmYes = async () => {
+    try {
+      await fetch(`/api/recordings/${recordingId}/download-link?confirm=true`);
+      setConfirmMessage("Great — you're all set. Save the file somewhere safe.");
+    } catch (e) {
+      setConfirmMessage("Noted. Thanks for confirming.");
+    } finally {
+      setShowConfirmModal(false);
+    }
+  };
+
+  const handleConfirmNo = async () => {
+    try {
+      await fetch(`/api/recordings/${recordingId}/report-download-issue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "user_reported_issue" }),
+      });
+    } catch {}
+    setConfirmMessage("Use Settings → Usage → Emergency Download (Latest Recording) if you're having trouble.");
+    setShowConfirmModal(false);
   };
 
   return (
@@ -307,6 +344,21 @@ function StreamEndedModal({
           </button>
         </div>
       </div>
+      {showConfirmModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20 }}>
+          <div style={{ background: "#111", border: "1px solid #333", borderRadius: 12, padding: 20, width: 320 }}>
+            <h4 style={{ margin: 0, marginBottom: 10, color: "#fff" }}>Did your download start?</h4>
+            <p style={{ margin: 0, marginBottom: 16, color: "#d1d5db", fontSize: 14 }}>If not, you can retry via Emergency Download in Settings → Usage.</p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={handleConfirmNo} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #444", background: "#1f2937", color: "#fff", cursor: "pointer" }}>No</button>
+              <button onClick={handleConfirmYes} style={{ padding: "8px 12px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#dc2626,#ef4444)", color: "#fff", cursor: "pointer" }}>Yes</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmMessage && (
+        <div style={{ marginTop: 12, color: "#d1d5db", fontSize: 13 }}>{confirmMessage}</div>
+      )}
     </div>
   );
 }
@@ -364,10 +416,12 @@ export default function Room() {
   const [viewerCount] = useState<number>(0);
   const [elapsedTime, setElapsedTime] = useState(0);
   const streamStartTimeRef = useRef<number | null>(null);
+  const lastElapsedRef = useRef(0);
+  const usagePostedRef = useRef(false);
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);
-  const [showExitOptions, setShowExitOptions] = useState(false);
   const [canMultistream, setCanMultistream] = useState<boolean>(false);
-  const [userPlanId, setUserPlanId] = useState<string>("free");
+  // Canonical plan id state
+  const [userPlanId, setUserPlanId] = useState<PlanId>("free");
   const [destinations, setDestinations] = useState<DestinationItem[]>([]);
   const [destinationsLoading, setDestinationsLoading] = useState(false);
   const [destinationsReady, setDestinationsReady] = useState(false);
@@ -450,9 +504,16 @@ export default function Room() {
         const res = await fetch(`${API_BASE}/api/usage/me`, { credentials: 'include' });
         if (!res.ok) return;
         const data = await res.json();
-        const planId = data?.plan?.id || data?.user?.planId || 'free';
-        setUserPlanId(String(planId));
-        const allowed = !!(data?.plan?.features?.rtmpMultistream) || String(planId) === 'internal_unlimited';
+        // Canonicalize plan id
+        let planIdRaw = data?.plan?.id || data?.user?.planId || 'free';
+        let canonicalPlanId: PlanId = "free";
+        if (planIdRaw === "starter_paid" || planIdRaw === "starter_trial") {
+          canonicalPlanId = "starter";
+        } else if (isPlanId(planIdRaw)) {
+          canonicalPlanId = planIdRaw;
+        }
+        setUserPlanId(canonicalPlanId);
+        const allowed = !!(data?.plan?.features?.rtmpMultistream) || planIdRaw === 'internal_unlimited';
         setCanMultistream(allowed);
       } catch {}
     })();
@@ -463,10 +524,12 @@ export default function Room() {
       if (!streamStartTimeRef.current) {
         streamStartTimeRef.current = Date.now();
       }
+      usagePostedRef.current = false;
       const interval = setInterval(() => {
         if (streamStartTimeRef.current) {
           const elapsed = Math.floor((Date.now() - streamStartTimeRef.current) / 1000);
           setElapsedTime(elapsed);
+          lastElapsedRef.current = elapsed;
         }
       }, 1000);
       return () => clearInterval(interval);
@@ -539,8 +602,62 @@ export default function Room() {
     return items;
   }
 
+  const sendUsageOnExit = async () => {
+    if (usagePostedRef.current) {
+      console.log("[usage] skip post: already sent");
+      return;
+    }
+    const seconds = lastElapsedRef.current;
+    if (!seconds || seconds <= 0) {
+      console.log("[usage] skip post: no elapsed seconds", { seconds });
+      return;
+    }
+
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    usagePostedRef.current = true;
+
+    console.log("[usage] preparing post", { seconds, minutes });
+
+    const payload: Record<string, any> = { minutes };
+    try {
+      const raw = localStorage.getItem("sl_user");
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          const uid = parsed?.id || parsed?.uid;
+          if (uid) payload.uid = uid;
+        } catch {}
+      }
+      if (!payload.uid) {
+        payload.uid = getOrCreateUid();
+      }
+    } catch {
+      payload.uid = getOrCreateUid();
+    }
+
+    console.log("[usage] sending streamEnded", payload);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/usage/streamEnded`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text();
+      console.log("[usage] streamEnded response", { status: res.status, body: text });
+    } catch (e) {
+      console.error("Failed to post usage", e);
+    }
+  };
+
   const handleLeftRoom = () => {
-    setShowGoodbye(true);
+    sendUsageOnExit();
+    if (isHost) {
+      nav('/join', { replace: true });
+    } else {
+      setShowGoodbye(true);
+    }
   };
 
   const handleHomeClick = () => {
@@ -611,33 +728,16 @@ export default function Room() {
       alert("⏹️ Recording is still active. Stop the stream first.");
       return;
     }
-    if (isHost && didStreamThisSession) {
-      setShowExitOptions(true);
-      return;
-    }
+    // At this point stream/recording are stopped. Post usage then exit.
+    sendUsageOnExit();
     if (isHost) {
-      console.log('👋 User never streamed - showing goodbye');
+      nav('/join', { replace: true });
+    } else {
       setShowGoodbye(true);
-      return;
     }
-    handleLeftRoom();
-  };
-
-  const handleStayAndRecord = () => {
-    setRecordingId(null);
-    setRecordingStatus("idle");
-    recordingRef.current = null;
-    setShowExitOptions(false);
-    console.log('🎬 Ready to record another session');
-  };
-
-  const handleViewSummary = () => {
-    setShowExitOptions(false);
-    nav('/thanks', { replace: true });
   };
 
   const handleLeaveRoom = () => {
-    setShowExitOptions(false);
     handleLeftRoom();
   };
 
@@ -916,115 +1016,6 @@ export default function Room() {
     return <ThankYouScreen showHomeButton={isHost} onHome={handleHomeClick} />;
   }
 
-  if (showExitOptions) {
-    return (
-      <div style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0, 0, 0, 0.8)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 50,
-        backdropFilter: 'blur(5px)'
-      }}>
-        <div style={{
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%)',
-          borderRadius: '1.5rem',
-          padding: '2.5rem',
-          width: '100%',
-          maxWidth: '500px',
-          border: '1px solid rgba(220, 38, 38, 0.3)',
-          backdropFilter: 'blur(20px)',
-          boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5)'
-        }}>
-          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎬</div>
-            <h2 style={{
-              fontSize: '1.75rem',
-              fontWeight: '700',
-              color: '#ffffff',
-              marginBottom: '0.5rem',
-              background: 'linear-gradient(to right, #ffffff, #fecaca)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent'
-            }}>
-              Recording Complete!
-            </h2>
-            <p style={{ fontSize: '0.95rem', color: '#9ca3af', marginTop: '0.75rem' }}>
-              What would you like to do next?
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <button
-              onClick={handleStayAndRecord}
-              style={{
-                padding: '1.25rem',
-                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%)',
-                border: '2px solid rgba(34, 197, 94, 0.5)',
-                borderRadius: '0.75rem',
-                color: '#10b981',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                fontSize: '1rem',
-                fontWeight: '600',
-                textAlign: 'left'
-              }}
-            >
-              <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>🎯 Stay & Record Another</div>
-              <div style={{ fontSize: '0.85rem', color: '#6ee7b7', opacity: 0.9 }}>
-                Perfect for multiple episodes, series, or batch recording
-              </div>
-            </button>
-
-            <button
-              onClick={handleViewSummary}
-              style={{
-                padding: '1.25rem',
-                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%)',
-                border: '2px solid rgba(59, 130, 246, 0.5)',
-                borderRadius: '0.75rem',
-                color: '#3b82f6',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                fontSize: '1rem',
-                fontWeight: '600',
-                textAlign: 'left'
-              }}
-            >
-              <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>📊 View Summary & Edit</div>
-              <div style={{ fontSize: '0.85rem', color: '#60a5fa', opacity: 0.9 }}>
-                See stats and edit your recording in the timeline editor
-              </div>
-            </button>
-
-            <button
-              onClick={handleLeaveRoom}
-              style={{
-                padding: '1.25rem',
-                background: 'rgba(107, 114, 128, 0.15)',
-                border: '2px solid rgba(107, 114, 128, 0.5)',
-                borderRadius: '0.75rem',
-                color: '#d1d5db',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                fontSize: '1rem',
-                fontWeight: '600',
-                textAlign: 'left'
-              }}
-            >
-              <div style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>🚪 Leave Room</div>
-              <div style={{ fontSize: '0.85rem', color: '#9ca3af', opacity: 0.9 }}>
-                Exit without viewing summary or recording another
-              </div>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
       {recordingStatus === "recording" && (
@@ -1224,4 +1215,4 @@ export default function Room() {
       `}</style>
     </>
   );
-}
+};

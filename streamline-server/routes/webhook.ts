@@ -283,20 +283,26 @@ router.post("/livekit", express.raw({ type: "*/*" }), async (req, res) => {
 
     const egressStatus = String(egressInfo?.status || "").toUpperCase();
     let finalStatus = "PROCESSING";
+    const now = new Date();
     if (egressStatus === "COMPLETE" && objectKey) finalStatus = "READY";
     else if (!objectKey) finalStatus = "FAILED";
 
-    await ref.set(
-      {
-        objectKey: objectKey ?? null,
-        oneTimeToken: hashedToken,
-        status: finalStatus,
-        updatedAt: new Date(),
-        endedAt: new Date(),
-        livekitStatus: egressStatus,
-      },
-      { merge: true }
-    );
+    const updates: any = {
+      objectKey: objectKey ?? null,
+      oneTimeToken: hashedToken,
+      status: finalStatus,
+      updatedAt: now,
+      endedAt: now,
+      livekitStatus: egressStatus,
+    };
+
+    if (finalStatus === "READY") {
+      updates.downloadReady = true;
+      updates.readyAt = now;
+      updates.downloadPath = objectKey ?? null;
+    }
+
+    await ref.set(updates, { merge: true });
 
     return res.status(200).json({ ok: true, testDownloadUrl: `/api/recordings/${recordingId}/download?token=${rawToken}` });
   } catch (err: any) {

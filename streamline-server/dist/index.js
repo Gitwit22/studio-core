@@ -23,6 +23,7 @@ const live_1 = __importDefault(require("./routes/live"));
 const stats_1 = __importDefault(require("./routes/stats"));
 const firebaseAdmin_1 = require("./firebaseAdmin");
 const livekit_1 = require("./lib/livekit"); // adjust path
+const usageTracker_1 = require("./lib/usageTracker");
 const firebase_admin_1 = __importDefault(require("firebase-admin"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
@@ -282,11 +283,6 @@ app.post("/api/roomModeration/remove", requireAuth_1.requireAuth, async (req, re
 // =============================================================================
 // AUTH ENDPOINTS
 // =============================================================================
-// Helper function to generate month key (YYYY-MM)
-function getCurrentMonthKey() {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
 // Helper function to calculate next reset date based on signup date
 function calculateNextResetDate(createdAt) {
     const now = new Date();
@@ -320,7 +316,7 @@ app.post("/api/auth/signup", async (req, res) => {
         }
         const passwordHash = await bcryptjs_1.default.hash(password, 10);
         const now = new Date();
-        const monthKey = getCurrentMonthKey();
+        const monthKey = (0, usageTracker_1.getCurrentMonthKey)();
         // =============================================================================
         // CREATE USER DOCUMENT WITH COMPLETE STRUCTURE
         // =============================================================================
@@ -532,9 +528,24 @@ app.get("/api/usage/summary", async (req, res) => {
 });
 app.post("/api/usage/streamEnded", async (req, res) => {
     try {
-        const { uid, minutes, guestCount } = req.body;
+        const authedUid = req.user?.uid;
+        const { uid: bodyUid, minutes, guestCount } = req.body;
+        const uid = bodyUid || authedUid;
         if (!uid) {
             return res.status(400).json({ error: "uid required" });
+        }
+        console.log("[usage] streamEnded start", {
+            authedUid,
+            bodyUid,
+            uid,
+            minutes,
+            guestCount,
+            transcodeMinutes: req.body?.transcodeMinutes,
+        });
+        const participantMinutes = Math.max(1, Math.round(Number(minutes || 0)));
+        const transcodeMinutes = Math.max(0, Math.round(Number(req.body?.transcodeMinutes || 0)));
+        if (!participantMinutes) {
+            return res.status(400).json({ error: "minutes required" });
         }
         const userRef = firebaseAdmin_1.firestore.collection("users").doc(uid);
         const userSnap = await userRef.get();
@@ -544,8 +555,14 @@ app.post("/api/usage/streamEnded", async (req, res) => {
         const userData = userSnap.data() || {};
         const usage = (userData.usage || {});
         const now = new Date();
-        const durationMinutes = Math.max(1, minutes || 0);
+        const durationMinutes = participantMinutes;
         const durationHours = durationMinutes / 60;
+        console.log("[usage] calculated durations", {
+            uid,
+            participantMinutes,
+            transcodeMinutes,
+            durationHours,
+        });
         // Handle monthly reset
         const resetDate = usage.resetDate && usage.resetDate.toDate
             ? usage.resetDate.toDate()
@@ -566,6 +583,13 @@ app.post("/api/usage/streamEnded", async (req, res) => {
         const hoursStreamedThisMonth = (usage.hoursStreamedThisMonth || 0) + durationHours;
         const ytdHours = (usage.ytdHours || 0) + durationHours;
         const guestCountToday = (usage.guestCountToday || 0) + (guestCount || 0);
+        console.log("[usage] updating legacy usage", {
+            uid,
+            hoursStreamedToday,
+            hoursStreamedThisMonth,
+            ytdHours,
+            guestCountToday,
+        });
         await userRef.update({
             "usage.hoursStreamedToday": hoursStreamedToday,
             "usage.hoursStreamedThisMonth": hoursStreamedThisMonth,
@@ -573,15 +597,52 @@ app.post("/api/usage/streamEnded", async (req, res) => {
             "usage.guestCountToday": guestCountToday,
             "usage.lastUsageUpdate": now,
         });
+        // Also track canonical usageMonthly participant/transcode minutes
+        const monthKey = (0, usageTracker_1.getCurrentMonthKey)();
+        const usageDocId = `${uid}_${monthKey}`;
+        const usageRef = firebaseAdmin_1.firestore.collection("usageMonthly").doc(usageDocId);
+        const usageSnap = await usageRef.get();
+        const existing = usageSnap.exists ? usageSnap.data() : {};
+        const prevUsage = existing.usage || {};
+        const prevYtd = existing.ytd || {};
+        const nextUsage = {
+            participantMinutes: Number(prevUsage.participantMinutes || 0) + durationMinutes,
+            transcodeMinutes: Number(prevUsage.transcodeMinutes || 0) + transcodeMinutes,
+        };
+        const nextYtd = {
+            participantMinutes: Number(prevYtd.participantMinutes || 0) + durationMinutes,
+            transcodeMinutes: Number(prevYtd.transcodeMinutes || 0) + transcodeMinutes,
+        };
+        await usageRef.set({
+            uid,
+            monthKey,
+            usage: nextUsage,
+            ytd: nextYtd,
+            createdAt: existing.createdAt || new Date(),
+            updatedAt: new Date(),
+        }, { merge: true });
+        console.log("[usage] updated usageMonthly", {
+            uid,
+            monthKey,
+            usageDocId,
+            nextUsage,
+            nextYtd,
+        });
         return res.json({
             ok: true,
             durationHours,
             hoursStreamedThisMonth,
             ytdHours,
+            usageMonthly: {
+                id: usageDocId,
+                usage: nextUsage,
+                ytd: nextYtd,
+                monthKey,
+            },
         });
     }
     catch (err) {
-        console.error("streamEnded error", err);
+        console.error("[usage] streamEnded error", err);
         return res.status(500).json({ error: "internal error" });
     }
 });

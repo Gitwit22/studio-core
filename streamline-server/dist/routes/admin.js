@@ -11,6 +11,7 @@ console.log("✅ admin.ts loaded");
 const express_1 = __importDefault(require("express"));
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const adminAuth_1 = require("../middleware/adminAuth");
+const plan_1 = require("../types/plan");
 const router = express_1.default.Router();
 // All routes require admin authentication
 router.use(adminAuth_1.requireAdmin);
@@ -23,16 +24,16 @@ router.get('/me', (req, res) => {
     res.json({ isAdmin: true, user: req.adminUser });
 });
 router.get("/plans", async (req, res) => {
-    console.log("🎯 1. Plans route handler started");
+    console.log("🎯 1. Plans route handler started (admin, all plans)");
     try {
-        console.log("🎯 2. About to query Firestore");
+        console.log("🎯 2. About to query Firestore for ALL plans");
         const snap = await firebaseAdmin_1.firestore.collection("plans").get();
         console.log("🎯 3. Firestore returned, docs count:", snap.size);
         const plans = snap.docs.map((d) => ({
             id: d.id,
             ...d.data(),
         }));
-        console.log("🎯 4. Mapped plans:", JSON.stringify(plans));
+        console.log("🎯 4. Mapped all plans:", JSON.stringify(plans));
         return res.json({ plans });
     }
     catch (err) {
@@ -345,7 +346,9 @@ router.get("/usage", async (req, res) => {
             const userData = doc.data();
             const userId = doc.id;
             const minutesUsed = usageByUser[userId] || 0;
-            const planId = userData.planId || "free";
+            const planIdRaw = userData.planId || "free";
+            // Canonicalize planId using isPlanId
+            const planId = (0, plan_1.isPlanId)(planIdRaw) ? planIdRaw : planIdRaw;
             const planData = plansMap[planId] || {};
             const planLimit = planData.limits?.monthlyMinutesIncluded ?? 60;
             const bonusMinutes = userData.bonusMinutes || 0;
@@ -389,12 +392,10 @@ router.get("/stats", async (req, res) => {
         const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         let totalUsers = 0;
-        let usersByPlan = {
-            free: 0,
-            starter: 0,
-            pro: 0,
-            enterprise: 0,
-        };
+        let usersByPlan = {};
+        for (const plan of plan_1.PLAN_IDS) {
+            usersByPlan[plan] = 0;
+        }
         let activeToday = 0;
         let activeThisWeek = 0;
         let activeThisMonth = 0;
@@ -402,7 +403,13 @@ router.get("/stats", async (req, res) => {
             const data = doc.data();
             totalUsers++;
             const plan = (data.planId || "free");
-            usersByPlan[plan]++;
+            if ((0, plan_1.isPlanId)(plan)) {
+                usersByPlan[plan]++;
+            }
+            else {
+                // Track unknown plans if needed
+                usersByPlan[plan] = (usersByPlan[plan] || 0) + 1;
+            }
             const lastActive = data.lastActive?.toDate();
             if (lastActive) {
                 if (lastActive >= dayStart)

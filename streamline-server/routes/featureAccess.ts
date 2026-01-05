@@ -13,8 +13,25 @@ const BAD_BILLING_STATUSES = new Set([
   "canceled",
 ]);
 
-function isPaidPlan(planId?: string) {
-  return planId === "starter" || planId === "pro" || planId === "internal_unlimited";
+import { PLAN_IDS, PlanId, isPlanId } from "../types/plan";
+
+// List of paid plans (update as needed, or drive from plan config)
+const PAID_PLANS: PlanId[] = [
+  "starter",
+  "pro",
+  "basic",
+  "enterprise",
+  // Add any other paid plans here
+];
+
+function isPaidPlan(planId?: string): boolean {
+  if (!planId) return false;
+  // Accept legacy or variant ids (e.g., "starter_paid")
+  let canonical: string = String(planId).toLowerCase();
+  if (canonical.endsWith("_paid") || canonical.endsWith("_trial")) {
+    canonical = canonical.replace(/_(paid|trial)$/i, "");
+  }
+  return PAID_PLANS.includes(canonical as PlanId) || canonical === "internal_unlimited";
 }
 
 function billingBlocks(user: any): string | null {

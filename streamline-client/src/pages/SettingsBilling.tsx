@@ -2,7 +2,7 @@
 
 
 import React, { useEffect, useState } from "react";
-import { getCanonicalPlanId } from "../lib/planUtils";
+import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
@@ -69,57 +69,7 @@ interface UsageData {
   projects: { used: number; limit: number };
 }
 
-// ============================================================================
-// DEFAULT PLAN DEFINITIONS (fallback if API fails)
-// ============================================================================
-
-const DEFAULT_PLANS: PlanDefinition[] = [
-  {
-    id: "free",
-    name: "Free",
-    price: 0,
-    description: "Get started with the StreamLine room and invite a few guests",
-    limits: {
-      monthlyMinutesIncluded: 60,
-      maxGuests: 1,
-      rtmpDestinationsMax: 1,
-      maxSessionMinutes: 30,
-      maxHoursPerMonth: 1,
-    },
-    features: { recording: false, rtmp: false },
-    editing: { access: false, maxProjects: 0, maxStorageGB: 0 },
-  },
-  {
-    id: "starter", // ✅ canonical id (NOT starter_paid)
-    name: "Starter",
-    price: 15,
-    description: "For starting creators, just getting started",
-    limits: {
-      monthlyMinutesIncluded: 300,
-      maxGuests: 2,
-      rtmpDestinationsMax: 2,
-      maxSessionMinutes: 60,
-      maxHoursPerMonth: 5,
-    },
-    features: { recording: true, rtmp: true, multistream: true },
-    editing: { access: true, maxProjects: 5, maxStorageGB: 10 },
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: 49,
-    description: "For professional streamers who want reach",
-    limits: {
-      monthlyMinutesIncluded: 1200,
-      maxGuests: 10,
-      rtmpDestinationsMax: 5,
-      maxSessionMinutes: 180,
-      maxHoursPerMonth: 20,
-    },
-    features: { recording: true, rtmp: true, multistream: true },
-    editing: { access: true, maxProjects: 50, maxStorageGB: 100 },
-  },
-];
+// Plans are loaded from the API; no hardcoded defaults to keep the DB/admin as source of truth.
 
 
 // ============================================================================
@@ -164,7 +114,7 @@ function getStatusBadge(status: string | undefined, cancelAtPeriodEnd?: boolean)
 // Button label logic (frontend-only)
 function getPlanActionLabel(
   currentPlan: string,
-  targetPlan: "free" | "starter" | "pro",
+  targetPlan: "free" | "starter" | "basic" |"pro",
   isProcessing: boolean
 ) {
   // Normalize variants to canonical plan ids
@@ -185,7 +135,7 @@ function getPlanActionLabel(
 
 
 // Map canonical plan id to checkout variant for resubscribe
-type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro";
+type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro" | "basic";
 
 // Loading state key for actions like checkout and portal
 type ActionLoading = CheckoutPlanVariant | "portal" | null;
@@ -214,7 +164,7 @@ export default function SettingsBilling() {
 };
 
 const [user, setUser] = useState<UserData | null>(null);
-  const [plans, setPlans] = useState<PlanDefinition[]>(DEFAULT_PLANS);
+  const [plans, setPlans] = useState<PlanDefinition[]>([]);
   const [usage, setUsage] = useState<UsageData>(DEFAULT_USAGE);
 
   const [loading, setLoading] = useState(true);
@@ -222,6 +172,8 @@ const [user, setUser] = useState<UserData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showManagePicker, setShowManagePicker] = useState(false);
   const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations">("plan");
+  const [emergencyLoading, setEmergencyLoading] = useState(false);
+  const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
   useEffect(() => {
     loadAllData();
   }, []);
@@ -302,25 +254,17 @@ const [user, setUser] = useState<UserData | null>(null);
       const res = await fetch(`${API_BASE}/api/plans`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
-        if (data.plans?.length) {
-          const first = data.plans[0];
-          if (typeof first === "string") {
-            const ids = new Set<string>(data.plans as string[]);
-            const resolved = DEFAULT_PLANS.filter((p) => ids.has(p.id));
-            if (resolved.length) {
-              setPlans(resolved);
-            } else {
-              // If API returns unknown ids, keep defaults
-              setPlans(DEFAULT_PLANS);
-            }
-          } else {
-            // Assume server returned full plan objects
-            setPlans(data.plans as PlanDefinition[]);
-          }
+        if (Array.isArray(data.plans) && data.plans.length) {
+          // Only use plans with visibility: 'public' (backend should already filter, but double-check)
+          const visiblePlans = data.plans.filter((p: any) => p.visibility === "public");
+          // If none are public, still use the fetched plans to avoid falling back to stale defaults
+          const source = visiblePlans.length ? visiblePlans : data.plans;
+          const sorted = source.slice().sort((a: any, b: any) => Number(a.price ?? 0) - Number(b.price ?? 0));
+          setPlans(sorted);
         }
       }
     } catch {
-      // Use defaults
+      setPlans([]);
     }
   };
 
@@ -333,9 +277,16 @@ const [user, setUser] = useState<UserData | null>(null);
       const data = await res.json();
       const limits = data?.plan?.limits || {};
 
+      const usageMonthly = data?.usageMonthly || {};
+      const usageInner = usageMonthly.usage || {};
+      // Fallback to legacy hours on user.usage if monthly doc not present
+      const legacyHours = Number(data?.user?.usage?.hoursStreamedThisMonth || 0);
+      const legacyMinutes = Math.max(0, Math.round(legacyHours * 60));
+      const participantUsed = Number(usageMonthly.participantMinutes ?? usageInner.participantMinutes ?? legacyMinutes ?? 0);
+
       setUsage({
         streamingMinutes: {
-          used: Number(data?.usage?.participantMinutes ?? 0),
+          used: participantUsed,
           limit: Number(limits.participantMinutes ?? 0) || (data?.plan?.id === "pro" ? 1200 : data?.plan?.id === "starter" ? 300 : 60),
         },
         rtmpDestinations: {
@@ -354,6 +305,38 @@ const [user, setUser] = useState<UserData | null>(null);
     } catch (err) {
       console.warn("loadUsage failed; using defaults", err);
       setUsage(DEFAULT_USAGE);
+    }
+  };
+
+  const handleEmergencyDownload = async () => {
+    try {
+      setEmergencyLoading(true);
+      setEmergencyMessage(null);
+      const res = await fetch(`/api/recordings/emergency-latest`, { credentials: "include" });
+      const data = await res.json();
+
+      if (res.status === 402 || data?.paywall) {
+        setEmergencyMessage("Upgrade required to download this recording.");
+        return;
+      }
+      if (data?.noRecording || res.status === 404) {
+        setEmergencyMessage("No link available.");
+        return;
+      }
+      const url = data?.data?.url;
+      if (!data?.success || !url) {
+        setEmergencyMessage("No link available.");
+        return;
+      }
+
+      window.open(url, "_blank");
+      setEmergencyMessage("Opened latest recording download.");
+    } catch (err) {
+      console.error("Emergency download failed", err);
+      setEmergencyMessage("No link available.");
+    } finally {
+      setEmergencyLoading(false);
+      setTimeout(() => setEmergencyMessage(null), 5000);
     }
   };
 
@@ -408,19 +391,21 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   };
 
 
-// Canonicalize planId for display logic
-function canonicalPlanId(planId: string | undefined): string {
+// Canonicalize planId for display logic using canonical frontend utility
+function canonicalPlanId(planId: string | undefined): PlanId {
   if (!planId) return "free";
   if (planId === "starter_paid" || planId === "starter_trial") return "starter";
-  return planId;
+  if (isPlanId(planId)) return planId;
+  // fallback for unknown/legacy ids
+  return "free";
 }
 
-const userPlanId = canonicalPlanId(user?.planId);
-const currentPlan = plans.find((p) => p.id === userPlanId) || plans[0];
+const userPlanId: PlanId = canonicalPlanId(user?.planId);
+const currentPlan = plans.find((p) => canonicalPlanId(p.id) === userPlanId);
 const status = user?.billingStatus;
 const hasStripeCustomer = !!(user?.billing?.customerId || (user as any)?.stripeCustomerId);
 
-const isPaidPlan = userPlanId === "starter" || userPlanId === "pro";
+const isPaidPlan = userPlanId === "starter" || userPlanId === "pro" || userPlanId === "basic";
 const isBlocked = isPaidPlan && (status === "past_due" || status === "unpaid");
 const isPaidValid = status === "active" || status === "trialing";
 
@@ -439,6 +424,26 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           <p>Loading billing information...</p>
         </div>
         {/* styles moved to SettingsBilling.css */}
+      </div>
+    );
+  }
+
+  if (!plans.length) {
+    return (
+      <div className="billing" style={S.container}>
+        <div style={S.content}>
+          <div style={S.header}>
+            <h1 style={S.title}>💳 Billing & Plans</h1>
+            <button onClick={loadAllData} style={S.refreshBtn} disabled={loading}>
+              🔄 Refresh
+            </button>
+          </div>
+          <div style={S.card}>
+            <h2 style={S.cardTitle}>No plans available</h2>
+            <p style={{ color: "#a1a1aa" }}>No plans were returned from the server. Please verify plan configuration in the admin panel.</p>
+            <button onClick={loadAllData} style={S.primaryBtn} disabled={loading}>Try again</button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -505,7 +510,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             style={activeTab === "destinations" ? { ...S.tab, ...S.tabActive } : S.tab}
             onClick={() => setActiveTab("destinations")}
           >
-            Destinations
+            Stream Keys
           </button>
         </div>
 
@@ -550,49 +555,63 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 )}
               </div>
 
-              <div style={S.planDisplay}>
-                <div style={S.planInfo}>
-                  <div style={S.planNameRow}>
-                    <span style={S.planName}>{currentPlan.name}</span>
-                    <span style={{ ...S.statusBadge, color: statusBadge.color, background: statusBadge.bg }}>
-                      {statusBadge.icon} {statusBadge.text}
-                    </span>
+              {currentPlan ? (
+                <div style={S.planDisplay}>
+                  <div style={S.planInfo}>
+                    <div style={S.planNameRow}>
+                      <span style={S.planName}>{currentPlan.name}</span>
+                      <span style={{ ...S.statusBadge, color: statusBadge.color, background: statusBadge.bg }}>
+                        {statusBadge.icon} {statusBadge.text}
+                      </span>
+                    </div>
+                    <div style={S.planPrice}>
+                      <span style={S.priceAmount}>${currentPlan.price}</span>
+                      <span style={S.pricePeriod}>/month</span>
+                    </div>
+                    {currentPlan.description && (
+                      <p style={S.planDescription}>{currentPlan.description}</p>
+                    )}
                   </div>
-                  <div style={S.planPrice}>
-                    <span style={S.priceAmount}>${currentPlan.price}</span>
-                    <span style={S.pricePeriod}>/month</span>
-                  </div>
-                  {currentPlan.description && (
-                    <p style={S.planDescription}>{currentPlan.description}</p>
-                  )}
-                </div>
 
-                <div style={S.billingDetails}>
-                  {status === "trialing" && (
-                    <div style={S.detailRow}>
-                      <span style={S.detailLabel}>Trial ends</span>
-                      <span style={S.detailValue}>
-                        {formatDate(user?.billing?.currentPeriodEnd)}
-                        <span style={S.daysLeft}>({daysLeft} days left)</span>
-                      </span>
-                    </div>
-                  )}
-                  {status === "active" && !user?.billing?.cancelAtPeriodEnd && (
-                    <div style={S.detailRow}>
-                      <span style={S.detailLabel}>Next billing</span>
-                      <span style={S.detailValue}>{formatDate(user?.billing?.currentPeriodEnd)}</span>
-                    </div>
-                  )}
-                  {user?.billing?.cancelAtPeriodEnd && (
-                    <div style={S.detailRow}>
-                      <span style={S.detailLabel}>Access ends</span>
-                      <span style={{ ...S.detailValue, color: "#f59e0b" }}>
-                        {formatDate(user?.billing?.currentPeriodEnd)}
-                      </span>
-                    </div>
-                  )}
+                  <div style={S.billingDetails}>
+                    {status === "trialing" && (
+                      <div style={S.detailRow}>
+                        <span style={S.detailLabel}>Trial ends</span>
+                        <span style={S.detailValue}>
+                          {formatDate(user?.billing?.currentPeriodEnd)}
+                          <span style={S.daysLeft}>({daysLeft} days left)</span>
+                        </span>
+                      </div>
+                    )}
+                    {status === "active" && !user?.billing?.cancelAtPeriodEnd && (
+                      <div style={S.detailRow}>
+                        <span style={S.detailLabel}>Next billing</span>
+                        <span style={S.detailValue}>{formatDate(user?.billing?.currentPeriodEnd)}</span>
+                      </div>
+                    )}
+                    {user?.billing?.cancelAtPeriodEnd && (
+                      <div style={S.detailRow}>
+                        <span style={S.detailLabel}>Access ends</span>
+                        <span style={{ ...S.detailValue, color: "#f59e0b" }}>
+                          {formatDate(user?.billing?.currentPeriodEnd)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div style={S.planDisplay}>
+                  <div style={S.planInfo}>
+                    <div style={S.planNameRow}>
+                      <span style={S.planName}>Plan unavailable</span>
+                      <span style={{ ...S.statusBadge, color: statusBadge.color, background: statusBadge.bg }}>
+                        {statusBadge.icon} {statusBadge.text}
+                      </span>
+                    </div>
+                    <p style={S.planDescription}>No matching plan found for your account. Please contact support.</p>
+                  </div>
+                </div>
+              )}
 
               {/* Primary Actions */}
               <div style={S.actionButtons}>
@@ -608,11 +627,19 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     </button>
 
                     <button
+                      onClick={() => startCheckout("basic")}
+                      style={S.secondaryBtn}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading === "basic" ? "⏳ Loading..." : "Choose Basic Plan"}
+                    </button>
+
+                    <button
                       onClick={() => startCheckout("starter_paid")}
                       style={S.secondaryBtn}
                       disabled={!!actionLoading}
                     >
-                      {actionLoading === "starter_paid" ? "⏳ Loading..." : "Choose Plan"}
+                      {actionLoading === "starter_paid" ? "⏳ Loading..." : "Choose Starter Plan"}
                     </button>
 
                     <button
@@ -620,7 +647,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       style={S.secondaryBtn}
                       disabled={!!actionLoading}
                     >
-                      {actionLoading === "pro" ? "⏳ Loading..." : "Choose Plan"}
+                      {actionLoading === "pro" ? "⏳ Loading..." : "Choose Pro Plan"}
                     </button>
                   </>
                 )}
@@ -694,27 +721,25 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
               <div style={S.plansGrid}>
                 {plans.map((plan) => {
+                  const planId = canonicalPlanId(plan.id);
                   const userPlan = userPlanId;
-
                   const color =
-                    plan.id === "free"
+                    planId === "free"
                       ? "#6b7280"
-                      : plan.id === "starter"
+                      : planId === "basic"
+                      ? "#0ea5e9"
+                      : planId === "starter"
                       ? "#3b82f6"
                       : "#8b5cf6";
-
-                  // Treat starter_paid and starter_trial as "starter" for current overlay
-                  const isCurrent = plan.id === userPlan;
-
-                  // Adjust upgrade/downgrade logic to use canonical plan id
+                  const isCurrent = planId === userPlan;
                   const isUpgrade =
-                    (userPlan === "free" && (plan.id === "starter" || plan.id === "pro")) ||
-                    (userPlan === "starter" && plan.id === "pro");
-
+                    (userPlan === "free" && (planId === "basic" || planId === "starter" || planId === "pro")) ||
+                    (userPlan === "basic" && (planId === "starter" || planId === "pro")) ||
+                    (userPlan === "starter" && planId === "pro");
                   const isDowngrade =
-                    (userPlan === "pro" && (plan.id === "starter" || plan.id === "free")) ||
-                    (userPlan === "starter" && plan.id === "free");
-
+                    (userPlan === "pro" && (planId === "starter" || planId === "basic" || planId === "free")) ||
+                    (userPlan === "starter" && (planId === "basic" || planId === "free")) ||
+                    (userPlan === "basic" && planId === "free");
                   return (
                     <div
                       key={plan.id}
@@ -727,22 +752,24 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       {isCurrent && (
                         <div style={{ ...S.currentBadge, background: color }}>Current</div>
                       )}
-
                       <div style={S.planCardHeader}>
                         <h3 style={{ ...S.planCardName, color }}>{plan.name}</h3>
                         <div style={S.planCardPrice}>
                           <span style={S.planCardAmount}>${plan.price}</span>
                           <span style={S.planCardPeriod}>/mo</span>
                         </div>
+                        {plan.description && (
+                          <p style={{ margin: "4px 0 0", color: "#9ca3af", fontSize: 12 }}>
+                            {plan.description}
+                          </p>
+                        )}
                       </div>
-
                       <ul style={S.featureList}>
                         <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
                         <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
                         <FeatureRow label="RTMP destinations" value={plan.limits.rtmpDestinationsMax} />
                         <FeatureRow label="Recording" value={plan.features.recording} />
-                        <FeatureRow label="Multistream" value={plan.features.multistream} />
-                        <FeatureRow label="Editing suite" value={plan.editing?.access} />
+                        <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
                         {plan.editing?.access && (
                           <>
                             <FeatureRow label="Projects" value={plan.editing.maxProjects} />
@@ -750,11 +777,21 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           </>
                         )}
                       </ul>
-
                       <div style={S.planCardAction}>
                         {isCurrent ? (
                           <span style={S.currentLabel}>✅ Current Plan</span>
-                        ) : plan.id === "starter" && userPlan === "free" ? (
+                        ) : planId === "basic" && (userPlan === "free" || userPlan === "starter") ? (
+                          <button
+                            onClick={() => startCheckout("basic")}
+                            style={{
+                              ...S.planUpgradeBtn,
+                              background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                            }}
+                            disabled={!!actionLoading || isBlocked || isProcessing}
+                          >
+                            {actionLoading === "basic" ? "⏳..." : getPlanActionLabel(userPlan, "basic" as any, isProcessing)}
+                          </button>
+                        ) : planId === "starter" && (userPlan === "free" || userPlan === "basic") ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                             <button
                               onClick={() => startCheckout("starter_paid")}
@@ -766,7 +803,6 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             >
                               {actionLoading === "starter_paid" ? "⏳..." : getPlanActionLabel(userPlan, "starter", isProcessing)}
                             </button>
-
                             <button
                               onClick={() => startCheckout("starter_trial")}
                               style={{
@@ -778,19 +814,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                               {actionLoading === "starter_trial" ? "⏳..." : "🚀 Start Free Trial"}
                             </button>
                           </div>
-                        ) : plan.id === "starter" && userPlan === "pro" ? (
-                          <button
-                            onClick={openPortal}
-                            style={{
-                              ...S.planUpgradeBtn,
-                              background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-                              opacity: 0.85,
-                            }}
-                            disabled={!!actionLoading || isBlocked}
-                          >
-                            {getPlanActionLabel(userPlan, "starter", isProcessing)}
-                          </button>
-                        ) : plan.id === "pro" && (userPlan === "free" || userPlan === "starter") ? (
+                        ) : planId === "pro" && (userPlan === "free" || userPlan === "starter" || userPlan === "basic") ? (
                           <button
                             onClick={() => startCheckout("pro")}
                             style={{
@@ -801,7 +825,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           >
                             {actionLoading === "pro" ? "⏳..." : getPlanActionLabel(userPlan, "pro", isProcessing)}
                           </button>
-                        ) : plan.id === "free" && (userPlan === "starter" || userPlan === "pro") ? (
+                        ) : planId === "free" && (userPlan === "starter" || userPlan === "pro" || userPlan === "basic") ? (
                           <button
                             onClick={openPortal}
                             style={{
@@ -823,11 +847,10 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             }}
                             disabled={!!actionLoading || isBlocked}
                           >
-                            {getPlanActionLabel(userPlan, plan.id as "starter" | "pro", isProcessing)}
+                            {getPlanActionLabel(userPlan, planId as any, isProcessing)}
                           </button>
                         )}
                       </div>
-
                     </div>
                   );
                 })}
@@ -945,6 +968,34 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 />
               )}
             </div>
+
+            <div style={{ marginTop: 16, padding: 12, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, background: "rgba(255,255,255,0.02)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ color: "#e5e7eb", fontWeight: 600 }}>Emergency Download (Latest Recording)</div>
+                <button
+                  type="button"
+                  onClick={handleEmergencyDownload}
+                  disabled={emergencyLoading}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(239, 68, 68, 0.6)",
+                    background: emergencyLoading ? "rgba(239, 68, 68, 0.2)" : "rgba(239, 68, 68, 0.15)",
+                    color: "#fecaca",
+                    cursor: emergencyLoading ? "not-allowed" : "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  {emergencyLoading ? "Preparing..." : "Download latest recording"}
+                </button>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
+                Use this if your in-room download didn’t work. Downloads are available for a limited time.
+              </div>
+              {emergencyMessage && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>{emergencyMessage}</div>
+              )}
+            </div>
           </div>
         )}
 
@@ -992,8 +1043,8 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
             {(() => {
               const trialEligible = !(user?.hasHadTrial || user?.billing?.hasHadTrial);
-              const starterPlan = plans.find((p) => p.id === "starter");
-              const proPlan = plans.find((p) => p.id === "pro");
+              const starterPlan = plans.find((p) => canonicalPlanId(p.id) === "starter");
+              const proPlan = plans.find((p) => canonicalPlanId(p.id) === "pro");
               return (
                 <div style={{ display: "grid", gap: 12 }}>
                   {trialEligible && (
@@ -1118,7 +1169,7 @@ function LockedFeature({ icon, title, description, requiredPlan }: { icon: strin
       </div>
     </div>
   );
-}
+};
 
 // ============================================================================
 // STYLES

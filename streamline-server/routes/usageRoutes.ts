@@ -56,16 +56,28 @@ async function handleUsageSummary(req: any, res: any) {
     const usageSnap = await usageRef.get();
 
     // If missing, do NOT fail—return a zeroed shape so the UI is stable.
-    const usageMonthly = usageSnap.exists
-      ? (usageSnap.data() as any)
-      : {
-          uid,
-          monthKey,
-          usage: { participantMinutes: 0, transcodeMinutes: 0 },
-          ytd: { participantMinutes: 0, transcodeMinutes: 0 },
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-        };
+    const legacyUsage = userData.usage || {};
+    const legacyHours = Number(legacyUsage.hoursStreamedThisMonth || 0);
+    const legacyParticipantMinutes = Math.max(0, Math.round(legacyHours * 60));
+
+    let usageMonthly: any;
+    if (usageSnap.exists) {
+      usageMonthly = usageSnap.data() as any;
+    } else {
+      usageMonthly = {
+        uid,
+        monthKey,
+        usage: { participantMinutes: legacyParticipantMinutes, transcodeMinutes: 0 },
+        ytd: {
+          participantMinutes: Math.max(0, Math.round(Number(legacyUsage.ytdHours || 0) * 60)),
+          transcodeMinutes: 0,
+        },
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+      // Persist seeded doc so subsequent calls don't lose legacy hours
+      await usageRef.set(usageMonthly, { merge: true });
+    }
 
     const usage = usageMonthly.usage || {};
     const ytd = usageMonthly.ytd || {};
@@ -97,6 +109,8 @@ async function handleUsageSummary(req: any, res: any) {
       uid,
       monthKey,
       resetDate: resetDateISO,
+      participantMinutes: participantUsed,
+      transcodeMinutes: transcodeUsed,
 
       user: {
         planId,
