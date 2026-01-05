@@ -159,12 +159,16 @@ export async function logAdminAction(
   details: Record<string, any>
 ): Promise<void> {
   try {
+    const safeDetails = Object.fromEntries(
+      Object.entries(details || {}).filter(([, v]) => v !== undefined)
+    );
+    const ip = safeDetails.ip || "unknown";
     await firestore.collection("adminLogs").add({
       adminId,
       action,
-      details,
+      details: safeDetails,
       timestamp: new Date(),
-      ip: details.ip || "unknown",
+      ip,
     });
   } catch (error) {
     console.error("Failed to log admin action:", error);

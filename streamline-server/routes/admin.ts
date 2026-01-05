@@ -10,6 +10,7 @@ import { firestore } from "../firebaseAdmin";
 import { requireAdmin, logAdminAction } from "../middleware/adminAuth";
 
 import type { UserUsageSummary } from "../types/admin.types";
+import { getCurrentMonthKey } from "../lib/usageTracker";
 import { PLAN_IDS, PlanId, isPlanId, getAllPlanIds } from "../types/plan";
 
 const router = express.Router();
@@ -378,9 +379,7 @@ router.get("/usage", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit as string) || 100;
     const planFilter = req.query.plan as PlanId | undefined;
-
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthKey = getCurrentMonthKey();
 
     // Get all users
     let usersQuery = firestore.collection("users");
@@ -390,50 +389,49 @@ router.get("/usage", async (req, res) => {
 
     const usersSnapshot = await usersQuery.limit(limit).get();
 
-    // Get usage for this month for all users
-    const usageSnapshot = await firestore
-      .collection("usage")
-      .where("timestamp", ">=", monthStart)
-      .get();
-
-    // Build usage summary
-    const usageByUser: Record<string, number> = {};
-    usageSnapshot.docs.forEach((doc) => {
-      const data = doc.data();
-      const userId = data.userId;
-      usageByUser[userId] = (usageByUser[userId] || 0) + (data.minutes || 0);
-    });
-
     // Fetch all plans once for efficiency
     const plansSnap = await firestore.collection("plans").get();
     const plansMap = Object.fromEntries(plansSnap.docs.map(d => [d.id, d.data()]));
 
-    const usageData = usersSnapshot.docs.map((doc) => {
-      const userData = doc.data();
-      const userId = doc.id;
-      const minutesUsed = usageByUser[userId] || 0;
-      const planIdRaw = userData.planId || "free";
-      // Canonicalize planId using isPlanId
-      const planId: PlanId | string = isPlanId(planIdRaw) ? planIdRaw : planIdRaw;
-      const planData = plansMap[planId] || {};
-      const planLimit = planData.limits?.monthlyMinutesIncluded ?? 60;
-      const bonusMinutes = userData.bonusMinutes || 0;
-      const effectiveLimit = planLimit + bonusMinutes;
+    const usageData = await Promise.all(
+      usersSnapshot.docs.map(async (doc) => {
+        const userData = doc.data();
+        const userId = doc.id;
+        // usageMonthly doc id shape: `${uid}_${YYYY-MM}`
+        const usageDocId = `${userId}_${monthKey}`;
+        const usageSnap = await firestore.collection("usageMonthly").doc(usageDocId).get();
+        const usageData = usageSnap.exists ? (usageSnap.data() as any) : {};
+        const usage = usageData.usage || usageData.totals || {};
+        const minutesUsed = Number(
+          usage.participantMinutes ?? usage.streamMinutes ?? usage.minutes ?? 0
+        );
+        const planIdRaw = userData.planId || "free";
+        // Canonicalize planId using isPlanId
+        const planId: PlanId | string = isPlanId(planIdRaw) ? planIdRaw : planIdRaw;
+        const planData = plansMap[planId] || {};
+        const planLimit = Number(
+          planData.limits?.participantMinutes ??
+          planData.limits?.monthlyMinutesIncluded ??
+          0
+        );
+        const bonusMinutes = userData.bonusMinutes || 0;
+        const effectiveLimit = planLimit + bonusMinutes;
 
-      return {
-        userId,
-        email: userData.email,
-        displayName: userData.displayName,
-        planId,
-        minutesUsed,
-        bonusMinutes,
-        planLimit,
-        effectiveLimit,
-        percentUsed: (minutesUsed / effectiveLimit) * 100,
-        isBlocked: minutesUsed >= effectiveLimit,
-        lastActive: userData.lastActive,
-      };
-    });
+        return {
+          userId,
+          email: userData.email,
+          displayName: userData.displayName,
+          planId,
+          minutesUsed,
+          bonusMinutes,
+          planLimit,
+          effectiveLimit,
+          percentUsed: effectiveLimit > 0 ? (minutesUsed / effectiveLimit) * 100 : 0,
+          isBlocked: effectiveLimit > 0 ? minutesUsed >= effectiveLimit : false,
+          lastActive: userData.lastActive,
+        };
+      })
+    );
 
     // Sort by percent used (most blocked users first)
     usageData.sort((a, b) => b.percentUsed - a.percentUsed);

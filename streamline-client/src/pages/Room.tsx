@@ -300,24 +300,30 @@ function StreamEndedModal({
           </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <button
-            onClick={onStartEditing}
-            style={{
-              width: '100%',
-              padding: '1rem',
-              background: 'linear-gradient(to right, #dc2626, #ef4444)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '0.5rem',
-              fontSize: '1rem',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-            }}
-            disabled={processing}
-          >
-            ✂️ Start Editing
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', width: '100%' }}>
+            <button
+              onClick={onStartEditing}
+              style={{
+                width: '100%',
+                padding: '1rem',
+                background: 'linear-gradient(to right, #4b5563, #374151)',
+                color: '#d1d5db',
+                border: 'none',
+                borderRadius: '0.5rem',
+                fontSize: '1rem',
+                fontWeight: '600',
+                cursor: 'not-allowed',
+                transition: 'all 0.3s ease',
+                opacity: 0.8,
+              }}
+              disabled
+            >
+              ✂️ Editing (Coming Soon)
+            </button>
+            <div style={{ fontSize: '0.8rem', color: '#9ca3af', textAlign: 'center' }}>
+              Editing suite is coming soon. Stay tuned!
+            </div>
+          </div>
           <button
             onClick={handleDownload}
             disabled={!ready}
