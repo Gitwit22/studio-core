@@ -667,7 +667,7 @@ useEffect(() => {
             {" "}
             <button
               type="button"
-              onClick={() => nav("/settings/destinations")}
+              onClick={() => nav("/settings/billing?tab=destinations")}
               style={{
                 marginLeft: "4px",
                 fontSize: "12px",

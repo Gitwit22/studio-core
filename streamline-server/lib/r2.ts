@@ -15,6 +15,7 @@ export const r2 = new S3Client({
     accessKeyId: mustGetEnv("R2_ACCESS_KEY_ID"),
     secretAccessKey: mustGetEnv("R2_SECRET_ACCESS_KEY"),
   },
+  forcePathStyle: true,
 });
 
 export async function r2GetStream(key: string) {

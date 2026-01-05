@@ -10,37 +10,31 @@ exports.generateRecordingPath = generateRecordingPath;
 exports.generateThumbnailPath = generateThumbnailPath;
 const client_s3_1 = require("@aws-sdk/client-s3");
 const s3_request_presigner_1 = require("@aws-sdk/s3-request-presigner");
-/**
- * Cloudflare R2 Storage Client
- * R2 is S3-compatible, so we use AWS SDK with R2 endpoint
- */
-// Configuration from environment variables
+// Unified R2 env scheme
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCOUNT_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_ACCOUNT_SECRET_ACCESS_KEY;
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
-const R2_ENDPOINT = process.env.R2_ENDPOINT;
-// Validate required environment variables
-if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME || !R2_ENDPOINT) {
-    console.warn("⚠️  R2 storage environment variables not fully configured");
-    console.warn("   Required: R2_ACCOUNT_ACCESS_KEY_ID, R2_ACCOUNT_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_ENDPOINT");
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_BUCKET = process.env.R2_BUCKET;
+const R2_ENDPOINT = R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : process.env.R2_ENDPOINT;
+if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET || !R2_ENDPOINT) {
+    console.warn("⚠️  R2 storage env vars incomplete. Required: R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY");
 }
-// Initialize S3 client with R2 endpoint
 const s3Client = new client_s3_1.S3Client({
     region: "auto",
     credentials: {
         accessKeyId: R2_ACCESS_KEY_ID || "",
         secretAccessKey: R2_SECRET_ACCESS_KEY || "",
     },
-    endpoint: R2_ENDPOINT || "https://r2.cloudflarestorage.com",
+    endpoint: R2_ENDPOINT,
+    forcePathStyle: true,
 });
 /**
  * Generate R2 public URL for a given storage path
  */
 function getPublicUrl(remotePath) {
-    // Extract bucket domain from R2_ENDPOINT
-    // Format: https://df4e3cd2d3e39008194313b377227e8d.r2.cloudflarestorage.com
-    const publicUrl = R2_ENDPOINT?.replace("r2.cloudflarestorage.com", `${R2_BUCKET_NAME}.r2.cloudflarestorage.com`) || "";
+    if (!R2_ENDPOINT || !R2_BUCKET)
+        return "";
+    const publicUrl = R2_ENDPOINT.replace("r2.cloudflarestorage.com", `${R2_BUCKET}.r2.cloudflarestorage.com`);
     return `${publicUrl}/${remotePath}`;
 }
 /**
@@ -53,7 +47,7 @@ function getPublicUrl(remotePath) {
 async function uploadVideo(buffer, remotePath, contentType = "video/mp4") {
     try {
         const command = new client_s3_1.PutObjectCommand({
-            Bucket: R2_BUCKET_NAME,
+            Bucket: R2_BUCKET,
             Key: remotePath,
             Body: buffer,
             ContentType: contentType,
@@ -76,7 +70,7 @@ async function uploadVideo(buffer, remotePath, contentType = "video/mp4") {
 async function getSignedDownloadUrl(remotePath, expiresIn = 3600) {
     try {
         const command = new client_s3_1.GetObjectCommand({
-            Bucket: R2_BUCKET_NAME,
+            Bucket: R2_BUCKET,
             Key: remotePath,
         });
         const url = await (0, s3_request_presigner_1.getSignedUrl)(s3Client, command, { expiresIn });
@@ -98,7 +92,7 @@ async function getSignedDownloadUrl(remotePath, expiresIn = 3600) {
 async function getSignedUploadUrl(remotePath, contentType = "video/mp4", expiresIn = 3600) {
     try {
         const command = new client_s3_1.PutObjectCommand({
-            Bucket: R2_BUCKET_NAME,
+            Bucket: R2_BUCKET,
             Key: remotePath,
             ContentType: contentType,
         });
@@ -118,7 +112,7 @@ async function getSignedUploadUrl(remotePath, contentType = "video/mp4", expires
 async function deleteFile(remotePath) {
     try {
         const command = new client_s3_1.DeleteObjectCommand({
-            Bucket: R2_BUCKET_NAME,
+            Bucket: R2_BUCKET,
             Key: remotePath,
         });
         await s3Client.send(command);
@@ -137,7 +131,7 @@ async function deleteFile(remotePath) {
 async function checkFileExists(remotePath) {
     try {
         const command = new client_s3_1.HeadObjectCommand({
-            Bucket: R2_BUCKET_NAME,
+            Bucket: R2_BUCKET,
             Key: remotePath,
         });
         await s3Client.send(command);
@@ -159,7 +153,7 @@ async function checkFileExists(remotePath) {
 async function getFileMetadata(remotePath) {
     try {
         const command = new client_s3_1.HeadObjectCommand({
-            Bucket: R2_BUCKET_NAME,
+            Bucket: R2_BUCKET,
             Key: remotePath,
         });
         const metadata = await s3Client.send(command);

@@ -19,6 +19,7 @@ interface Props {
   recordingStatus: "idle" | "recording" | "stopping" | "stopped" | "error";
   onStartRecording: (layout: "speaker" | "grid") => Promise<void>;
   onStopRecording: () => Promise<void>;
+  recordingEnabled?: boolean;
 
   // Optional: saved destinations with stored keys (from Settings Destinations)
   savedDestinations?: Array<{
@@ -41,6 +42,7 @@ export default function StreamSetupModalV2({
   onStartRecording,
   onStopRecording,
   savedDestinations,
+  recordingEnabled = true,
 }: Props) {
   const [useYouTube, setUseYouTube] = useState(false);
   const [useFacebook, setUseFacebook] = useState(false);
@@ -61,6 +63,7 @@ export default function StreamSetupModalV2({
   
   const recordingIsActive = recordingStatus === "recording";
   const recordingIsBusy = recordingStatus === "stopping";
+  const showRecordingControls = recordingEnabled !== false;
 
   const hasSavedDestinations = Array.isArray(savedDestinations) && savedDestinations.length > 0;
 
@@ -396,117 +399,119 @@ export default function StreamSetupModalV2({
           </div>
 
           {/* SECTION 2: RECORDING CONTROL */}
-          <div style={{
-            background: 'rgba(220, 38, 38, 0.05)',
-            border: '1px solid rgba(220, 38, 38, 0.2)',
-            borderRadius: '0.5rem',
-            padding: '0.75rem'
-          }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#ef4444', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
-              🎬 Recording Control
-            </div>
-
-            {/* Layout Selector */}
-            <label style={{ fontSize: '0.875rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ fontWeight: 600 }}>Layout:</span>
-              <select
-                value={layout}
-                onChange={e => setLayout(e.target.value as "speaker" | "grid")}
-                disabled={recordingIsActive}
-                style={{
-                  padding: '0.4rem 0.7rem',
-                  borderRadius: '0.3rem',
-                  border: '1px solid #ef4444',
-                  background: '#18181b',
-                  color: '#fff',
-                  fontWeight: 600,
-                  fontSize: '0.85rem',
-                  outline: 'none',
-                  cursor: recordingIsActive ? 'not-allowed' : 'pointer',
-                  opacity: recordingIsActive ? 0.5 : 1
-                }}
-              >
-                <option value="speaker">Speaker</option>
-                <option value="grid">Grid</option>
-              </select>
-            </label>
-
-            {/* Status */}
-            {recordingStatus === "error" && (
-              <div style={{ 
-                fontSize: '0.75rem', 
-                color: '#ef4444', 
-                marginBottom: '0.75rem',
-                padding: '0.5rem',
-                background: 'rgba(220, 38, 38, 0.1)',
-                borderRadius: '0.25rem'
-              }}>
-                ❌ Recording failed to start. Check server logs.
+          {showRecordingControls && (
+            <div style={{
+              background: 'rgba(220, 38, 38, 0.05)',
+              border: '1px solid rgba(220, 38, 38, 0.2)',
+              borderRadius: '0.5rem',
+              padding: '0.75rem'
+            }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#ef4444', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
+                🎬 Recording Control
               </div>
-            )}
 
-            {/* Recording Control Button */}
-            {!recordingIsActive ? (
-              <button
-                onClick={handleStartRecording}
-                disabled={recordingIsBusy}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  fontSize: '0.875rem',
-                  borderRadius: '0.5rem',
-                  background: recordingIsBusy ? 'rgba(220, 38, 38, 0.3)' : 'linear-gradient(135deg, #dc2626, #b91c1c)',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontWeight: '600',
-                  cursor: recordingIsBusy ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s ease',
-                  opacity: recordingIsBusy ? 0.6 : 1
-                }}
-              >
-                🎬 Start Recording
-              </button>
-            ) : (
-              <button
-                onClick={onStopRecording}
-                disabled={recordingIsBusy}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  fontSize: '0.875rem',
-                  borderRadius: '0.5rem',
-                  background: recordingIsBusy ? 'rgba(220, 38, 38, 0.5)' : 'linear-gradient(135deg, #7c2d12, #991b1b)',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontWeight: '600',
-                  cursor: recordingIsBusy ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s ease',
-                }}
-              >
-                {recordingIsBusy ? "🔄 Stopping Recording..." : "⏹️ Stop Recording"}
-              </button>
-            )}
+              {/* Layout Selector */}
+              <label style={{ fontSize: '0.875rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span style={{ fontWeight: 600 }}>Layout:</span>
+                <select
+                  value={layout}
+                  onChange={e => setLayout(e.target.value as "speaker" | "grid")}
+                  disabled={recordingIsActive}
+                  style={{
+                    padding: '0.4rem 0.7rem',
+                    borderRadius: '0.3rem',
+                    border: '1px solid #ef4444',
+                    background: '#18181b',
+                    color: '#fff',
+                    fontWeight: 600,
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                    cursor: recordingIsActive ? 'not-allowed' : 'pointer',
+                    opacity: recordingIsActive ? 0.5 : 1
+                  }}
+                >
+                  <option value="speaker">Speaker</option>
+                  <option value="grid">Grid</option>
+                </select>
+              </label>
 
-            {recordingIsActive && (
-              <div style={{
-                marginTop: '0.75rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                fontSize: '0.75rem',
-                color: '#ef4444'
-              }}>
+              {/* Status */}
+              {recordingStatus === "error" && (
+                <div style={{ 
+                  fontSize: '0.75rem', 
+                  color: '#ef4444', 
+                  marginBottom: '0.75rem',
+                  padding: '0.5rem',
+                  background: 'rgba(220, 38, 38, 0.1)',
+                  borderRadius: '0.25rem'
+                }}>
+                  ❌ Recording failed to start. Check server logs.
+                </div>
+              )}
+
+              {/* Recording Control Button */}
+              {!recordingIsActive ? (
+                <button
+                  onClick={handleStartRecording}
+                  disabled={recordingIsBusy}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    fontSize: '0.875rem',
+                    borderRadius: '0.5rem',
+                    background: recordingIsBusy ? 'rgba(220, 38, 38, 0.3)' : 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: '600',
+                    cursor: recordingIsBusy ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.3s ease',
+                    opacity: recordingIsBusy ? 0.6 : 1
+                  }}
+                >
+                  🎬 Start Recording
+                </button>
+              ) : (
+                <button
+                  onClick={onStopRecording}
+                  disabled={recordingIsBusy}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    fontSize: '0.875rem',
+                    borderRadius: '0.5rem',
+                    background: recordingIsBusy ? 'rgba(220, 38, 38, 0.5)' : 'linear-gradient(135deg, #7c2d12, #991b1b)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: '600',
+                    cursor: recordingIsBusy ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.3s ease',
+                  }}
+                >
+                  {recordingIsBusy ? "🔄 Stopping Recording..." : "⏹️ Stop Recording"}
+                </button>
+              )}
+
+              {recordingIsActive && (
                 <div style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  background: '#ef4444',
-                  animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
-                }} />
-                <span>Recording in progress...</span>
-              </div>
-            )}
-          </div>
+                  marginTop: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.75rem',
+                  color: '#ef4444'
+                }}>
+                  <div style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: '#ef4444',
+                    animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+                  }} />
+                  <span>Recording in progress...</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Help Text */}
           <div style={{ 

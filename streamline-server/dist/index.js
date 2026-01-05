@@ -32,9 +32,22 @@ console.log("CLIENT_URL:", process.env.CLIENT_URL);
 const PORT = process.env.PORT || 5137;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 const app = (0, express_1.default)();
+// Allow primary client plus local dev hosts for testing/incognito shares
+const allowedOrigins = [
+    process.env.CLIENT_URL,
+    process.env.CLIENT_URL_2,
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+].filter(Boolean);
 app.use((0, cors_1.default)({
-    origin: process.env.CLIENT_URL, // exact frontend URL
-    credentials: true, // 🔥 REQUIRED for cookies
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin))
+            return callback(null, true);
+        return callback(new Error(`Not allowed by CORS: ${origin}`));
+    },
+    credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "Cache-Control"],
 }));

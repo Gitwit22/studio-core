@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
 import SettingsDestinations from "./SettingsDestinations";
@@ -154,6 +154,7 @@ function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
 
 export default function SettingsBilling() {
   const nav = useNavigate();
+  const location = useLocation();
 
   
   const DEFAULT_USAGE: UsageData = {
@@ -177,6 +178,15 @@ const [user, setUser] = useState<UserData | null>(null);
   useEffect(() => {
     loadAllData();
   }, []);
+
+  // Sync tab from URL query (?tab=destinations|plan|usage) so deep links open the correct view
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tabParam = params.get("tab");
+    if (tabParam === "plan" || tabParam === "usage" || tabParam === "destinations") {
+      setActiveTab(tabParam);
+    }
+  }, [location.search]);
 
   // Safe pending cleanup: only clear under safe conditions
   useEffect(() => {

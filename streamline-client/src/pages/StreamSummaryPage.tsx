@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRecordingProgress } from '../hooks/useRecordingProgress';
 import { editingApi } from '../lib/editingApi';
+import { API_BASE } from '../lib/apiBase';
 
 /**
  * STREAMLINE STREAM SUMMARY PAGE - REDESIGNED
@@ -121,7 +122,9 @@ export default function StreamSummaryPage() {
     try {
       if (!recordingId) throw new Error("Recording not ready");
 
-      const res = await fetch(`/api/recordings/${recordingId}/download-link`);
+      const res = await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link`, {
+        credentials: "include",
+      });
       if (res.status === 410) {
         alert("This recording link expired. Use Settings → Usage → Emergency Download.");
         return;
@@ -149,7 +152,9 @@ export default function StreamSummaryPage() {
 
   const handleConfirmYes = async () => {
     try {
-      await fetch(`/api/recordings/${recordingId}/download-link?confirm=true`);
+      await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link?confirm=true`, {
+        credentials: "include",
+      });
       setConfirmMessage("Great — you're all set. Save the file somewhere safe.");
     } catch (e) {
       setConfirmMessage("Noted. Thanks for confirming.");
@@ -160,9 +165,10 @@ export default function StreamSummaryPage() {
 
   const handleConfirmNo = async () => {
     try {
-      await fetch(`/api/recordings/${recordingId}/report-download-issue`, {
+      await fetch(`${API_BASE}/api/recordings/${recordingId}/report-download-issue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ reason: "user_reported_issue" }),
       });
     } catch {}

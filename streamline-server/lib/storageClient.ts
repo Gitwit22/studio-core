@@ -8,41 +8,33 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-/**
- * Cloudflare R2 Storage Client
- * R2 is S3-compatible, so we use AWS SDK with R2 endpoint
- */
-
-// Configuration from environment variables
+// Unified R2 env scheme
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCOUNT_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_ACCOUNT_SECRET_ACCESS_KEY;
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
-const R2_ENDPOINT = process.env.R2_ENDPOINT;
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_BUCKET = process.env.R2_BUCKET;
+const R2_ENDPOINT = R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : process.env.R2_ENDPOINT;
 
-// Validate required environment variables
-if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME || !R2_ENDPOINT) {
-  console.warn("⚠️  R2 storage environment variables not fully configured");
-  console.warn("   Required: R2_ACCOUNT_ACCESS_KEY_ID, R2_ACCOUNT_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_ENDPOINT");
+if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET || !R2_ENDPOINT) {
+  console.warn("⚠️  R2 storage env vars incomplete. Required: R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY");
 }
 
-// Initialize S3 client with R2 endpoint
 const s3Client = new S3Client({
   region: "auto",
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID || "",
     secretAccessKey: R2_SECRET_ACCESS_KEY || "",
   },
-  endpoint: R2_ENDPOINT || "https://r2.cloudflarestorage.com",
+  endpoint: R2_ENDPOINT,
+  forcePathStyle: true,
 });
 
 /**
  * Generate R2 public URL for a given storage path
  */
 function getPublicUrl(remotePath: string): string {
-  // Extract bucket domain from R2_ENDPOINT
-  // Format: https://df4e3cd2d3e39008194313b377227e8d.r2.cloudflarestorage.com
-  const publicUrl = R2_ENDPOINT?.replace("r2.cloudflarestorage.com", `${R2_BUCKET_NAME}.r2.cloudflarestorage.com`) || "";
+  if (!R2_ENDPOINT || !R2_BUCKET) return "";
+  const publicUrl = R2_ENDPOINT.replace("r2.cloudflarestorage.com", `${R2_BUCKET}.r2.cloudflarestorage.com`);
   return `${publicUrl}/${remotePath}`;
 }
 
@@ -60,7 +52,7 @@ export async function uploadVideo(
 ): Promise<string> {
   try {
     const command = new PutObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: R2_BUCKET,
       Key: remotePath,
       Body: buffer,
       ContentType: contentType,
@@ -88,7 +80,7 @@ export async function getSignedDownloadUrl(
 ): Promise<string> {
   try {
     const command = new GetObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: R2_BUCKET,
       Key: remotePath,
     });
 
@@ -116,7 +108,7 @@ export async function getSignedUploadUrl(
 ): Promise<string> {
   try {
     const command = new PutObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: R2_BUCKET,
       Key: remotePath,
       ContentType: contentType,
     });
@@ -138,7 +130,7 @@ export async function getSignedUploadUrl(
 export async function deleteFile(remotePath: string): Promise<void> {
   try {
     const command = new DeleteObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: R2_BUCKET,
       Key: remotePath,
     });
 
@@ -158,7 +150,7 @@ export async function deleteFile(remotePath: string): Promise<void> {
 export async function checkFileExists(remotePath: string): Promise<boolean> {
   try {
     const command = new HeadObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: R2_BUCKET,
       Key: remotePath,
     });
 
@@ -181,7 +173,7 @@ export async function checkFileExists(remotePath: string): Promise<boolean> {
 export async function getFileMetadata(remotePath: string): Promise<HeadObjectCommandOutput> {
   try {
     const command = new HeadObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: R2_BUCKET,
       Key: remotePath,
     });
 

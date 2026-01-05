@@ -156,13 +156,20 @@ function StreamEndedModal({
       }
 
       try {
-        const res = await fetch(`/api/recordings/${recordingId}`);
+        const res = await fetch(`${API_BASE}/api/recordings/${recordingId}`, {
+          credentials: "include",
+        });
         if (!res.ok) throw new Error("Failed to fetch recording status");
 
         const text = await res.text();
         if (!text) throw new Error("Empty response from server");
 
-        const payload = JSON.parse(text);
+        let payload: any;
+        try {
+          payload = JSON.parse(text);
+        } catch (err) {
+          throw new Error(`Non-JSON poll response (possible auth/CORS): ${text.slice(0, 120)}`);
+        }
         console.log("🔍 Full response:", payload);
 
         const status = payload?.data?.status ?? payload?.status ?? "PROCESSING";
@@ -203,7 +210,9 @@ function StreamEndedModal({
 
   const handleDownload = async () => {
     try {
-      const res = await fetch(`/api/recordings/${recordingId}/download-link`);
+      const res = await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link`, {
+        credentials: "include",
+      });
       if (res.status === 410) {
         alert("This recording link expired. Use Settings → Usage → Emergency Download.");
         return;
@@ -231,7 +240,9 @@ function StreamEndedModal({
 
   const handleConfirmYes = async () => {
     try {
-      await fetch(`/api/recordings/${recordingId}/download-link?confirm=true`);
+      await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link?confirm=true`, {
+        credentials: "include",
+      });
       setConfirmMessage("Great — you're all set. Save the file somewhere safe.");
     } catch (e) {
       setConfirmMessage("Noted. Thanks for confirming.");
@@ -242,9 +253,10 @@ function StreamEndedModal({
 
   const handleConfirmNo = async () => {
     try {
-      await fetch(`/api/recordings/${recordingId}/report-download-issue`, {
+      await fetch(`${API_BASE}/api/recordings/${recordingId}/report-download-issue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ reason: "user_reported_issue" }),
       });
     } catch {}
@@ -420,6 +432,7 @@ export default function Room() {
   const usagePostedRef = useRef(false);
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);
   const [canMultistream, setCanMultistream] = useState<boolean>(false);
+  const [recordingEnabled, setRecordingEnabled] = useState<boolean>(true);
   // Canonical plan id state
   const [userPlanId, setUserPlanId] = useState<PlanId>("free");
   const [destinations, setDestinations] = useState<DestinationItem[]>([]);
@@ -515,6 +528,9 @@ export default function Room() {
         setUserPlanId(canonicalPlanId);
         const allowed = !!(data?.plan?.features?.rtmpMultistream) || planIdRaw === 'internal_unlimited';
         setCanMultistream(allowed);
+        const recFlag = data?.plan?.features?.recording;
+        const recordingAllowed = planIdRaw === 'internal_unlimited' ? true : (recFlag === undefined ? true : !!recFlag);
+        setRecordingEnabled(recordingAllowed);
       } catch {}
     })();
   }, [API_BASE]);
@@ -1188,6 +1204,7 @@ export default function Room() {
         recordingStatus={recordingStatus}
         onStartRecording={startRecording}
         onStopRecording={stopRecording}
+        recordingEnabled={recordingEnabled}
         savedDestinations={destinations
           .filter((d) => d.enabled && d.status === "connected" && d.hasKey)
           .map((d) => ({
@@ -1203,7 +1220,7 @@ export default function Room() {
         <StreamEndedModal
           recordingId={recordingId}
           onStartEditing={() => nav('/edit', { replace: true })}
-          onExitRoom={() => nav('/thanks', { replace: true })}
+          onExitRoom={() => nav('/join', { replace: true })}
         />
       )}
 

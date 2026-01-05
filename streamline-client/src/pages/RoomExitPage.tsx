@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { API_BASE } from "../lib/apiBase";
 import { editingApi } from "../lib/editingApi";
 // downloadService no longer used for direct downloads; we rely on signed links
 
@@ -30,7 +31,9 @@ export default function RoomExitPage() {
     setDownloading(true);
 
     try {
-      const res = await fetch(`/api/recordings/${recordingId}/download-link`);
+      const res = await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link`, {
+        credentials: "include",
+      });
       if (res.status === 410) {
         alert("This recording link expired. Use Settings → Usage → Emergency Download.");
         setDownloading(false);
@@ -64,7 +67,9 @@ export default function RoomExitPage() {
 
   const handleConfirmYes = async () => {
     try {
-      await fetch(`/api/recordings/${recordingId}/download-link?confirm=true`);
+      await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link?confirm=true`, {
+        credentials: "include",
+      });
       setConfirmMessage("Great — you're all set. Save the file somewhere safe.");
     } catch (e) {
       setConfirmMessage("Noted. Thanks for confirming.");
@@ -75,9 +80,10 @@ export default function RoomExitPage() {
 
   const handleConfirmNo = async () => {
     try {
-      await fetch(`/api/recordings/${recordingId}/report-download-issue`, {
+      await fetch(`${API_BASE}/api/recordings/${recordingId}/report-download-issue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ reason: "user_reported_issue" }),
       });
     } catch {}

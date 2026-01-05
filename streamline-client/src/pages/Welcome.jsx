@@ -51,6 +51,12 @@ const Welcome = () => {
     return String(n);
   };
 
+  const renderStatValue = (value) => {
+    if (statsLoading) return "…";
+    if (value == null) return "—";
+    return fmtK(value);
+  };
+
   return (
     <div 
       style={{
@@ -327,7 +333,7 @@ const Welcome = () => {
         >
           <div>
             <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>
-              {stats.streamers != null ? fmtK(stats.streamers) : "10K+"}
+              {renderStatValue(stats.streamers)}
             </div>
             <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               Streamers
@@ -336,7 +342,7 @@ const Welcome = () => {
           <div style={{ width: '1px', background: 'rgba(255, 255, 255, 0.1)' }}></div>
           <div>
             <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>
-              {stats.hoursStreamed != null ? fmtK(stats.hoursStreamed) : "50M+"}
+              {renderStatValue(stats.hoursStreamed)}
             </div>
             <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               Hours Streamed
@@ -344,23 +350,12 @@ const Welcome = () => {
           </div>
           <div style={{ width: '1px', background: 'rgba(255, 255, 255, 0.1)' }}></div>
           <div>
-            {stats.streamersActive != null ? (
-              <>
-                <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>
-                  {fmtK(stats.streamersActive)}
-                </div>
-                <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                  Active Now
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>99.9%</div>
-                <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                  Uptime
-                </div>
-              </>
-            )}
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>
+              {renderStatValue(stats.streamersActive)}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              Active Now
+            </div>
           </div>
         </div>
 

@@ -18,6 +18,7 @@ exports.r2 = new client_s3_1.S3Client({
         accessKeyId: mustGetEnv("R2_ACCESS_KEY_ID"),
         secretAccessKey: mustGetEnv("R2_SECRET_ACCESS_KEY"),
     },
+    forcePathStyle: true,
 });
 async function r2GetStream(key) {
     const resp = await exports.r2.send(new client_s3_1.GetObjectCommand({ Bucket: exports.R2_BUCKET, Key: key }));

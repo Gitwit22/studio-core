@@ -122,7 +122,7 @@ export const SignupPage = () => {
       // skipped onboarding). From there they can configure destinations/keys and
       // then navigate to Join or Dashboard.
       if (!skipOnboarding) {
-        nav("/settings/destinations");
+        nav("/settings/billing?tab=destinations");
         return;
       }
 
