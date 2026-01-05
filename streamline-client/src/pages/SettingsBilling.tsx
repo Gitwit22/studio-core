@@ -322,11 +322,26 @@ const [user, setUser] = useState<UserData | null>(null);
     try {
       setEmergencyLoading(true);
       setEmergencyMessage(null);
-      const res = await fetch(`/api/recordings/emergency-latest`, { credentials: "include" });
-      const data = await res.json();
+      const res = await fetch(`/api/recordings/emergency-latest`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        console.error("Emergency download parse error", parseErr);
+        setEmergencyMessage("No link available.");
+        return;
+      }
 
       if (res.status === 402 || data?.paywall) {
         setEmergencyMessage("Upgrade required to download this recording.");
+        return;
+      }
+      if (!res.ok) {
+        setEmergencyMessage("No link available.");
         return;
       }
       if (data?.noRecording || res.status === 404) {

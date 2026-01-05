@@ -606,6 +606,15 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
     const uid = getAuthUserId(req);
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
+    // Prevent CDN/browser caching so this endpoint never returns a 304 with an empty body
+    res.set({
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Surrogate-Control": "no-store",
+      ETag: `${Date.now()}`,
+    });
+
     // Per spec: Query recordings where userId == uid AND status == "ready"
     // Order by createdAt descending, limit 1
     const snap = await firestore
@@ -636,7 +645,7 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
       });
 
       if (!fallbackDoc) {
-        return res.json({
+        return res.status(200).json({
           success: false,
           noRecording: true,
           message: "No ready recordings found",
@@ -647,7 +656,7 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
       const fallbackData = fallbackDoc.data() || {};
       const size = await r2HeadObjectSize(fallbackData.objectKey);
       if (size <= 0) {
-        return res.json({
+        return res.status(200).json({
           success: false,
           noRecording: true,
           message: "Recording file not found in storage",
@@ -660,7 +669,7 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
         .doc(fallbackDoc.id)
         .set({ lastDownloadRequestedAt: Timestamp.now() }, { merge: true });
 
-      return res.json({
+      return res.status(200).json({
         success: true,
         data: {
           url: signedUrl,
@@ -693,7 +702,7 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
       .doc(readyDoc.id)
       .set({ lastDownloadRequestedAt: Timestamp.now() }, { merge: true });
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       data: {
         url: signedUrl,

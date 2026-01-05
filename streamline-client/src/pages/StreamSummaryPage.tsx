@@ -164,7 +164,7 @@ export default function StreamSummaryPage() {
     } catch (e) {
       setConfirmMessage("Noted. Thanks for confirming.");
     } finally {
-      setShowConfirmModal(false);
+      setShowConfirmModal(true);
     }
   };
 
@@ -178,7 +178,12 @@ export default function StreamSummaryPage() {
       });
     } catch {}
     setConfirmMessage("Use Settings → Usage → Emergency Download (Latest Recording) if you're having trouble.");
+    setShowConfirmModal(true);
+  };
+
+  const handleCloseConfirmModal = () => {
     setShowConfirmModal(false);
+    setConfirmMessage(null);
   };
 
   const statusConfig = {
