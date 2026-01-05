@@ -11,6 +11,7 @@ console.log("✅ admin.ts loaded");
 const express_1 = __importDefault(require("express"));
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const adminAuth_1 = require("../middleware/adminAuth");
+const usageTracker_1 = require("../lib/usageTracker");
 const plan_1 = require("../types/plan");
 const router = express_1.default.Router();
 // All routes require admin authentication
@@ -319,38 +320,32 @@ router.get("/usage", async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 100;
         const planFilter = req.query.plan;
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthKey = (0, usageTracker_1.getCurrentMonthKey)();
         // Get all users
         let usersQuery = firebaseAdmin_1.firestore.collection("users");
         if (planFilter) {
             usersQuery = usersQuery.where("planId", "==", planFilter);
         }
         const usersSnapshot = await usersQuery.limit(limit).get();
-        // Get usage for this month for all users
-        const usageSnapshot = await firebaseAdmin_1.firestore
-            .collection("usage")
-            .where("timestamp", ">=", monthStart)
-            .get();
-        // Build usage summary
-        const usageByUser = {};
-        usageSnapshot.docs.forEach((doc) => {
-            const data = doc.data();
-            const userId = data.userId;
-            usageByUser[userId] = (usageByUser[userId] || 0) + (data.minutes || 0);
-        });
         // Fetch all plans once for efficiency
         const plansSnap = await firebaseAdmin_1.firestore.collection("plans").get();
         const plansMap = Object.fromEntries(plansSnap.docs.map(d => [d.id, d.data()]));
-        const usageData = usersSnapshot.docs.map((doc) => {
+        const usageData = await Promise.all(usersSnapshot.docs.map(async (doc) => {
             const userData = doc.data();
             const userId = doc.id;
-            const minutesUsed = usageByUser[userId] || 0;
+            // usageMonthly doc id shape: `${uid}_${YYYY-MM}`
+            const usageDocId = `${userId}_${monthKey}`;
+            const usageSnap = await firebaseAdmin_1.firestore.collection("usageMonthly").doc(usageDocId).get();
+            const usageData = usageSnap.exists ? usageSnap.data() : {};
+            const usage = usageData.usage || usageData.totals || {};
+            const minutesUsed = Number(usage.participantMinutes ?? usage.streamMinutes ?? usage.minutes ?? 0);
             const planIdRaw = userData.planId || "free";
             // Canonicalize planId using isPlanId
             const planId = (0, plan_1.isPlanId)(planIdRaw) ? planIdRaw : planIdRaw;
             const planData = plansMap[planId] || {};
-            const planLimit = planData.limits?.monthlyMinutesIncluded ?? 60;
+            const planLimit = Number(planData.limits?.participantMinutes ??
+                planData.limits?.monthlyMinutesIncluded ??
+                0);
             const bonusMinutes = userData.bonusMinutes || 0;
             const effectiveLimit = planLimit + bonusMinutes;
             return {
@@ -362,11 +357,11 @@ router.get("/usage", async (req, res) => {
                 bonusMinutes,
                 planLimit,
                 effectiveLimit,
-                percentUsed: (minutesUsed / effectiveLimit) * 100,
-                isBlocked: minutesUsed >= effectiveLimit,
+                percentUsed: effectiveLimit > 0 ? (minutesUsed / effectiveLimit) * 100 : 0,
+                isBlocked: effectiveLimit > 0 ? minutesUsed >= effectiveLimit : false,
                 lastActive: userData.lastActive,
             };
-        });
+        }));
         // Sort by percent used (most blocked users first)
         usageData.sort((a, b) => b.percentUsed - a.percentUsed);
         res.json({

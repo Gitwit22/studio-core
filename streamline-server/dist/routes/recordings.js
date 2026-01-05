@@ -486,6 +486,31 @@ router.post("/stop", requireAuth_1.requireAuth, async (req, res) => {
             downloadPath: data.objectKey || null,
         });
         console.log(`[recordings/stop] Recording ${recordingId} now processing`);
+        // Best-effort post-stop verification in case webhooks are delayed or dropped
+        const objectKey = data.objectKey;
+        if (objectKey) {
+            setTimeout(async () => {
+                try {
+                    const size = await r2HeadObjectSize(objectKey);
+                    if (size > 0) {
+                        await recordingRef.update({
+                            status: "ready",
+                            downloadReady: true,
+                            readyAt: new Date(),
+                            fileSize: size,
+                            updatedAt: new Date(),
+                        });
+                        console.log(`[recordings/stop] ✅ File confirmed via head-check: ${objectKey} (${size} bytes)`);
+                    }
+                    else {
+                        console.warn(`[recordings/stop] head-check found no file yet for ${objectKey}`);
+                    }
+                }
+                catch (checkErr) {
+                    console.warn(`[recordings/stop] head-check error for ${objectKey}:`, checkErr?.message);
+                }
+            }, 4000);
+        }
         return res.json({ ok: true, success: true, recordingId });
     }
     catch (err) {

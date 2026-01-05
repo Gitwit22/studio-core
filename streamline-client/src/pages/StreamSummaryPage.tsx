@@ -18,6 +18,7 @@ export default function StreamSummaryPage() {
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editPrivacy, setEditPrivacy] = useState('public');
+  const [isDownloading, setIsDownloading] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
 
@@ -119,6 +120,8 @@ export default function StreamSummaryPage() {
   };
 
   const handleDownload = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
     try {
       if (!recordingId) throw new Error("Recording not ready");
 
@@ -147,6 +150,8 @@ export default function StreamSummaryPage() {
     } catch (err) {
       console.error("Download failed:", err);
       alert("Failed to download recording. Use Settings → Usage → Emergency Download.");
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -436,6 +441,59 @@ export default function StreamSummaryPage() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {recording.videoUrl && (
+                  <div
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '13px', color: '#9ca3af', fontWeight: 600 }}>Preview</span>
+                      <span style={{ fontSize: '12px', color: '#d1d5db' }}>Press play to make sure it works.</span>
+                    </div>
+                    <div style={{ borderRadius: '10px', overflow: 'hidden', background: '#0b0b0b' }}>
+                      <video
+                        controls
+                        src={recording.videoUrl}
+                        style={{ width: '100%', display: 'block', background: '#000' }}
+                      />
+                    </div>
+                    <button
+                      onClick={handleDownload}
+                      disabled={isDownloading}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        background: 'rgba(220, 38, 38, 0.15)',
+                        border: '1px solid rgba(220, 38, 38, 0.4)',
+                        color: '#fecaca',
+                        borderRadius: '10px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        cursor: isDownloading ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.3s ease',
+                        opacity: isDownloading ? 0.7 : 1,
+                        textAlign: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isDownloading) return;
+                        e.currentTarget.style.background = 'rgba(220, 38, 38, 0.25)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(220, 38, 38, 0.15)';
+                      }}
+                    >
+                      {isDownloading ? 'Preparing download...' : 'Click here to download'}
+                    </button>
+                  </div>
+                )}
                 
                 <button
                   onClick={() => nav(`/editing/assets?newRecording=${recording.id}`)}
@@ -534,6 +592,7 @@ export default function StreamSummaryPage() {
 
                 <button
                   onClick={handleDownload}
+                  disabled={isDownloading}
                   style={{
                     width: '100%',
                     padding: '14px 24px',
@@ -543,11 +602,13 @@ export default function StreamSummaryPage() {
                     borderRadius: '12px',
                     fontSize: '15px',
                     fontWeight: 500,
-                    cursor: 'pointer',
                     textAlign: 'center',
-                    transition: 'all 0.3s ease'
+                    transition: 'all 0.3s ease',
+                    opacity: isDownloading ? 0.7 : 1,
+                    cursor: isDownloading ? 'not-allowed' : 'pointer'
                   }}
                   onMouseEnter={(e) => {
+                    if (isDownloading) return;
                     (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.1)';
                     (e.currentTarget as HTMLButtonElement).style.color = '#ffffff';
                   }}
@@ -556,7 +617,7 @@ export default function StreamSummaryPage() {
                     (e.currentTarget as HTMLButtonElement).style.color = '#9ca3af';
                   }}
                 >
-                  📥 Download MP4
+                  {isDownloading ? 'Preparing download...' : '📥 Download MP4'}
                 </button>
               </div>
             </div>

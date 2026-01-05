@@ -120,12 +120,14 @@ async function revokeAdminPrivileges(userId, revokedBy) {
  */
 async function logAdminAction(adminId, action, details) {
     try {
+        const safeDetails = Object.fromEntries(Object.entries(details || {}).filter(([, v]) => v !== undefined));
+        const ip = safeDetails.ip || "unknown";
         await firebaseAdmin_1.firestore.collection("adminLogs").add({
             adminId,
             action,
-            details,
+            details: safeDetails,
             timestamp: new Date(),
-            ip: details.ip || "unknown",
+            ip,
         });
     }
     catch (error) {
