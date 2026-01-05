@@ -20,6 +20,7 @@ interface Props {
   onStartRecording: (layout: "speaker" | "grid") => Promise<void>;
   onStopRecording: () => Promise<void>;
   recordingEnabled?: boolean;
+  recordingElapsedSeconds?: number;
 
   // Optional: saved destinations with stored keys (from Settings Destinations)
   savedDestinations?: Array<{
@@ -43,6 +44,7 @@ export default function StreamSetupModalV2({
   onStopRecording,
   savedDestinations,
   recordingEnabled = true,
+  recordingElapsedSeconds = 0,
 }: Props) {
   const [useYouTube, setUseYouTube] = useState(false);
   const [useFacebook, setUseFacebook] = useState(false);
@@ -507,7 +509,19 @@ export default function StreamSetupModalV2({
                     background: '#ef4444',
                     animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
                   }} />
-                  <span>Recording in progress...</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    Recording in progress…
+                    <span style={{
+                      padding: '2px 6px',
+                      borderRadius: '0.35rem',
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      border: '1px solid rgba(239, 68, 68, 0.35)',
+                      fontFamily: 'monospace',
+                      color: '#fecaca'
+                    }}>
+                      {`${Math.floor(recordingElapsedSeconds / 60)}:${String(recordingElapsedSeconds % 60).padStart(2, '0')}`}
+                    </span>
+                  </span>
                 </div>
               )}
             </div>

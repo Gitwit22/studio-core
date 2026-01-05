@@ -127,10 +127,12 @@ function StreamEndedModal({
   recordingId,
   onStartEditing,
   onExitRoom,
+  onStayInRoom,
 }: {
   recordingId: string;
   onStartEditing: () => void;
   onExitRoom: () => void;
+  onStayInRoom: () => void;
 }) {
   const [processing, setProcessing] = useState(true);
   const [ready, setReady] = useState(false);
@@ -360,6 +362,23 @@ function StreamEndedModal({
           >
             🚪 Exit Room
           </button>
+          <button
+            onClick={onStayInRoom}
+            style={{
+              width: '100%',
+              padding: '0.85rem',
+              background: 'rgba(34, 197, 94, 0.1)',
+              border: '1px solid rgba(34, 197, 94, 0.25)',
+              color: '#bbf7d0',
+              borderRadius: '0.5rem',
+              fontSize: '0.95rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+            }}
+          >
+            Stay in Room
+          </button>
         </div>
       </div>
       {showConfirmModal && (
@@ -414,6 +433,7 @@ export default function Room() {
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
+  const [showStreamEndedModal, setShowStreamEndedModal] = useState(false);
   const currentUserId = getOrCreateUid();
   const [isHost, setIsHost] = useState(false);
   const [userRole, setUserRole] = useState<string>("guest");
@@ -431,6 +451,9 @@ export default function Room() {
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
   const recordingRef = useRef<string | null>(null);
+  const recordingStartRef = useRef<number | null>(null);
+  const lastRecordingStatusRef = useRef<RecordingStatus>("idle");
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
   const [viewerCount] = useState<number>(0);
   const [elapsedTime, setElapsedTime] = useState(0);
   const streamStartTimeRef = useRef<number | null>(null);
@@ -542,6 +565,20 @@ export default function Room() {
   }, [API_BASE]);
 
   useEffect(() => {
+    if (
+      recordingStatus === "stopped" &&
+      recordingId &&
+      lastRecordingStatusRef.current !== "stopped"
+    ) {
+      setShowStreamEndedModal(true);
+    } else if (recordingStatus !== "stopped") {
+      setShowStreamEndedModal(false);
+    }
+
+    lastRecordingStatusRef.current = recordingStatus;
+  }, [recordingStatus, recordingId]);
+
+  useEffect(() => {
     if (streamStatus === "live") {
       if (!streamStartTimeRef.current) {
         streamStartTimeRef.current = Date.now();
@@ -560,6 +597,26 @@ export default function Room() {
       setElapsedTime(0);
     }
   }, [streamStatus]);
+
+  // Track recording elapsed time independently from stream timer
+  useEffect(() => {
+    if (recordingStatus === "recording") {
+      if (!recordingStartRef.current) {
+        recordingStartRef.current = Date.now();
+        setRecordingElapsed(0);
+      }
+      const interval = setInterval(() => {
+        if (recordingStartRef.current) {
+          const elapsed = Math.floor((Date.now() - recordingStartRef.current) / 1000);
+          setRecordingElapsed(elapsed);
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+
+    recordingStartRef.current = null;
+    setRecordingElapsed(0);
+  }, [recordingStatus]);
 
   // Load destinations (soft gate)
   useEffect(() => {
@@ -686,6 +743,10 @@ export default function Room() {
     nav('/join', { replace: true });
   };
 
+  const handleStayInRoom = () => {
+    setShowStreamEndedModal(false);
+  };
+
   const startRecording = async (layout: "speaker" | "grid" = "grid") => {
     if (!roomName) {
       console.log("❌ No roomName, can't start recording");
@@ -710,6 +771,8 @@ export default function Room() {
       }
       recordingRef.current = recId;
       setRecordingId(recId);
+      recordingStartRef.current = Date.now();
+      setRecordingElapsed(0);
       streamStartTimeRef.current = Date.now();
       console.log("✅ Recording started!");
     } catch (e) {
@@ -1211,6 +1274,7 @@ export default function Room() {
         onStartRecording={startRecording}
         onStopRecording={stopRecording}
         recordingEnabled={recordingEnabled}
+        recordingElapsedSeconds={recordingElapsed}
         savedDestinations={destinations
           .filter((d) => d.enabled && d.status === "connected" && d.hasKey)
           .map((d) => ({
@@ -1222,11 +1286,12 @@ export default function Room() {
           }))}
       />
 
-      {recordingStatus === "stopped" && recordingId && (
+      {showStreamEndedModal && recordingId && (
         <StreamEndedModal
           recordingId={recordingId}
           onStartEditing={() => nav('/edit', { replace: true })}
           onExitRoom={() => nav('/join', { replace: true })}
+          onStayInRoom={handleStayInRoom}
         />
       )}
 
