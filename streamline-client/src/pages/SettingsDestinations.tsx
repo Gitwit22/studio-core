@@ -286,60 +286,64 @@ export default function SettingsDestinations() {
               from the room.
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid rgba(248, 250, 252, 0.1)" }}>
-                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Platform</th>
-                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Name</th>
-                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Base</th>
-                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Status</th>
-                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Key</th>
-                  <th align="left" style={{ padding: "6px 4px", color: "#e5e7eb" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map(item => (
-                  <tr key={item.id} style={{ borderBottom: "1px solid rgba(248, 250, 252, 0.06)" }}>
-                    <td style={{ padding: "6px 4px", textTransform: "capitalize", color: "#f9fafb" }}>{item.platform}</td>
-                    <td style={{ padding: "6px 4px", color: "#e5e7eb" }}>{item.name || "—"}</td>
-                    <td style={{ padding: "6px 4px", fontFamily: "monospace", fontSize: 12, color: "#e5e7eb" }}>{item.rtmpUrlBase}</td>
-                    <td style={{ padding: "6px 4px" }}>
-                      <StatusBadge status={item.status} reason={item.statusReason || undefined} />
-                    </td>
-                    <td style={{ padding: "6px 4px", color: "#e5e7eb" }}>{item.hasKey ? `••••${item.keyPreview ?? ""}` : "no key"}</td>
-                    <td style={{ padding: "6px 4px" }}>
-                      {item.hasKey && (
+            <div style={{ width: "100%", overflowX: "auto" }}>
+              <table style={{ width: "100%", minWidth: 520, borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid rgba(248, 250, 252, 0.1)" }}>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Platform</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Name</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb" }}>Base</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Status</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Key</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map(item => (
+                    <tr key={item.id} style={{ borderBottom: "1px solid rgba(248, 250, 252, 0.06)" }}>
+                      <td style={{ padding: "6px 6px", textTransform: "capitalize", color: "#f9fafb", whiteSpace: "nowrap" }}>{item.platform}</td>
+                      <td style={{ padding: "6px 6px", color: "#e5e7eb", wordBreak: "break-word" }}>{item.name || "—"}</td>
+                      <td style={{ padding: "6px 6px", fontFamily: "monospace", fontSize: 12, color: "#e5e7eb", wordBreak: "break-all" }}>{item.rtmpUrlBase}</td>
+                      <td style={{ padding: "6px 6px" }}>
+                        <StatusBadge status={item.status} reason={item.statusReason || undefined} />
+                      </td>
+                      <td style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>{item.hasKey ? `••••${item.keyPreview ?? ""}` : "no key"}</td>
+                      <td style={{ padding: "6px 6px", whiteSpace: "nowrap" }}>
+                        {item.hasKey && (
+                          <button
+                            onClick={() => onClearKey(item.id)}
+                            style={{
+                              fontSize: 12,
+                              color: "#e5e7eb",
+                              border: "none",
+                              background: "transparent",
+                              cursor: "pointer",
+                              marginRight: 8,
+                              padding: 0,
+                            }}
+                          >
+                            Clear Key
+                          </button>
+                        )}
                         <button
-                          onClick={() => onClearKey(item.id)}
+                          onClick={() => onDelete(item.id)}
                           style={{
                             fontSize: 12,
-                            color: "#e5e7eb",
+                            color: "#fecaca",
                             border: "none",
                             background: "transparent",
                             cursor: "pointer",
-                            marginRight: 8,
+                            padding: 0,
                           }}
                         >
-                          Clear Key
+                          Delete
                         </button>
-                      )}
-                      <button
-                        onClick={() => onDelete(item.id)}
-                        style={{
-                          fontSize: 12,
-                          color: "#fecaca",
-                          border: "none",
-                          background: "transparent",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
