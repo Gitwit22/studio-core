@@ -171,4 +171,34 @@ async function handleUsageSummary(req: any, res: any) {
 // Expose both endpoints with the same stable payload
 router.get("/summary", requireAuth, handleUsageSummary);
 router.get("/me", requireAuth, handleUsageSummary);
+
+// Lightweight entitlements endpoint for client gating (features + limits)
+router.get("/entitlements", requireAuth, async (req, res) => {
+  const uid = (req as any).user?.uid;
+  if (!uid) return res.status(401).json({ error: "unauthorized" });
+
+  const userSnap = await firestore.collection("users").doc(uid).get();
+  if (!userSnap.exists) return res.status(404).json({ error: "user_not_found" });
+  const planId = String((userSnap.data() || {}).planId || "free");
+
+  const planSnap = await firestore.collection("plans").doc(planId).get();
+  if (!planSnap.exists) return res.status(404).json({ error: "plan_not_found", planId });
+
+  const plan = planSnap.data() || {};
+  const features = plan.features || {};
+  const limits = plan.limits || {};
+
+  return res.json({
+    planId,
+    planName: plan.name || planId,
+    recording: !!features.recording,
+    rtmpMultistream: !!features.rtmpMultistream || !!features.rtmp || !!plan.multistreamEnabled,
+    dualRecording: !!features.dualRecording || !!features.dual_recording,
+    maxDestinations: Number(limits.maxDestinations || 0),
+    maxGuests: Number(limits.maxGuests || 0),
+    participantMinutes: Number(limits.participantMinutes || 0),
+    transcodeMinutes: Number(limits.transcodeMinutes || 0),
+  });
+});
+
 export default router;

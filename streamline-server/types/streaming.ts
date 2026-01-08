@@ -17,6 +17,8 @@ export type ApiErrorCode =
   | "limit_exceeded"
   | "not_found"
   | "destination_not_found"
+  | "duplicate_name"
+  | "duplicate_stream_key"
   | "duplicate_target"
   | "validation_failed"
   | "rate_limited"

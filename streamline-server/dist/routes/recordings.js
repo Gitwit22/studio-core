@@ -23,6 +23,7 @@ const express_1 = require("express");
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const requireAuth_1 = require("../middleware/requireAuth");
 const featureAccess_1 = require("./featureAccess");
+const mediaPresets_1 = require("../lib/mediaPresets");
 const firestore_1 = require("firebase-admin/firestore");
 const client_s3_1 = require("@aws-sdk/client-s3");
 const s3_request_presigner_1 = require("@aws-sdk/s3-request-presigner");
@@ -209,12 +210,28 @@ router.post("/start", requireAuth_1.requireAuth, async (req, res) => {
             });
         }
         // Validate request
-        const { roomName, layout: rawLayout } = req.body;
+        const { roomName, layout: rawLayout, mode: rawMode, presetId } = req.body;
         if (!roomName) {
             return res.status(400).json({ error: "roomName is required" });
         }
         // CRITICAL: Layout must be exactly "speaker" or "grid" - anything else causes 400
         const layout = rawLayout === "speaker" ? "speaker" : "grid";
+        const mode = rawMode === "dual" ? "dual" : "cloud";
+        // Plan gate for dual recording (feature: dualRecording)
+        if (mode === "dual") {
+            const userSnap = await firebaseAdmin_1.firestore.collection("users").doc(uid).get();
+            const planId = String((userSnap.data() || {}).planId || "free");
+            const planSnap = await firebaseAdmin_1.firestore.collection("plans").doc(planId).get();
+            const plan = planSnap.exists ? planSnap.data() : {};
+            const dualAllowed = plan?.features?.dualRecording || plan?.features?.dual_recording || false;
+            if (!dualAllowed) {
+                return res.status(403).json({ error: "dual_recording_not_allowed" });
+            }
+        }
+        // Clamp preset to plan allowances
+        const planId = await (0, mediaPresets_1.getUserPlanId)(uid);
+        const { preset, effectiveId, requestedId, clamped } = (0, mediaPresets_1.clampPresetForPlan)(planId, presetId);
+        const encodingOptions = (0, mediaPresets_1.toEncodingOptions)(preset, "record");
         // Check configs
         const livekitCfg = getLiveKitConfig();
         if (!livekitCfg.isConfigured) {
@@ -243,6 +260,7 @@ router.post("/start", requireAuth_1.requireAuth, async (req, res) => {
             userId: uid,
             roomName,
             layout: layout || "grid",
+            mode,
             status: "starting",
             downloadReady: false,
             objectKey,
@@ -266,6 +284,9 @@ router.post("/start", requireAuth_1.requireAuth, async (req, res) => {
             downloadIssueReportedAt: null,
             downloadIssueNote: null,
             oneTimeToken: null,
+            presetId: requestedId,
+            effectivePresetId: effectiveId,
+            presetClamped: clamped,
         };
         await recordingRef.set(initialDoc);
         console.log(`[recordings/start] Created doc ${recordingId} status=starting`);
@@ -363,7 +384,7 @@ router.post("/start", requireAuth_1.requireAuth, async (req, res) => {
             // =======================================================================
             // EGRESS CALL - SDK 2.6.1 accepts direct EncodedFileOutput; ensure output.oneof is set
             // =======================================================================
-            const egressResp = await egressClient.startRoomCompositeEgress(roomName, fileOutput, compositeOpts);
+            const egressResp = await egressClient.startRoomCompositeEgress(roomName, fileOutput, { ...compositeOpts, encodingOptions });
             egressId = egressResp?.egressId || null;
             if (!egressId) {
                 throw new Error("No egressId returned from LiveKit");
@@ -410,6 +431,9 @@ router.post("/start", requireAuth_1.requireAuth, async (req, res) => {
             recordingId,
             egressId,
             recording: finalData,
+            effectivePresetId: effectiveId,
+            requestedPresetId: requestedId,
+            presetClamped: clamped,
         });
     }
     catch (err) {

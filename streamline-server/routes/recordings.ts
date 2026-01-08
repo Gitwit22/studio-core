@@ -22,6 +22,7 @@ import { Router } from "express";
 import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { canAccessFeature } from "./featureAccess";
+import { clampRecordingPreset, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { Timestamp } from "firebase-admin/firestore";
 import type { DocumentSnapshot } from "firebase-admin/firestore";
 import {
@@ -236,9 +237,11 @@ router.post("/start", requireAuth, async (req, res) => {
     }
 
     // Validate request
-    const { roomName, layout: rawLayout } = req.body as {
+    const { roomName, layout: rawLayout, mode: rawMode, presetId } = req.body as {
       roomName?: string;
       layout?: string;
+      mode?: string; // "cloud" | "dual"
+      presetId?: string;
     };
 
     if (!roomName) {
@@ -247,6 +250,40 @@ router.post("/start", requireAuth, async (req, res) => {
 
     // CRITICAL: Layout must be exactly "speaker" or "grid" - anything else causes 400
     const layout = rawLayout === "speaker" ? "speaker" : "grid";
+    const mode = rawMode === "dual" ? "dual" : "cloud";
+
+    // Plan + features
+    const planId = await getUserPlanId(uid);
+    const planSnap = await firestore.collection("plans").doc(planId).get();
+    const plan = planSnap.exists ? (planSnap.data() as any) : {};
+    const dualAllowed = plan?.features?.dualRecording || plan?.features?.dual_recording || false;
+    const allowHigherRecordingThanStream = !!(
+      plan?.features?.allowHigherRecordingThanStream ||
+      plan?.features?.allow_higher_recording_than_stream
+    );
+
+    // Plan gate for dual recording (feature: dualRecording)
+    if (mode === "dual" && !dualAllowed) {
+      return res.status(403).json({ error: "dual_recording_not_allowed" });
+    }
+
+    // If a stream is live, lower recording quality to stream preset when required
+    let activeStreamPresetId: string | null = null;
+    try {
+      const streamDocId = `${uid}_${roomName}`;
+      const streamSnap = await firestore.collection("activeStreams").doc(streamDocId).get();
+      if (streamSnap.exists) {
+        const data = streamSnap.data() || {};
+        activeStreamPresetId = data.effectivePresetId || data.presetEffectiveId || null;
+      }
+    } catch (e) {
+      console.warn("[recordings/start] failed to read active stream preset", (e as any)?.message);
+    }
+
+    // Clamp preset to plan and (optionally) active stream preset
+    const clamp = clampRecordingPreset(planId, presetId, activeStreamPresetId, allowHigherRecordingThanStream);
+    const { preset, effectiveId, requestedId, clamped, clampedToStream } = clamp;
+    const encodingOptions = toEncodingOptions(preset, "record");
 
     // Check configs
     const livekitCfg = getLiveKitConfig();
@@ -278,6 +315,7 @@ router.post("/start", requireAuth, async (req, res) => {
       userId: uid,
       roomName,
       layout: layout || "grid",
+      mode,
       status: "starting",
       downloadReady: false,
       objectKey,
@@ -301,6 +339,11 @@ router.post("/start", requireAuth, async (req, res) => {
       downloadIssueReportedAt: null,
       downloadIssueNote: null,
       oneTimeToken: null,
+      presetId: requestedId,
+      effectivePresetId: effectiveId,
+      presetClamped: clamped || clampedToStream,
+      presetClampedToStream: clampedToStream,
+      streamPresetId: activeStreamPresetId,
     };
 
     await recordingRef.set(initialDoc);
@@ -416,7 +459,7 @@ router.post("/start", requireAuth, async (req, res) => {
       const egressResp = await egressClient.startRoomCompositeEgress(
         roomName,
         fileOutput,
-        compositeOpts
+        { ...compositeOpts, encodingOptions }
       );
 
       egressId = (egressResp as any)?.egressId || null;
@@ -473,6 +516,11 @@ router.post("/start", requireAuth, async (req, res) => {
       recordingId,
       egressId,
       recording: finalData,
+      effectivePresetId: effectiveId,
+      requestedPresetId: requestedId,
+      presetClamped: clamped || clampedToStream,
+      presetClampedToStream: clampedToStream,
+      streamPresetId: activeStreamPresetId,
     });
 
   } catch (err: any) {

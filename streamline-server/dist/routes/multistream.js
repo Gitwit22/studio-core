@@ -5,6 +5,7 @@ const firebaseAdmin_1 = require("../firebaseAdmin");
 const requireAuth_1 = require("../middleware/requireAuth");
 const featureAccess_1 = require("./featureAccess");
 const crypto_1 = require("../lib/crypto");
+const mediaPresets_1 = require("../lib/mediaPresets");
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
 let _lkMod = null;
 async function getLiveKitSdk() {
@@ -12,6 +13,19 @@ async function getLiveKitSdk() {
         return _lkMod;
     _lkMod = await import("livekit-server-sdk");
     return _lkMod;
+}
+async function getPlanLimit(uid, field) {
+    const userSnap = await firebaseAdmin_1.firestore.collection("users").doc(uid).get();
+    const planId = String((userSnap.data() || {}).planId || "free");
+    const planSnap = await firebaseAdmin_1.firestore.collection("plans").doc(planId).get();
+    if (!planSnap.exists)
+        return undefined;
+    const limits = (planSnap.data() || {}).limits || {};
+    const raw = limits[field];
+    if (raw === undefined || raw === null)
+        return undefined;
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : undefined;
 }
 const router = (0, express_1.Router)();
 router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (req, res) => {
@@ -25,7 +39,7 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
         const streamDocId = `${uid}_${roomName}`; // always non-empty if checks passed
         const ref = firebaseAdmin_1.firestore.collection("activeStreams").doc(streamDocId);
         // if your client sends individual keys or destination IDs:
-        const { youtubeStreamKey, facebookStreamKey, twitchStreamKey, guestCount, destinationIds } = req.body || {};
+        const { youtubeStreamKey, facebookStreamKey, twitchStreamKey, guestCount, destinationIds, presetId } = req.body || {};
         console.log("[multistream:start] uid:", uid, "room:", roomName, {
             youtubeStreamKey: !!youtubeStreamKey,
             facebookStreamKey: !!facebookStreamKey,
@@ -43,9 +57,18 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
         const userSnap = await firebaseAdmin_1.firestore.collection("users").doc(uid).get();
         if (!userSnap.exists)
             return res.status(401).json({ error: "User not found" });
+        const planId = await (0, mediaPresets_1.getUserPlanId)(uid);
         const access = await (0, featureAccess_1.canAccessFeature)(uid, "multistream");
         if (!access.allowed) {
             return res.status(403).json({ error: access.reason || "Multistreaming is not available on your plan" });
+        }
+        // Clamp preset by plan
+        const { preset, effectiveId, requestedId, clamped } = (0, mediaPresets_1.clampPresetForPlan)(planId, presetId);
+        const encodingOptions = (0, mediaPresets_1.toEncodingOptions)(preset, "stream");
+        // Destination cap enforcement (plan-based)
+        const maxDestinations = await getPlanLimit(uid, "maxDestinations");
+        if (maxDestinations !== undefined && maxDestinations > 0 && destIds.length > maxDestinations) {
+            return res.status(403).json({ error: "destination_limit_exceeded", limit: maxDestinations });
         }
         // Save intent / status (optional but useful)
         await ref.set({
@@ -98,7 +121,7 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
         console.log("[multistream:start] RTMP URLs:", urls);
         try {
             // Import LiveKit egress client and types using dynamic helper
-            const { EgressClient, StreamOutput, StreamProtocol, EncodingOptionsPreset } = await getLiveKitSdk();
+            const { EgressClient, StreamOutput, StreamProtocol } = await getLiveKitSdk();
             const livekitUrl = process.env.LIVEKIT_URL;
             const livekitApiKey = process.env.LIVEKIT_API_KEY;
             const livekitApiSecret = process.env.LIVEKIT_API_SECRET;
@@ -106,7 +129,7 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
             // Create RTMP stream output
             const streamOutput = new StreamOutput({ protocol: StreamProtocol.RTMP, urls });
             // Start Room Composite egress with preset encoding
-            const response = await egressClient.startRoomCompositeEgress(roomName, { stream: streamOutput }, { layout: "grid", encodingOptions: EncodingOptionsPreset.H264_1080P_30 });
+            const response = await egressClient.startRoomCompositeEgress(roomName, { stream: streamOutput }, { layout: "grid", encodingOptions });
             console.log("[multistream:start] Egress response:", {
                 egressId: response?.egressId,
                 room: roomName,
@@ -126,7 +149,14 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
                     updatedAt: Date.now(),
                 }, { merge: true });
                 // Ensure non-empty JSON body
-                return res.status(200).json({ success: true, egressId: response.egressId, status: "started" });
+                return res.status(200).json({
+                    success: true,
+                    egressId: response.egressId,
+                    status: "started",
+                    effectivePresetId: effectiveId,
+                    requestedPresetId: requestedId,
+                    presetClamped: clamped,
+                });
             }
             else {
                 console.error("[multistream:start] No egressId returned from LiveKit");

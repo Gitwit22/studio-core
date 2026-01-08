@@ -19,6 +19,10 @@ function deriveStatus(hasEnc: boolean, streamKeyDec: string | null, enabled: boo
   return { status: "connected", statusReason: undefined };
 }
 
+function normalizeName(name?: string | null): string {
+  return (name || "").trim().toLowerCase();
+}
+
 function toItem(doc: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.DocumentData>): DestinationItem {
   const data = (doc.data() as any) || {};
   const hasEnc = !!data.streamKeyEnc;
@@ -105,32 +109,61 @@ router.post("/", requireAuth, async (req: any, res) => {
     }
 
     const normalizedBase = normalizeRtmpBase(String(rtmpUrlBase));
+    const normalizedPlatform = String(platform).toLowerCase();
+    const normalizedName = normalizeName(name);
 
-    // Duplicate rule: same platform + same normalized base per user
-    const dupSnap = await firestore.collection("users").doc(uid).collection("destinations")
-      .where("platform", "==", String(platform).toLowerCase())
-      .where("rtmpUrlBase", "==", normalizedBase)
-      .limit(1)
-      .get();
-    if (!dupSnap.empty) {
-      return res.status(409).json({ error: "duplicate_target" as ApiErrorCode });
+    // Enforce plan limit for enabled destinations
+    const planLimit = await getPlanLimit(uid);
+    const enabledCount = await getEnabledCount(uid);
+    const willBeEnabled = enabled === false ? false : true;
+    if (willBeEnabled && planLimit !== undefined && planLimit > 0 && enabledCount >= planLimit) {
+      return res.status(409).json({ error: "limit_exceeded" as ApiErrorCode });
     }
 
     // Resolve encrypted key: prefer freshly provided plaintext (server-encrypted),
     // otherwise allow callers to supply an already-encrypted payload.
     let finalEnc: any = streamKeyEnc || null;
+    let plainKey: string | null = null;
     if (typeof streamKeyPlain === "string" && streamKeyPlain.trim()) {
-      const enc = encryptStreamKey(streamKeyPlain.trim());
+      const trimmed = streamKeyPlain.trim();
+      const enc = encryptStreamKey(trimmed);
       if (!enc) {
         return res.status(500).json({ error: "server_error" as ApiErrorCode, details: "stream key encryption is not configured" });
       }
       finalEnc = enc;
+      plainKey = trimmed;
+    } else if (streamKeyEnc) {
+      plainKey = decryptStreamKey(streamKeyEnc as any);
+    }
+
+    // Duplicate rules:
+    // 1) Names must be unique per platform (case-insensitive).
+    // 2) Stream keys must be unique per platform (match on decrypted plaintext).
+    const existingSnap = await firestore
+      .collection("users")
+      .doc(uid)
+      .collection("destinations")
+      .where("platform", "==", normalizedPlatform)
+      .get();
+
+    for (const doc of existingSnap.docs) {
+      const data = doc.data() as any;
+      const existingName = normalizeName(data?.name);
+      if (normalizedName && normalizedName === existingName) {
+        return res.status(409).json({ error: "duplicate_name" as ApiErrorCode });
+      }
+      if (plainKey) {
+        const existingDec = data?.streamKeyEnc ? decryptStreamKey(data.streamKeyEnc) : null;
+        if (existingDec && existingDec === plainKey) {
+          return res.status(409).json({ error: "duplicate_stream_key" as ApiErrorCode });
+        }
+      }
     }
 
     // Build doc data
     const now = Date.now();
     const docData: any = {
-      platform: String(platform).toLowerCase(),
+      platform: normalizedPlatform,
       name: name ? String(name) : null,
       enabled: enabled === false ? false : true,
       rtmpUrlBase: normalizedBase,
@@ -144,7 +177,7 @@ router.post("/", requireAuth, async (req: any, res) => {
     const destination = toItem(createdSnap);
 
     const usedCount = await getEnabledCount(uid);
-    const limit = await getPlanLimit(uid);
+    const limit = planLimit;
     const payload: DestinationPostResponse = {
       ok: true,
       destination,
@@ -223,23 +256,13 @@ router.put("/:id", requireAuth, async (req: any, res) => {
 
     let nextPlatform = typeof updates.platform === "string" ? String(updates.platform).toLowerCase() : current.platform;
     let nextBase = typeof updates.rtmpUrlBase === "string" ? normalizeRtmpBase(String(updates.rtmpUrlBase)) : current.rtmpUrlBase;
-
-    if ((nextPlatform !== current.platform) || (nextBase !== current.rtmpUrlBase)) {
-      const dupSnap = await firestore.collection("users").doc(uid).collection("destinations")
-        .where("platform", "==", nextPlatform)
-        .where("rtmpUrlBase", "==", nextBase)
-        .limit(1)
-        .get();
-      const isDup = !dupSnap.empty && dupSnap.docs[0].id !== id;
-      if (isDup) {
-        return res.status(409).json({ error: "duplicate_target" as ApiErrorCode });
-      }
-    }
+    const nextNameNorm = normalizeName(typeof updates.name === "string" ? updates.name : current.name);
 
     // Resolve encrypted key updates. If a new plaintext key is provided, encrypt
     // and store it. If streamKeyEnc is explicitly provided, honor it. Otherwise
     // keep the existing value.
     let nextEnc: any = current.streamKeyEnc ?? null;
+    let nextPlainKey: string | null = null;
     if (typeof updates.streamKeyPlain === "string") {
       const trimmed = updates.streamKeyPlain.trim();
       if (trimmed) {
@@ -248,12 +271,51 @@ router.put("/:id", requireAuth, async (req: any, res) => {
           return res.status(500).json({ error: "server_error" as ApiErrorCode, details: "stream key encryption is not configured" });
         }
         nextEnc = enc;
+        nextPlainKey = trimmed;
       } else {
         // Empty string clears the key
         nextEnc = null;
+        nextPlainKey = null;
       }
     } else if (Object.prototype.hasOwnProperty.call(updates, "streamKeyEnc")) {
       nextEnc = updates.streamKeyEnc ?? null;
+      nextPlainKey = updates.streamKeyEnc ? decryptStreamKey(updates.streamKeyEnc as any) : null;
+    } else if (current.streamKeyEnc) {
+      nextPlainKey = decryptStreamKey(current.streamKeyEnc);
+    }
+
+    // Duplicate rules on update (exclude current doc):
+    // 1) Names unique per platform.
+    // 2) Stream keys unique per platform.
+    const existingSnap = await firestore
+      .collection("users")
+      .doc(uid)
+      .collection("destinations")
+      .where("platform", "==", nextPlatform)
+      .get();
+
+    for (const doc of existingSnap.docs) {
+      if (doc.id === id) continue;
+      const data = doc.data() as any;
+      const existingName = normalizeName(data?.name);
+      if (nextNameNorm && nextNameNorm === existingName) {
+        return res.status(409).json({ error: "duplicate_name" as ApiErrorCode });
+      }
+      if (nextPlainKey) {
+        const existingDec = data?.streamKeyEnc ? decryptStreamKey(data.streamKeyEnc) : null;
+        if (existingDec && existingDec === nextPlainKey) {
+          return res.status(409).json({ error: "duplicate_stream_key" as ApiErrorCode });
+        }
+      }
+    }
+
+    // Enforce plan limit if toggling enabled from false to true
+    const planLimit = await getPlanLimit(uid);
+    const enabledCount = await getEnabledCount(uid);
+    const currentEnabled = !!current.enabled;
+    const nextEnabled = typeof updates.enabled === "boolean" ? !!updates.enabled : currentEnabled;
+    if (!currentEnabled && nextEnabled && planLimit !== undefined && planLimit > 0 && enabledCount >= planLimit) {
+      return res.status(409).json({ error: "limit_exceeded" as ApiErrorCode });
     }
 
     const docData: any = {
@@ -268,8 +330,7 @@ router.put("/:id", requireAuth, async (req: any, res) => {
     const updatedSnap = await ref.get();
     const destination = toItem(updatedSnap);
     const usedCount = await getEnabledCount(uid);
-    const limit = await getPlanLimit(uid);
-    return res.json({ ok: true, destination, usedCount, limit });
+    return res.json({ ok: true, destination, usedCount, limit: planLimit });
   } catch (err: any) {
     console.error("PUT /api/destinations/:id error:", err);
     return res.status(500).json({ error: "server_error" as ApiErrorCode, details: err?.message || String(err) });

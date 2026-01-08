@@ -1,12 +1,105 @@
 import { Router } from "express";
 import type Stripe from "stripe";
+import type { DocumentReference } from "firebase-admin/firestore";
 import { stripe } from "../lib/stripe";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { PLAN_IDS, PlanId, isPlanId } from "../types/plan";
 
+// Plan change guardrails
+const PLAN_CHANGE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
+const PLAN_CHANGE_MAX_IN_WINDOW = 2;
+const PLAN_CHANGE_LOCK_TTL_MS = 60 * 1000; // 60 seconds
+
+type PlanChangeHistoryEntry = {
+  at: number; // epoch ms
+  fromPlan: string;
+  toPlan: string;
+  source: string;
+};
+
 function getUserRef(uid: string) {
   return db.collection("users").doc(uid);
+}
+
+function sanitizeHistory(history: any): PlanChangeHistoryEntry[] {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((entry) => ({
+      at: Number(entry?.at || 0),
+      fromPlan: String(entry?.fromPlan || "unknown"),
+      toPlan: String(entry?.toPlan || "unknown"),
+      source: String(entry?.source || "unknown"),
+    }))
+    .filter((entry) => Number.isFinite(entry.at) && entry.at > 0)
+    .sort((a, b) => a.at - b.at)
+    .slice(-10);
+}
+
+async function acquirePlanChangeLock(params: {
+  userRef: DocumentReference;
+  requestId: string;
+}) {
+  const { userRef, requestId } = params;
+  const now = Date.now();
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    if (!snap.exists) {
+      throw Object.assign(new Error("user_not_found"), { code: "USER_NOT_FOUND" });
+    }
+
+    const user = snap.data() as any;
+    const history = sanitizeHistory(user?.planChangeHistory);
+
+    // Cooldown check: block on 3rd change inside 5-day window
+    const recent = history.filter((entry) => entry.at >= now - PLAN_CHANGE_WINDOW_MS);
+    if (recent.length >= PLAN_CHANGE_MAX_IN_WINDOW) {
+      const oldestRecent = recent[0];
+      const cooldownUntil = oldestRecent.at + PLAN_CHANGE_WINDOW_MS;
+      tx.set(
+        userRef,
+        {
+          planChangeCooldownUntil: cooldownUntil,
+          planChangeLock: null,
+        },
+        { merge: true }
+      );
+      throw Object.assign(new Error("plan_change_cooldown"), {
+        code: "COOLDOWN",
+        cooldownUntil,
+      });
+    }
+
+    const lock = user?.planChangeLock;
+    const lockActive =
+      lock && typeof lock.expiresAt === "number" && lock.expiresAt > now;
+
+    // Another request holds the lock
+    if (lockActive && lock.token !== requestId) {
+      throw Object.assign(new Error("plan_change_locked"), {
+        code: "LOCKED",
+        lockUntil: lock.expiresAt,
+      });
+    }
+
+    const newLock = {
+      token: requestId,
+      acquiredAt: now,
+      expiresAt: now + PLAN_CHANGE_LOCK_TTL_MS,
+    };
+
+    tx.set(
+      userRef,
+      {
+        planChangeLock: newLock,
+        planChangeRequestId: requestId,
+      },
+      { merge: true }
+    );
+
+    return { user, newLock };
+  });
 }
 
 const router = Router();
@@ -39,14 +132,32 @@ function priceIdFor(plan: PlanId, planMeta?: any) {
 // Accept any PlanId + variant for checkout
 type CheckoutPlanVariant = `${PlanId}_paid` | `${PlanId}_trial` | PlanId;
 
+const PLAN_RANKS: Record<string, number> = {
+  free: 0,
+  starter: 1,
+  basic: 1,
+  pro: 2,
+  enterprise: 3,
+  internal_unlimited: 4,
+};
+
+function getPlanRank(planId?: string | null): number {
+  if (!planId) return 0;
+  return PLAN_RANKS[planId] ?? 0;
+}
+
 router.post("/checkout", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
 
-    const { plan } = (req.body || {}) as { plan?: CheckoutPlanVariant };
+    const { plan, requestId } = (req.body || {}) as { plan?: CheckoutPlanVariant; requestId?: string };
     if (!plan || typeof plan !== "string") {
       return res.status(400).json({ success: false, error: "Missing plan" });
+    }
+
+    if (!requestId || typeof requestId !== "string" || requestId.trim().length < 8) {
+      return res.status(400).json({ success: false, error: "Missing requestId" });
     }
 
     // Parse canonical plan id from variant
@@ -75,8 +186,32 @@ router.post("/checkout", requireAuth, async (req, res) => {
 
     const user = snap.data() as any;
 
+    // Idempotent: return the prior result if this requestId already finished
+    if (user?.planChangeRequestId === requestId && user?.planChangeRequestResult) {
+      return res.json({ success: true, reused: true, ...user.planChangeRequestResult });
+    }
+
+    // Acquire lock + cooldown enforcement
+    let lockedUser: any = null;
+    try {
+      lockedUser = await acquirePlanChangeLock({ userRef, requestId });
+    } catch (err: any) {
+      if (err?.code === "COOLDOWN") {
+        return res.status(429).json({ success: false, error: "plan_change_cooldown", cooldownUntil: err.cooldownUntil });
+      }
+      if (err?.code === "LOCKED") {
+        return res.status(409).json({ success: false, error: "plan_change_locked", lockUntil: err.lockUntil });
+      }
+      if (err?.code === "USER_NOT_FOUND") {
+        return res.status(404).json({ success: false, error: "User not found" });
+      }
+      throw err;
+    }
+
+    const userAtLock = lockedUser?.user ?? user;
+
     // Trial eligibility
-    const hasHadTrial = user?.billing?.hasHadTrial === true;
+    const hasHadTrial = userAtLock?.billing?.hasHadTrial === true;
     const DEFAULT_TRIAL_DAYS = Number(process.env.STRIPE_STARTER_TRIAL_DAYS || "5");
 
     // Trial logic: only when explicitly chosen AND not already used
@@ -84,12 +219,12 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const trialDays = useTrial ? DEFAULT_TRIAL_DAYS : 0;
 
     // Ensure Stripe customer exists
-    let customerId: string | undefined = user?.stripeCustomerId || user?.billing?.customerId;
+    let customerId: string | undefined = userAtLock?.stripeCustomerId || userAtLock?.billing?.customerId;
 
     if (!customerId) {
       const customer = await stripe.customers.create({
-        email: user?.email,
-        name: user?.displayName,
+        email: userAtLock?.email,
+        name: userAtLock?.displayName,
         metadata: { userId: uid },
       });
 
@@ -107,9 +242,6 @@ router.post("/checkout", requireAuth, async (req, res) => {
         { merge: true }
       );
     }
-
-    // Set pendingPlan to canonical plan only
-    await userRef.set({ pendingPlan: canonicalPlan }, { merge: true });
 
     // Fetch plan metadata from Firestore for custom plans
     let planMeta: any = {};
@@ -148,9 +280,49 @@ router.post("/checkout", requireAuth, async (req, res) => {
       subscription_data,
     });
 
-    return res.json({ success: true, url: session.url });
+    const now = Date.now();
+    const history = sanitizeHistory(userAtLock?.planChangeHistory);
+    const nextHistory = [
+      ...history,
+      {
+        at: now,
+        fromPlan: userAtLock?.planId || "free",
+        toPlan: canonicalPlan,
+        source: "checkout",
+      },
+    ].slice(-10);
+
+    await userRef.set(
+      {
+        pendingPlan: canonicalPlan,
+        planChangeHistory: nextHistory,
+        planChangeCooldownUntil: null,
+        planChangeLock: null,
+        planChangeRequestId: requestId,
+        planChangeRequestResult: {
+          requestId,
+          status: "ok",
+          url: session.url,
+          plan: canonicalPlan,
+          createdAt: now,
+        },
+      },
+      { merge: true }
+    );
+
+    return res.json({ success: true, url: session.url, requestId });
   } catch (err: any) {
     console.error("POST /api/billing/checkout failed:", err?.message || err);
+    if (req?.body?.requestId) {
+      try {
+        await getUserRef((req as any).user?.uid).set(
+          {
+            planChangeLock: null,
+          },
+          { merge: true }
+        );
+      } catch {}
+    }
     return res.status(500).json({ success: false, error: err?.message || "Server error" });
   }
 });
@@ -288,6 +460,118 @@ router.get("/pending-change", requireAuth, async (req, res) => {
     });
   } catch (err: any) {
     console.error("GET /api/billing/pending-change failed:", err?.message || err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Comprehensive billing/plan state for UI state machine
+router.get("/status", requireAuth, async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+
+    const snap = await getUserRef(uid).get();
+    if (!snap.exists) return res.status(404).json({ error: "User not found" });
+    const user = snap.data() as any;
+
+    const now = Date.now();
+    const cooldownUntil = typeof user?.planChangeCooldownUntil === "number" ? user.planChangeCooldownUntil : null;
+    const cooldownActive = !!(cooldownUntil && cooldownUntil > now);
+    const lock = user?.planChangeLock || null;
+
+    const subscriptionId: string | undefined =
+      user?.billing?.subscriptionId || user?.stripeSubscriptionId;
+
+    let cancelAtPeriodEnd = false;
+    let status: string | undefined = user?.billingStatus;
+    let billingActive = !!(user?.billingStatus === "active" || user?.billingStatus === "trialing");
+    let scheduledChange = false;
+    let scheduledEffectiveDate: string | null = null;
+
+    if (subscriptionId) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
+        cancelAtPeriodEnd = !!(sub as any).cancel_at_period_end;
+        status = (sub as any).status as string | undefined;
+        billingActive = status === "active" || status === "trialing";
+
+        const currentPeriodEnd = (sub as any).current_period_end
+          ? new Date((sub as any).current_period_end * 1000).toISOString()
+          : null;
+
+        if (cancelAtPeriodEnd) {
+          scheduledChange = true;
+          scheduledEffectiveDate = currentPeriodEnd;
+        }
+
+        const scheduleId = (sub as any).schedule || (sub as any).subscription_schedule;
+        if (!scheduledChange && scheduleId) {
+          scheduledChange = true;
+          try {
+            const schedule = await stripe.subscriptionSchedules.retrieve(String(scheduleId));
+            const phases = (schedule.phases || []) as any[];
+            const last = phases[phases.length - 1];
+            if (last?.end_date) {
+              scheduledEffectiveDate = new Date(last.end_date * 1000).toISOString();
+            }
+          } catch {}
+        }
+
+        if (!scheduledChange && (sub as any).pending_update) {
+          scheduledChange = true;
+          scheduledEffectiveDate = currentPeriodEnd;
+        }
+      } catch (err: any) {
+        console.error("GET /api/billing/status subscription fetch failed:", err?.message || err);
+      }
+    }
+
+    const planId = user?.planId || "free";
+    const pendingPlan = user?.pendingPlan ?? null;
+
+    let state: string = "ACTIVE";
+    if (cooldownActive) {
+      state = "COOLDOWN";
+    } else if (cancelAtPeriodEnd) {
+      state = "CANCEL_AT_PERIOD_END";
+    } else if (scheduledChange) {
+      if (pendingPlan && pendingPlan !== planId) {
+        state = getPlanRank(pendingPlan) > getPlanRank(planId) ? "PENDING_UPGRADE" : "PENDING_DOWNGRADE";
+      } else {
+        state = "PENDING_CHANGE";
+      }
+    }
+
+    const lockStale = lock?.expiresAt && lock.expiresAt < now - PLAN_CHANGE_LOCK_TTL_MS;
+    if (!subscriptionId && billingActive) {
+      state = "ERROR_NEEDS_SUPPORT";
+    } else if (lockStale && state === "ACTIVE") {
+      state = "ERROR_NEEDS_SUPPORT";
+    }
+
+    const history = sanitizeHistory(user?.planChangeHistory);
+
+    return res.json({
+      success: true,
+      state,
+      planId,
+      pendingPlan,
+      billingStatus: status || null,
+      billingActive,
+      subscriptionId: subscriptionId || null,
+      scheduledChange,
+      scheduledEffectiveDate,
+      cancelAtPeriodEnd,
+      cooldownUntil: cooldownUntil || null,
+      lock: lock || null,
+      request: {
+        lastRequestId: user?.planChangeRequestId ?? null,
+        lastResult: user?.planChangeRequestResult ?? null,
+      },
+      history,
+    });
+  } catch (err: any) {
+    console.error("GET /api/billing/status failed:", err?.message || err);
     return res.status(500).json({ error: "Server error" });
   }
 });

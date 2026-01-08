@@ -95,6 +95,27 @@ function planIdFromPrice(priceId?: string) {
   return "free";
 }
 
+type PlanChangeHistoryEntry = {
+  at: number;
+  fromPlan: string;
+  toPlan: string;
+  source: string;
+};
+
+function sanitizeHistory(history: any): PlanChangeHistoryEntry[] {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((entry) => ({
+      at: Number(entry?.at || 0),
+      fromPlan: String(entry?.fromPlan || "unknown"),
+      toPlan: String(entry?.toPlan || "unknown"),
+      source: String(entry?.source || "unknown"),
+    }))
+    .filter((entry) => Number.isFinite(entry.at) && entry.at > 0)
+    .sort((a, b) => a.at - b.at)
+    .slice(-10);
+}
+
 function mapBillingStatus(status: string) {
   if (status === "active" || status === "trialing") return status;
   if (status === "past_due") return "past_due";
@@ -174,10 +195,23 @@ router.post(
           const userSnap = await getUserRef(uid).get();
           const user = userSnap.exists ? userSnap.data() : {};
 
+          const currentPlan = user?.planId || "free";
+          const now = Date.now();
+          const history = sanitizeHistory((user as any)?.planChangeHistory);
+          const nextHistory =
+            currentPlan === canonicalPlan
+              ? history
+              : [...history, { at: now, fromPlan: currentPlan, toPlan: canonicalPlan, source: "stripe_webhook" }].slice(-10);
+
           await getUserRef(uid).set(
             {
               planId: canonicalPlan,
               pendingPlan: null,
+              planChangeHistory: nextHistory,
+              planChangeCooldownUntil: null,
+              planChangeLock: null,
+              planChangeRequestId: null,
+              planChangeRequestResult: null,
               billingActive: isActive,
               billingStatus: subscription.status,
               billing: {
@@ -284,11 +318,26 @@ router.post(
           const userId = (sub as any)?.metadata?.userId;
           if (!userId) break;
 
+          const userSnap = await getUserRef(userId).get();
+          const user = userSnap.exists ? userSnap.data() : {};
+          const now = Date.now();
+          const history = sanitizeHistory((user as any)?.planChangeHistory);
+          const currentPlan = user?.planId || "free";
+          const nextHistory =
+            currentPlan === "free"
+              ? history
+              : [...history, { at: now, fromPlan: currentPlan, toPlan: "free", source: "stripe_webhook" }].slice(-10);
+
           await db.collection("users").doc(userId).set(
             {
               planId: "free",
               billingActive: false,
               billingStatus: "past_due",
+              planChangeHistory: nextHistory,
+              planChangeCooldownUntil: null,
+              planChangeLock: null,
+              planChangeRequestId: null,
+              planChangeRequestResult: null,
               billing: { updatedAt: Date.now() },
             },
             { merge: true }
