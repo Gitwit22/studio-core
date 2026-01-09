@@ -20,13 +20,15 @@ export async function getToken(
 
 export async function apiStartRecording(
   roomName: string,
-  layout: "speaker" | "grid"
+  layout: "speaker" | "grid",
+  mode: "cloud" | "dual" = "cloud",
+  presetId?: string
 ) {
   const res = await fetch(`${API_BASE}/api/recordings/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ roomName, layout }),
+    body: JSON.stringify({ roomName, layout, mode, presetId }),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text);

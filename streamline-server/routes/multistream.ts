@@ -93,6 +93,7 @@ const ref = firestore.collection("activeStreams").doc(streamDocId);
         updatedAt: Date.now(),
         presetRequestedId: requestedId,
         presetEffectiveId: effectiveId,
+        usageType: "live",
       },
       { merge: true }
     );
@@ -166,6 +167,7 @@ const ref = firestore.collection("activeStreams").doc(streamDocId);
           updatedAt: Date.now(),
           presetRequestedId: requestedId,
           presetEffectiveId: effectiveId,
+          usageType: "live",
         }, { merge: true });
 
         // Ensure non-empty JSON body

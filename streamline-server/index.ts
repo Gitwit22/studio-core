@@ -6,6 +6,7 @@ import webhookRouter from "./routes/webhook";
 import authRoutes from "./routes/auth";
 import adminRoutes from './routes/admin';
 import adminStatusRouter from "./routes/adminStatus";
+import accountRoutes from "./routes/account";
 import { requireAuth } from "./middleware/requireAuth";
 import authRouter from "./routes/auth";
 import billingRoutes from "./routes/billing";
@@ -73,6 +74,7 @@ app.use(cookieParser());
 // Stripe/Billing webhooks
 app.use("/api/webhooks", webhookRouter);
 app.use("/api/auth", authRoutes);
+app.use("/api/account", accountRoutes);
 
 // Admin routes
 app.use("/api/admin/status", adminStatusRouter);
@@ -794,15 +796,41 @@ app.post("/api/usage/streamEnded", async (req, res) => {
 
     const prevUsage = existing.usage || {};
     const prevYtd = existing.ytd || {};
+    const prevMinutes = prevUsage.minutes || {};
+    const prevYtdMinutes = prevYtd.minutes || {};
 
     const nextUsage = {
       participantMinutes: Number(prevUsage.participantMinutes || 0) + durationMinutes,
       transcodeMinutes: Number(prevUsage.transcodeMinutes || 0) + transcodeMinutes,
+      minutes: {
+        live: {
+          currentPeriod: Number(prevMinutes.live?.currentPeriod || 0) + durationMinutes,
+          lifetime:
+            Number(
+              prevMinutes.live?.lifetime ||
+              prevYtdMinutes.live?.lifetime ||
+              0
+            ) + durationMinutes,
+        },
+        recording: {
+          currentPeriod: Number(prevMinutes.recording?.currentPeriod || 0),
+          lifetime: Number(prevMinutes.recording?.lifetime || prevYtdMinutes.recording?.lifetime || 0),
+        },
+      },
     };
 
     const nextYtd = {
       participantMinutes: Number(prevYtd.participantMinutes || 0) + durationMinutes,
       transcodeMinutes: Number(prevYtd.transcodeMinutes || 0) + transcodeMinutes,
+      minutes: {
+        live: {
+          lifetime:
+            Number(prevYtdMinutes.live?.lifetime || prevMinutes.live?.lifetime || 0) + durationMinutes,
+        },
+        recording: {
+          lifetime: Number(prevYtdMinutes.recording?.lifetime || prevMinutes.recording?.lifetime || 0),
+        },
+      },
     };
 
     await usageRef.set(

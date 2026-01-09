@@ -5,7 +5,7 @@
 // - Safe API_BASE normalization => prevents double "/api"
 // ============================================================================
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 // Normalize base so if you set VITE_API_BASE to ".../api" it won't double up.
@@ -30,7 +30,6 @@ async function apiFetch(path: string, init: RequestInit = {}) {
     },
   });
 }
-
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -65,6 +64,16 @@ interface FeatureFlag {
   enabled: boolean;
 }
 
+type FeatureCategory =
+  | "Streaming"
+  | "Recording"
+  | "Editing"
+  | "Collaboration"
+  | "Billing"
+  | "Security"
+  | "Experiments"
+  | "Other";
+
 interface AdminStats {
   totalUsers: number;
   usersByPlan: Record<string, number>;
@@ -86,11 +95,17 @@ interface Plan {
     monthlyMinutesIncluded: number;
     maxHoursPerMonth: number;
     maxGuests: number;
-    rtmpDestinationsMax: number;
+    rtmpDestinationsMax?: number;
+    maxDestinations?: number;
+    participantMinutes?: number;
+    transcodeMinutes?: number;
   };
   features: {
     recording: boolean;
     rtmp: boolean;
+    dualRecording?: boolean;
+    rtmpMultistream?: boolean;
+    advancedPermissions?: boolean;
     watermarkRecordings: boolean;
   };
   editing: {
@@ -127,6 +142,85 @@ const PLAN_COLORS: Record<string, string> = {
   pro: "#f59e0b",
   enterprise: "#ef4444",
 };
+
+const FEATURE_CATEGORY_ORDER: FeatureCategory[] = [
+  "Streaming",
+  "Recording",
+  "Editing",
+  "Collaboration",
+  "Billing",
+  "Security",
+  "Experiments",
+  "Other",
+];
+
+const FEATURE_META: Record<
+  string,
+  {
+    category: FeatureCategory;
+    label?: string;
+    description?: string;
+  }
+> = {
+  multistream: { category: "Streaming", label: "Multistream", description: "Send to multiple RTMP destinations." },
+  rtmp_multistream: { category: "Streaming", label: "RTMP Multistream", description: "Legacy RTMP toggle." },
+  live_captions: { category: "Streaming", label: "Live Captions", description: "Enable captions during live sessions." },
+  low_latency: { category: "Streaming", label: "Low Latency", description: "Prefer lower-latency LiveKit profiles." },
+
+  recording: { category: "Recording", label: "Recording", description: "Allow session recording." },
+  dual_recording: { category: "Recording", label: "Dual Recording", description: "Cloud + local capture." },
+  cloud_recording: { category: "Recording", label: "Cloud Recording" },
+  vod_downloads: { category: "Recording", label: "VOD Downloads", description: "Enable video downloads." },
+
+  editing_access: { category: "Editing", label: "Editor Access", description: "Allow timeline editor usage." },
+  editing_sharing: { category: "Editing", label: "Editor Sharing", description: "Share projects with collaborators." },
+  ai_highlights: { category: "Editing", label: "AI Highlights", description: "Generate highlight reels." },
+
+  guests: { category: "Collaboration", label: "Guests", description: "Allow guest links to rooms." },
+  guest_invites: { category: "Collaboration", label: "Guest Invites" },
+  chat: { category: "Collaboration", label: "Chat" },
+
+  billing_portal: { category: "Billing", label: "Billing Portal" },
+  usage_meters: { category: "Billing", label: "Usage Meters" },
+
+  login_rate_limit: { category: "Security", label: "Login Rate Limit" },
+  guardrails: { category: "Security", label: "Guardrails", description: "Safety and abuse protections." },
+
+  experiment_a: { category: "Experiments", label: "Experiment A" },
+  experiment_b: { category: "Experiments", label: "Experiment B" },
+    forcesimplemode: { category: "Security", label: "Advanced Permissions Global Lock", description: "Force everyone into Simple permissions temporarily." },
+};
+
+const titleize = (value: string) =>
+  value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+
+function categorizeFeature(flag: FeatureFlag): { category: FeatureCategory; label: string; description?: string } {
+  const key = flag.name.toLowerCase();
+  const meta = FEATURE_META[key];
+  if (meta) {
+    return {
+      category: meta.category,
+      label: meta.label || titleize(flag.name),
+      description: meta.description,
+    };
+  }
+
+  if (key.includes("record")) return { category: "Recording", label: titleize(flag.name) };
+  if (key.includes("stream") || key.includes("rtmp") || key.includes("live"))
+    return { category: "Streaming", label: titleize(flag.name) };
+  if (key.includes("edit")) return { category: "Editing", label: titleize(flag.name) };
+  if (key.includes("guest") || key.includes("collab") || key.includes("invite"))
+    return { category: "Collaboration", label: titleize(flag.name) };
+  if (key.includes("bill") || key.includes("usage") || key.includes("meter"))
+    return { category: "Billing", label: titleize(flag.name) };
+  if (key.includes("guard") || key.includes("security") || key.includes("auth"))
+    return { category: "Security", label: titleize(flag.name) };
+
+  return { category: "Other", label: titleize(flag.name) };
+}
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -148,12 +242,66 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState<User[]>([]);
   const [usage, setUsage] = useState<UsageRecord[]>([]);
   const [features, setFeatures] = useState<FeatureFlag[]>([]);
+  const groupedFeatures = useMemo(() => {
+    const groups: Record<FeatureCategory, Array<{ flag: FeatureFlag; label: string; description?: string }>> = {
+      Streaming: [],
+      Recording: [],
+      Editing: [],
+      Collaboration: [],
+      Billing: [],
+      Security: [],
+      Experiments: [],
+      Other: [],
+    };
+
+    features.forEach((flag) => {
+      const meta = categorizeFeature(flag);
+      groups[meta.category].push({ flag, label: meta.label, description: meta.description });
+    });
+
+    // Sort labels within each group for quick scanning
+    FEATURE_CATEGORY_ORDER.forEach((cat) => {
+      groups[cat].sort((a, b) => a.label.localeCompare(b.label));
+    });
+
+    return groups;
+  }, [features]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [savingPlan, setSavingPlan] = useState<string | null>(null);
+
+  // Persist collapsible section state per title
+  const SECTION_COLLAPSE_STORAGE_KEY = "admin.planSectionCollapse";
+  const [sectionCollapse, setSectionCollapse] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(SECTION_COLLAPSE_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SECTION_COLLAPSE_STORAGE_KEY, JSON.stringify(sectionCollapse));
+    } catch {
+      // ignore persistence errors
+    }
+  }, [sectionCollapse]);
+
+  const getSectionCollapsed = (title: string, fallback = false) => {
+    const stored = sectionCollapse[title];
+    return typeof stored === "boolean" ? stored : fallback;
+  };
+
+  const setSectionCollapsedValue = (title: string, value: boolean) => {
+    setSectionCollapse((prev) => ({ ...prev, [title]: value }));
+  };
 
   // Add state for selected users (multi-select)
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -726,25 +874,45 @@ export default function AdminDashboard() {
             {activeTab === "features" && (
               <div>
                 <h3 style={{ margin: "0 0 16px" }}>Global Feature Flags</h3>
-                <div style={S.grid2}>
-                  {features.map((f) => (
-                    <div key={f.name} style={S.featureCard}>
-                      <div>
-                        <div style={{ fontWeight: 600, textTransform: "capitalize" }}>{f.name.replace(/_/g, " ")}</div>
-                        <div style={{ fontSize: 11, color: "#6b7280" }}>Platform toggle</div>
+                <p style={{ margin: "0 0 12px", color: "#94a3b8", fontSize: 13 }}>
+                  Grouped by domain so you can scan streaming, recording, editing, and collaboration toggles quickly.
+                </p>
+
+                {FEATURE_CATEGORY_ORDER.map((category) => {
+                  const items = groupedFeatures[category];
+                  if (!items || items.length === 0) return null;
+
+                  return (
+                    <div key={category} style={{ marginBottom: 18 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                        <h4 style={{ margin: 0, fontSize: 15 }}>{category}</h4>
+                        <span style={{ fontSize: 12, color: "#9ca3af" }}>{items.length} {items.length === 1 ? "flag" : "flags"}</span>
                       </div>
-                      <button
-                        onClick={() => toggleFeature(f.name)}
-                        style={{
-                          ...S.toggle,
-                          background: f.enabled ? "linear-gradient(135deg,#22c55e,#16a34a)" : "#374151",
-                        }}
-                      >
-                        <div style={{ ...S.toggleKnob, left: f.enabled ? 27 : 3 }} />
-                      </button>
+
+                      <div style={S.grid2}>
+                        {items.map(({ flag, label, description }) => (
+                          <div key={flag.name} style={S.featureCard}>
+                            <div>
+                              <div style={{ fontWeight: 600 }}>{label}</div>
+                              <div style={{ fontSize: 11, color: "#6b7280" }}>
+                                {description || "Platform toggle"}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => toggleFeature(flag.name)}
+                              style={{
+                                ...S.toggle,
+                                background: flag.enabled ? "linear-gradient(135deg,#22c55e,#16a34a)" : "#374151",
+                              }}
+                            >
+                              <div style={{ ...S.toggleKnob, left: flag.enabled ? 27 : 3 }} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             )}
 
@@ -836,6 +1004,12 @@ export default function AdminDashboard() {
                             <span style={S.statValue}>{plan.limits?.maxGuests || 0}</span>
                             <span style={S.statLabel}>guests</span>
                           </div>
+                          {plan.limits?.maxDestinations ? (
+                            <div style={S.stat}>
+                              <span style={S.statValue}>{plan.limits.maxDestinations}</span>
+                              <span style={S.statLabel}>destinations</span>
+                            </div>
+                          ) : null}
                           {plan.editing?.access && plan.editing?.maxProjects > 0 && (
                             <div style={S.stat}>
                               <span style={S.statValue}>{plan.editing.maxProjects}</span>
@@ -853,7 +1027,9 @@ export default function AdminDashboard() {
                         {/* Feature Pills */}
                         <div style={S.featurePills}>
                           <FeaturePill enabled={plan.features?.recording} label="Recording" />
+                          <FeaturePill enabled={plan.features?.dualRecording} label="Dual Recording" />
                           <FeaturePill enabled={plan.multistreamEnabled} label="Multistream" />
+                          <FeaturePill enabled={plan.features?.advancedPermissions} label="Advanced Permissions Mode" />
                           <FeaturePill enabled={plan.editing?.access} label="Editing" />
                           <FeaturePill enabled={plan.editing?.ai?.autoCut} label="AI AutoCut" />
                           <FeaturePill enabled={plan.editing?.ai?.captions} label="AI Captions" />
@@ -894,7 +1070,11 @@ export default function AdminDashboard() {
                               </button>
                             </div>
 
-                            <PlanSection title="🔒 Availability">
+                            <PlanSection
+                              title="🔒 Availability"
+                              collapsed={getSectionCollapsed("🔒 Availability")}
+                              onToggle={(next) => setSectionCollapsedValue("🔒 Availability", next)}
+                            >
                               <div style={S.editRow}>
                                 <label style={S.editLabel}>Visibility</label>
                                 <select
@@ -908,11 +1088,25 @@ export default function AdminDashboard() {
                                 </select>
                               </div>
                             </PlanSection>
-                            <PlanSection title="📊 Limits">
+                            <PlanSection
+                              title="📊 Limits"
+                              collapsed={getSectionCollapsed("📊 Limits")}
+                              onToggle={(next) => setSectionCollapsedValue("📊 Limits", next)}
+                            >
                               <EditRow
                                 label="Monthly Minutes"
                                 value={plan.limits?.monthlyMinutesIncluded || 0}
                                 onChange={(v) => updatePlanField(plan.id, "limits.monthlyMinutesIncluded", Number(v))}
+                              />
+                              <EditRow
+                                label="Participant Minutes"
+                                value={plan.limits?.participantMinutes || 0}
+                                onChange={(v) => updatePlanField(plan.id, "limits.participantMinutes", Number(v))}
+                              />
+                              <EditRow
+                                label="Transcode Minutes"
+                                value={plan.limits?.transcodeMinutes || 0}
+                                onChange={(v) => updatePlanField(plan.id, "limits.transcodeMinutes", Number(v))}
                               />
                               <EditRow
                                 label="Max Session (mins)"
@@ -930,16 +1124,36 @@ export default function AdminDashboard() {
                                 onChange={(v) => updatePlanField(plan.id, "limits.maxGuests", Number(v))}
                               />
                               <EditRow
-                                label="RTMP Destinations"
-                                value={plan.limits?.rtmpDestinationsMax || 0}
-                                onChange={(v) => updatePlanField(plan.id, "limits.rtmpDestinationsMax", Number(v))}
+                                label="Destinations Max (RTMP)"
+                                value={plan.limits?.maxDestinations || plan.limits?.rtmpDestinationsMax || 0}
+                                onChange={(v) => {
+                                  const num = Number(v);
+                                  updatePlanField(plan.id, "limits.maxDestinations", num);
+                                }}
                               />
                             </PlanSection>
 
-                            <PlanSection title="🎛️ Core Features">
+                            <PlanSection
+                              title="🎛️ Core Features"
+                              collapsed={getSectionCollapsed("🎛️ Core Features")}
+                              onToggle={(next) => setSectionCollapsedValue("🎛️ Core Features", next)}
+                            >
                               <ToggleRow label="Recording" value={plan.features?.recording} onChange={(v) => updatePlanField(plan.id, "features.recording", v)} />
+                              <ToggleRow label="Dual Recording" value={plan.features?.dualRecording} onChange={(v) => updatePlanField(plan.id, "features.dualRecording", v)} />
+                              <ToggleRow
+                                label="RTMP Multistream"
+                                value={plan.features?.rtmpMultistream ?? plan.multistreamEnabled}
+                                onChange={(v) => {
+                                  updatePlanField(plan.id, "features.rtmpMultistream", v);
+                                  updatePlanField(plan.id, "multistreamEnabled", v);
+                                }}
+                              />
                               <ToggleRow label="RTMP Streaming" value={plan.features?.rtmp} onChange={(v) => updatePlanField(plan.id, "features.rtmp", v)} />
-                              <ToggleRow label="Multistream" value={plan.multistreamEnabled} onChange={(v) => updatePlanField(plan.id, "multistreamEnabled", v)} />
+                              <ToggleRow
+                                label="Advanced Permissions Mode"
+                                value={plan.features?.advancedPermissions}
+                                onChange={(v) => updatePlanField(plan.id, "features.advancedPermissions", v)}
+                              />
                               <ToggleRow
                                 label="Watermark Recordings"
                                 value={plan.features?.watermarkRecordings}
@@ -947,7 +1161,12 @@ export default function AdminDashboard() {
                               />
                             </PlanSection>
 
-                            <PlanSection title="✂️ Editing Suite">
+                            <PlanSection
+                              title="✂️ Editing Suite"
+                              defaultCollapsed
+                              collapsed={getSectionCollapsed("✂️ Editing Suite", true)}
+                              onToggle={(next) => setSectionCollapsedValue("✂️ Editing Suite", next)}
+                            >
                               <ToggleRow label="Editing Access" value={plan.editing?.access} onChange={(v) => updatePlanField(plan.id, "editing.access", v)} />
                               <EditRow label="Max Projects" value={plan.editing?.maxProjects || 0} onChange={(v) => updatePlanField(plan.id, "editing.maxProjects", Number(v))} />
                               <EditRow label="Max Tracks" value={plan.editing?.maxTracks || 0} onChange={(v) => updatePlanField(plan.id, "editing.maxTracks", Number(v))} />
@@ -972,25 +1191,40 @@ export default function AdminDashboard() {
                               />
                             </PlanSection>
 
-                            <PlanSection title="🤖 AI Features">
+                            <PlanSection
+                              title="🤖 AI Features"
+                              defaultCollapsed
+                              collapsed={getSectionCollapsed("🤖 AI Features", true)}
+                              onToggle={(next) => setSectionCollapsedValue("🤖 AI Features", next)}
+                            >
                               <ToggleRow label="AI AutoCut" value={plan.editing?.ai?.autoCut} onChange={(v) => updatePlanField(plan.id, "editing.ai.autoCut", v)} />
                               <ToggleRow label="AI Captions" value={plan.editing?.ai?.captions} onChange={(v) => updatePlanField(plan.id, "editing.ai.captions", v)} />
                               <ToggleRow label="AI Highlights" value={plan.editing?.ai?.highlights} onChange={(v) => updatePlanField(plan.id, "editing.ai.highlights", v)} />
                             </PlanSection>
 
-                            <PlanSection title="🎬 Transitions">
+                            <PlanSection
+                              title="🎬 Transitions"
+                              defaultCollapsed
+                              collapsed={getSectionCollapsed("🎬 Transitions", true)}
+                              onToggle={(next) => setSectionCollapsedValue("🎬 Transitions", next)}
+                            >
                               <ToggleRow label="Basic Transitions" value={plan.editing?.transitions?.basic} onChange={(v) => updatePlanField(plan.id, "editing.transitions.basic", v)} />
                               <ToggleRow label="Advanced Transitions" value={plan.editing?.transitions?.advanced} onChange={(v) => updatePlanField(plan.id, "editing.transitions.advanced", v)} />
                             </PlanSection>
 
-                            <PlanSection title="📤 Export Options">
+                            <PlanSection
+                              title="📤 Export Options"
+                              defaultCollapsed
+                              collapsed={getSectionCollapsed("📤 Export Options", true)}
+                              onToggle={(next) => setSectionCollapsedValue("📤 Export Options", next)}
+                            >
                               <ToggleRow label="Export Watermark" value={plan.editing?.export?.watermark} onChange={(v) => updatePlanField(plan.id, "editing.export.watermark", v)} />
                               <ToggleRow label="Direct Upload" value={plan.editing?.export?.directUpload} onChange={(v) => updatePlanField(plan.id, "editing.export.directUpload", v)} />
                               <ToggleRow label="Multi-Platform" value={plan.editing?.export?.multiPlatform} onChange={(v) => updatePlanField(plan.id, "editing.export.multiPlatform", v)} />
                               <ToggleRow label="Priority Queue" value={plan.editing?.export?.priorityQueue} onChange={(v) => updatePlanField(plan.id, "editing.export.priorityQueue", v)} />
                             </PlanSection>
 
-                            <PlanSection title="💰 Pricing">
+                            <PlanSection title="💰 Pricing" collapsible={false}>
                               <EditRow label="Price ($/month)" value={plan.price} onChange={(v) => updatePlanField(plan.id, "price", Number(v))} />
                               <div style={S.editRow}>
                                 <label style={S.editLabel}>Description</label>
@@ -1071,13 +1305,59 @@ function FeaturePill({ enabled, label }: { enabled?: boolean; label: string }) {
   );
 }
 
-function PlanSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#ef4444", marginBottom: 8, paddingBottom: 4, borderBottom: "1px solid rgba(220,38,38,0.2)" }}>
+function PlanSection({ title, children, defaultCollapsed = false, collapsible = true, collapsed, onToggle }: { title: string; children: React.ReactNode; defaultCollapsed?: boolean; collapsible?: boolean; collapsed?: boolean; onToggle?: (next: boolean) => void }) {
+  const isControlled = typeof collapsed === "boolean";
+  const [internalCollapsed, setInternalCollapsed] = React.useState(defaultCollapsed);
+  const currentCollapsed = isControlled ? (collapsed as boolean) : internalCollapsed;
+
+  const header = (
+    <div
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+        padding: "8px 6px 6px",
+        color: "#ef4444",
+        fontSize: 12,
+        fontWeight: 700,
+        textAlign: "left",
+      }}
+    >
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        {collapsible && (
+          <span style={{ display: "inline-block", transform: currentCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 120ms ease" }}>
+            ▼
+          </span>
+        )}
         {title}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{children}</div>
+      </span>
+      {collapsible && <span style={{ color: "#9ca3af", fontWeight: 600 }}>{currentCollapsed ? "Show" : "Hide"}</span>}
+    </div>
+  );
+
+  const toggle = () => {
+    if (!collapsible) return;
+    const next = !currentCollapsed;
+    if (!isControlled) setInternalCollapsed(next);
+    onToggle?.(next);
+  };
+
+  return (
+    <div style={{ marginBottom: 16, borderBottom: "1px solid rgba(220,38,38,0.18)", paddingBottom: 8 }}>
+      {collapsible ? (
+        <button
+          onClick={toggle}
+          style={{ width: "100%", background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
+          aria-expanded={!currentCollapsed}
+        >
+          {header}
+        </button>
+      ) : (
+        header
+      )}
+      {(!collapsible || !currentCollapsed) && <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0 2px" }}>{children}</div>}
     </div>
   );
 }

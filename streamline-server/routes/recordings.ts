@@ -24,6 +24,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { canAccessFeature } from "./featureAccess";
 import { clampRecordingPreset, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { Timestamp } from "firebase-admin/firestore";
+import { getCurrentMonthKey } from "../lib/usageTracker";
 import type { DocumentSnapshot } from "firebase-admin/firestore";
 import {
   S3Client,
@@ -140,6 +141,103 @@ function getS3Client(): S3Client {
 
 const DEFAULT_RETENTION_MINUTES = 30;
 
+function toNumber(value: any): number {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+async function incrementRecordingUsage(uid: string, minutes: number) {
+  if (!minutes || minutes < 0) return;
+
+  const monthKey = getCurrentMonthKey();
+  const usageDocId = `${uid}_${monthKey}`;
+  const usageRef = firestore.collection("usageMonthly").doc(usageDocId);
+
+  let alertContext: {
+    liveCurrent: number;
+    liveLifetime: number;
+    recordingCurrent: number;
+    recordingLifetime: number;
+    added: number;
+  } | null = null;
+
+  await firestore.runTransaction(async (tx) => {
+    const snap = await tx.get(usageRef);
+    const existing = snap.exists ? (snap.data() as any) : {};
+    const usage = existing.usage || {};
+    const ytd = existing.ytd || {};
+
+    const prevMinutes = usage.minutes || {};
+    const prevYtdMinutes = ytd.minutes || {};
+
+    const liveCurrent = toNumber(prevMinutes.live?.currentPeriod);
+    const liveLifetime = toNumber(prevMinutes.live?.lifetime ?? prevYtdMinutes.live?.lifetime);
+    const recCurrent = toNumber(prevMinutes.recording?.currentPeriod);
+    const recLifetime = toNumber(prevMinutes.recording?.lifetime ?? prevYtdMinutes.recording?.lifetime);
+
+    const nextUsage = {
+      ...usage,
+      participantMinutes: toNumber(usage.participantMinutes) + minutes,
+      transcodeMinutes: toNumber(usage.transcodeMinutes),
+      minutes: {
+        live: {
+          currentPeriod: liveCurrent,
+          lifetime: liveLifetime,
+        },
+        recording: {
+          currentPeriod: recCurrent + minutes,
+          lifetime: recLifetime + minutes,
+        },
+      },
+    };
+
+    const nextYtd = {
+      ...ytd,
+      participantMinutes: toNumber(ytd.participantMinutes) + minutes,
+      transcodeMinutes: toNumber(ytd.transcodeMinutes),
+      minutes: {
+        live: {
+          lifetime: toNumber(prevYtdMinutes.live?.lifetime ?? liveLifetime),
+        },
+        recording: {
+          lifetime: recLifetime + minutes,
+        },
+      },
+    };
+
+    tx.set(
+      usageRef,
+      {
+        uid,
+        monthKey,
+        usage: nextUsage,
+        ytd: nextYtd,
+        createdAt: existing.createdAt || new Date(),
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    alertContext = {
+      liveCurrent: nextUsage.minutes.live.currentPeriod,
+      liveLifetime: nextYtd.minutes.live.lifetime,
+      recordingCurrent: nextUsage.minutes.recording.currentPeriod,
+      recordingLifetime: nextYtd.minutes.recording.lifetime,
+      added: minutes,
+    };
+  });
+
+  if (alertContext) {
+    const ratio = 3;
+    if (alertContext.recordingCurrent > alertContext.liveCurrent * ratio) {
+      console.warn("[usage][recording] recording minutes high vs live", { uid, ...alertContext, ratio });
+    }
+    if (minutes >= 240) {
+      console.warn("[usage][recording] long single recording detected", { uid, minutes });
+    }
+  }
+}
+
 function computeExpiry(
   readyAt?: Timestamp | Date | null,
   retentionMinutes: number = DEFAULT_RETENTION_MINUTES
@@ -237,11 +335,12 @@ router.post("/start", requireAuth, async (req, res) => {
     }
 
     // Validate request
-    const { roomName, layout: rawLayout, mode: rawMode, presetId } = req.body as {
+    const { roomName, layout: rawLayout, mode: rawMode, presetId, usageType: rawUsageType } = req.body as {
       roomName?: string;
       layout?: string;
       mode?: string; // "cloud" | "dual"
       presetId?: string;
+      usageType?: string;
     };
 
     if (!roomName) {
@@ -268,17 +367,26 @@ router.post("/start", requireAuth, async (req, res) => {
     }
 
     // If a stream is live, lower recording quality to stream preset when required
+    const streamDocId = `${uid}_${roomName}`;
     let activeStreamPresetId: string | null = null;
+    let hasActiveStream = false;
     try {
-      const streamDocId = `${uid}_${roomName}`;
       const streamSnap = await firestore.collection("activeStreams").doc(streamDocId).get();
       if (streamSnap.exists) {
+        hasActiveStream = true;
         const data = streamSnap.data() || {};
         activeStreamPresetId = data.effectivePresetId || data.presetEffectiveId || null;
       }
     } catch (e) {
       console.warn("[recordings/start] failed to read active stream preset", (e as any)?.message);
     }
+
+    const requestedUsageType =
+      rawUsageType === "live" || rawUsageType === "recording_only" || rawUsageType === "live+recording"
+        ? rawUsageType
+        : null;
+
+    const usageType = requestedUsageType || (hasActiveStream ? "live+recording" : "recording_only");
 
     // Clamp preset to plan and (optionally) active stream preset
     const clamp = clampRecordingPreset(planId, presetId, activeStreamPresetId, allowHigherRecordingThanStream);
@@ -344,10 +452,22 @@ router.post("/start", requireAuth, async (req, res) => {
       presetClamped: clamped || clampedToStream,
       presetClampedToStream: clampedToStream,
       streamPresetId: activeStreamPresetId,
+      usageType,
     };
 
     await recordingRef.set(initialDoc);
     console.log(`[recordings/start] Created doc ${recordingId} status=starting`);
+
+    if (hasActiveStream) {
+      try {
+        await firestore
+          .collection("activeStreams")
+          .doc(streamDocId)
+          .set({ usageType: "live+recording", lastRecordingId: recordingId }, { merge: true });
+      } catch (e) {
+        console.warn("[recordings/start] failed to tag active stream usageType", (e as any)?.message);
+      }
+    }
 
     // =========================================================================
     // STEP 2: Start LiveKit egress to R2
@@ -569,9 +689,9 @@ router.post("/stop", requireAuth, async (req, res) => {
     const startedAt: Date | null = data.startedAt?.toDate?.()
       ? data.startedAt.toDate()
       : data.startedAt || null;
-    const durationSeconds = startedAt
-      ? Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / 1000))
-      : 0;
+    const durationMs = startedAt ? Math.max(0, now.getTime() - startedAt.getTime()) : 0;
+    const durationSeconds = Math.floor(durationMs / 1000);
+    const billedMinutes = durationMs > 0 ? Math.max(1, Math.ceil(durationMs / 60000)) : 0;
 
     // =========================================================================
     // Stop LiveKit egress using stored egressId
@@ -599,15 +719,124 @@ router.post("/stop", requireAuth, async (req, res) => {
     }
 
     // =========================================================================
-    // Update doc to status=processing
+    // Update recording doc and usage in a single transaction (idempotent)
     // =========================================================================
-    await recordingRef.update({
-      status: "processing",
-      stoppedAt: now,
-      duration: durationSeconds,
-      updatedAt: now,
-      downloadReady: false,
-      downloadPath: data.objectKey || null,
+    let usageCountedAlready = false;
+
+    const usageType = typeof data.usageType === "string" ? data.usageType : "recording_only";
+
+    await firestore.runTransaction(async (tx) => {
+      const recSnap = await tx.get(recordingRef);
+      if (!recSnap.exists) throw new Error("recording_missing");
+      const recData = recSnap.data() || {};
+
+      const monthKey = getCurrentMonthKey();
+      const usageRef = firestore.collection("usageMonthly").doc(`${uid}_${monthKey}`);
+      const usageSnap = await tx.get(usageRef);
+      const existingUsage = usageSnap.exists ? (usageSnap.data() as any) : {};
+      const usage = existingUsage.usage || {};
+      const ytd = existingUsage.ytd || {};
+      const minutes = usage.minutes || {};
+      const ytdMinutes = ytd.minutes || {};
+
+      const liveCurrent = toNumber(minutes.live?.currentPeriod);
+      const liveLifetime = toNumber(minutes.live?.lifetime ?? ytdMinutes.live?.lifetime);
+      const recCurrentPrev = toNumber(minutes.recording?.currentPeriod);
+      const recLifetimePrev = toNumber(minutes.recording?.lifetime ?? ytdMinutes.recording?.lifetime);
+      const totalCurrentPrev = toNumber(minutes.total?.currentPeriod);
+      const totalLifetimePrev = toNumber(minutes.total?.lifetime ?? ytdMinutes.total?.lifetime);
+
+      const byUsageTypePrev = minutes.byUsageType || {};
+      const byUsageTypeYtd = ytdMinutes.byUsageType || {};
+      const typePrev = byUsageTypePrev[usageType] || {};
+      const typeLifetimePrev = toNumber(typePrev.lifetime ?? byUsageTypeYtd[usageType]?.lifetime);
+
+      if (recData.usageCounted === true) {
+        usageCountedAlready = true;
+        tx.update(recordingRef, {
+          status: "processing",
+          stoppedAt: recData.stoppedAt || now,
+          endedAt: recData.endedAt || now,
+          duration: recData.duration ?? durationSeconds,
+          durationSeconds: recData.durationSeconds ?? durationSeconds,
+          durationMs: recData.durationMs ?? durationMs,
+          billedMinutes: recData.billedMinutes ?? billedMinutes,
+          updatedAt: now,
+          downloadReady: false,
+          downloadPath: recData.objectKey || recData.downloadPath || null,
+        });
+        return;
+      }
+
+      const billed = billedMinutes;
+
+      const nextMinutes = {
+        ...minutes,
+        live: {
+          currentPeriod: liveCurrent,
+          lifetime: liveLifetime,
+        },
+        recording: {
+          currentPeriod: recCurrentPrev + billed,
+          lifetime: recLifetimePrev + billed,
+        },
+        total: {
+          currentPeriod: totalCurrentPrev + billed,
+          lifetime: totalLifetimePrev + billed,
+        },
+        byUsageType: {
+          ...byUsageTypePrev,
+          [usageType]: {
+            currentPeriod: toNumber(typePrev.currentPeriod) + billed,
+            lifetime: typeLifetimePrev + billed,
+          },
+        },
+      };
+
+      const nextYtdMinutes = {
+        ...ytdMinutes,
+        live: { lifetime: liveLifetime },
+        recording: { lifetime: recLifetimePrev + billed },
+        total: { lifetime: totalLifetimePrev + billed },
+        byUsageType: {
+          ...byUsageTypeYtd,
+          [usageType]: { lifetime: typeLifetimePrev + billed },
+        },
+      };
+
+      tx.update(recordingRef, {
+        status: "processing",
+        stoppedAt: now,
+        endedAt: now,
+        duration: durationSeconds,
+        durationSeconds,
+        durationMs,
+        billedMinutes: billed,
+        usageCounted: true,
+        usageCountedAt: now,
+        updatedAt: now,
+        downloadReady: false,
+        downloadPath: data.objectKey || null,
+      });
+
+      tx.set(
+        usageRef,
+        {
+          uid,
+          monthKey,
+          usage: {
+            ...usage,
+            minutes: nextMinutes,
+          },
+          ytd: {
+            ...ytd,
+            minutes: nextYtdMinutes,
+          },
+          createdAt: existingUsage.createdAt || now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
     });
 
     console.log(`[recordings/stop] Recording ${recordingId} now processing`);

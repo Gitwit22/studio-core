@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
@@ -13,13 +13,40 @@ type UsageData = {
   planId: PlanId;
 };
 
+function formatDefaultRoomName(displayName: string) {
+  const now = new Date();
+  const dateFmt = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(now);
+  const timeFmt = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(now);
+
+  if (displayName) return `${displayName} – Live Session`;
+  return `StreamLine Live – ${dateFmt}, ${timeFmt}`;
+}
+
 export default function Join() {
   // Log auth/user info when arriving at join page
   useEffect(() => { logAuthDebugContext("Arrive Join Page"); }, []);
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(() => {
+    // Prefer profile displayName if available, then fall back to cached value
+    try {
+      const rawUser = localStorage.getItem("sl_user");
+      if (rawUser && rawUser !== "undefined") {
+        const parsed = JSON.parse(rawUser);
+        if (parsed?.displayName) return parsed.displayName as string;
+      }
+    } catch {
+      // ignore parse errors and fall back
+    }
+    return localStorage.getItem("sl_displayName") || "";
+  });
   const [roomName, setRoomName] = useState("");
   const [showEditingModal, setShowEditingModal] = useState(false);
 
@@ -77,6 +104,34 @@ useEffect(() => {
       localStorage.setItem("sl_current_role", role);
     }
   }, [searchParams, role]);
+
+  const lastRoom = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("sl_last_room");
+      const ts = Number(localStorage.getItem("sl_last_room_ts") || 0);
+      if (!raw || !ts) return null;
+      const ageMs = Date.now() - ts;
+      // Only suggest reuse if within 6 hours
+      if (ageMs > 6 * 60 * 60 * 1000) return null;
+      return raw;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isParticipant) return; // never override invite room
+    if (roomName.trim()) return; // respect user edits
+
+    // Prefer recent room name, else generate a deterministic friendly default
+    if (lastRoom) {
+      setRoomName(lastRoom);
+      return;
+    }
+
+    const fallback = formatDefaultRoomName(displayName.trim());
+    setRoomName(fallback);
+  }, [displayName, isParticipant, lastRoom, roomName]);
 
   // Fetch real usage summary (for all authenticated users)
   useEffect(() => {
@@ -144,6 +199,8 @@ useEffect(() => {
         createdRooms.push(room);
         localStorage.setItem("sl_created_rooms", JSON.stringify(createdRooms));
       }
+      localStorage.setItem("sl_last_room", room);
+      localStorage.setItem("sl_last_room_ts", String(Date.now()));
       // Set role to 'host' when creating a room
       localStorage.setItem("sl_current_role", "host");
     }
@@ -663,24 +720,27 @@ useEffect(() => {
               textAlign: "center",
             }}
           >
-            Want one-click Go Live to YouTube, Facebook, or Twitch?
-            {" "}
-            <button
-              type="button"
-              onClick={() => nav("/settings/billing?tab=destinations")}
-              style={{
-                marginLeft: "4px",
-                fontSize: "12px",
-                color: "#f97316",
-                textDecoration: "underline",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                padding: 0,
-              }}
-            >
-              Configure streaming settings
-            </button>
+            Suggested room name: <strong>{roomName || "StreamLine Live"}</strong>
+            <div style={{ marginTop: "6px" }}>
+              Want one-click Go Live to YouTube, Facebook, or Twitch?
+              {" "}
+              <button
+                type="button"
+                onClick={() => nav("/settings/billing?tab=destinations")}
+                style={{
+                  marginLeft: "4px",
+                  fontSize: "12px",
+                  color: "#f97316",
+                  textDecoration: "underline",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                Configure streaming settings
+              </button>
+            </div>
           </div>
         )}
 

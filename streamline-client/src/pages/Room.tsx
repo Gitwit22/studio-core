@@ -73,6 +73,37 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
           50% { transform: translateY(-20px) rotate(180deg); }
         }
       `}</style>
+          {recordingCountdown && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+                zIndex: 50,
+              }}
+            >
+              <div
+                key={recordingCountdown}
+                style={{
+                  padding: "14px 22px",
+                  borderRadius: "12px",
+                  background: "rgba(0, 0, 0, 0.65)",
+                  color: "#ffffff",
+                  fontSize: "30px",
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                  boxShadow: "0 12px 40px rgba(0,0,0,0.35)",
+                  animation: "fadeScale 0.9s ease",
+                }}
+              >
+                {recordingCountdown}
+              </div>
+            </div>
+          )}
 
       <div style={{
         background: 'rgba(39, 39, 42, 0.5)',
@@ -418,18 +449,38 @@ export default function Room() {
     logAuthDebugContext("Arrive Room Page");
   }, []);
 
+  useEffect(() => {
+    return () => {
+      recordingCountdownTimersRef.current.forEach(clearTimeout);
+      recordingCountdownTimersRef.current = [];
+      liveCountdownTimersRef.current.forEach(clearTimeout);
+      liveCountdownTimersRef.current = [];
+    };
+  }, []);
+
   const streamEgressRef = useRef<string | null>(null);
   const nav = useNavigate();
   const { roomName } = useParams<{ roomName: string }>();
 
-  const [displayName, setDisplayName] = useState(
-    () => localStorage.getItem("sl_displayName") ?? ""
-  );
+  const [displayName, setDisplayName] = useState(() => {
+    // Prefer profile displayName if available, then fall back to cached value
+    try {
+      const rawUser = localStorage.getItem("sl_user");
+      if (rawUser && rawUser !== "undefined") {
+        const parsed = JSON.parse(rawUser);
+        if (parsed?.displayName) return parsed.displayName as string;
+      }
+    } catch {
+      // ignore parse errors and fall back
+    }
+    return localStorage.getItem("sl_displayName") ?? "";
+  });
   const [pendingName, setPendingName] = useState(displayName);
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [showStreamSetup, setShowStreamSetup] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
@@ -437,6 +488,13 @@ export default function Room() {
   const currentUserId = getOrCreateUid();
   const [isHost, setIsHost] = useState(false);
   const [userRole, setUserRole] = useState<string>("guest");
+  const [isViewer, setIsViewer] = useState(false);
+  const [recordingCountdown, setRecordingCountdown] = useState<string | null>(null);
+  const [isRecordingCountdown, setIsRecordingCountdown] = useState(false);
+  const recordingCountdownTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const [liveCountdown, setLiveCountdown] = useState<string | null>(null);
+  const [isLiveCountdown, setIsLiveCountdown] = useState(false);
+  const liveCountdownTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
   useEffect(() => {
     if (!roomName) return;
@@ -462,6 +520,9 @@ export default function Room() {
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);
   const [canMultistream, setCanMultistream] = useState<boolean>(false);
   const [recordingEnabled, setRecordingEnabled] = useState<boolean>(true);
+  const [dualRecordingAllowed, setDualRecordingAllowed] = useState<boolean>(false);
+  const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(false);
+  const [maxGuestsAllowed, setMaxGuestsAllowed] = useState<number | null>(null);
   // Canonical plan id state
   const [userPlanId, setUserPlanId] = useState<PlanId>("free");
   const [destinations, setDestinations] = useState<DestinationItem[]>([]);
@@ -470,21 +531,53 @@ export default function Room() {
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [preflightResult, setPreflightResult] = useState<any>(null);
   const [canGoLive, setCanGoLive] = useState(false);
+  const [mediaPresets, setMediaPresets] = useState<Array<{ id: string; label: string }>>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("standard_720p30");
+  const [effectivePresetId, setEffectivePresetId] = useState<string | null>(null);
+  const [presetClamped, setPresetClamped] = useState(false);
+  const [defaultLayoutPref, setDefaultLayoutPref] = useState<"speaker" | "grid">("speaker");
+  const [defaultRecordingModePref, setDefaultRecordingModePref] = useState<"cloud" | "dual">("cloud");
+
+  const presetLabelFor = (id?: string | null) => {
+    if (!id) return "Standard 720p30";
+    const match = mediaPresets.find((p) => p.id === id);
+    return match?.label || id;
+  };
+
+  const handlePresetChange = (id: string) => {
+    setSelectedPresetId(id);
+    setEffectivePresetId(id);
+    setPresetClamped(false);
+  };
 
   useEffect(() => {
     if (!roomName || !displayName) return;
+    const role = localStorage.getItem("sl_current_role") || userRole;
+    const isGuest = role === "guest";
 
     const fetchToken = async () => {
       try {
-        console.log("[Room] Fetching room token...");
-        const res = await fetch(`${API_BASE}/api/roomToken`, {
+        console.log(`[Room] Fetching room token (role=${role || "host"})...`);
+        const endpoint = isGuest ? `${API_BASE}/api/roomToken/guest` : `${API_BASE}/api/roomToken`;
+        const payload: any = {
+          roomName,
+          identity: displayName,
+        };
+        if (isGuest) {
+          payload.displayName = displayName;
+          payload.guestId = getOrCreateUid();
+        } else {
+          payload.uid = getOrCreateUid();
+          // Moderator tokens require admin grants; signal intent so the server can downgrade safely
+          if (role === "moderator") {
+            payload.roomAdmin = true;
+          }
+        }
+
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            roomName,
-            identity: displayName,
-            uid: getOrCreateUid(),
-          }),
+          body: JSON.stringify(payload),
           credentials: 'include',
         });
         console.log("[Room] roomToken status:", res.status);
@@ -528,6 +621,17 @@ export default function Room() {
         console.log("[Room] token received:", !!token, "serverUrl:", finalServerUrl);
         setToken(token);
         setServerUrl(finalServerUrl || null);
+        if (typeof data?.isViewer === "boolean") {
+          setIsViewer(data.isViewer);
+          if (data.isViewer) {
+            setIsHost(false);
+            setUserRole("viewer");
+          }
+        }
+        if (typeof data?.role === "string") {
+          setUserRole(data.role);
+          if (data.role === "viewer") setIsHost(false);
+        }
         if (!token || !finalServerUrl) {
           console.error("[Room] Missing token or serverUrl", { token, serverUrl });
         }
@@ -539,11 +643,21 @@ export default function Room() {
     fetchToken();
   }, [roomName, displayName]);
 
-  // Load usage/plan to gate multistream for free users
   useEffect(() => {
+    if (isViewer && showStreamSetup) {
+      setShowStreamSetup(false);
+    }
+  }, [isViewer, showStreamSetup]);
+
+  // Load usage/plan to gate multistream for free users (hosts only)
+  useEffect(() => {
+    const role = localStorage.getItem("sl_current_role") || userRole;
+    if (role === "guest") return;
+
     (async () => {
       try {
         const res = await fetch(`${API_BASE}/api/usage/me`, { credentials: 'include' });
+        if (res.status === 401) return; // guest or expired session
         if (!res.ok) return;
         const data = await res.json();
         // Canonicalize plan id
@@ -560,9 +674,104 @@ export default function Room() {
         const recFlag = data?.plan?.features?.recording;
         const recordingAllowed = planIdRaw === 'internal_unlimited' ? true : (recFlag === undefined ? true : !!recFlag);
         setRecordingEnabled(recordingAllowed);
+        const dualFlag = data?.plan?.features?.dualRecording;
+        setDualRecordingAllowed(!!dualFlag);
+        const watermarkFlag = data?.plan?.features?.watermarkRecordings || data?.plan?.features?.watermark;
+        setWatermarkEnabled(planIdRaw === 'internal_unlimited' ? true : !!watermarkFlag);
+        const maxGuestsFromPlan = data?.plan?.features?.maxGuests;
+        if (typeof maxGuestsFromPlan === "number") {
+          setMaxGuestsAllowed(maxGuestsFromPlan);
+        }
       } catch {}
     })();
-  }, [API_BASE]);
+  }, [API_BASE, userRole]);
+
+  useEffect(() => {
+    const role = localStorage.getItem("sl_current_role") || userRole;
+    if (role === "guest") return;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/usage/entitlements`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (typeof data?.recording === "boolean") {
+          setRecordingEnabled(data.recording);
+        }
+        if (typeof data?.dualRecording === "boolean") {
+          setDualRecordingAllowed(data.dualRecording);
+        }
+        if (typeof data?.watermark === "boolean") {
+          setWatermarkEnabled(data.watermark);
+        }
+        if (typeof data?.maxGuests === "number") {
+          setMaxGuestsAllowed(data.maxGuests);
+        }
+        if (typeof data?.rtmpMultistream === "boolean") {
+          setCanMultistream(data.rtmpMultistream);
+        }
+      } catch (e) {
+        // ignore entitlements fetch failures
+      }
+    })();
+  }, [API_BASE, userRole]);
+
+  // Load media presets + defaults (hosts only)
+  useEffect(() => {
+    const role = localStorage.getItem("sl_current_role") || userRole;
+    if (role === "guest") return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [presetsRes, meRes] = await Promise.all([
+          fetch(`${API_BASE}/api/account/presets`, { credentials: "include" }),
+          fetch(`${API_BASE}/api/account/me`, { credentials: "include" }),
+        ]);
+
+        if (!cancelled && presetsRes.ok) {
+          const payload = await presetsRes.json();
+          const list = Array.isArray(payload?.presets) ? payload.presets : [];
+          if (list.length) {
+            setMediaPresets(list.map((p: any) => ({ id: p.id, label: p.label })));
+          } else {
+            setMediaPresets([
+              { id: "standard_720p30", label: "Standard 720p30" },
+              { id: "hd_1080p30", label: "HD Event 1080p30" },
+            ]);
+          }
+        }
+
+        if (!cancelled && meRes.ok) {
+          const me = await meRes.json();
+          const prefs = me?.mediaPrefs || {};
+          if (prefs.defaultLayout === "grid" || prefs.defaultLayout === "speaker") {
+            setDefaultLayoutPref(prefs.defaultLayout);
+          }
+          if (prefs.defaultRecordingMode === "cloud" || prefs.defaultRecordingMode === "dual") {
+            setDefaultRecordingModePref(prefs.defaultRecordingMode);
+          }
+          if (prefs.defaultPresetId) {
+            setSelectedPresetId(prefs.defaultPresetId);
+            setEffectivePresetId(prefs.defaultPresetId);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error("[Room] failed to load media presets", err);
+          setMediaPresets((prev) => prev.length ? prev : [
+            { id: "standard_720p30", label: "Standard 720p30" },
+            { id: "hd_1080p30", label: "HD Event 1080p30" },
+          ]);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE, userRole]);
 
   useEffect(() => {
     if (
@@ -618,8 +827,11 @@ export default function Room() {
     setRecordingElapsed(0);
   }, [recordingStatus]);
 
-  // Load destinations (soft gate)
+  // Load destinations (soft gate) - hosts only
   useEffect(() => {
+    const role = localStorage.getItem("sl_current_role") || userRole;
+    if (role === "guest") return;
+
     const loadDestinations = async () => {
       try {
         setDestinationsLoading(true);
@@ -636,9 +848,11 @@ export default function Room() {
       }
     };
     loadDestinations();
-  }, []);
+  }, [userRole]);
 
   async function refreshDestinations() {
+    const role = localStorage.getItem("sl_current_role") || userRole;
+    if (role === "guest") return;
     try {
       const res = await fetchDestinations({ includeDisabled: false });
       const items = res.items || [];
@@ -650,8 +864,10 @@ export default function Room() {
     }
   }
 
-  // Run preflight when modal opens (hard gate)
+  // Run preflight when modal opens (hard gate) - hosts only
   useEffect(() => {
+    const role = localStorage.getItem("sl_current_role") || userRole;
+    if (role === "guest") return;
     const runPreflight = async () => {
       setPreflightLoading(true);
       try {
@@ -667,7 +883,7 @@ export default function Room() {
       }
     };
     if (showStreamSetup) runPreflight();
-  }, [showStreamSetup]);
+  }, [showStreamSetup, userRole]);
 
   function buildPreflightItems(): Array<{ id: string; label: string; ok: boolean; detail?: string }> {
     const dests = (preflightResult?.destinations || []) as Array<{ id: string; platform: string; status: string; statusReason?: string | null }>;
@@ -682,6 +898,8 @@ export default function Room() {
   }
 
   const sendUsageOnExit = async () => {
+    const role = localStorage.getItem("sl_current_role") || userRole;
+    if (role === "guest") return;
     if (usagePostedRef.current) {
       console.log("[usage] skip post: already sent");
       return;
@@ -747,42 +965,92 @@ export default function Room() {
     setShowStreamEndedModal(false);
   };
 
-  const startRecording = async (layout: "speaker" | "grid" = "grid") => {
+  const activePresetId = effectivePresetId || selectedPresetId;
+  const activePresetLabel = presetLabelFor(activePresetId);
+
+  const startRecording = async ({
+    layout = "grid",
+    mode = "cloud",
+    presetId,
+  }: { layout?: "speaker" | "grid"; mode?: "cloud" | "dual"; presetId?: string }) => {
+    if (isViewer) {
+      console.warn("startRecording blocked for viewer role");
+      return;
+    }
     if (!roomName) {
       console.log("❌ No roomName, can't start recording");
       return;
     }
-    if (recordingRef.current) {
-      console.log("⏳ Recording already in progress, skipping startRecording call.");
+    if (recordingRef.current || recordingStatus === "recording" || isRecordingCountdown) {
+      console.log("⏳ Recording already in progress or countdown active, skipping startRecording call.");
       return;
     }
-    console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout);
-    setRecordingStatus("recording");
-    try {
-      console.log("📡 Calling apiStartRecording...");
-      const response = await apiStartRecording(roomName, layout);
-      console.log("📡 Got response:", response);
-      const recId = response?.data?.recordingId ?? response?.recordingId;
-      console.log("🎬 Extracted recordingId:", recId);
-      if (!recId || recId === "unknown") {
-        console.error("❌ Invalid recordingId:", recId);
-        setRecordingStatus("error");
-        return;
-      }
-      recordingRef.current = recId;
-      setRecordingId(recId);
-      recordingStartRef.current = Date.now();
-      setRecordingElapsed(0);
-      streamStartTimeRef.current = Date.now();
-      console.log("✅ Recording started!");
-    } catch (e) {
-      console.error("❌ Failed to start recording:", e);
-      setRecordingStatus("error");
-      alert(`Failed to start recording: ${(e as Error).message || "Unknown error"}`);
+
+    const requestedMode = mode === "dual" && !dualRecordingAllowed ? "cloud" : mode;
+    if (mode === "dual" && !dualRecordingAllowed) {
+      console.warn("Dual recording requested but not allowed; falling back to cloud mode.");
     }
+
+    console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout, "mode:", requestedMode);
+
+    // Show a quick 3-2-1 countdown before kicking off the recording
+    const sequence = ["3", "2", "1"];
+    const stepMs = 900;
+    recordingCountdownTimersRef.current.forEach(clearTimeout);
+    recordingCountdownTimersRef.current = [];
+    setIsRecordingCountdown(true);
+    setRecordingCountdown(sequence[0]);
+
+    sequence.slice(1).forEach((val, idx) => {
+      const t = setTimeout(() => setRecordingCountdown(val), (idx + 1) * stepMs);
+      recordingCountdownTimersRef.current.push(t);
+    });
+
+    const startTimer = setTimeout(async () => {
+      setRecordingCountdown("You're recording");
+      try {
+        console.log("📡 Calling apiStartRecording...");
+        const response = await apiStartRecording(roomName, layout, requestedMode, presetId || selectedPresetId);
+        console.log("📡 Got response:", response);
+        const recId = response?.data?.recordingId ?? response?.recordingId;
+        console.log("🎬 Extracted recordingId:", recId);
+        if (!recId || recId === "unknown") {
+          console.error("❌ Invalid recordingId:", recId);
+          setRecordingStatus("error");
+          return;
+        }
+        recordingRef.current = recId;
+        setRecordingId(recId);
+        recordingStartRef.current = Date.now();
+        setRecordingElapsed(0);
+        streamStartTimeRef.current = Date.now();
+        setRecordingStatus("recording");
+        const effective = response?.effectivePresetId || response?.data?.effectivePresetId || presetId || selectedPresetId;
+        if (effective) setEffectivePresetId(effective);
+        const clamped = response?.presetClamped || response?.data?.presetClamped;
+        setPresetClamped(!!clamped && effective !== (presetId || selectedPresetId));
+        console.log("✅ Recording started!");
+      } catch (e) {
+        console.error("❌ Failed to start recording:", e);
+        setRecordingStatus("error");
+        alert(`Failed to start recording: ${(e as Error).message || "Unknown error"}`);
+      } finally {
+        const clearTimer = setTimeout(() => {
+          setRecordingCountdown(null);
+          setIsRecordingCountdown(false);
+        }, stepMs);
+        recordingCountdownTimersRef.current.push(clearTimer);
+      }
+    }, sequence.length * stepMs);
+
+    recordingCountdownTimersRef.current.push(startTimer);
   };
 
   const stopRecording = async () => {
+    if (isViewer) {
+      console.warn("stopRecording blocked for viewer role");
+      return;
+    }
     console.log("🛑 stopRecording called");
     const id = recordingRef.current;
     if (!id || id === "unknown") {
@@ -797,6 +1065,7 @@ export default function Room() {
       console.log("✅ Recording stopped successfully");
       setRecordingStatus("stopped");
       setRecordingId(id);
+      recordingRef.current = null; // allow subsequent recordings after stop
     } catch (e) {
       console.error("❌ Failed to stop recording:", e);
       setRecordingStatus("error");
@@ -834,7 +1103,12 @@ export default function Room() {
     layout?: "speaker" | "grid";
     destinationIds?: string[];
   }) => {
+    if (isViewer) {
+      alert("View-only mode: publishing controls are disabled.");
+      return;
+    }
     if (streamStatus === "starting" || streamStatus === "live") return;
+    if (isLiveCountdown) return;
     if (!roomName) {
       alert("No room name");
       return;
@@ -851,69 +1125,99 @@ export default function Room() {
       alert("Select at least one saved destination or enter a stream key.");
       return;
     }
-    try {
-      setStreamStatus("starting");
-      const requestBody = {
-        youtubeStreamKey: keys.youtubeKey,
-        facebookStreamKey: keys.facebookKey,
-        twitchStreamKey: keys.twitchKey,
-        destinationIds: destIds.length ? destIds : undefined,
-        userId: getOrCreateUid(),
-      };
-      console.log("   Sending to API:", requestBody);
-      const res = await fetch(
-        `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-          credentials: 'include',
+    const sequence = ["3", "2", "1"];
+    const stepMs = 900;
+    liveCountdownTimersRef.current.forEach(clearTimeout);
+    liveCountdownTimersRef.current = [];
+    setIsLiveCountdown(true);
+    setLiveCountdown(sequence[0]);
+
+    sequence.slice(1).forEach((val, idx) => {
+      const t = setTimeout(() => setLiveCountdown(val), (idx + 1) * stepMs);
+      liveCountdownTimersRef.current.push(t);
+    });
+
+    const startTimer = setTimeout(async () => {
+      setLiveCountdown("You're live");
+      try {
+        setStreamStatus("starting");
+        const requestBody = {
+          youtubeStreamKey: keys.youtubeKey,
+          facebookStreamKey: keys.facebookKey,
+          twitchStreamKey: keys.twitchKey,
+          destinationIds: destIds.length ? destIds : undefined,
+          userId: getOrCreateUid(),
+          presetId: selectedPresetId,
+        };
+        console.log("   Sending to API:", requestBody);
+        const res = await fetch(
+          `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+            credentials: 'include',
+          }
+        );
+        const raw = await res.text();
+        let data: any = {};
+        if (raw && raw.trim().length > 0) {
+          try {
+            data = JSON.parse(raw);
+          } catch (parseErr) {
+            console.error("start-multistream parse error", parseErr, raw);
+            data = { raw };
+          }
+        } else {
+          console.warn("start-multistream empty response body");
+          data = { raw: "" };
         }
-      );
-      // Read body once to avoid 'body stream already read' errors
-      const raw = await res.text();
-      let data: any = {};
-      if (raw && raw.trim().length > 0) {
-        try {
-          data = JSON.parse(raw);
-        } catch (parseErr) {
-          console.error("start-multistream parse error", parseErr, raw);
-          data = { raw };
+        console.log("🔍 startMultistream full response:", data);
+        if (!res.ok) {
+          console.error("Start multistream failed", data);
+          alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
+          setStreamStatus("idle");
+          return;
         }
-      } else {
-        console.warn("start-multistream empty response body");
-        data = { raw: "" };
-      }
-      console.log("🔍 startMultistream full response:", data);
-      if (!res.ok) {
-        console.error("Start multistream failed", data);
-        alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
+        if (data?.success === false || data?.error) {
+          console.error("Start multistream API indicated failure", data);
+          alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
+          setStreamStatus("idle");
+          return;
+        }
+        const egressIdVal = data?.data?.egressId ?? data?.egressId ?? data?.data?.id ?? data?.id;
+        streamEgressRef.current = egressIdVal || null;
+        setStreamStatus("live");
+        streamStartTimeRef.current = Date.now();
+        setDidStreamThisSession(true);
+        const effective = data?.effectivePresetId || data?.data?.effectivePresetId || selectedPresetId;
+        if (effective) setEffectivePresetId(effective);
+        setPresetClamped(!!(data?.presetClamped || data?.data?.presetClamped) && effective !== selectedPresetId);
+        if (keys.record) {
+          await startRecording({ layout: keys.layout ?? "grid", mode: "cloud", presetId: selectedPresetId });
+        }
+        console.log("✅ Stream started! Egress ID:", egressIdVal);
+      } catch (err) {
+        console.error("Error starting multistream:", err);
+        alert("Error starting multistream");
         setStreamStatus("idle");
-        return;
+      } finally {
+        const clearTimer = setTimeout(() => {
+          setLiveCountdown(null);
+          setIsLiveCountdown(false);
+        }, stepMs);
+        liveCountdownTimersRef.current.push(clearTimer);
       }
-      if (data?.success === false || data?.error) {
-        console.error("Start multistream API indicated failure", data);
-        alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
-        setStreamStatus("idle");
-        return;
-      }
-      const egressIdVal = data?.data?.egressId ?? data?.egressId ?? data?.data?.id ?? data?.id;
-      streamEgressRef.current = egressIdVal || null;
-      setStreamStatus("live");
-      streamStartTimeRef.current = Date.now();
-      setDidStreamThisSession(true);
-      if (keys.record) {
-        await startRecording(keys.layout ?? "grid");
-      }
-      console.log("✅ Stream started! Egress ID:", egressIdVal);
-    } catch (err) {
-      console.error("Error starting multistream:", err);
-      alert("Error starting multistream");
-      setStreamStatus("idle");
-    }
+    }, sequence.length * stepMs);
+
+    liveCountdownTimersRef.current.push(startTimer);
   };
 
   const handleStopMultistream = async () => {
+    if (isViewer) {
+      alert("View-only mode: publishing controls are disabled.");
+      return;
+    }
     const streamEgressId = streamEgressRef.current;
     if (!streamEgressId) {
       alert("No active stream");
@@ -950,6 +1254,35 @@ export default function Room() {
       alert("Error stopping multistream");
       setStreamStatus("live");
     }
+  };
+
+  const [roleProfiles, setRoleProfiles] = useState<Array<{ id: string; label: string }>>([]);
+  const [quickRoleIds, setQuickRoleIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/account/roles`, { credentials: "include" });
+        if (!res.ok) throw new Error("roles failed");
+        const data = await res.json();
+        if (Array.isArray(data?.roles)) setRoleProfiles(data.roles);
+        if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds);
+      } catch (err) {
+        console.warn("roles load failed, using defaults", err);
+        setRoleProfiles([
+          { id: "participant", label: "Participant" },
+          { id: "cohost", label: "Co-host" },
+          { id: "moderator", label: "Moderator" },
+        ]);
+        setQuickRoleIds(["participant", "cohost", "moderator"]);
+      }
+    })();
+  }, []);
+
+  const copyInviteLink = (role: string, label: string) => {
+    const url = `${window.location.origin}/join?room=${encodeURIComponent(roomName || '')}&role=${encodeURIComponent(role)}`;
+    navigator.clipboard.writeText(url);
+    alert(`${label} link copied!\n${url}`);
   };
 
   // ==================== RENDER ====================
@@ -1024,13 +1357,15 @@ export default function Room() {
             setDisplayName(name);
           }}
         >
-          <h1 style={{
-            fontSize: '1.5rem',
-            fontWeight: '600',
-            textAlign: 'center',
-            marginBottom: '0.5rem',
-            color: '#ffffff'
-          }}>
+          <h1
+            style={{
+              fontSize: '1.5rem',
+              fontWeight: '600',
+              textAlign: 'center',
+              marginBottom: '0.5rem',
+              color: '#ffffff'
+            }}
+          >
             Enter your name to join
           </h1>
 
@@ -1062,13 +1397,15 @@ export default function Room() {
               width: '100%',
               padding: '0.875rem',
               borderRadius: '0.75rem',
-              background: !pendingName.trim() ? 'rgba(75, 85, 99, 0.5)' : 'linear-gradient(135deg, #dc2626, #ef4444)',
+              background: !pendingName.trim()
+                ? 'rgba(75, 85, 99, 0.5)'
+                : 'linear-gradient(135deg, #dc2626, #ef4444)',
               color: '#ffffff',
               fontWeight: '600',
               border: 'none',
               cursor: !pendingName.trim() ? 'not-allowed' : 'pointer',
               transition: 'all 0.3s ease',
-              opacity: !pendingName.trim() ? 0.6 : 1
+              opacity: !pendingName.trim() ? 0.6 : 1,
             }}
           >
             Join Room
@@ -1101,8 +1438,16 @@ export default function Room() {
     return <ThankYouScreen showHomeButton={isHost} onHome={handleHomeClick} />;
   }
 
+  const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
+  const entitlementSummary = `Rec:${recordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • Multi:${canMultistream ? "on" : "off"} • Guests:${guestCapLabel}`;
+
   return (
     <>
+      {isViewer && (
+        <div className="w-full bg-amber-500 text-black text-sm font-semibold px-4 py-2 flex items-center gap-2">
+          👀 View-only mode — publishing controls are disabled.
+        </div>
+      )}
       {recordingStatus === "recording" && (
         <div className="fixed bottom-4 left-4 flex items-center gap-2 bg-red-600 px-4 py-3 rounded-lg shadow-lg z-40">
           <div className="w-3 h-3 bg-white rounded-full animate-pulse" />
@@ -1125,11 +1470,7 @@ export default function Room() {
 
           {isHost && (
             <button
-              onClick={() => {
-                const inviteUrl = `${window.location.origin}/join?room=${encodeURIComponent(roomName || '')}`;
-                navigator.clipboard.writeText(inviteUrl);
-                alert(`Invite link copied to clipboard!\n${inviteUrl}`);
-              }}
+              onClick={() => setInviteModalOpen(true)}
               style={{
                 fontSize: '0.75rem',
                 padding: '0.5rem 0.75rem',
@@ -1141,9 +1482,9 @@ export default function Room() {
                 transition: 'all 0.3s ease',
                 fontWeight: '500'
               }}
-              title="Copy invite link to clipboard"
+              title="Copy invite links"
             >
-              🔗 Invite
+              🔗 Invite Links
             </button>
           )}
 
@@ -1168,8 +1509,30 @@ export default function Room() {
           )}
         </div>
 
-        {isHost && (
+        {isHost && !isViewer && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{
+              padding: '0.35rem 0.6rem',
+              borderRadius: '0.375rem',
+              border: '1px solid rgba(148, 163, 184, 0.4)',
+              color: '#e5e7eb',
+              fontSize: '0.7rem',
+              background: 'rgba(255, 255, 255, 0.04)',
+              whiteSpace: 'nowrap'
+            }}>
+              {entitlementSummary}
+            </div>
+            <div style={{
+              padding: '0.35rem 0.6rem',
+              borderRadius: '0.375rem',
+              border: presetClamped ? '1px solid rgba(251,191,36,0.6)' : '1px solid rgba(148, 163, 184, 0.35)',
+              color: presetClamped ? '#fbbf24' : '#e5e7eb',
+              fontSize: '0.7rem',
+              background: presetClamped ? 'rgba(251,191,36,0.12)' : 'rgba(255, 255, 255, 0.04)',
+              whiteSpace: 'nowrap'
+            }}>
+              Preset: {activePresetLabel}{presetClamped ? " (clamped)" : ""}
+            </div>
             <button
               onClick={() => setDashboardOpen(v => !v)}
               style={{
@@ -1222,10 +1585,11 @@ export default function Room() {
       {token && serverUrl && (
         <LiveKitRoom
           data-lk-theme="default"
-          className="sl-layout"
+          className={`sl-layout${isViewer ? " sl-viewer" : ""}`}
           token={token}
           serverUrl={serverUrl}
           connect={true}
+          connectOptions={isViewer ? { audio: false, video: false } : undefined}
           onDisconnected={handleLeftRoom}
           style={{
             width: "100%",
@@ -1234,21 +1598,18 @@ export default function Room() {
           }}
         >
           <div style={{ width: "100%", height: "100%", position: "relative" }}>
-            {isHost && <HostAVControls />}
+            {isHost && !isViewer && <HostAVControls />}
             <VideoConference />
-            {isHost && (
+            {watermarkEnabled && (
               <img
                 src="/logo.png"
-                alt="StreamLine"
+                alt="StreamLine watermark"
+                className="sl-watermark"
                 style={{
-                  position: "absolute",
-                  top: "20px",
-                  right: "20px",
-                  width: "120px",
-                  height: "auto",
-                  opacity: "0.75",
-                  zIndex: 10,
-                  pointerEvents: "none",
+                  top: "12px",
+                  right: "12px",
+                  width: "96px",
+                  opacity: 0.8,
                 }}
               />
             )}
@@ -1263,10 +1624,105 @@ export default function Room() {
         </LiveKitRoom>
       )}
 
+      {inviteModalOpen && isHost && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setInviteModalOpen(false)}
+        >
+          <div
+            style={{
+              width: "min(420px, 90vw)",
+              background: "#0f172a",
+              border: "1px solid #1f2937",
+              borderRadius: 12,
+              padding: 20,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
+              color: "#e5e7eb",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Invite people</h3>
+              <button
+                onClick={() => setInviteModalOpen(false)}
+                style={{
+                  background: "transparent",
+                  color: "#9ca3af",
+                  border: "none",
+                  fontSize: 16,
+                  cursor: "pointer",
+                }}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p style={{ marginTop: 0, marginBottom: 14, color: "#94a3b8", fontSize: 13 }}>
+              Copy the right link for your guest role. Moderator requires admin access; we’ll downgrade if missing.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {(quickRoleIds.length ? quickRoleIds : ["participant", "cohost", "moderator"]).map((roleId) => {
+                const roleLabel = roleProfiles.find((r) => r.id === roleId)?.label || roleId;
+                return { role: roleId, label: roleLabel };
+              }).map((item) => (
+                <div
+                  key={item.role}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #1f2937",
+                    background: "rgba(255,255,255,0.02)",
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>{item.label}</span>
+                    <span style={{ fontSize: 12, color: "#9ca3af" }}>{item.role === "participant" ? "Standard guest join" : item.role === "cohost" ? "Co-host profile" : item.role === "moderator" ? "Moderator controls" : "Custom role (uses participant token)"}</span>
+                  </div>
+                  <button
+                    onClick={() => copyInviteLink(item.role, item.label)}
+                    style={{
+                      fontSize: 12,
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(34, 197, 94, 0.4)",
+                      background: "rgba(34, 197, 94, 0.08)",
+                      color: "#22c55e",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Copy link
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <StreamSetupModalV2
-        open={showStreamSetup}
+        open={showStreamSetup && !isViewer}
         onClose={() => setShowStreamSetup(false)}
         roomName={roomName ?? ""}
+        presetOptions={mediaPresets}
+        selectedPresetId={selectedPresetId}
+        onPresetChange={handlePresetChange}
+        defaultLayout={defaultLayoutPref}
+        defaultRecordingMode={defaultRecordingModePref}
+        presetClamped={presetClamped}
         streamStatus={streamStatus}
         onStartStream={handleStartMultistream}
         onStopStream={handleStopMultistream}
@@ -1274,6 +1730,9 @@ export default function Room() {
         onStartRecording={startRecording}
         onStopRecording={stopRecording}
         recordingEnabled={recordingEnabled}
+        multistreamAllowed={canMultistream}
+        dualRecordingAllowed={dualRecordingAllowed}
+        maxGuests={maxGuestsAllowed === null ? undefined : maxGuestsAllowed || undefined}
         recordingElapsedSeconds={recordingElapsed}
         savedDestinations={destinations
           .filter((d) => d.enabled && d.status === "connected" && d.hasKey)
@@ -1300,6 +1759,28 @@ export default function Room() {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.7; }
         }
+
+        @keyframes fadeScale {
+          0% { opacity: 0; transform: scale(0.92); }
+          20% { opacity: 1; transform: scale(1); }
+          80% { opacity: 1; transform: scale(1); }
+          100% { opacity: 0; transform: scale(0.94); }
+        }
+
+        ${isViewer ? `
+        .sl-layout.sl-viewer .lk-control-bar .lk-button-microphone,
+        .sl-layout.sl-viewer .lk-control-bar .lk-button-camera,
+        .sl-layout.sl-viewer .lk-control-bar .lk-button-screen-share,
+        .sl-layout.sl-viewer .lk-control-bar .lk-button-start-audio,
+        .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_mic"],
+        .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_camera"],
+        .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_screen_share"],
+        .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Microphone"],
+        .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Camera"],
+        .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Screen"] {
+          display: none !important;
+        }
+        ` : ""}
       `}</style>
     </>
   );

@@ -67,10 +67,31 @@ async function handleUsageSummary(req: any, res: any) {
       usageMonthly = {
         uid,
         monthKey,
-        usage: { participantMinutes: legacyParticipantMinutes, transcodeMinutes: 0 },
+        usage: {
+          participantMinutes: legacyParticipantMinutes,
+          transcodeMinutes: 0,
+          minutes: {
+            live: {
+              currentPeriod: legacyParticipantMinutes,
+              lifetime: legacyParticipantMinutes,
+            },
+            recording: {
+              currentPeriod: 0,
+              lifetime: 0,
+            },
+          },
+        },
         ytd: {
           participantMinutes: Math.max(0, Math.round(Number(legacyUsage.ytdHours || 0) * 60)),
           transcodeMinutes: 0,
+          minutes: {
+            live: {
+              lifetime: Math.max(0, Math.round(Number(legacyUsage.ytdHours || 0) * 60)),
+            },
+            recording: {
+              lifetime: 0,
+            },
+          },
         },
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
@@ -79,11 +100,25 @@ async function handleUsageSummary(req: any, res: any) {
       await usageRef.set(usageMonthly, { merge: true });
     }
 
+    const toNumber = (value: any) => {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : 0;
+    };
+
     const usage = usageMonthly.usage || {};
     const ytd = usageMonthly.ytd || {};
+    const usageMinutes = usage.minutes || {};
+    const ytdMinutes = ytd.minutes || {};
 
-    const participantUsed = Number(usage.participantMinutes || 0);
-    const transcodeUsed = Number(usage.transcodeMinutes || 0);
+    const participantUsed = toNumber(usage.participantMinutes);
+    const transcodeUsed = toNumber(usage.transcodeMinutes);
+
+    const liveCurrent = toNumber(usageMinutes.live?.currentPeriod ?? participantUsed);
+    const liveLifetime = toNumber(
+      usageMinutes.live?.lifetime ?? ytdMinutes.live?.lifetime ?? ytd.participantMinutes
+    );
+    const recordingCurrent = toNumber(usageMinutes.recording?.currentPeriod);
+    const recordingLifetime = toNumber(usageMinutes.recording?.lifetime ?? ytdMinutes.recording?.lifetime);
 
     const participantLimit = Number(limits.participantMinutes || 0); // 0 = unlimited
     const transcodeLimit = Number(limits.transcodeMinutes || 0);     // 0 = unlimited
@@ -111,6 +146,18 @@ async function handleUsageSummary(req: any, res: any) {
       resetDate: resetDateISO,
       participantMinutes: participantUsed,
       transcodeMinutes: transcodeUsed,
+      usage: {
+        minutes: {
+          live: {
+            currentPeriod: liveCurrent,
+            lifetime: liveLifetime,
+          },
+          recording: {
+            currentPeriod: recordingCurrent,
+            lifetime: recordingLifetime,
+          },
+        },
+      },
 
       user: {
         planId,
@@ -142,10 +189,28 @@ async function handleUsageSummary(req: any, res: any) {
           transcodeMinutes: transcodeUsed,
           participantHours: Math.round((participantUsed / 60) * 100) / 100,
           transcodeHours: Math.round((transcodeUsed / 60) * 100) / 100,
+          minutes: {
+            live: {
+              currentPeriod: liveCurrent,
+              lifetime: liveLifetime,
+            },
+            recording: {
+              currentPeriod: recordingCurrent,
+              lifetime: recordingLifetime,
+            },
+          },
         },
         ytd: {
           participantMinutes: Number(ytd.participantMinutes || 0),
           transcodeMinutes: Number(ytd.transcodeMinutes || 0),
+          minutes: {
+            live: {
+              lifetime: toNumber(ytdMinutes.live?.lifetime ?? liveLifetime),
+            },
+            recording: {
+              lifetime: toNumber(ytdMinutes.recording?.lifetime ?? recordingLifetime),
+            },
+          },
         },
       },
 
@@ -194,6 +259,7 @@ router.get("/entitlements", requireAuth, async (req, res) => {
     recording: !!features.recording,
     rtmpMultistream: !!features.rtmpMultistream || !!features.rtmp || !!plan.multistreamEnabled,
     dualRecording: !!features.dualRecording || !!features.dual_recording,
+    watermark: !!features.watermarkRecordings || !!features.watermark,
     maxDestinations: Number(limits.maxDestinations || 0),
     maxGuests: Number(limits.maxGuests || 0),
     participantMinutes: Number(limits.participantMinutes || 0),

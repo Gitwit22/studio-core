@@ -11,6 +11,7 @@ const webhook_1 = __importDefault(require("./routes/webhook"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const admin_1 = __importDefault(require("./routes/admin"));
 const adminStatus_1 = __importDefault(require("./routes/adminStatus"));
+const account_1 = __importDefault(require("./routes/account"));
 const requireAuth_1 = require("./middleware/requireAuth");
 const billing_1 = __importDefault(require("./routes/billing"));
 const recordings_1 = __importDefault(require("./routes/recordings"));
@@ -58,6 +59,7 @@ app.use((0, cookie_parser_1.default)());
 // Stripe/Billing webhooks
 app.use("/api/webhooks", webhook_1.default);
 app.use("/api/auth", auth_1.default);
+app.use("/api/account", account_1.default);
 // Admin routes
 app.use("/api/admin/status", adminStatus_1.default);
 app.use("/api/admin", admin_1.default);
@@ -618,13 +620,35 @@ app.post("/api/usage/streamEnded", async (req, res) => {
         const existing = usageSnap.exists ? usageSnap.data() : {};
         const prevUsage = existing.usage || {};
         const prevYtd = existing.ytd || {};
+        const prevMinutes = prevUsage.minutes || {};
+        const prevYtdMinutes = prevYtd.minutes || {};
         const nextUsage = {
             participantMinutes: Number(prevUsage.participantMinutes || 0) + durationMinutes,
             transcodeMinutes: Number(prevUsage.transcodeMinutes || 0) + transcodeMinutes,
+            minutes: {
+                live: {
+                    currentPeriod: Number(prevMinutes.live?.currentPeriod || 0) + durationMinutes,
+                    lifetime: Number(prevMinutes.live?.lifetime ||
+                        prevYtdMinutes.live?.lifetime ||
+                        0) + durationMinutes,
+                },
+                recording: {
+                    currentPeriod: Number(prevMinutes.recording?.currentPeriod || 0),
+                    lifetime: Number(prevMinutes.recording?.lifetime || prevYtdMinutes.recording?.lifetime || 0),
+                },
+            },
         };
         const nextYtd = {
             participantMinutes: Number(prevYtd.participantMinutes || 0) + durationMinutes,
             transcodeMinutes: Number(prevYtd.transcodeMinutes || 0) + transcodeMinutes,
+            minutes: {
+                live: {
+                    lifetime: Number(prevYtdMinutes.live?.lifetime || prevMinutes.live?.lifetime || 0) + durationMinutes,
+                },
+                recording: {
+                    lifetime: Number(prevYtdMinutes.recording?.lifetime || prevMinutes.recording?.lifetime || 0),
+                },
+            },
         };
         await usageRef.set({
             uid,

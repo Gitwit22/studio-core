@@ -7,6 +7,7 @@ const express_1 = require("express");
 const crypto_1 = __importDefault(require("crypto"));
 const requireAuth_1 = require("../middleware/requireAuth");
 const firebaseAdmin_1 = require("../firebaseAdmin");
+const account_1 = require("./account");
 // Dynamic import for AccessToken constructor
 async function getAccessTokenCtor() {
     const mod = await import("livekit-server-sdk");
@@ -37,6 +38,78 @@ function roleToGrant(role) {
     // participant/host/cohost
     return { ...base, canPublish: true, canPublishData: true, canUpdateMetadata: false, roomAdmin: false };
 }
+async function getAdvancedPermissionsEnabled(uid) {
+    const userSnap = await firebaseAdmin_1.firestore.collection("users").doc(uid).get();
+    const userData = userSnap.exists ? userSnap.data() || {} : {};
+    const planId = String(userData.planId || userData.plan || "free");
+    const planSnap = await firebaseAdmin_1.firestore.collection("plans").doc(planId).get();
+    const planFeatures = planSnap.exists ? (planSnap.data()?.features || {}) : {};
+    const planFlag = !!planFeatures.advancedPermissions;
+    const override = userData.advancedPermissionsOverride === true;
+    const force = await firebaseAdmin_1.firestore.collection("featureFlags").doc("forceSimpleMode").get();
+    const globalLock = force.exists ? !!force.data()?.enabled : false;
+    return { enabled: !globalLock && (planFlag || override), planFlag, override, globalLock };
+}
+async function getPermissionsMode(uid) {
+    if (!uid)
+        return "simple";
+    const snap = await firebaseAdmin_1.firestore.collection("users").doc(uid).get();
+    const prefs = snap.data()?.mediaPrefs;
+    const mode = prefs?.permissionsMode;
+    const advanced = await getAdvancedPermissionsEnabled(uid);
+    if (!advanced.enabled)
+        return "simple";
+    return mode === "advanced" ? "advanced" : "simple";
+}
+async function resolveRoleForInvite(opts) {
+    const allowedSimpleRoles = ["participant", "moderator", "cohost", "host"];
+    const requested = String(opts.requestedRole || "participant").toLowerCase();
+    const mode = await getPermissionsMode(opts.uid);
+    if (mode === "simple") {
+        const isAllowed = allowedSimpleRoles.includes(requested);
+        const effectiveRoleKey = isAllowed
+            ? requested
+            : "participant";
+        if (!isAllowed && opts.requestedRole) {
+            return {
+                ok: false,
+                error: {
+                    error: "simple_mode_locked",
+                    allowedRoles: allowedSimpleRoles,
+                    effectiveRoleKey,
+                    locked: true,
+                    note: "Viewer room tokens are disabled in simple mode; use watch links.",
+                },
+            };
+        }
+        const perms = effectiveRoleKey === "host" || effectiveRoleKey === "moderator"
+            ? account_1.SIMPLE_ROLE_DEFAULTS.moderator
+            : account_1.SIMPLE_ROLE_DEFAULTS[effectiveRoleKey];
+        const grantRole = effectiveRoleKey === "moderator" || effectiveRoleKey === "host"
+            ? "moderator"
+            : effectiveRoleKey === "cohost"
+                ? "participant"
+                : effectiveRoleKey;
+        return {
+            ok: true,
+            result: {
+                grantRole,
+                permissions: perms,
+                effectiveRoleKey,
+                locked: true,
+            },
+        };
+    }
+    // advanced: preserve existing behavior
+    const allowedRoles = ["host", "participant", "moderator", "viewer", "cohost"];
+    const normalizedRole = (allowedRoles.includes(requested) ? requested : "participant");
+    const wantsModerator = normalizedRole === "moderator";
+    const grantRole = wantsModerator ? "moderator" : normalizedRole === "cohost" ? "participant" : normalizedRole;
+    const effectiveRoleKey = normalizedRole === "cohost" ? "cohost" : normalizedRole;
+    // Advanced mode currently does not hydrate custom profiles; keep existing grant mapping
+    const permissions = { canStream: true, canRecord: true, canDestinations: true, canModerate: grantRole === "moderator", canLayout: true, canScreenShare: true, canInvite: true, canAnalytics: grantRole === "moderator" };
+    return { ok: true, result: { grantRole, permissions, effectiveRoleKey, locked: false } };
+}
 async function getPlanLimit(uid, field) {
     const userSnap = await firebaseAdmin_1.firestore.collection("users").doc(uid).get();
     const planId = String((userSnap.data() || {}).planId || "free");
@@ -49,6 +122,13 @@ async function getPlanLimit(uid, field) {
         return undefined;
     const num = Number(raw);
     return Number.isFinite(num) ? num : undefined;
+}
+function nowTs() {
+    return FirebaseFirestore.Timestamp.now();
+}
+function addMinutes(ts, minutes) {
+    const ms = ts.toMillis() + minutes * 60 * 1000;
+    return FirebaseFirestore.Timestamp.fromMillis(ms);
 }
 async function getParticipantCount(roomName) {
     const serviceUrl = deriveServiceUrl();
@@ -68,6 +148,65 @@ async function getParticipantCount(roomName) {
     }
 }
 const router = (0, express_1.Router)();
+async function createViewerInvite(roomId, opts) {
+    const docRef = firebaseAdmin_1.firestore.collection("viewerInvites").doc();
+    const payload = {
+        roomId,
+        roleProfileId: "viewer",
+        expiresAt: null,
+        expiresOnRoomEnd: true,
+        viewerGraceMinutes: typeof opts.viewerGraceMinutes === "number" ? opts.viewerGraceMinutes : 10,
+        maxUses: opts.maxUses ?? null,
+        usedCount: 0,
+        usedSessions: [],
+        revokedAt: null,
+        allowRejoin: true,
+        requirePasscode: opts.passcode || null,
+        requireDisplayName: opts.requireDisplayName ?? false,
+        allowAnonymous: opts.allowAnonymous ?? true,
+        createdAt: nowTs(),
+        createdBy: opts.createdBy,
+    };
+    await docRef.set(payload, { merge: false });
+    return { inviteId: docRef.id };
+}
+async function validateViewerInvite(inviteToken, roomName, sessionId, passcode) {
+    const doc = await firebaseAdmin_1.firestore.collection("viewerInvites").doc(inviteToken).get();
+    if (!doc.exists)
+        return { ok: false, reason: "not_found" };
+    const data = doc.data();
+    if (data.roomId !== roomName)
+        return { ok: false, reason: "room_mismatch" };
+    if (data.revokedAt)
+        return { ok: false, reason: "revoked" };
+    // Expiry checks
+    if (data.expiresAt && data.expiresAt.toMillis() < Date.now()) {
+        return { ok: false, reason: "expired" };
+    }
+    // Grace-after-end: if we had room end timestamps we would enforce here; keeping placeholder for future.
+    // Passcode check
+    if (data.requirePasscode) {
+        if (!passcode || passcode !== data.requirePasscode) {
+            return { ok: false, reason: "passcode_required" };
+        }
+    }
+    // Uses check (count unique sessions)
+    const usedSessions = Array.isArray(data.usedSessions) ? data.usedSessions : [];
+    const alreadyUsed = usedSessions.includes(sessionId);
+    const maxUses = data.maxUses ?? null;
+    if (!alreadyUsed && maxUses !== null && maxUses > 0 && usedSessions.length >= maxUses) {
+        return { ok: false, reason: "max_used" };
+    }
+    // If new session, record it
+    if (!alreadyUsed) {
+        const nextSessions = usedSessions.concat(sessionId).slice(-1000);
+        await doc.ref.update({
+            usedSessions: nextSessions,
+            usedCount: (data.usedCount || 0) + 1,
+        });
+    }
+    return { ok: true, invite: data };
+}
 router.post("/", requireAuth_1.requireAuthOrInvite, async (req, res) => {
     try {
         const { roomName, identity, role: rawRole } = req.body;
@@ -89,29 +228,25 @@ router.post("/", requireAuth_1.requireAuthOrInvite, async (req, res) => {
         if (!apiKey || !apiSecret) {
             return res.status(500).json({ error: "LiveKit keys missing in env" });
         }
-        const AccessToken = await getAccessTokenCtor();
         const inviteIdentity = invite?.identity || invite?.uid || invite?.sub || null;
         const tokenIdentity = (identity && identity.trim()) || uid || inviteIdentity || `invite-${roomName}`; // prefer provided identity, fallback to auth/ invite
-        const requestedRole = String(rawRole || "participant").toLowerCase();
-        const allowedRoles = ["host", "participant", "moderator", "viewer", "cohost"];
-        const normalizedRole = (allowedRoles.includes(requestedRole) ? requestedRole : "participant");
-        const wantsModerator = normalizedRole === "moderator";
-        const isRoomAdmin = req.body?.roomAdmin === true || req.body?.isRoomAdmin === true;
-        const finalRole = wantsModerator && !isRoomAdmin
-            ? "participant"
-            : normalizedRole === "cohost"
-                ? "participant"
-                : normalizedRole;
-        const isViewer = finalRole === "viewer";
+        const resolved = await resolveRoleForInvite({ uid, requestedRole: rawRole });
+        if (resolved.ok === false) {
+            const payload = resolved.error;
+            return res.status(400).json(payload);
+        }
+        const { grantRole, permissions, effectiveRoleKey, locked } = resolved.result;
+        const isViewer = grantRole === "viewer";
+        const AccessToken = await getAccessTokenCtor();
         const at = new AccessToken(apiKey, apiSecret, { identity: tokenIdentity });
         at.addGrant({
             room: roomName,
-            ...roleToGrant(finalRole),
+            ...roleToGrant(grantRole),
         });
         const jwt = await at.toJwt();
         console.log("✅ roomToken jwt typeof:", typeof jwt, "len:", jwt.length);
         const serverUrl = process.env.LIVEKIT_URL || null;
-        return res.status(200).json({ token: jwt, serverUrl, role: finalRole, isViewer });
+        return res.status(200).json({ token: jwt, serverUrl, role: grantRole, isViewer, permissions, effectiveRoleKey, locked });
     }
     catch (err) {
         console.error("roomToken error:", err);
@@ -167,17 +302,24 @@ router.post("/guest", async (req, res) => {
                 overCap = true;
             }
         }
+        if (overCap) {
+            return res.status(429).json({ error: "room_full" });
+        }
         const identity = (guestId && guestId.trim()) || crypto_1.default.randomUUID();
+        const resolved = await resolveRoleForInvite({ uid: hostUid, requestedRole: "participant" });
+        if (resolved.ok === false) {
+            const payload = resolved.error;
+            return res.status(400).json(payload);
+        }
         const AccessToken = await getAccessTokenCtor();
         const at = new AccessToken(apiKey, apiSecret, { identity });
-        const role = overCap ? "viewer" : "participant";
         at.addGrant({
             room: roomName,
-            ...roleToGrant(role),
+            ...roleToGrant(resolved.result.grantRole),
         });
         const jwt = await at.toJwt();
         const serverUrl = process.env.LIVEKIT_URL || null;
-        return res.status(200).json({ token: jwt, serverUrl, identity, role, isViewer: role === "viewer" });
+        return res.status(200).json({ token: jwt, serverUrl, identity, role: resolved.result.grantRole, isViewer: false, permissions: resolved.result.permissions, effectiveRoleKey: resolved.result.effectiveRoleKey, locked: resolved.result.locked });
     }
     catch (err) {
         console.error("roomToken guest error:", err);

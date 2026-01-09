@@ -25,6 +25,7 @@ import Terms from "./pages/Terms";
 import Support from "./pages/Support";
 import BillingCanceled from "./pages/BillingCanceled";
 import BillingSuccess from "./pages/BillingSuccess";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 
 
 // Stripe/Billing pages
@@ -55,8 +56,22 @@ function App() {
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
       {/* Streaming flow */}
-      <Route path="/join" element={<Join />} />
-      <Route path="/room/:roomName" element={<Room />} />
+      <Route
+        path="/join"
+        element={
+          <ProtectedRoute>
+            <Join />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/room/:roomName"
+        element={
+          <ProtectedRoute>
+            <Room />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/settings/destinations" element={<SettingsDestinations />} />
       <Route path="/room-exit/:recordingId" element={<RoomExitPage />} />
 

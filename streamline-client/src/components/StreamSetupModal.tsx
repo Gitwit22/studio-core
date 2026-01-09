@@ -1,9 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   roomName: string;
+  presetOptions?: Array<{ id: string; label: string }>;
+  selectedPresetId?: string;
+  onPresetChange?: (id: string) => void;
+  defaultLayout?: "speaker" | "grid";
+  defaultRecordingMode?: "cloud" | "dual";
+  presetClamped?: boolean;
   
   // Stream state
   streamStatus: "idle" | "starting" | "live" | "stopping";
@@ -12,15 +18,19 @@ interface Props {
     facebookKey?: string;
     twitchKey?: string;
     destinationIds?: string[];
+    presetId?: string;
   }) => Promise<void>;
   onStopStream: () => Promise<void>;
   
   // Recording state (independent from stream)
   recordingStatus: "idle" | "recording" | "stopping" | "stopped" | "error";
-  onStartRecording: (layout: "speaker" | "grid") => Promise<void>;
+  onStartRecording: (params: { layout: "speaker" | "grid"; mode: "cloud" | "dual"; presetId?: string }) => Promise<void>;
   onStopRecording: () => Promise<void>;
   recordingEnabled?: boolean;
   recordingElapsedSeconds?: number;
+  dualRecordingAllowed?: boolean;
+  maxGuests?: number;
+  multistreamAllowed?: boolean;
 
   // Optional: saved destinations with stored keys (from Settings Destinations)
   savedDestinations?: Array<{
@@ -36,6 +46,12 @@ export default function StreamSetupModalV2({
   open,
   onClose,
   roomName,
+  presetOptions = [],
+  selectedPresetId,
+  onPresetChange,
+  defaultLayout = "speaker",
+  defaultRecordingMode = "cloud",
+  presetClamped = false,
   streamStatus,
   onStartStream,
   onStopStream,
@@ -45,6 +61,9 @@ export default function StreamSetupModalV2({
   savedDestinations,
   recordingEnabled = true,
   recordingElapsedSeconds = 0,
+  dualRecordingAllowed = false,
+  maxGuests,
+  multistreamAllowed = true,
 }: Props) {
   const [useYouTube, setUseYouTube] = useState(false);
   const [useFacebook, setUseFacebook] = useState(false);
@@ -56,18 +75,40 @@ export default function StreamSetupModalV2({
 
   const [selectedDestinationIds, setSelectedDestinationIds] = useState<string[]>([]);
 
-  const [layout, setLayout] = useState<"speaker" | "grid">("speaker");
+  const [layout, setLayout] = useState<"speaker" | "grid">(defaultLayout);
+  const [recordingMode, setRecordingMode] = useState<"cloud" | "dual">(defaultRecordingMode);
+
+  // Keep local layout/mode in sync with defaults from account prefs
+  useEffect(() => {
+    setLayout(defaultLayout);
+  }, [defaultLayout]);
+
+  useEffect(() => {
+    setRecordingMode(defaultRecordingMode);
+  }, [defaultRecordingMode]);
+
+  const selectedPresetLabel = presetOptions.find((p) => p.id === selectedPresetId)?.label || "Standard";
 
   if (!open) return null;
 
   const streamIsLive = streamStatus === "live";
   const streamIsBusy = streamStatus === "starting" || streamStatus === "stopping";
+  const streamDisallowed = !multistreamAllowed;
   
   const recordingIsActive = recordingStatus === "recording";
   const recordingIsBusy = recordingStatus === "stopping";
   const showRecordingControls = recordingEnabled !== false;
 
   const hasSavedDestinations = Array.isArray(savedDestinations) && savedDestinations.length > 0;
+
+  const badgeItems = [
+    { label: "Recording", value: recordingEnabled ? "On" : "Off", ok: recordingEnabled },
+    { label: "Dual", value: dualRecordingAllowed ? "On" : "Off", ok: dualRecordingAllowed },
+    { label: "Multistream", value: multistreamAllowed ? "On" : "Off", ok: multistreamAllowed },
+    typeof maxGuests === "number"
+      ? { label: "Guests", value: maxGuests > 0 ? `${maxGuests}` : "—", ok: true }
+      : null,
+  ].filter(Boolean) as Array<{ label: string; value: string; ok: boolean }>;
 
   const toggleDestination = (id: string) => {
     setSelectedDestinationIds((prev) =>
@@ -76,6 +117,10 @@ export default function StreamSetupModalV2({
   };
 
   const handleStartStream = async () => {
+    if (streamDisallowed) {
+      alert("Multistreaming is disabled for this plan. Upgrade in Settings → Usage to enable external destinations.");
+      return;
+    }
     const yt = useYouTube ? youtubeKey.trim() : "";
     const fb = useFacebook ? facebookKey.trim() : "";
     const tw = useTwitch ? twitchKey.trim() : "";
@@ -92,11 +137,12 @@ export default function StreamSetupModalV2({
       facebookKey: fb || undefined,
       twitchKey: tw || undefined,
       destinationIds: destIds.length ? destIds : undefined,
+      presetId: selectedPresetId,
     });
   };
 
   const handleStartRecording = async () => {
-    await onStartRecording(layout);
+    await onStartRecording({ layout, mode: recordingMode, presetId: selectedPresetId });
   };
 
   return (
@@ -172,6 +218,90 @@ export default function StreamSetupModalV2({
           flexDirection: 'column',
           gap: '1rem'
         }}>
+
+          {/* Entitlements summary */}
+          {badgeItems.length > 0 && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+              gap: '0.5rem',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: '0.5rem',
+              padding: '0.6rem',
+              background: 'rgba(255,255,255,0.02)'
+            }}>
+              {badgeItems.map((item) => (
+                <div
+                  key={item.label}
+                  style={{
+                    border: `1px solid ${item.ok ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}`,
+                    background: item.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.06)',
+                    color: item.ok ? '#bbf7d0' : '#fecdd3',
+                    borderRadius: '0.45rem',
+                    padding: '0.35rem 0.5rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.1rem',
+                    minHeight: '48px'
+                  }}
+                >
+                  <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>{item.label}</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Media preset selector */}
+          <div style={{
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '0.5rem',
+            padding: '0.75rem',
+            background: 'rgba(255,255,255,0.02)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.3px' }}>Media Preset</div>
+                <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.65)' }}>Applies to streaming + recording quality</div>
+              </div>
+              <span style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', borderRadius: '9999px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', color: '#fca5a5' }}>
+                {selectedPresetLabel}
+              </span>
+            </div>
+            <select
+              value={selectedPresetId || ''}
+              onChange={(e) => onPresetChange?.(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.55rem 0.65rem',
+                background: 'rgba(20,20,20,0.9)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: '0.45rem',
+                color: '#ffffff',
+                fontSize: '0.85rem',
+                outline: 'none'
+              }}
+              disabled={!onPresetChange || presetOptions.length === 0}
+            >
+              {(presetOptions.length === 0) && <option value="">Loading presets…</option>}
+              {presetOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+            {presetClamped && (
+              <div style={{
+                marginTop: '0.5rem',
+                fontSize: '0.72rem',
+                color: '#fbbf24',
+                background: 'rgba(251,191,36,0.08)',
+                border: '1px dashed rgba(251,191,36,0.4)',
+                borderRadius: '0.4rem',
+                padding: '0.45rem 0.55rem'
+              }}>
+                Plan limit applied; upgraded plans unlock higher quality.
+              </div>
+            )}
+          </div>
           
           {/* SECTION 1: STREAM PLATFORMS */}
           <div style={{
@@ -198,6 +328,20 @@ export default function StreamSetupModalV2({
               📡 Stream Destinations
             </div>
 
+            {streamDisallowed && (
+              <div style={{
+                marginBottom: '0.75rem',
+                padding: '0.55rem 0.75rem',
+                borderRadius: '0.375rem',
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                fontSize: '0.75rem',
+                color: '#fca5a5'
+              }}>
+                Multistream is disabled for this plan. Upgrade in Settings → Usage to enable streaming to external destinations.
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {/* YouTube */}
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', fontSize: '0.85rem' }}>
@@ -205,8 +349,8 @@ export default function StreamSetupModalV2({
                   type="checkbox"
                   checked={useYouTube}
                   onChange={() => setUseYouTube(v => !v)}
-                  disabled={streamIsLive}
-                  style={{ marginTop: '0.25rem', cursor: streamIsLive ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
+                  disabled={streamIsLive || streamDisallowed}
+                  style={{ marginTop: '0.25rem', cursor: (streamIsLive || streamDisallowed) ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>YouTube Live</div>
@@ -215,7 +359,7 @@ export default function StreamSetupModalV2({
                     value={youtubeKey}
                     onChange={(e) => setYoutubeKey(e.target.value)}
                     placeholder="Stream Key"
-                    disabled={!useYouTube || streamIsLive}
+                    disabled={!useYouTube || streamIsLive || streamDisallowed}
                     style={{
                       width: '100%',
                       padding: '0.4rem 0.5rem',
@@ -225,8 +369,8 @@ export default function StreamSetupModalV2({
                       color: '#ffffff',
                       fontSize: '0.75rem',
                       outline: 'none',
-                      opacity: (!useYouTube || streamIsLive) ? 0.5 : 1,
-                      cursor: (!useYouTube || streamIsLive) ? 'not-allowed' : 'text'
+                      opacity: (!useYouTube || streamIsLive || streamDisallowed) ? 0.5 : 1,
+                      cursor: (!useYouTube || streamIsLive || streamDisallowed) ? 'not-allowed' : 'text'
                     }}
                   />
                 </div>
@@ -238,8 +382,8 @@ export default function StreamSetupModalV2({
                   type="checkbox"
                   checked={useFacebook}
                   onChange={() => setUseFacebook(v => !v)}
-                  disabled={streamIsLive}
-                  style={{ marginTop: '0.25rem', cursor: streamIsLive ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
+                  disabled={streamIsLive || streamDisallowed}
+                  style={{ marginTop: '0.25rem', cursor: (streamIsLive || streamDisallowed) ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>Facebook Live</div>
@@ -248,7 +392,7 @@ export default function StreamSetupModalV2({
                     value={facebookKey}
                     onChange={(e) => setFacebookKey(e.target.value)}
                     placeholder="Stream Key"
-                    disabled={!useFacebook || streamIsLive}
+                    disabled={!useFacebook || streamIsLive || streamDisallowed}
                     style={{
                       width: '100%',
                       padding: '0.4rem 0.5rem',
@@ -258,8 +402,8 @@ export default function StreamSetupModalV2({
                       color: '#ffffff',
                       fontSize: '0.75rem',
                       outline: 'none',
-                      opacity: (!useFacebook || streamIsLive) ? 0.5 : 1,
-                      cursor: (!useFacebook || streamIsLive) ? 'not-allowed' : 'text'
+                      opacity: (!useFacebook || streamIsLive || streamDisallowed) ? 0.5 : 1,
+                      cursor: (!useFacebook || streamIsLive || streamDisallowed) ? 'not-allowed' : 'text'
                     }}
                   />
                 </div>
@@ -271,8 +415,8 @@ export default function StreamSetupModalV2({
                   type="checkbox"
                   checked={useTwitch}
                   onChange={() => setUseTwitch(v => !v)}
-                  disabled={streamIsLive}
-                  style={{ marginTop: '0.25rem', cursor: streamIsLive ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
+                  disabled={streamIsLive || streamDisallowed}
+                  style={{ marginTop: '0.25rem', cursor: (streamIsLive || streamDisallowed) ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>Twitch</div>
@@ -281,7 +425,7 @@ export default function StreamSetupModalV2({
                     value={twitchKey}
                     onChange={(e) => setTwitchKey(e.target.value)}
                     placeholder="Stream Key"
-                    disabled={!useTwitch || streamIsLive}
+                    disabled={!useTwitch || streamIsLive || streamDisallowed}
                     style={{
                       width: '100%',
                       padding: '0.4rem 0.5rem',
@@ -291,8 +435,8 @@ export default function StreamSetupModalV2({
                       color: '#ffffff',
                       fontSize: '0.75rem',
                       outline: 'none',
-                      opacity: (!useTwitch || streamIsLive) ? 0.5 : 1,
-                      cursor: (!useTwitch || streamIsLive) ? 'not-allowed' : 'text'
+                      opacity: (!useTwitch || streamIsLive || streamDisallowed) ? 0.5 : 1,
+                      cursor: (!useTwitch || streamIsLive || streamDisallowed) ? 'not-allowed' : 'text'
                     }}
                   />
                 </div>
@@ -305,17 +449,17 @@ export default function StreamSetupModalV2({
                 <>
                   <button
                     onClick={handleStartStream}
-                    disabled={streamIsBusy}
+                    disabled={streamIsBusy || streamDisallowed}
                     style={{
                       width: '100%',
                       padding: '0.75rem',
                       fontSize: '0.875rem',
                       borderRadius: '0.5rem',
-                      background: streamIsBusy ? 'rgba(59, 130, 246, 0.5)' : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                      background: (streamIsBusy || streamDisallowed) ? 'rgba(59, 130, 246, 0.5)' : 'linear-gradient(135deg, #22c55e, #16a34a)',
                       color: '#ffffff',
                       border: 'none',
                       fontWeight: '600',
-                      cursor: streamIsBusy ? 'not-allowed' : 'pointer',
+                      cursor: (streamIsBusy || streamDisallowed) ? 'not-allowed' : 'pointer',
                       transition: 'all 0.3s ease',
                     }}
                   >
@@ -360,10 +504,10 @@ export default function StreamSetupModalV2({
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               <input
                                 type="checkbox"
-                                disabled={streamIsLive || d.status !== 'connected' || !d.hasKey}
+                                disabled={streamIsLive || streamDisallowed || d.status !== 'connected' || !d.hasKey}
                                 checked={selectedDestinationIds.includes(d.id)}
                                 onChange={() => toggleDestination(d.id)}
-                                style={{ cursor: streamIsLive ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
+                                style={{ cursor: (streamIsLive || streamDisallowed) ? 'not-allowed' : 'pointer', accentColor: '#ef4444' }}
                               />
                               <span>{d.label}</span>
                             </div>
@@ -412,6 +556,53 @@ export default function StreamSetupModalV2({
                 🎬 Recording Control
               </div>
 
+              {/* Mode Selector */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.75rem' }}>
+                <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Mode:</span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => setRecordingMode('cloud')}
+                    disabled={recordingIsActive}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      borderRadius: '0.35rem',
+                      border: recordingMode === 'cloud' ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.15)',
+                      background: recordingMode === 'cloud' ? 'rgba(239, 68, 68, 0.12)' : '#18181b',
+                      color: '#ffffff',
+                      fontWeight: 600,
+                      fontSize: '0.8rem',
+                      cursor: recordingIsActive ? 'not-allowed' : 'pointer',
+                      opacity: recordingIsActive ? 0.5 : 1,
+                    }}
+                  >
+                    Cloud
+                  </button>
+                  <button
+                    onClick={() => dualRecordingAllowed && setRecordingMode('dual')}
+                    disabled={recordingIsActive || !dualRecordingAllowed}
+                    title={dualRecordingAllowed ? 'Record cloud + local copy' : 'Dual recording not included in this plan'}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      borderRadius: '0.35rem',
+                      border: recordingMode === 'dual' ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.15)',
+                      background: recordingMode === 'dual' ? 'rgba(239, 68, 68, 0.12)' : '#18181b',
+                      color: '#ffffff',
+                      fontWeight: 600,
+                      fontSize: '0.8rem',
+                      cursor: (recordingIsActive || !dualRecordingAllowed) ? 'not-allowed' : 'pointer',
+                      opacity: !dualRecordingAllowed ? 0.4 : (recordingIsActive ? 0.6 : 1),
+                    }}
+                  >
+                    Dual
+                  </button>
+                </div>
+                {!dualRecordingAllowed && (
+                  <div style={{ fontSize: '0.75rem', color: '#fca5a5' }}>
+                    Dual recording is disabled for this plan.
+                  </div>
+                )}
+              </div>
+
               {/* Layout Selector */}
               <label style={{ fontSize: '0.875rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontWeight: 600 }}>Layout:</span>
@@ -455,7 +646,7 @@ export default function StreamSetupModalV2({
               {!recordingIsActive ? (
                 <button
                   onClick={handleStartRecording}
-                  disabled={recordingIsBusy}
+                  disabled={recordingIsBusy || (recordingMode === "dual" && !dualRecordingAllowed)}
                   style={{
                     width: '100%',
                     padding: '0.75rem',
@@ -465,9 +656,9 @@ export default function StreamSetupModalV2({
                     color: '#ffffff',
                     border: 'none',
                     fontWeight: '600',
-                    cursor: recordingIsBusy ? 'not-allowed' : 'pointer',
+                    cursor: (recordingIsBusy || (recordingMode === "dual" && !dualRecordingAllowed)) ? 'not-allowed' : 'pointer',
                     transition: 'all 0.3s ease',
-                    opacity: recordingIsBusy ? 0.6 : 1
+                    opacity: (recordingIsBusy || (recordingMode === "dual" && !dualRecordingAllowed)) ? 0.6 : 1
                   }}
                 >
                   🎬 Start Recording
@@ -535,6 +726,11 @@ export default function StreamSetupModalV2({
             fontStyle: 'italic'
           }}>
             💡 Tip: You can stream without recording, or record without streaming to platforms. They're independent!
+            {typeof maxGuests === "number" && maxGuests > 0 && (
+              <div style={{ marginTop: '0.3rem', color: 'rgba(255, 255, 255, 0.55)', fontStyle: 'normal' }}>
+                Plan guest limit: {maxGuests}.
+              </div>
+            )}
           </div>
         </div>
       </div>

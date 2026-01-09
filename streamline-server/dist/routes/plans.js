@@ -60,6 +60,7 @@ router.get("/", async (_req, res) => {
                     recording: !!features.recording,
                     rtmp: !!features.rtmp,
                     multistream: !!(features.multistream ?? data.multistreamEnabled),
+                    advancedPermissions: !!features.advancedPermissions,
                 },
                 editing: {
                     access: !!data.editing?.access,

@@ -688,6 +688,7 @@ router.post("/create-recording", authenticateToken, async (req: Request, res: Re
       videoUrl: null, // Will be populated if video is uploaded
       thumbnailUrl: null,
       progress: 100,
+      usageType: "recording_only",
     };
 
     await recordingRef.set(recordingData);
@@ -741,6 +742,7 @@ router.post("/recordings/start", authenticateToken, async (req: Request, res: Re
       videoUrl: null,
       thumbnailUrl: null,
       progress: 0,
+      usageType: "recording_only",
     };
 
     await recordingRef.set(recordingData);

@@ -81,6 +81,9 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
             guestCount: Number(guestCount || 0),
             status: "starting",
             updatedAt: Date.now(),
+            presetRequestedId: requestedId,
+            presetEffectiveId: effectiveId,
+            usageType: "live",
         }, { merge: true });
         // Build RTMP URLs for each platform and any stored destinations
         const urls = [];
@@ -147,6 +150,9 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
                     status: "started",
                     egressId: response.egressId,
                     updatedAt: Date.now(),
+                    presetRequestedId: requestedId,
+                    presetEffectiveId: effectiveId,
+                    usageType: "live",
                 }, { merge: true });
                 // Ensure non-empty JSON body
                 return res.status(200).json({
