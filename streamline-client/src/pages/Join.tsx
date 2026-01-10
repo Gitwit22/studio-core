@@ -48,6 +48,7 @@ export default function Join() {
     }
     return localStorage.getItem("sl_displayName") || "";
   });
+  const [didEditDisplayName, setDidEditDisplayName] = useState(false);
   const [roomName, setRoomName] = useState("");
   const [showEditingModal, setShowEditingModal] = useState(false);
 
@@ -76,6 +77,27 @@ export default function Join() {
 const { user: authUser, loading: authLoading } = useAuthMe();
 const isAdmin = !!authUser?.isAdmin;
 const adminLoading = authLoading;
+
+  // Auto-populate the name field from authenticated profile (test env often lacks sl_user localStorage)
+  // Do not override if user has typed.
+  useEffect(() => {
+    if (didEditDisplayName) return;
+    if (displayName.trim()) return;
+
+    const candidate =
+      (typeof authUser?.displayName === "string" && authUser.displayName.trim()) ||
+      (typeof (authUser as any)?.name === "string" && String((authUser as any).name).trim()) ||
+      (typeof authUser?.email === "string" && authUser.email.split("@")[0]?.trim()) ||
+      "";
+
+    if (!candidate) return;
+    setDisplayName(candidate);
+    try {
+      localStorage.setItem("sl_displayName", candidate);
+    } catch {
+      // ignore
+    }
+  }, [authUser, didEditDisplayName, displayName]);
 
   useEffect(() => {
     const inviteRoom = searchParams.get("room");
@@ -612,7 +634,10 @@ const adminLoading = authLoading;
                 type="text"
                 placeholder="Enter your display name"
                 value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                onChange={(e) => {
+                  setDidEditDisplayName(true);
+                  setDisplayName(e.target.value);
+                }}
                 required
                 style={{
                   width: "100%",

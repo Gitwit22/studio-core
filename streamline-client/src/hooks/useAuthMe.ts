@@ -31,8 +31,7 @@ if (typeof window !== "undefined" && cachedUser === undefined) {
   }
 }
 
-async function loadAuthMe(): Promise<AuthUser | null> {
-  if (cachedUser !== undefined) return cachedUser;
+async function fetchAuthMeFresh(): Promise<AuthUser | null> {
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
@@ -50,18 +49,22 @@ async function loadAuthMe(): Promise<AuthUser | null> {
         throw new Error(`auth/me failed: ${res.status}`);
       }
 
-      const data = await res.json();
+      const data = (await res.json()) as AuthUser;
       cachedUser = data;
       return data;
-    } catch (err) {
-      cachedUser = null;
-      throw err;
     } finally {
       inFlight = null;
     }
   })();
 
   return inFlight;
+}
+
+async function loadAuthMe(): Promise<AuthUser | null> {
+  // Fast path: if we already have a cached value (including from localStorage), use it.
+  // We still do a background refresh in the hook so fields like isAdmin stay accurate.
+  if (cachedUser !== undefined) return cachedUser;
+  return fetchAuthMeFresh();
 }
 
 export function isAuthUserInTestMode(user: AuthUser | null | undefined): boolean {
@@ -86,9 +89,11 @@ export function useAuthMe() {
 
   useEffect(() => {
     let isMounted = true;
-    if (cachedUser !== undefined) {
-      setLoading(false);
-      return;
+
+    // Always perform a background refresh so role/isAdmin don't get stuck
+    // on stale localStorage values (common in test/dev env).
+    if (cachedUser === undefined) {
+      setLoading(true);
     }
 
     loadAuthMe()
@@ -97,6 +102,19 @@ export function useAuthMe() {
         setUser(data);
         setError(null);
         setLoading(false);
+        // If we bootstrapped from localStorage, refresh once from the server.
+        if (cachedUser !== undefined) {
+          fetchAuthMeFresh()
+            .then((fresh) => {
+              if (!isMounted) return;
+              setUser(fresh);
+              setError(null);
+            })
+            .catch((err: any) => {
+              if (!isMounted) return;
+              setError(err?.message || String(err));
+            });
+        }
       })
       .catch((err: any) => {
         if (!isMounted) return;
@@ -115,7 +133,7 @@ export function useAuthMe() {
     setLoading(true);
     setError(null);
     try {
-      const data = await loadAuthMe();
+      const data = await fetchAuthMeFresh();
       setUser(data);
       setLoading(false);
     } catch (err: any) {
