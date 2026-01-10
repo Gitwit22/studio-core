@@ -8,10 +8,12 @@ import express from "express";
 
 import { firestore } from "../firebaseAdmin";
 import { requireAdmin, logAdminAction } from "../middleware/adminAuth";
+import { invalidatePlatformBillingCache } from "../lib/userAccount";
 
 import type { UserUsageSummary } from "../types/admin.types";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { PLAN_IDS, PlanId, isPlanId, getAllPlanIds } from "../types/plan";
+import { resolveMaxDestinations } from "../lib/planLimits";
 
 const router = express.Router();
 
@@ -25,6 +27,79 @@ router.use((req, res, next) => {
 
 router.get('/me', (req, res) => {
   res.json({ isAdmin: true, user: req.adminUser });
+});
+
+// Lightweight environment sanity endpoint for admins.
+// Returns current admin's user + plan docs, resolved limits and key feature flags.
+router.get("/env-sanity", async (req, res) => {
+  try {
+    const adminUser = req.adminUser;
+    const uid = adminUser?.uid;
+
+    if (!uid) {
+      return res.status(401).json({ error: "unauthorized", message: "Missing admin uid" });
+    }
+
+    const userSnap = await firestore.collection("users").doc(uid).get();
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: "user_doc_missing", uid });
+    }
+
+    const user = userSnap.data() || {};
+
+    const planId = String(user.planId ?? user.plan ?? "free");
+    const planSnap = await firestore.collection("plans").doc(planId).get();
+    const planDoc = planSnap.exists ? (planSnap.data() as any) : null;
+
+    const limits = (planDoc?.limits || {}) as any;
+    const features = (planDoc?.features || {}) as any;
+
+    const maxDestinations = resolveMaxDestinations(limits);
+
+    const rtmp = Boolean(features.rtmp);
+    const rtmpMultistream = Boolean(
+      features.rtmpMultistream ?? features.multistream ?? planDoc?.multistreamEnabled
+    );
+    const dualRecording = Boolean(features.dualRecording ?? features.dual_recording);
+
+    const gating = {
+      canUseRtmp: rtmp,
+      canUseMultistream: rtmp && rtmpMultistream,
+      canUseDualRecording: dualRecording,
+    };
+
+    return res.json({
+      user: {
+        uid,
+        email: adminUser.email,
+        planId,
+        planLegacy: user.plan ?? null,
+        adminOverride: Boolean(user.adminOverride),
+        admin: user.admin ?? null,
+        isAdminUserField: Boolean(user.admin?.isAdmin ?? user.isAdmin),
+      },
+      plan: {
+        id: planId,
+        exists: Boolean(planDoc),
+        raw: planDoc,
+        limits,
+        features,
+        resolved: {
+          maxDestinations,
+          rtmp,
+          rtmpMultistream,
+          dualRecording,
+        },
+        gating,
+      },
+    });
+  } catch (err: any) {
+    console.error("/api/admin/env-sanity failed:", err);
+    return res.status(500).json({
+      error: "env_sanity_failed",
+      message: err?.message || String(err),
+    });
+  }
 });
 
 
@@ -182,8 +257,11 @@ router.get("/users/:userId", async (req, res) => {
     const planId = (userData?.planId || userData?.plan || "free").toLowerCase();
     const planSnap = await firestore.collection("plans").doc(planId).get();
     const planData = planSnap.exists ? (planSnap.data() as any) : null;
-    // Safe fallback if plan doc missing
-    const includedMinutes = planData?.limits?.monthlyMinutesIncluded ?? 60;
+    // Safe fallback if plan doc missing. Prefer canonical participant/monthly minutes fields.
+    const includedMinutes =
+      Number(planData?.limits?.participantMinutes ?? 0) ||
+      Number(planData?.limits?.monthlyMinutes ?? 0) ||
+      Number(planData?.limits?.monthlyMinutesIncluded ?? 60);
 
     const userSummary: UserUsageSummary = {
       user: {
@@ -368,6 +446,214 @@ router.post("/users/:userId/toggle-billing", async (req, res) => {
   } catch (error: any) {
     console.error("Failed to toggle billing:", error);
     res.status(500).json({ error: "Failed to toggle billing", details: error.message });
+  }
+});
+
+/**
+ * POST /api/admin/plans/migrate-schema
+ * One-time migration to normalize plan documents in Firestore to the canonical schema.
+ *
+ * - Renames legacy fields:
+ *   - limits.monthlyMinutesIncluded -> limits.monthlyMinutes
+ *   - limits.rtmpDestinationsMax / limits.maxDestinations -> limits.rtmpDestinations
+ * - Moves any top-level limit fields into limits and removes the legacy copies:
+ *   - maxGuests, maxHoursPerMonth, maxDestinations
+ * - Ensures feature flags are booleans (default false).
+ * - Ensures known numeric limits are numbers (default 0).
+ */
+router.post("/plans/migrate-schema", async (req, res) => {
+  try {
+    const snap = await firestore.collection("plans").get();
+    const report: Array<{
+      id: string;
+      updated: boolean;
+      renamed: Record<string, string>;
+      removed: string[];
+      defaultsApplied: string[];
+    }> = [];
+
+    for (const doc of snap.docs) {
+      const id = doc.id;
+      const before = (doc.data() as any) || {};
+      const after = { ...before } as any;
+      const renamed: Record<string, string> = {};
+      const removed: string[] = [];
+      const defaultsApplied: string[] = [];
+
+      const features = { ...(after.features || {}) } as any;
+      const limits = { ...(after.limits || {}) } as any;
+
+      // ---- Rename legacy minute fields ----
+      if (typeof limits.monthlyMinutes === "undefined" && typeof limits.monthlyMinutesIncluded === "number") {
+        limits.monthlyMinutes = limits.monthlyMinutesIncluded;
+        renamed["limits.monthlyMinutesIncluded"] = "limits.monthlyMinutes";
+      }
+      if (Object.prototype.hasOwnProperty.call(limits, "monthlyMinutesIncluded")) {
+        delete limits.monthlyMinutesIncluded;
+        removed.push("limits.monthlyMinutesIncluded");
+      }
+
+      // ---- RTMP destinations: collapse to limits.rtmpDestinations ----
+      if (typeof limits.rtmpDestinations === "undefined") {
+        if (typeof limits.rtmpDestinationsMax === "number") {
+          limits.rtmpDestinations = limits.rtmpDestinationsMax;
+          renamed["limits.rtmpDestinationsMax"] = "limits.rtmpDestinations";
+        } else if (typeof limits.maxDestinations === "number") {
+          limits.rtmpDestinations = limits.maxDestinations;
+          renamed["limits.maxDestinations"] = "limits.rtmpDestinations";
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(limits, "rtmpDestinationsMax")) {
+        delete limits.rtmpDestinationsMax;
+        removed.push("limits.rtmpDestinationsMax");
+      }
+      if (Object.prototype.hasOwnProperty.call(limits, "maxDestinations")) {
+        delete limits.maxDestinations;
+        removed.push("limits.maxDestinations");
+      }
+
+      // ---- Move any top-level limit fields into limits ----
+      if (typeof after.maxGuests === "number") {
+        if (typeof limits.maxGuests === "undefined") {
+          limits.maxGuests = after.maxGuests;
+          renamed["maxGuests"] = "limits.maxGuests";
+        }
+        delete after.maxGuests;
+        removed.push("maxGuests");
+      }
+
+      if (typeof after.maxHoursPerMonth === "number") {
+        if (typeof limits.maxHoursPerMonth === "undefined") {
+          limits.maxHoursPerMonth = after.maxHoursPerMonth;
+          renamed["maxHoursPerMonth"] = "limits.maxHoursPerMonth";
+        }
+        delete after.maxHoursPerMonth;
+        removed.push("maxHoursPerMonth");
+      }
+
+      // ---- Ensure feature flags are booleans ----
+      const featureKeys = [
+        "recording",
+        "rtmp",
+        "multistream",
+        "advancedPermissions",
+        "rtmpMultistream",
+        "overagesAllowed",
+      ];
+      for (const key of featureKeys) {
+        if (typeof features[key] !== "boolean") {
+          if (features[key] !== undefined) {
+            defaultsApplied.push(`features.${key}`);
+          }
+          features[key] = !!features[key];
+        }
+      }
+
+      // ---- Ensure known numeric limits are numbers (default 0) ----
+      const limitKeys = [
+        "monthlyMinutes",
+        "participantMinutes",
+        "transcodeMinutes",
+        "maxGuests",
+        "rtmpDestinations",
+        "maxSessionMinutes",
+        "maxRecordingMinutesPerClip",
+        "maxHoursPerMonth",
+      ];
+      for (const key of limitKeys) {
+        const raw = limits[key];
+        if (typeof raw === "undefined") {
+          limits[key] = 0;
+          defaultsApplied.push(`limits.${key}`);
+        } else if (typeof raw !== "number" || Number.isNaN(raw)) {
+          limits[key] = Number(raw) || 0;
+          defaultsApplied.push(`limits.${key}`);
+        }
+      }
+
+      after.features = features;
+      after.limits = limits;
+
+      const updated = JSON.stringify(before) !== JSON.stringify(after);
+      if (updated) {
+        await doc.ref.set(after, { merge: false });
+      }
+
+      report.push({ id, updated, renamed, removed, defaultsApplied });
+    }
+
+    res.json({
+      ok: true,
+      total: snap.size,
+      updated: report.filter((r) => r.updated).length,
+      report,
+    });
+  } catch (error: any) {
+    console.error("plans/migrate-schema failed", error);
+    res.status(500).json({ error: "plans_migrate_schema_failed", details: error.message });
+  }
+});
+
+/**
+ * POST /api/admin/feature-flags/billing
+ * Toggle the platform-wide billing system flag.
+ *
+ * Persists to config/features.billingSystemEnabled and logs an admin action.
+ */
+router.post("/feature-flags/billing", async (req, res) => {
+  try {
+    const { enabled, reason } = req.body || {};
+
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "enabled must be a boolean" });
+    }
+
+    const isProd = process.env.NODE_ENV === "production";
+    if (isProd && enabled === false && (typeof reason !== "string" || reason.trim().length === 0)) {
+      return res.status(400).json({ error: "reason_required_in_production" });
+    }
+
+    const docRef = firestore.collection("config").doc("features");
+    const now = new Date();
+
+    const beforeSnap = await docRef.get();
+    const beforeData = (beforeSnap.exists ? beforeSnap.data() || {} : {}) as any;
+    const previous =
+      typeof beforeData.billingSystemEnabled === "boolean"
+        ? beforeData.billingSystemEnabled
+        : true;
+
+    await docRef.set(
+      {
+        billingSystemEnabled: enabled,
+        updatedAt: now,
+        updatedBy: req.adminUser!.uid,
+        reason: typeof reason === "string" ? reason : undefined,
+      },
+      { merge: true }
+    );
+
+    // Invalidate in-memory cache so the new value is visible immediately
+    // from subsequent getUserAccount() calls on this instance.
+    invalidatePlatformBillingCache();
+
+    await logAdminAction(req.adminUser!.uid, "toggle_billing_system", {
+      previousBillingSystemEnabled: previous,
+      nextBillingSystemEnabled: enabled,
+      reason,
+    });
+
+    console.log(
+      `Admin ${req.adminUser!.email} ${enabled ? "enabled" : "disabled"} platform billing (previous=${previous})`
+    );
+
+    return res.json({ success: true, billingSystemEnabled: enabled });
+  } catch (error: any) {
+    console.error("Failed to toggle platform billing:", error);
+    return res.status(500).json({
+      error: "Failed to toggle platform billing",
+      details: error.message,
+    });
   }
 });
 

@@ -3,9 +3,13 @@ export type DestinationStatusReason = "missing_key" | "invalid_format" | "egress
 
 export interface DestinationItem {
   id: string;
+  targetId: string;
   platform: string;
   name?: string;
   enabled: boolean;
+  mode?: "manual" | "connected";
+  persistent?: boolean;
+  oauthRef?: string | null;
   rtmpUrlBase: string;
   status: DestinationStatus;
   statusReason?: DestinationStatusReason | null;
@@ -37,7 +41,7 @@ export async function fetchDestinations(params?: { platform?: string; includeDis
   return data as { ok: boolean; items: DestinationItem[]; usedCount?: number; limit?: number };
 }
 
-export async function createDestination(body: { platform: string; name?: string; rtmpUrlBase: string; enabled?: boolean; streamKeyPlain?: string }) {
+export async function createDestination(body: { platform: string; name?: string; rtmpUrlBase: string; enabled?: boolean; streamKeyPlain?: string; mode?: "manual" | "connected"; persistent?: boolean; oauthRef?: string | null }) {
   const res = await fetch(`${API_BASE}/api/destinations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,7 +53,7 @@ export async function createDestination(body: { platform: string; name?: string;
   return data as { ok: boolean; destination: DestinationItem; validation?: { status: DestinationStatus; statusReason?: DestinationStatusReason | null }; usedCount?: number; limit?: number };
 }
 
-export async function updateDestination(id: string, body: { platform?: string; name?: string; rtmpUrlBase?: string; enabled?: boolean; streamKeyPlain?: string; streamKeyEnc?: any }) {
+export async function updateDestination(id: string, body: { platform?: string; name?: string; rtmpUrlBase?: string; enabled?: boolean; streamKeyPlain?: string; streamKeyEnc?: any; mode?: "manual" | "connected"; persistent?: boolean; oauthRef?: string | null }) {
   const res = await fetch(`${API_BASE}/api/destinations/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },

@@ -1,10 +1,35 @@
 import { useEffect, useState, useCallback } from "react";
 import { API_BASE } from "../lib/apiBase";
 
-export type AuthUser = any; // Server returns user doc shape; keep flexible for now
+export interface AuthUser {
+  id?: string;
+  uid?: string;
+  email?: string;
+  planId?: string;
+  isAdmin?: boolean;
+  billingEnabled?: boolean;
+  platformBillingEnabled?: boolean;
+  effectiveBillingEnabled?: boolean;
+  billingMode?: "test" | "live" | string;
+  // Allow arbitrary additional fields from the server without losing type-safety on the ones we care about.
+  [key: string]: any;
+}
 
 let cachedUser: AuthUser | null | undefined = undefined; // undefined => not fetched yet
 let inFlight: Promise<AuthUser | null> | null = null;
+
+// Bootstrap cachedUser from localStorage if available so login works
+// even if /api/auth/me is temporarily unreachable (e.g., dev env).
+if (typeof window !== "undefined" && cachedUser === undefined) {
+  try {
+    const raw = window.localStorage.getItem("sl_user");
+    if (raw && raw !== "undefined") {
+      cachedUser = JSON.parse(raw);
+    }
+  } catch {
+    cachedUser = null;
+  }
+}
 
 async function loadAuthMe(): Promise<AuthUser | null> {
   if (cachedUser !== undefined) return cachedUser;
@@ -37,6 +62,21 @@ async function loadAuthMe(): Promise<AuthUser | null> {
   })();
 
   return inFlight;
+}
+
+export function isAuthUserInTestMode(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+
+  // Canonical: effectiveBillingEnabled === false
+  if (user.effectiveBillingEnabled === false) return true;
+
+  // Legacy per-user test mode: explicit billingEnabled === false
+  if (user.billingEnabled === false) return true;
+
+  // Fallback: older payloads that only expose billingMode
+  if (user.billingMode === "test") return true;
+
+  return false;
 }
 
 export function useAuthMe() {

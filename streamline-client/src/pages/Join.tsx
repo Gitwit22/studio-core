@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useAuthMe } from "../hooks/useAuthMe";
 import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
@@ -70,28 +71,11 @@ export default function Join() {
   // Check for invite link (room query parameter)
   const isParticipant = searchParams.get("room") !== null;
   const role = searchParams.get("role") || "guest"; // Get role from URL
-const [isAdmin, setIsAdmin] = useState(false);
-const [adminLoading, setAdminLoading] = useState(true);
 
-// Swallow all errors from /api/admin/status so Join never blocks
-useEffect(() => {
-  let cancelled = false;
-  (async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/admin/status`, { credentials: "include" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setIsAdmin(!!data.isAdmin);
-      console.log("[DEBUG] isAdmin set to:", !!data.isAdmin);
-    } catch {
-      // ignore completely
-    } finally {
-      if (!cancelled) setAdminLoading(false);
-      console.log("[DEBUG] adminLoading set to false");
-    }
-  })();
-  return () => { cancelled = true; };
-}, []);
+// Use /api/auth/me for admin status
+const { user: authUser, loading: authLoading } = useAuthMe();
+const isAdmin = !!authUser?.isAdmin;
+const adminLoading = authLoading;
 
   useEffect(() => {
     const inviteRoom = searchParams.get("room");
@@ -100,7 +84,6 @@ useEffect(() => {
       setRoomName(decodedRoom);
 
       // Store role for later use in room
-      console.log("👤 Joining as role:", role);
       localStorage.setItem("sl_current_role", role);
     }
   }, [searchParams, role]);

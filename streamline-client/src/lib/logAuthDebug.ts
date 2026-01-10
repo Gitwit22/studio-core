@@ -1,5 +1,18 @@
 // Utility to log all relevant auth/user info between login/join/room
+//
+// IMPORTANT:
+// - This is a client-side helper intended only for targeted debugging.
+// - It is gated by VITE_AUTH_DEBUG so it is off by default in production.
+// - For server-side auth logging, use AUTH_DEBUG on the server instead.
 export function logAuthDebugContext(contextLabel = "") {
+  const enabled =
+    // Always allowed in dev
+    (import.meta.env.DEV && import.meta.env.VITE_AUTH_DEBUG !== "0") ||
+    // In prod, require explicit opt-in
+    (import.meta.env.PROD && import.meta.env.VITE_AUTH_DEBUG === "1");
+
+  if (!enabled) return;
+
   try {
     // LocalStorage values
     const sl_user = localStorage.getItem("sl_user");
@@ -15,16 +28,45 @@ export function logAuthDebugContext(contextLabel = "") {
     }
     console.log(`\n===== [Auth Debug] ${contextLabel} =====`);
     let empty = true;
-    [
-      ["sl_user", sl_user],
-      ["sl_token", sl_token],
-      ["sl_userId", sl_userId],
-      ["sl_displayName", sl_displayName],
-      ["sl_current_role", sl_current_role],
-      ["sl_guestId", sl_guestId],
-      ["sl_created_rooms", sl_created_rooms],
-      ["cookies", cookies],
-    ].forEach(([key, value]) => {
+    const mask = (val: string | null) => {
+      if (!val) return null;
+      const trimmed = val.trim();
+      if (!trimmed) return null;
+      if (trimmed.length <= 4) return "***";
+      return `***${trimmed.slice(-4)}`;
+    };
+
+    let parsedUser: any = null;
+    if (sl_user && sl_user !== "undefined") {
+      try {
+        parsedUser = JSON.parse(sl_user);
+      } catch {
+        parsedUser = null;
+      }
+    }
+
+    const safeRows: Array<[string, any]> = [
+      ["sl_user", parsedUser
+        ? {
+            present: true,
+            id: mask(String(parsedUser.id || parsedUser.uid || "")),
+            emailMasked: parsedUser.email ? `***@${String(parsedUser.email).split("@").pop()}` : null,
+            planId: parsedUser.planId || null,
+            isAdmin: !!parsedUser.isAdmin,
+          }
+        : sl_user
+        ? { present: true }
+        : null],
+      ["sl_token", sl_token ? mask(sl_token) : null],
+      ["sl_userId", sl_userId ? mask(sl_userId) : null],
+      ["sl_displayName", sl_displayName || null],
+      ["sl_current_role", sl_current_role || null],
+      ["sl_guestId", sl_guestId ? mask(sl_guestId) : null],
+      ["sl_created_rooms", sl_created_rooms ? "[redacted list]" : null],
+      ["cookies", cookies ? `length=${cookies.length}` : null],
+    ];
+
+    safeRows.forEach(([key, value]) => {
       if (value && value !== "undefined" && value !== "") empty = false;
       console.log(`  ${key}:`, value);
     });

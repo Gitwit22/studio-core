@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { requireAuth } from "../middleware/requireAuth";
 import { firestore as db } from "../firebaseAdmin";
+import { getUserAccount } from "../lib/userAccount";
 
 console.log("✅ auth router loaded");
 
@@ -37,7 +38,11 @@ router.get("/ping", (_req, res) => res.json({ ok: true }));
 
 /**
  * GET /api/auth/me
- * Returns the authenticated user's Firestore document.
+ * Returns the authenticated user's normalized account document.
+ *
+ * Behavior:
+ * - Never 404s due to missing user doc; auto-creates a minimal doc.
+ * - Exposes planId, billingEnabled, platformBillingEnabled, effectiveBillingEnabled, isAdmin.
  */
 router.get("/me", requireAuth, async (req, res) => {
   try {
@@ -45,10 +50,26 @@ router.get("/me", requireAuth, async (req, res) => {
     const userId = user.id || user.uid;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-    const snap = await db.collection("users").doc(userId).get();
-    if (!snap.exists) return res.status(404).json({ error: "User not found" });
+    const account = await getUserAccount(userId);
 
-    return res.json({ id: userId, ...stripSensitiveUserFields(snap.data()) });
+    // Load the latest Firestore snapshot so we can strip sensitive fields
+    const snap = await db.collection("users").doc(userId).get();
+    const raw = stripSensitiveUserFields(snap.data() || account.rawUser || {});
+
+    const body = {
+      id: userId,
+      ...raw,
+      planId: account.planId,
+      billingEnabled: account.billingEnabled,
+      platformBillingEnabled: account.platformBillingEnabled,
+      effectiveBillingEnabled: account.effectiveBillingEnabled,
+      isAdmin: account.isAdmin,
+      // When effective billing is disabled (either per-user or platform-wide),
+      // treat the account as running in "test" mode from the client's POV.
+      billingMode: account.effectiveBillingEnabled === false ? "test" : "live",
+    };
+
+    return res.json(body);
   } catch (err: any) {
     console.error("GET /api/auth/me failed:", err?.message || err);
     return res.status(500).json({ error: "Failed to load user" });

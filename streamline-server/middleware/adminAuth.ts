@@ -23,15 +23,33 @@ declare global {
 }
 
 /**
- * Check if user is an admin
- * Admin status is stored in Firestore under /admins/{uid}
+ * Check if user is an admin.
+ *
+ * New canonical source of truth is the user document:
+ *   users/{uid}.admin.isAdmin === true OR users/{uid}.isAdmin === true
+ * We still support the legacy /admins/{uid} collection as a fallback so
+ * existing environments keep working.
  */
-async function isAdmin(uid: string): Promise<boolean> {
+export async function isAdmin(uid: string): Promise<boolean> {
   try {
+    const userDoc = await firestore.collection("users").doc(uid).get();
+    const userData = userDoc.data() || {};
+
+    const fromUserDoc = userData?.admin?.isAdmin === true || userData?.isAdmin === true;
+    if (fromUserDoc) {
+      // Minimal, non-sensitive signal that admin was resolved from user doc
+      console.log("[isAdmin] resolved from user document");
+      return true;
+    }
+
     const adminDoc = await firestore.collection("admins").doc(uid).get();
-    return adminDoc.exists && adminDoc.data()?.isAdmin === true;
+    const fromLegacyAdmins = adminDoc.exists && adminDoc.data()?.isAdmin === true;
+    if (fromLegacyAdmins) {
+      console.log("[isAdmin] resolved from legacy admins collection");
+    }
+    return fromLegacyAdmins;
   } catch (error) {
-    console.error("Error checking admin status:", error);
+    console.error("[isAdmin] error checking admin status");
     return false;
   }
 }
@@ -83,7 +101,8 @@ export async function requireAdmin(
       if (userId) jwtSource = 'body/query';
     }
 
-    console.log(`[requireAdmin] userId: ${userId}, jwtSource: ${jwtSource}, path: ${req.path}`);
+    // Minimal debug for tracing auth source without exposing user data
+    console.log(`[requireAdmin] auth source: ${jwtSource || "none"}, path: ${req.path}`);
 
     if (!userId) {
       res.status(401).json({ error: "Missing admin user ID or valid token" });
@@ -92,6 +111,7 @@ export async function requireAdmin(
 
     const isAdminUser = await isAdmin(userId);
     if (!isAdminUser) {
+      console.warn("[requireAdmin] admin privileges required");
       res.status(403).json({ error: "Admin privileges required" });
       return;
     }
@@ -109,7 +129,7 @@ export async function requireAdmin(
       isAdmin: true,
     };
 
-    console.log(`Admin ${req.adminUser.email} accessing: ${req.method} ${req.path}`);
+    console.log(`[requireAdmin] admin access ok: ${req.method} ${req.path}`);
 
     next();
   } catch (error) {

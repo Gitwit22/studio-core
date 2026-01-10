@@ -8,6 +8,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const requireAuth_1 = require("../middleware/requireAuth");
 const firebaseAdmin_1 = require("../firebaseAdmin");
+const userAccount_1 = require("../lib/userAccount");
 console.log("✅ auth router loaded");
 const router = (0, express_1.Router)();
 // --- helpers ---
@@ -37,7 +38,11 @@ function stripSensitiveUserFields(user) {
 router.get("/ping", (_req, res) => res.json({ ok: true }));
 /**
  * GET /api/auth/me
- * Returns the authenticated user's Firestore document.
+ * Returns the authenticated user's normalized account document.
+ *
+ * Behavior:
+ * - Never 404s due to missing user doc; auto-creates a minimal doc.
+ * - Exposes planId, billingEnabled, platformBillingEnabled, effectiveBillingEnabled, isAdmin.
  */
 router.get("/me", requireAuth_1.requireAuth, async (req, res) => {
     try {
@@ -45,10 +50,23 @@ router.get("/me", requireAuth_1.requireAuth, async (req, res) => {
         const userId = user.id || user.uid;
         if (!userId)
             return res.status(401).json({ error: "Unauthorized" });
+        const account = await (0, userAccount_1.getUserAccount)(userId);
+        // Load the latest Firestore snapshot so we can strip sensitive fields
         const snap = await firebaseAdmin_1.firestore.collection("users").doc(userId).get();
-        if (!snap.exists)
-            return res.status(404).json({ error: "User not found" });
-        return res.json({ id: userId, ...stripSensitiveUserFields(snap.data()) });
+        const raw = stripSensitiveUserFields(snap.data() || account.rawUser || {});
+        const body = {
+            id: userId,
+            ...raw,
+            planId: account.planId,
+            billingEnabled: account.billingEnabled,
+            platformBillingEnabled: account.platformBillingEnabled,
+            effectiveBillingEnabled: account.effectiveBillingEnabled,
+            isAdmin: account.isAdmin,
+            // When effective billing is disabled (either per-user or platform-wide),
+            // treat the account as running in "test" mode from the client's POV.
+            billingMode: account.effectiveBillingEnabled === false ? "test" : "live",
+        };
+        return res.json(body);
     }
     catch (err) {
         console.error("GET /api/auth/me failed:", err?.message || err);

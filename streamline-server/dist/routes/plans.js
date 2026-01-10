@@ -4,23 +4,17 @@ const express_1 = require("express");
 const usagePlans_1 = require("../usagePlans");
 const plan_1 = require("../types/plan");
 const firebaseAdmin_1 = require("../firebaseAdmin");
+const normalizePlan_1 = require("../lib/normalizePlan");
 const router = (0, express_1.Router)();
 router.get("/", async (_req, res) => {
     try {
         const snap = await firebaseAdmin_1.firestore.collection("plans").get();
         const mapped = snap.docs.map((d) => {
             const data = d.data() || {};
-            const features = (data.features || {});
-            const limits = (data.limits || {});
             const id = d.id;
-            // Determine visibility for public exposure
-            // Defaults: 'public' unless explicitly hidden or admin-only; enterprise/internal default to admin
-            const hidden = data.hidden === true;
-            const visibility = 
-            // Prefer explicit visibility; else respect legacy hidden flag; else default
-            (data.visibility ?? (hidden ? "hidden" : ((id === "enterprise" || id === "internal") ? "admin" : "public")));
-            const monthlyMinutesIncluded = Number(limits.monthlyMinutesIncluded ?? limits.participantMinutes ?? limits.monthlyMinutes ?? 0);
-            const priceNumber = Number(data.priceMonthly ?? data.price ?? 0);
+            const plan = (0, normalizePlan_1.normalizePlan)(id, data);
+            const visibility = plan.visibility;
+            const priceNumber = Number(plan.priceMonthly ?? 0);
             // Determine if there is a valid Stripe price configured for paid plans
             let hasStripePrice = false;
             if ((0, plan_1.isPlanId)(id)) {
@@ -42,25 +36,26 @@ router.get("/", async (_req, res) => {
                 hasStripePrice = true;
             }
             const planObj = {
-                id,
-                name: data.name || id,
+                id: plan.id,
+                name: plan.name,
                 price: priceNumber,
-                description: data.description || "",
+                description: plan.description,
                 visibility,
                 // Expose a hint for admin clients (not used by public filtering; kept here for clarity)
                 billable: id === "free" ? true : (priceNumber > 0 && hasStripePrice),
                 limits: {
-                    monthlyMinutesIncluded,
-                    maxGuests: Number(limits.maxGuests ?? 0),
-                    rtmpDestinationsMax: Number(limits.rtmpDestinationsMax ?? limits.maxDestinations ?? limits.rtmpDestinations ?? 0),
-                    maxSessionMinutes: Number(limits.maxSessionMinutes ?? 0),
-                    maxHoursPerMonth: Number(limits.maxHoursPerMonth ?? (monthlyMinutesIncluded > 0 ? Math.floor(monthlyMinutesIncluded / 60) : 0)),
+                    monthlyMinutesIncluded: plan.limits.monthlyMinutes,
+                    maxGuests: plan.limits.maxGuests,
+                    rtmpDestinationsMax: plan.limits.rtmpDestinationsMax,
+                    maxSessionMinutes: plan.limits.maxSessionMinutes,
+                    maxRecordingMinutesPerClip: plan.limits.maxRecordingMinutesPerClip,
+                    maxHoursPerMonth: plan.limits.maxHoursPerMonth,
                 },
                 features: {
-                    recording: !!features.recording,
-                    rtmp: !!features.rtmp,
-                    multistream: !!(features.multistream ?? data.multistreamEnabled),
-                    advancedPermissions: !!features.advancedPermissions,
+                    recording: !!plan.features.recording,
+                    rtmp: !!plan.features.rtmp,
+                    multistream: !!plan.features.multistream,
+                    advancedPermissions: !!plan.features.advancedPermissions,
                 },
                 editing: {
                     access: !!data.editing?.access,
@@ -96,6 +91,23 @@ router.get("/", async (_req, res) => {
     catch (err) {
         console.error("/api/plans failed, returning fallback IDs:", err?.message || err);
         return res.json({ plans: usagePlans_1.PLANS });
+    }
+});
+// Editor/diagnostic endpoint for a single plan in canonical shape
+router.get("/:id", async (req, res) => {
+    try {
+        const id = String(req.params.id || "");
+        if (!id)
+            return res.status(400).json({ error: "missing_plan_id" });
+        const snap = await firebaseAdmin_1.firestore.collection("plans").doc(id).get();
+        if (!snap.exists)
+            return res.status(404).json({ error: "plan_not_found" });
+        const plan = (0, normalizePlan_1.normalizePlan)(id, snap.data() || {});
+        return res.json({ plan });
+    }
+    catch (err) {
+        console.error("/api/plans/:id failed", err?.message || err);
+        return res.status(500).json({ error: "internal_error" });
     }
 });
 exports.default = router;

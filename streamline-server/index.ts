@@ -5,7 +5,6 @@ import cookieParser from "cookie-parser";
 import webhookRouter from "./routes/webhook";
 import authRoutes from "./routes/auth";
 import adminRoutes from './routes/admin';
-import adminStatusRouter from "./routes/adminStatus";
 import accountRoutes from "./routes/account";
 import { requireAuth } from "./middleware/requireAuth";
 import authRouter from "./routes/auth";
@@ -77,7 +76,6 @@ app.use("/api/auth", authRoutes);
 app.use("/api/account", accountRoutes);
 
 // Admin routes
-app.use("/api/admin/status", adminStatusRouter);
 app.use("/api/admin", adminRoutes);
 
 

@@ -6,6 +6,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useMemo } from "react";
+import { useAuthMe } from "../hooks/useAuthMe";
 import { useNavigate } from "react-router-dom";
 
 // Normalize base so if you set VITE_API_BASE to ".../api" it won't double up.
@@ -68,8 +69,11 @@ type FeatureCategory =
   | "Streaming"
   | "Recording"
   | "Editing"
+  | "AI"
   | "Collaboration"
   | "Billing"
+  | "Access"
+  | "Site Tools"
   | "Security"
   | "Experiments"
   | "Other";
@@ -92,11 +96,14 @@ interface Plan {
   visibility?: "public" | "hidden" | "admin";
   limits: {
     maxSessionMinutes: number;
+    maxRecordingMinutesPerClip?: number;
     monthlyMinutesIncluded: number;
     maxHoursPerMonth: number;
     maxGuests: number;
     rtmpDestinationsMax?: number;
     maxDestinations?: number;
+    // Legacy field name support; kept loose for admin view only
+    rtmpDestinations?: number;
     participantMinutes?: number;
     transcodeMinutes?: number;
   };
@@ -135,6 +142,16 @@ interface Plan {
   };
   multistreamEnabled: boolean;
 }
+
+function resolvePlanMaxDestinations(limits: Plan["limits"]): number {
+  if (!limits) return 0;
+  return (
+    limits.maxDestinations ??
+    limits.rtmpDestinationsMax ??
+    limits.rtmpDestinations ??
+    0
+  );
+}
 const PLAN_COLORS: Record<string, string> = {
   free: "#6b7280",
   basic: "#3b82f6",
@@ -147,8 +164,11 @@ const FEATURE_CATEGORY_ORDER: FeatureCategory[] = [
   "Streaming",
   "Recording",
   "Editing",
+  "AI",
   "Collaboration",
   "Billing",
+  "Access",
+  "Site Tools",
   "Security",
   "Experiments",
   "Other",
@@ -174,7 +194,10 @@ const FEATURE_META: Record<
 
   editing_access: { category: "Editing", label: "Editor Access", description: "Allow timeline editor usage." },
   editing_sharing: { category: "Editing", label: "Editor Sharing", description: "Share projects with collaborators." },
-  ai_highlights: { category: "Editing", label: "AI Highlights", description: "Generate highlight reels." },
+  // Group all AI-related flags under a dedicated AI category
+  ai_highlights: { category: "AI", label: "AI Highlights", description: "Generate highlight reels." },
+  // If a global flag exists for direct uploads, keep it under Recording
+  direct_uploads: { category: "Recording", label: "Direct Uploads", description: "Allow direct upload of recordings." },
 
   guests: { category: "Collaboration", label: "Guests", description: "Allow guest links to rooms." },
   guest_invites: { category: "Collaboration", label: "Guest Invites" },
@@ -206,6 +229,30 @@ function categorizeFeature(flag: FeatureFlag): { category: FeatureCategory; labe
       label: meta.label || titleize(flag.name),
       description: meta.description,
     };
+  }
+
+  // Heuristic grouping for flags without explicit metadata
+  // 1) AI-related flags
+  if (key.includes("ai")) return { category: "AI", label: titleize(flag.name) };
+
+  // 2) Access programs: waitlist, greenroom, priority access
+  if (key.includes("waitlist") || key.includes("greenroom") || key.includes("priority")) {
+    return { category: "Access", label: titleize(flag.name) };
+  }
+
+  // 3) Site tools: maintenance, support, status
+  if (key.includes("maintenance") || key.includes("support") || key.includes("status_page")) {
+    return { category: "Site Tools", label: titleize(flag.name) };
+  }
+
+  // 4) Transitions (basic / advanced) live under Editing
+  if (key.includes("transition")) {
+    return { category: "Editing", label: titleize(flag.name) };
+  }
+
+  // 5) Direct uploads should live under Recording
+  if (key.includes("direct") && key.includes("upload")) {
+    return { category: "Recording", label: titleize(flag.name) };
   }
 
   if (key.includes("record")) return { category: "Recording", label: titleize(flag.name) };
@@ -247,8 +294,11 @@ export default function AdminDashboard() {
       Streaming: [],
       Recording: [],
       Editing: [],
+      AI: [],
       Collaboration: [],
       Billing: [],
+      Access: [],
+      "Site Tools": [],
       Security: [],
       Experiments: [],
       Other: [],
@@ -312,28 +362,26 @@ export default function AdminDashboard() {
     window.setTimeout(() => setToast(null), 3000);
   };
 
-  // 1) Verify admin (non-cached, cookie-based) — handles rare 304
+  // Use /api/auth/me for admin check
+  const { user: authUser, loading: authLoading, refresh: refreshAuth } = useAuthMe();
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiFetch("/api/admin/status");
-        if (!res.ok) {
-          setIsAdmin(false);
-          return;
-        }
-        if (res.status === 304) {
-          setIsAdmin((prev) => (prev === null ? false : prev));
-          return;
-        }
-        const data = await res.json();
-        setIsAdmin(Boolean(data?.isAdmin));
-      } catch {
-        setIsAdmin(false);
-      } finally {
-        setPageLoading(false);
+    if (!authLoading) {
+      setIsAdmin(!!authUser?.isAdmin);
+      setPageLoading(false);
+    }
+  }, [authUser, authLoading]);
+
+  const [platformBillingEnabled, setPlatformBillingEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!authLoading && authUser) {
+      if (typeof (authUser as any).platformBillingEnabled === "boolean") {
+        setPlatformBillingEnabled((authUser as any).platformBillingEnabled);
+      } else {
+        setPlatformBillingEnabled(true);
       }
-    })();
-  }, []);
+    }
+  }, [authLoading, authUser]);
 
   // 2) Load data for active tab (only when admin)
   useEffect(() => {
@@ -418,6 +466,50 @@ export default function AdminDashboard() {
     } catch {
       setFeatures(prev);
       showToast("Feature toggle failed");
+    }
+  };
+
+  const togglePlatformBilling = async () => {
+    if (platformBillingEnabled === null) return;
+
+    const previous = platformBillingEnabled;
+    const next = !previous;
+    setPlatformBillingEnabled(next);
+
+    try {
+      let reason: string | undefined = undefined;
+      if (!next) {
+        const input = window.prompt(
+          "Reason for disabling platform billing (required in production):",
+          ""
+        );
+        if (input === null) {
+          // User canceled; revert local state and abort.
+          setPlatformBillingEnabled(previous);
+          return;
+        }
+        reason = input || undefined;
+      }
+
+      const res = await apiFetch("/api/admin/feature-flags/billing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next, reason }),
+      });
+
+      if (!res.ok) {
+        throw new Error("toggle failed");
+      }
+
+      showToast(`Platform billing ${next ? "enabled" : "disabled"}`);
+
+      // Refresh auth/me so any derived flags on the admin user stay in sync.
+      try {
+        await refreshAuth();
+      } catch {}
+    } catch {
+      setPlatformBillingEnabled(previous);
+      showToast("Platform billing toggle failed");
     }
   };
 
@@ -878,6 +970,68 @@ export default function AdminDashboard() {
                   Grouped by domain so you can scan streaming, recording, editing, and collaboration toggles quickly.
                 </p>
 
+                {/* Platform-wide Billing Flag */}
+                <div
+                  style={{
+                    marginBottom: 18,
+                    padding: 16,
+                    borderRadius: 12,
+                    border: "1px solid #1f2937",
+                    background: "#020617",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600 }}>Platform Billing System</div>
+                      <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                        When disabled, Stripe checkout and the billing portal are turned off globally. Test Mode
+                        plan switching stays available while billing is disabled.
+                      </div>
+                    </div>
+                    <button
+                      onClick={togglePlatformBilling}
+                      disabled={platformBillingEnabled === null}
+                      style={{
+                        ...S.toggle,
+                        opacity: platformBillingEnabled === null ? 0.5 : 1,
+                        cursor: platformBillingEnabled === null ? "not-allowed" : "pointer",
+                        background:
+                          platformBillingEnabled === false
+                            ? "#374151"
+                            : "linear-gradient(135deg,#22c55e,#16a34a)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          ...S.toggleKnob,
+                          left: platformBillingEnabled ? 27 : 3,
+                        }}
+                      />
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                    Status:{" "}
+                    {platformBillingEnabled === null
+                      ? "Loading..."
+                      : platformBillingEnabled
+                      ? "Enabled (Stripe live)"
+                      : "Disabled (Test Mode only)"}
+                    {"  b7 "}
+                    May take up to ~30s to propagate to all sessions.
+                  </div>
+                </div>
+
                 {FEATURE_CATEGORY_ORDER.map((category) => {
                   const items = groupedFeatures[category];
                   if (!items || items.length === 0) return null;
@@ -1004,9 +1158,9 @@ export default function AdminDashboard() {
                             <span style={S.statValue}>{plan.limits?.maxGuests || 0}</span>
                             <span style={S.statLabel}>guests</span>
                           </div>
-                          {plan.limits?.maxDestinations ? (
+                          {resolvePlanMaxDestinations(plan.limits) > 0 ? (
                             <div style={S.stat}>
-                              <span style={S.statValue}>{plan.limits.maxDestinations}</span>
+                              <span style={S.statValue}>{resolvePlanMaxDestinations(plan.limits)}</span>
                               <span style={S.statLabel}>destinations</span>
                             </div>
                           ) : null}
@@ -1028,7 +1182,7 @@ export default function AdminDashboard() {
                         <div style={S.featurePills}>
                           <FeaturePill enabled={plan.features?.recording} label="Recording" />
                           <FeaturePill enabled={plan.features?.dualRecording} label="Dual Recording" />
-                          <FeaturePill enabled={plan.multistreamEnabled} label="Multistream" />
+                          <FeaturePill enabled={plan.features?.rtmpMultistream ?? plan.multistreamEnabled} label="Multistream" />
                           <FeaturePill enabled={plan.features?.advancedPermissions} label="Advanced Permissions Mode" />
                           <FeaturePill enabled={plan.editing?.access} label="Editing" />
                           <FeaturePill enabled={plan.editing?.ai?.autoCut} label="AI AutoCut" />
@@ -1114,6 +1268,11 @@ export default function AdminDashboard() {
                                 onChange={(v) => updatePlanField(plan.id, "limits.maxSessionMinutes", Number(v))}
                               />
                               <EditRow
+                                label="Recording Cap per Clip (mins)"
+                                value={plan.limits?.maxRecordingMinutesPerClip || 0}
+                                onChange={(v) => updatePlanField(plan.id, "limits.maxRecordingMinutesPerClip", Number(v))}
+                              />
+                              <EditRow
                                 label="Max Hours/Month"
                                 value={plan.limits?.maxHoursPerMonth || 0}
                                 onChange={(v) => updatePlanField(plan.id, "limits.maxHoursPerMonth", Number(v))}
@@ -1125,7 +1284,7 @@ export default function AdminDashboard() {
                               />
                               <EditRow
                                 label="Destinations Max (RTMP)"
-                                value={plan.limits?.maxDestinations || plan.limits?.rtmpDestinationsMax || 0}
+                                value={resolvePlanMaxDestinations(plan.limits)}
                                 onChange={(v) => {
                                   const num = Number(v);
                                   updatePlanField(plan.id, "limits.maxDestinations", num);
@@ -1144,8 +1303,8 @@ export default function AdminDashboard() {
                                 label="RTMP Multistream"
                                 value={plan.features?.rtmpMultistream ?? plan.multistreamEnabled}
                                 onChange={(v) => {
+                                  // Canonical schema: write only features.rtmpMultistream
                                   updatePlanField(plan.id, "features.rtmpMultistream", v);
-                                  updatePlanField(plan.id, "multistreamEnabled", v);
                                 }}
                               />
                               <ToggleRow label="RTMP Streaming" value={plan.features?.rtmp} onChange={(v) => updatePlanField(plan.id, "features.rtmp", v)} />

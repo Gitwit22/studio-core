@@ -7,6 +7,7 @@ exports.getCurrentMonthKey = getCurrentMonthKey;
 exports.canStartStream = canStartStream;
 exports.calculateNextResetDate = calculateNextResetDate;
 exports.formatDuration = formatDuration;
+const planLimits_1 = require("./planLimits");
 /**
  * Get current month key in YYYY-MM format
  */
@@ -19,6 +20,7 @@ function getCurrentMonthKey() {
  */
 function canStartStream(params) {
     const { uid, plan, userOverages, selectedDestinationsCount, wantsRecording, wantsRTMP, currentUsage, } = params;
+    const maxDestinations = (0, planLimits_1.resolveMaxDestinations)(plan.limits || {});
     // 1) Check if plan allows RTMP multistream
     if (wantsRTMP && !plan.features.rtmpMultistream) {
         return {
@@ -27,11 +29,11 @@ function canStartStream(params) {
             requiresUpgrade: true,
         };
     }
-    // 2) Check if destinations count exceeds plan limit
-    if (selectedDestinationsCount > plan.limits.maxDestinations) {
+    // 2) Check if destinations count exceeds plan limit (only if a hard cap is configured)
+    if (maxDestinations > 0 && selectedDestinationsCount > maxDestinations) {
         return {
             allowed: false,
-            reason: `Your plan allows ${plan.limits.maxDestinations} destination(s), but you selected ${selectedDestinationsCount}`,
+            reason: `Your plan allows ${maxDestinations} destination(s), but you selected ${selectedDestinationsCount}`,
             requiresUpgrade: true,
         };
     }

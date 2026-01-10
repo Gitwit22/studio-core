@@ -4,6 +4,8 @@ import { requireAuth } from "../middleware/requireAuth";
 import { Timestamp } from "firebase-admin/firestore";
 import { firestore } from "../firebaseAdmin";
 import { getCurrentMonthKey } from "../lib/usageTracker";
+import { resolveMaxDestinations } from "../lib/planLimits";
+import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 
 // Helper function to get the next reset date (start of next month)
 function getNextResetDate(): Date {
@@ -29,24 +31,13 @@ async function handleUsageSummary(req: any, res: any) {
     }
 
     const userData = userSnap.data() || {};
-    const planId = String(userData.planId || userData.plan || "free");
+    const entitlements = await getEffectiveEntitlements(uid);
+    const plan = entitlements.plan;
+    const planId = entitlements.planId;
     const overagesEnabled = !!userData.overagesEnabled;
 
-    // 2) Plan doc
-    const planRef = firestore.collection("plans").doc(planId);
-    const planSnap = await planRef.get();
-
-    if (!planSnap.exists) {
-      return res.status(500).json({
-        success: false,
-        error: "plan not found",
-        planId,
-      });
-    }
-
-    const planData = planSnap.data() || {};
-    const features = (planData.features || {}) as any;
-    const limits = (planData.limits || {}) as any;
+    const features = plan.features;
+    const limits = plan.limits as any;
 
     // 3) Usage monthly doc (source of truth)
     const monthKey = getCurrentMonthKey();
@@ -120,8 +111,8 @@ async function handleUsageSummary(req: any, res: any) {
     const recordingCurrent = toNumber(usageMinutes.recording?.currentPeriod);
     const recordingLifetime = toNumber(usageMinutes.recording?.lifetime ?? ytdMinutes.recording?.lifetime);
 
-    const participantLimit = Number(limits.participantMinutes || 0); // 0 = unlimited
-    const transcodeLimit = Number(limits.transcodeMinutes || 0);     // 0 = unlimited
+    const participantLimit = Number(plan.limits.monthlyMinutes || 0); // 0 = unlimited
+    const transcodeLimit = Number(plan.limits.transcodeMinutes || 0); // 0 = unlimited
 
     const isOverParticipant =
       participantLimit > 0 ? participantUsed >= participantLimit : false;
@@ -167,18 +158,18 @@ async function handleUsageSummary(req: any, res: any) {
 
       plan: {
         id: planId,
-        name: planData.name || planId,
-        priceMonthly: planData.priceMonthly ?? null,
+        name: plan.name,
+        priceMonthly: plan.priceMonthly ?? null,
         features: {
           recording: !!features.recording,
-          rtmpMultistream: !!features.rtmpMultistream || !!features.rtmp || !!planData.multistreamEnabled,
-          overagesAllowed: !!features.overagesAllowed,
+          rtmpMultistream: !!features.multistream,
+          overagesAllowed: !!(plan.raw?.features?.overagesAllowed),
         },
         limits: {
-          maxDestinations: Number(limits.maxDestinations || 0),
+          maxDestinations: resolveMaxDestinations(plan.raw?.limits || limits),
           participantMinutes: participantLimit,
           transcodeMinutes: transcodeLimit,
-          maxGuests: Number(limits.maxGuests || (planId === "pro" ? 10 : planId === "starter" ? 2 : 1)),
+          maxGuests: Number(plan.limits.maxGuests || 0),
         },
       },
 
@@ -242,29 +233,25 @@ router.get("/entitlements", requireAuth, async (req, res) => {
   const uid = (req as any).user?.uid;
   if (!uid) return res.status(401).json({ error: "unauthorized" });
 
-  const userSnap = await firestore.collection("users").doc(uid).get();
-  if (!userSnap.exists) return res.status(404).json({ error: "user_not_found" });
-  const planId = String((userSnap.data() || {}).planId || "free");
+  const entitlements = await getEffectiveEntitlements(uid);
+  const plan = entitlements.plan;
 
-  const planSnap = await firestore.collection("plans").doc(planId).get();
-  if (!planSnap.exists) return res.status(404).json({ error: "plan_not_found", planId });
+  const payload = {
+    planId: entitlements.planId,
+    planName: plan.name || entitlements.planId,
+    recording: !!entitlements.features.recording,
+    rtmpMultistream: !!entitlements.features.multistream,
+    dualRecording: !!(plan.raw?.features?.dualRecording || plan.raw?.features?.dual_recording),
+    watermark: !!(plan.raw?.features?.watermarkRecordings || plan.raw?.features?.watermark),
+    maxDestinations: resolveMaxDestinations(plan.raw?.limits || entitlements.limits),
+    maxGuests: Number(entitlements.limits.maxGuests || 0),
+    participantMinutes: Number(entitlements.limits.monthlyMinutes || 0),
+    transcodeMinutes: Number(plan.limits.transcodeMinutes || 0),
+  };
 
-  const plan = planSnap.data() || {};
-  const features = plan.features || {};
-  const limits = plan.limits || {};
+  console.log("[usage/entitlements] effective", { uid, planId: payload.planId, limits: payload.participantMinutes, maxDestinations: payload.maxDestinations });
 
-  return res.json({
-    planId,
-    planName: plan.name || planId,
-    recording: !!features.recording,
-    rtmpMultistream: !!features.rtmpMultistream || !!features.rtmp || !!plan.multistreamEnabled,
-    dualRecording: !!features.dualRecording || !!features.dual_recording,
-    watermark: !!features.watermarkRecordings || !!features.watermark,
-    maxDestinations: Number(limits.maxDestinations || 0),
-    maxGuests: Number(limits.maxGuests || 0),
-    participantMinutes: Number(limits.participantMinutes || 0),
-    transcodeMinutes: Number(limits.transcodeMinutes || 0),
-  });
+  return res.json(payload);
 });
 
 export default router;

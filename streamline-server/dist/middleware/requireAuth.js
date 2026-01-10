@@ -11,12 +11,29 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 function getJwtSecret() {
     return process.env.JWT_SECRET || "dev-secret";
 }
+// Server-side auth debug gate.
+//
+// AUTH_DEBUG=1 enables additional auth logging on the server.
+// For extra safety, detailed per-request auth debug should also
+// require a header like `x-debug-auth: 1`.
+//
+// By default (prod), this remains off.
+const AUTH_DEBUG_ENABLED = process.env.AUTH_DEBUG === "1";
+function shouldLogAuthDebug(req) {
+    if (!AUTH_DEBUG_ENABLED)
+        return false;
+    const header = String(req.headers["x-debug-auth"] || "").toLowerCase();
+    return header === "1" || header === "true" || header === "yes";
+}
 function tryGetAuthUser(req) {
     const rawToken = req.cookies?.token ||
         req.headers.authorization?.replace("Bearer ", "");
     if (!rawToken)
         return null;
     const decoded = jsonwebtoken_1.default.verify(rawToken, getJwtSecret());
+    if (shouldLogAuthDebug(req)) {
+        console.log("[auth-debug] Verified JWT for uid", decoded?.uid || "unknown");
+    }
     return { uid: decoded.uid };
 }
 function requireAuth(req, res, next) {
@@ -24,6 +41,9 @@ function requireAuth(req, res, next) {
         const user = tryGetAuthUser(req);
         if (!user)
             return res.status(401).json({ error: "Unauthorized" });
+        if (shouldLogAuthDebug(req)) {
+            console.log("[auth-debug] requireAuth ok", { uid: user.uid, path: req.path, method: req.method });
+        }
         req.user = user;
         return next();
     }

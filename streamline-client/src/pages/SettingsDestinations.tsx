@@ -11,16 +11,24 @@ function StatusBadge({ status, reason }: { status: string; reason?: string | nul
 }
 
 export default function SettingsDestinations() {
+  const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
   const [items, setItems] = useState<DestinationItem[]>([]);
   const [usedCount, setUsedCount] = useState<number | undefined>(undefined);
   const [limit, setLimit] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectedPlatforms, setConnectedPlatforms] = useState<{ youtube: boolean; facebook: boolean; twitch: boolean }>({ youtube: false, facebook: false, twitch: false });
 
   const [platform, setPlatform] = useState("youtube");
+  const [mode, setMode] = useState<"manual" | "connected">("manual");
   const [name, setName] = useState("");
   const [streamKey, setStreamKey] = useState("");
+  const [persistent, setPersistent] = useState(true);
   const [validation, setValidation] = useState<{ status: string; statusReason?: string | null } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{ platform: string; name: string; rtmpUrlBase: string; streamKeyPlain: string; persistent: boolean; mode: "manual" | "connected" }>(
+    { platform: "youtube", name: "", rtmpUrlBase: "", streamKeyPlain: "", persistent: true, mode: "manual" }
+  );
 
   function getDefaultRtmpBase(p: string): string {
     switch (p) {
@@ -38,7 +46,7 @@ export default function SettingsDestinations() {
   async function load() {
     try {
       setLoading(true);
-      const res = await fetchDestinations();
+      const res = await fetchDestinations({ includeDisabled: true });
       setItems(res.items);
       setUsedCount(res.usedCount);
       setLimit(res.limit);
@@ -51,6 +59,23 @@ export default function SettingsDestinations() {
 
   useEffect(() => {
     load();
+    const loadAccount = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/account/me`, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.connectedPlatforms) {
+          setConnectedPlatforms({
+            youtube: !!data.connectedPlatforms.youtube,
+            facebook: !!data.connectedPlatforms.facebook,
+            twitch: !!data.connectedPlatforms.twitch,
+          });
+        }
+      } catch {
+        // ignore
+      }
+    };
+    loadAccount();
   }, []);
 
   async function onValidate() {
@@ -69,14 +94,16 @@ export default function SettingsDestinations() {
     setError(null);
     try {
       const base = getDefaultRtmpBase(platform);
-      const res = await createDestination({ platform, name, rtmpUrlBase: base, streamKeyPlain: streamKey || undefined });
+      const res = await createDestination({ platform, name, rtmpUrlBase: base, streamKeyPlain: streamKey || undefined, mode, persistent });
       // After creating, clear validation so the form is "fresh" for the next key
       setValidation(null);
       setUsedCount(res.usedCount);
       setLimit(res.limit);
       setPlatform("youtube");
+      setMode("manual");
       setName("");
       setStreamKey("");
+      setPersistent(true);
       await load();
     } catch (e: any) {
       setError(e?.message || String(e));
@@ -93,6 +120,46 @@ export default function SettingsDestinations() {
         setUsedCount(newUsed);
         return filtered;
       });
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    }
+  }
+
+  function onStartEdit(item: DestinationItem) {
+    setError(null);
+    setEditingId(item.id);
+    setEditForm({
+      platform: item.platform,
+      name: item.name || "",
+      rtmpUrlBase: item.rtmpUrlBase,
+      streamKeyPlain: "",
+      persistent: item.persistent !== false,
+      mode: item.mode === "connected" ? "connected" : "manual",
+    });
+  }
+
+  function onCancelEdit() {
+    setEditingId(null);
+    setEditForm({ platform: "youtube", name: "", rtmpUrlBase: "", streamKeyPlain: "", persistent: true, mode: "manual" });
+  }
+
+  async function onSaveEdit(id: string) {
+    setError(null);
+    try {
+      const payload: any = {
+        platform: editForm.platform,
+        name: editForm.name,
+        rtmpUrlBase: editForm.rtmpUrlBase,
+        persistent: editForm.persistent,
+        mode: editForm.mode,
+      };
+      if (editForm.streamKeyPlain.trim()) payload.streamKeyPlain = editForm.streamKeyPlain.trim();
+      const res = await updateDestination(id, payload);
+      setItems(prev => prev.map(i => (i.id === id ? res.destination : i)));
+      if (typeof res.usedCount !== "undefined") setUsedCount(res.usedCount);
+      if (typeof res.limit !== "undefined") setLimit(res.limit);
+      setEditingId(null);
+      setEditForm({ platform: "youtube", name: "", rtmpUrlBase: "", streamKeyPlain: "", persistent: true, mode: "manual" });
     } catch (e: any) {
       setError(e?.message || String(e));
     }
@@ -162,6 +229,11 @@ export default function SettingsDestinations() {
             Paste your stream key from your platform. Keys are stored encrypted and will be used automatically when
             you go live.
           </p>
+          {platform === "facebook" && (
+            <div style={{ fontSize: 11, color: "#cbd5e1", marginBottom: 10 }}>
+              Facebook may require a new stream key for scheduled events. Make sure this key is current.
+            </div>
+          )}
 
         {validation && (
           <div style={{ marginBottom: 8 }}>
@@ -212,6 +284,53 @@ export default function SettingsDestinations() {
               }}
               autoComplete="off"
             />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#e5e7eb" }}>
+                <span>Mode:</span>
+                <select
+                  value={mode}
+                  onChange={e => setMode(e.target.value as any)}
+                  style={{
+                    border: "1px solid rgba(248, 250, 252, 0.2)",
+                    borderRadius: 6,
+                    padding: "4px 6px",
+                    color: "#f9fafb",
+                    background: "rgba(15, 23, 42, 0.7)",
+                  }}
+                >
+                  <option value="manual">Manual key</option>
+                  <option value="connected" disabled={!connectedPlatforms[platform as keyof typeof connectedPlatforms]}>Connected</option>
+                </select>
+              </label>
+              {!connectedPlatforms[platform as keyof typeof connectedPlatforms] && (
+                <button
+                  type="button"
+                  onClick={() => window.location.assign("/settings/integrations")}
+                  style={{
+                    fontSize: 12,
+                    borderRadius: 999,
+                    padding: "4px 10px",
+                    border: "1px solid rgba(248, 113, 113, 0.6)",
+                    background: "transparent",
+                    color: "#fecaca",
+                    cursor: "pointer",
+                  }}
+                >
+                  Connect {platform}
+                </button>
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#e5e7eb" }}>
+                <input
+                  type="checkbox"
+                  checked={persistent}
+                  onChange={e => setPersistent(e.target.checked)}
+                />
+                <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.3 }}>
+                  <strong style={{ fontWeight: 600 }}>Save stream for reuse</strong>
+                  <span style={{ color: "#cbd5e1" }}>Recommended for scheduled streams </span>
+                </span>
+              </label>
+            </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button
                 type="button"
@@ -286,58 +405,195 @@ export default function SettingsDestinations() {
               from the room.
             </div>
           ) : (
-            <div style={{ width: "100%", overflowX: "auto" }}>
-              <table style={{ width: "100%", minWidth: 520, borderCollapse: "collapse", fontSize: 13 }}>
+            <div style={{ width: "100%" }}>
+              <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid rgba(248, 250, 252, 0.1)" }}>
-                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Platform</th>
-                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Name</th>
-                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb" }}>Base</th>
-                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Status</th>
-                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Key</th>
-                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>Actions</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "normal", wordBreak: "break-word" }}>Platform</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "normal", wordBreak: "break-word" }}>Name</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", wordBreak: "break-word" }}>Base</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "normal", wordBreak: "break-word" }}>Status</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "normal", wordBreak: "break-word", minWidth: 120 }}>Key</th>
+                    <th align="left" style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "normal", wordBreak: "break-word" }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map(item => (
                     <tr key={item.id} style={{ borderBottom: "1px solid rgba(248, 250, 252, 0.06)" }}>
-                      <td style={{ padding: "6px 6px", textTransform: "capitalize", color: "#f9fafb", whiteSpace: "nowrap" }}>{item.platform}</td>
-                      <td style={{ padding: "6px 6px", color: "#e5e7eb", wordBreak: "break-word" }}>{item.name || "—"}</td>
-                      <td style={{ padding: "6px 6px", fontFamily: "monospace", fontSize: 12, color: "#e5e7eb", wordBreak: "break-all" }}>{item.rtmpUrlBase}</td>
+                      <td style={{ padding: "6px 6px", textTransform: "capitalize", color: "#f9fafb", whiteSpace: "normal", wordBreak: "break-word" }}>
+                        {editingId === item.id ? (
+                          <select
+                            value={editForm.platform}
+                            onChange={e => setEditForm(f => ({ ...f, platform: e.target.value }))}
+                            style={{
+                              border: "1px solid rgba(248, 250, 252, 0.2)",
+                              borderRadius: 6,
+                              padding: "4px 6px",
+                              color: "#f9fafb",
+                              background: "rgba(15, 23, 42, 0.7)",
+                            }}
+                          >
+                            <option value="youtube">YouTube</option>
+                            <option value="facebook">Facebook</option>
+                            <option value="twitch">Twitch</option>
+                            <option value="custom">Custom</option>
+                          </select>
+                        ) : (
+                          item.platform
+                        )}
+                      </td>
+                      <td style={{ padding: "6px 6px", color: "#e5e7eb", wordBreak: "break-word", whiteSpace: "normal" }}>
+                        {editingId === item.id ? (
+                          <input
+                            value={editForm.name}
+                            onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                            placeholder="Optional name"
+                            style={{
+                              border: "1px solid rgba(248, 250, 252, 0.2)",
+                              borderRadius: 6,
+                              padding: "4px 6px",
+                              color: "#f9fafb",
+                              background: "rgba(15, 23, 42, 0.7)",
+                              width: "100%",
+                            }}
+                          />
+                        ) : (
+                          item.name || "—"
+                        )}
+                      </td>
+                      <td style={{ padding: "6px 6px", fontFamily: "monospace", fontSize: 12, color: "#e5e7eb", wordBreak: "break-all" }}>
+                        {editingId === item.id ? (
+                          <input
+                            value={editForm.rtmpUrlBase}
+                            onChange={e => setEditForm(f => ({ ...f, rtmpUrlBase: e.target.value }))}
+                            placeholder="rtmp://..."
+                            style={{
+                              border: "1px solid rgba(248, 250, 252, 0.2)",
+                              borderRadius: 6,
+                              padding: "4px 6px",
+                              color: "#f9fafb",
+                              background: "rgba(15, 23, 42, 0.7)",
+                              width: "100%",
+                            }}
+                          />
+                        ) : (
+                          // Show a high-level label instead of the full RTMP URL for on-screen safety
+                          item.platform === "youtube"
+                            ? "YouTube default"
+                            : item.platform === "facebook"
+                            ? "Facebook default"
+                            : item.platform === "twitch"
+                            ? "Twitch default"
+                            : "Custom RTMP endpoint"
+                        )}
+                      </td>
                       <td style={{ padding: "6px 6px" }}>
                         <StatusBadge status={item.status} reason={item.statusReason || undefined} />
                       </td>
-                      <td style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "nowrap" }}>{item.hasKey ? `••••${item.keyPreview ?? ""}` : "no key"}</td>
-                      <td style={{ padding: "6px 6px", whiteSpace: "nowrap" }}>
-                        {item.hasKey && (
-                          <button
-                            onClick={() => onClearKey(item.id)}
+                      <td style={{ padding: "6px 6px", color: "#e5e7eb", whiteSpace: "normal", wordBreak: "normal", minWidth: 140 }}>
+                        {editingId === item.id ? (
+                          <input
+                            type="password"
+                            value={editForm.streamKeyPlain}
+                            onChange={e => setEditForm(f => ({ ...f, streamKeyPlain: e.target.value }))}
+                            placeholder={item.hasKey ? "Enter new key (stored encrypted, never shown)" : "Enter new key"}
                             style={{
-                              fontSize: 12,
-                              color: "#e5e7eb",
-                              border: "none",
-                              background: "transparent",
-                              cursor: "pointer",
-                              marginRight: 8,
-                              padding: 0,
+                              border: "1px solid rgba(248, 250, 252, 0.2)",
+                              borderRadius: 6,
+                              padding: "4px 6px",
+                              color: "#f9fafb",
+                              background: "rgba(15, 23, 42, 0.7)",
+                              width: "100%",
+                              minWidth: 100,
+                              maxWidth: 140,
                             }}
-                          >
-                            Clear Key
-                          </button>
+                            autoComplete="off"
+                          />
+                        ) : (
+                          // Do not show any part of the stored key; only indicate presence
+                          item.hasKey ? "Saved (hidden)" : "No key saved"
                         )}
-                        <button
-                          onClick={() => onDelete(item.id)}
-                          style={{
-                            fontSize: 12,
-                            color: "#fecaca",
-                            border: "none",
-                            background: "transparent",
-                            cursor: "pointer",
-                            padding: 0,
-                          }}
-                        >
-                          Delete
-                        </button>
+                        {editingId === item.id ? null : null}
+                      </td>
+                      <td style={{ padding: "6px 6px", whiteSpace: "normal", wordBreak: "break-word" }}>
+                        {editingId === item.id ? (
+                          <>
+                            <button
+                              onClick={() => onSaveEdit(item.id)}
+                              style={{
+                                fontSize: 12,
+                                color: "#16a34a",
+                                border: "none",
+                                background: "transparent",
+                                cursor: "pointer",
+                                marginRight: 8,
+                                padding: 0,
+                                fontWeight: 600,
+                              }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={onCancelEdit}
+                              style={{
+                                fontSize: 12,
+                                color: "#e5e7eb",
+                                border: "none",
+                                background: "transparent",
+                                cursor: "pointer",
+                                padding: 0,
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => onStartEdit(item)}
+                              style={{
+                                fontSize: 12,
+                                color: "#e5e7eb",
+                                border: "none",
+                                background: "transparent",
+                                cursor: "pointer",
+                                marginRight: 8,
+                                padding: 0,
+                              }}
+                            >
+                              Edit
+                            </button>
+                            {item.hasKey && (
+                              <button
+                                onClick={() => onClearKey(item.id)}
+                                style={{
+                                  fontSize: 12,
+                                  color: "#e5e7eb",
+                                  border: "none",
+                                  background: "transparent",
+                                  cursor: "pointer",
+                                  marginRight: 8,
+                                  padding: 0,
+                                }}
+                              >
+                                Clear Key
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onDelete(item.id)}
+                              style={{
+                                fontSize: 12,
+                                color: "#fecaca",
+                                border: "none",
+                                background: "transparent",
+                                cursor: "pointer",
+                                padding: 0,
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

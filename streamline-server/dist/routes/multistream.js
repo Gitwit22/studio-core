@@ -30,6 +30,7 @@ async function getPlanLimit(uid, field) {
 const router = (0, express_1.Router)();
 router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (req, res) => {
     try {
+        const requestStartedAt = Date.now();
         const uid = req.user?.uid;
         const roomName = String(req.params.roomName || "").trim();
         if (!uid)
@@ -39,17 +40,26 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
         const streamDocId = `${uid}_${roomName}`; // always non-empty if checks passed
         const ref = firebaseAdmin_1.firestore.collection("activeStreams").doc(streamDocId);
         // if your client sends individual keys or destination IDs:
-        const { youtubeStreamKey, facebookStreamKey, twitchStreamKey, guestCount, destinationIds, presetId } = req.body || {};
+        const rawBody = req.body || {};
+        const trimKey = (k) => (typeof k === "string" ? k.trim() : "");
+        const youtubeStreamKey = trimKey(rawBody.youtubeStreamKey) || undefined;
+        const facebookStreamKey = trimKey(rawBody.facebookStreamKey) || undefined;
+        const twitchStreamKey = trimKey(rawBody.twitchStreamKey) || undefined;
+        const { guestCount, destinationIds, enabledTargetIds, sessionKeys, presetId } = rawBody;
         console.log("[multistream:start] uid:", uid, "room:", roomName, {
             youtubeStreamKey: !!youtubeStreamKey,
             facebookStreamKey: !!facebookStreamKey,
             twitchStreamKey: !!twitchStreamKey,
             guestCount,
             destinationIdsCount: Array.isArray(destinationIds) ? destinationIds.length : 0,
+            enabledTargetIdsCount: Array.isArray(enabledTargetIds) ? enabledTargetIds.length : 0,
         });
-        const destIds = Array.isArray(destinationIds)
-            ? destinationIds.map((id) => String(id)).filter(Boolean)
-            : [];
+        const destIds = Array.isArray(enabledTargetIds)
+            ? enabledTargetIds.map((id) => String(id)).filter(Boolean)
+            : Array.isArray(destinationIds)
+                ? destinationIds.map((id) => String(id)).filter(Boolean)
+                : [];
+        const sessionKeyMap = sessionKeys && typeof sessionKeys === "object" ? sessionKeys : {};
         if (!youtubeStreamKey && !facebookStreamKey && !twitchStreamKey && destIds.length === 0) {
             return res.status(400).json({ error: "At least one stream key is required" });
         }
@@ -87,12 +97,30 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
         }, { merge: true });
         // Build RTMP URLs for each platform and any stored destinations
         const urls = [];
-        if (youtubeStreamKey)
-            urls.push(`rtmp://a.rtmp.youtube.com/live2/${youtubeStreamKey}`);
-        if (facebookStreamKey)
-            urls.push(`rtmps://live-api-s.facebook.com:443/rtmp/${facebookStreamKey}`);
-        if (twitchStreamKey)
-            urls.push(`rtmp://live.twitch.tv/app/${twitchStreamKey}`);
+        const logEntries = [];
+        const maskUrl = (url) => {
+            const idx = url.lastIndexOf("/");
+            if (idx === -1)
+                return "***";
+            return `${url.slice(0, idx + 1)}***`;
+        };
+        const pushLog = (platform, url, key, source) => {
+            urls.push(url);
+            logEntries.push({ platform, url: maskUrl(url), keyLen: key.length, last4: key.slice(-4), source });
+        };
+        if (youtubeStreamKey) {
+            const url = `rtmp://a.rtmp.youtube.com/live2/${youtubeStreamKey}`;
+            pushLog("youtube", url, youtubeStreamKey, "direct");
+        }
+        if (facebookStreamKey) {
+            const url = `rtmps://live-api-s.facebook.com:443/rtmp/${facebookStreamKey}`;
+            pushLog("facebook", url, facebookStreamKey, "direct");
+        }
+        if (twitchStreamKey) {
+            const url = `rtmp://live.twitch.tv/app/${twitchStreamKey}`;
+            pushLog("twitch", url, twitchStreamKey, "direct");
+        }
+        const usedSessionKeys = new Set();
         if (destIds.length > 0) {
             try {
                 const col = firebaseAdmin_1.firestore.collection("users").doc(uid).collection("destinations");
@@ -101,27 +129,65 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
                     if (!snap.exists)
                         continue;
                     const data = snap.data();
-                    if (!data || data.enabled === false)
+                    if (!data)
                         continue;
-                    const baseRaw = String(data.rtmpUrlBase || "");
+                    if (data.mode === "connected") {
+                        return res.status(400).json({ error: "connected_target_not_supported_yet" });
+                    }
+                    const targetId = data.targetId || snap.id;
+                    const sessionKey = sessionKeyMap[targetId];
+                    const baseRaw = String(sessionKey?.rtmpUrlBase || data.rtmpUrlBase || "");
                     const base = (0, crypto_1.normalizeRtmpBase)(baseRaw);
                     if (!base)
                         continue;
-                    const dec = data.streamKeyEnc ? (0, crypto_1.decryptStreamKey)(data.streamKeyEnc) : null;
+                    let dec = null;
+                    if (sessionKey?.streamKey) {
+                        dec = trimKey(sessionKey.streamKey);
+                    }
+                    else if (data.persistent !== false) {
+                        const maybeDec = data.streamKeyEnc ? (0, crypto_1.decryptStreamKey)(data.streamKeyEnc) : null;
+                        dec = maybeDec ? trimKey(maybeDec) : null;
+                    }
                     if (!dec)
                         continue;
                     const url = `${base}/${dec}`;
-                    urls.push(url);
+                    const source = sessionKey?.streamKey ? "session" : "main";
+                    pushLog(String(data.platform || "destination"), url, dec, source);
+                    if (sessionKey?.streamKey)
+                        usedSessionKeys.add(targetId);
                 }
             }
             catch (e) {
                 console.error("[multistream:start] failed to resolve destinationIds", e);
             }
         }
+        // Handle standalone session keys (e.g., custom RTMP) that aren't tied to saved destinations
+        for (const [keyId, entry] of Object.entries(sessionKeyMap || {})) {
+            if (usedSessionKeys.has(keyId))
+                continue;
+            let base = (0, crypto_1.normalizeRtmpBase)(String(entry?.rtmpUrlBase || ""));
+            let dec = entry?.streamKey ? trimKey(entry.streamKey) : "";
+            // If base missing but streamKey looks like a full RTMP URL, split it
+            if (!base && dec.startsWith("rtmp")) {
+                const idx = dec.lastIndexOf("/");
+                if (idx > 8) {
+                    const maybeBase = (0, crypto_1.normalizeRtmpBase)(dec.slice(0, idx));
+                    const maybeKey = trimKey(dec.slice(idx + 1));
+                    if (maybeBase && maybeKey) {
+                        base = maybeBase;
+                        dec = maybeKey;
+                    }
+                }
+            }
+            if (!base || !dec)
+                continue;
+            const url = `${base}/${dec}`;
+            pushLog("custom", url, dec, "session");
+        }
         if (urls.length === 0) {
             return res.status(400).json({ error: "At least one stream key is required" });
         }
-        console.log("[multistream:start] RTMP URLs:", urls);
+        console.log("[multistream:start] RTMP URLs (masked):", logEntries);
         try {
             // Import LiveKit egress client and types using dynamic helper
             const { EgressClient, StreamOutput, StreamProtocol } = await getLiveKitSdk();
@@ -139,6 +205,9 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
                 raw: response,
             });
             if (response.egressId) {
+                const startedAt = Date.now();
+                const warmupMs = startedAt - requestStartedAt;
+                const platforms = logEntries.map((e) => e.platform);
                 // Save to Firestore only after success
                 await ref.set({
                     uid,
@@ -149,11 +218,20 @@ router.post("/:roomName/start-multistream", requireAuth_1.requireAuth, async (re
                     guestCount: Number(guestCount || 0),
                     status: "started",
                     egressId: response.egressId,
-                    updatedAt: Date.now(),
+                    updatedAt: startedAt,
                     presetRequestedId: requestedId,
                     presetEffectiveId: effectiveId,
                     usageType: "live",
+                    warmupMs,
+                    warmupPlatforms: platforms,
                 }, { merge: true });
+                console.log("[multistream:warmup] egress started", {
+                    uid,
+                    roomName,
+                    warmupMs,
+                    warmupSeconds: Math.round(warmupMs / 1000),
+                    platforms,
+                });
                 // Ensure non-empty JSON body
                 return res.status(200).json({
                     success: true,
@@ -202,13 +280,32 @@ router.post("/:roomName/stop-multistream", requireAuth_1.requireAuth, async (req
             if (!egressId) {
                 return res.status(404).json({ error: "No active multistream found for this room and no egressId provided" });
             }
-            const querySnap = await firebaseAdmin_1.firestore.collection("activeStreams").where("egressId", "==", egressId).get();
+            const querySnap = await firebaseAdmin_1.firestore
+                .collection("activeStreams")
+                .where("egressId", "==", egressId)
+                .limit(1)
+                .get();
             if (querySnap.empty) {
                 return res.status(404).json({ error: "No active multistream found for this egressId" });
             }
-            // Use the first matching doc
-            doc = querySnap.docs[0];
-            foundRef = doc.ref;
+            const candidate = querySnap.docs[0];
+            const data = (candidate.data() || {});
+            const ownerUid = data.uid;
+            const ownerRoomName = typeof data.roomName === "string" ? data.roomName.trim() : undefined;
+            const roomMatches = ownerRoomName
+                ? ownerRoomName === roomName
+                : candidate.id === streamDocId;
+            if (ownerUid !== uid || !roomMatches) {
+                console.info("[multistream:stop] egressId owner/room mismatch; denying stop", {
+                    uid,
+                    roomName,
+                    activeUid: ownerUid,
+                    activeRoomName: ownerRoomName || null,
+                });
+                return res.status(404).json({ error: "No active multistream found for this egressId" });
+            }
+            doc = candidate;
+            foundRef = candidate.ref;
         }
         if (!egressId) {
             return res.status(400).json({ error: "No egressId found for active stream" });
@@ -225,8 +322,16 @@ router.post("/:roomName/stop-multistream", requireAuth_1.requireAuth, async (req
             return res.json({ success: true, status: "stopped" });
         }
         catch (err) {
+            const message = err?.message || String(err);
+            const code = err?.code || err?.status;
+            const isNotRunning = code === 412 || /412/.test(message) || /not running/i.test(message);
+            if (isNotRunning) {
+                console.warn("stopEgress returned precondition/unknown state; treating as already stopped", { egressId, message });
+                await foundRef.delete();
+                return res.json({ success: true, status: "stopped", reason: "not_running" });
+            }
             console.error("Error stopping multistream:", err);
-            return res.status(500).json({ error: "Failed to stop multistream", details: err?.message });
+            return res.status(500).json({ error: "Failed to stop multistream", details: message });
         }
     }
     catch (err) {

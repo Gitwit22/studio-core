@@ -5,6 +5,7 @@ import { stripe } from "../lib/stripe";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { PLAN_IDS, PlanId, isPlanId } from "../types/plan";
+import { getUserAccount } from "../lib/userAccount";
 
 // Plan change guardrails
 const PLAN_CHANGE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
@@ -17,6 +18,10 @@ type PlanChangeHistoryEntry = {
   toPlan: string;
   source: string;
 };
+
+// Simple in-memory throttle for test-mode plan switching
+const TEST_PLAN_CHANGE_THROTTLE_MS = 2000; // 1 req / 2s per uid
+const testPlanChangeThrottle = new Map<string, number>();
 
 function getUserRef(uid: string) {
   return db.collection("users").doc(uid);
@@ -180,6 +185,14 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const CLIENT_URL = process.env.CLIENT_URL;
     if (!CLIENT_URL) throw new Error("Missing env var: CLIENT_URL");
 
+    // Normalize account and hard-block Stripe when billing is effectively disabled
+    const account = await getUserAccount(uid);
+    if (account.effectiveBillingEnabled === false) {
+      return res
+        .status(403)
+        .json({ success: false, error: "billing_disabled" });
+    }
+
     const userRef = getUserRef(uid);
     const snap = await userRef.get();
     if (!snap.exists) return res.status(404).json({ success: false, error: "User not found" });
@@ -331,6 +344,12 @@ router.post("/portal", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
+    const account = await getUserAccount(uid);
+    if (account.effectiveBillingEnabled === false) {
+      return res
+        .status(403)
+        .json({ success: false, error: "billing_disabled" });
+    }
 
     const snap = await getUserRef(uid).get();
     if (!snap.exists) return res.status(404).json({ success: false, error: "User not found" });
@@ -355,6 +374,87 @@ router.post("/portal", requireAuth, async (req, res) => {
   }
 });
 
+// Test-mode only: allow self-service plan switching without Stripe when billing is disabled.
+router.post("/test/change-plan", requireAuth, async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
+
+    const { newPlanId } = (req.body || {}) as { newPlanId?: string };
+    if (!newPlanId || typeof newPlanId !== "string") {
+      return res.status(400).json({ success: false, error: "missing_plan" });
+    }
+
+    const account = await getUserAccount(uid);
+
+    // Only allowed when billing is effectively disabled (platform-wide or per-user)
+    if (account.effectiveBillingEnabled !== false) {
+      return res
+        .status(403)
+        .json({ success: false, error: "billing_live" });
+    }
+
+    // Optional safety rail: in production, require explicit tester flag
+    const isProd = process.env.NODE_ENV === "production";
+    const raw = account.rawUser || {};
+    const isTester = !!(raw.tester || raw.isTester);
+    if (isProd && !isTester) {
+      return res
+        .status(403)
+        .json({ success: false, error: "test_mode_disabled" });
+    }
+
+    const planIdCandidate = newPlanId as PlanId;
+    if (!isPlanId(planIdCandidate)) {
+      return res.status(400).json({ success: false, error: "invalid_plan" });
+    }
+
+    const now = Date.now();
+    const last = testPlanChangeThrottle.get(uid) || 0;
+    if (now - last < TEST_PLAN_CHANGE_THROTTLE_MS) {
+      return res.status(429).json({ success: false, error: "too_many_requests" });
+    }
+    testPlanChangeThrottle.set(uid, now);
+
+    const fromPlan = account.planId || "free";
+    const userRef = getUserRef(uid);
+
+    // In test mode, do not touch any Stripe or subscription fields; just update planId/pendingPlan.
+    await userRef.set(
+      {
+        planId: planIdCandidate,
+        pendingPlan: null,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    const ip = (req.headers["x-forwarded-for"] as string) || req.ip;
+    const userAgent = (req.headers["user-agent"] as string) || "";
+    const env = process.env.NODE_ENV || "development";
+    const requestIdHeader = (req.headers["x-request-id"] as string) || "";
+    const requestId = requestIdHeader || `${uid}-${now}`;
+
+    await db.collection("billingAudit").add({
+      type: "test_plan_change",
+      uid,
+      fromPlan,
+      toPlan: planIdCandidate,
+      at: now,
+      ip,
+      userAgent,
+      env,
+      requestId,
+      source: "billing_test_mode",
+    });
+
+    return res.json({ success: true, planId: planIdCandidate });
+  } catch (err: any) {
+    console.error("POST /api/billing/test/change-plan failed:", err?.message || err);
+    return res.status(500).json({ success: false, error: "Failed to change plan in test mode" });
+  }
+});
+
 // Allow clients to clear a stale pendingPlan (e.g., user canceled checkout)
 router.post("/clear-pending", requireAuth, async (req, res) => {
   try {
@@ -372,11 +472,19 @@ router.get("/me", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    const account = await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();
-    if (!snap.exists) return res.status(404).json({ error: "User not found" });
-
-    return res.json({ id: uid, ...snap.data() });
+    const raw = snap.exists ? snap.data() : account.rawUser;
+    return res.json({
+      id: uid,
+      ...raw,
+      planId: account.planId,
+      billingEnabled: account.billingEnabled,
+      platformBillingEnabled: account.platformBillingEnabled,
+      effectiveBillingEnabled: account.effectiveBillingEnabled,
+      isAdmin: account.isAdmin,
+    });
   } catch (err: any) {
     console.error("GET /api/billing/me failed:", err?.message || err);
     return res.status(500).json({ error: "Failed to load user" });
@@ -389,6 +497,7 @@ router.get("/pending-change", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    const account = await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();
     if (!snap.exists) return res.status(404).json({ error: "User not found" });
@@ -469,6 +578,7 @@ router.get("/status", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    const account = await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();
     if (!snap.exists) return res.status(404).json({ error: "User not found" });

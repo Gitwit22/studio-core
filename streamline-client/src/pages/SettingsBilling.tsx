@@ -7,6 +7,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
 import SettingsDestinations from "./SettingsDestinations";
+import { apiFetch } from "../lib/api";
+import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
+import { formatLimitLabel } from "../lib/entitlements";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -98,7 +101,8 @@ interface UserData {
   billingActive?: boolean;
   billing?: BillingInfo;
   hasHadTrial?: boolean;
-
+  billingEnabled?: boolean;
+  billingMode?: "test" | "live";
 }
 
 interface PlanDefinition {
@@ -252,6 +256,7 @@ function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
 export default function SettingsBilling() {
   const nav = useNavigate();
   const location = useLocation();
+  const { refresh: refreshAuth } = useAuthMe();
 
   
   const DEFAULT_USAGE: UsageData = {
@@ -325,6 +330,11 @@ export default function SettingsBilling() {
   const [cohostMessage, setCohostMessage] = useState<string | null>(null);
   const [emergencyLoading, setEmergencyLoading] = useState(false);
   const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [testModeTargetPlan, setTestModeTargetPlan] = useState<PlanId | null>(null);
+  const [testModeModalOpen, setTestModeModalOpen] = useState(false);
+  const [testModeLoading, setTestModeLoading] = useState(false);
+  const [testModeSummary, setTestModeSummary] = useState<string | null>(null);
   const effectivePermissionsMode = advancedPermissions.effectivePermissionsMode || ((advancedPermissions.enabled && (mediaPrefs.permissionsMode ?? "simple") === "advanced") ? "advanced" : "simple");
   const simpleMode = effectivePermissionsMode === "simple";
   useEffect(() => {
@@ -345,15 +355,14 @@ export default function SettingsBilling() {
     (async () => {
       if (!user?.pendingPlan) return;
       try {
-        const res = await fetch(`${API_BASE}/api/billing/pending-change`, { credentials: "include" });
-        if (!res.ok) return;
+        const res = await apiFetch(`${API_BASE}/api/billing/pending-change`);
         const info = await res.json();
         const isFreeNoSub = user.planId === "free" && !info?.hasSubscription && !info?.billingActive;
         const noScheduled = info?.scheduledChange === false;
         const completed = user.billingStatus === "active" || user.billingStatus === "trialing";
         if (isFreeNoSub || noScheduled || completed) {
           try {
-            await fetch(`${API_BASE}/api/billing/clear-pending`, { method: "POST", credentials: "include" });
+            await apiFetch(`${API_BASE}/api/billing/clear-pending`, { method: "POST" });
           } catch {}
           setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
         }
@@ -403,12 +412,15 @@ export default function SettingsBilling() {
   };
 
   const loadUser = async () => {
-    const res = await fetch(`${API_BASE}/api/auth/me`, {
-      credentials: "include",
-    });
-    if (!res.ok) throw new Error("Failed to load user");
+    const res = await apiFetch(`${API_BASE}/api/auth/me`);
     const data = await res.json();
     setUser(data);
+    try {
+      window.localStorage.setItem("sl_user", JSON.stringify(data));
+      if ((data as any)?.id || (data as any)?.uid) {
+        window.localStorage.setItem("sl_userId", String((data as any).id || (data as any).uid));
+      }
+    } catch {}
   };
 
   const loadPlans = async () => {
@@ -432,19 +444,46 @@ export default function SettingsBilling() {
 
   const loadEntitlements = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/usage/entitlements`, { credentials: "include" });
-      if (!res.ok) throw new Error("entitlements endpoint failed");
+      // Prefer canonical effectiveEntitlements from /api/account/me
+      const res = await apiFetch(`${API_BASE}/api/account/me`);
+      if (!res.ok) {
+        throw new Error("account/me failed");
+      }
       const data = await res.json();
+
+      const eff = (data as any)?.effectiveEntitlements;
+
+      if (eff && typeof eff === "object") {
+        const features = eff.features || {};
+        const limits = eff.limits || {};
+        setEntitlements({
+          planId: eff.planId || data.planId || "free",
+          planName: eff.planName || data.planId || eff.planId || "Free",
+          recording: !!features.recording,
+          dualRecording: !!features.dualRecording,
+          rtmpMultistream: !!features.rtmpMultistream,
+          maxGuests: Number(limits.maxGuests ?? 0),
+          maxDestinations: Number(limits.maxDestinations ?? 0),
+          participantMinutes: Number(limits.participantMinutes ?? 0),
+          transcodeMinutes: Number(limits.transcodeMinutes ?? 0),
+        });
+        return;
+      }
+
+      // Fallback: legacy usage entitlements endpoint
+      const legacyRes = await apiFetch(`${API_BASE}/api/usage/entitlements`);
+      if (!legacyRes.ok) throw new Error("usage/entitlements failed");
+      const legacy = await legacyRes.json();
       setEntitlements({
-        planId: data?.planId || "free",
-        planName: data?.planName || data?.planId || "Free",
-        recording: !!data?.recording,
-        dualRecording: !!data?.dualRecording,
-        rtmpMultistream: !!data?.rtmpMultistream,
-        maxGuests: Number(data?.maxGuests ?? 0),
-        maxDestinations: Number(data?.maxDestinations ?? 0),
-        participantMinutes: Number(data?.participantMinutes ?? 0),
-        transcodeMinutes: Number(data?.transcodeMinutes ?? 0),
+        planId: legacy?.planId || "free",
+        planName: legacy?.planName || legacy?.planId || "Free",
+        recording: !!legacy?.recording,
+        dualRecording: !!legacy?.dualRecording,
+        rtmpMultistream: !!legacy?.rtmpMultistream,
+        maxGuests: Number(legacy?.maxGuests ?? 0),
+        maxDestinations: Number(legacy?.maxDestinations ?? 0),
+        participantMinutes: Number(legacy?.participantMinutes ?? 0),
+        transcodeMinutes: Number(legacy?.transcodeMinutes ?? 0),
       });
     } catch (err) {
       console.warn("loadEntitlements failed; using defaults", err);
@@ -455,9 +494,7 @@ export default function SettingsBilling() {
  
   const loadUsage = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/usage/me`, { credentials: "include" });
-      if (!res.ok) throw new Error("usage endpoint failed");
-
+      const res = await apiFetch(`${API_BASE}/api/usage/me`);
       const data = await res.json();
       const limits = data?.plan?.limits || {};
 
@@ -502,7 +539,8 @@ export default function SettingsBilling() {
         },
         rtmpDestinations: {
           used: 0,
-          limit: Number(limits.maxDestinations ?? 0) || (data?.plan?.id === "pro" ? 5 : data?.plan?.id === "starter" ? 2 : 1),
+          // Destination caps are resolved on the server; 0 = "no numeric cap".
+          limit: Number(limits.maxDestinations ?? 0),
         },
         storage: {
           used: 0,
@@ -787,6 +825,7 @@ export default function SettingsBilling() {
       } else {
         setMediaPrefs((prev) => ({ ...prev, permissionsMode: mode }));
       }
+      setAdvancedPermissions((prev) => ({ ...prev, effectivePermissionsMode: mode }));
       if (mode === "simple") {
         setEditingRoleId(null);
         setEditingDraft(null);
@@ -834,26 +873,60 @@ export default function SettingsBilling() {
     }
   };
 
+  const safeReadJson = async (res: Response) => {
+    const text = await res.text().catch(() => "");
+    try {
+      return { json: text ? JSON.parse(text) : null, text };
+    } catch {
+      return { json: null, text };
+    }
+  };
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 3000);
+  };
+
   const handleEmergencyDownload = async () => {
     try {
       setEmergencyLoading(true);
       setEmergencyMessage(null);
-      const res = await fetch(`${API_BASE}/api/recordings/emergency-latest`, {
-        credentials: "include",
-        cache: "no-store",
-      });
 
-      let data: any = null;
+      let res: Response;
       try {
-        data = await res.json();
-      } catch (parseErr) {
-        console.error("Emergency download parse error", parseErr);
-        setEmergencyMessage("No link available.");
+        res = await fetch(`${API_BASE}/api/recordings/emergency-latest`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+      } catch (err) {
+        console.error("Emergency download failed (network)", err);
+        setEmergencyMessage("Network error. Check your connection and try again.");
         return;
       }
 
-      console.error("Emergency download failed", err);
-      setEmergencyMessage("No link available.");
+      const { json, text } = await safeReadJson(res);
+
+      if (!res.ok) {
+        console.error("Emergency download failed (http)", {
+          status: res.status,
+          body: json ?? text,
+        });
+        setEmergencyMessage("Server error fetching recording. Try again.");
+        return;
+      }
+
+      const url = (json as any)?.url || (json as any)?.data?.url;
+      if (!url) {
+        console.error("Emergency download failed (shape)", { body: json ?? text });
+        setEmergencyMessage("Recording URL missing. Contact support.");
+        return;
+      }
+
+      window.open(url, "_blank");
+      setEmergencyMessage("Download link opened.");
+    } catch (err) {
+      console.error("Emergency download failed (unexpected)", err);
+      setEmergencyMessage("Unexpected error. Try again.");
     } finally {
       setEmergencyLoading(false);
       setTimeout(() => setEmergencyMessage(null), 5000);
@@ -863,13 +936,20 @@ export default function SettingsBilling() {
 
 
 const startCheckout = async (plan: CheckoutPlanVariant) => {
+  // In test mode, Stripe checkout is disabled in favor of test-mode plan switching.
+  if (isTestMode) {
+    setError("Billing is disabled in Test Mode. Use 'Switch Plan (Test Mode)' below instead.");
+    setActionLoading(null);
+    return;
+  }
+
   setActionLoading(plan);
+  const requestId = `${plan}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
   try {
-    const res = await fetch(`${API_BASE}/api/billing/checkout`, {
+    const res = await apiFetch(`${API_BASE}/api/billing/checkout`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ plan }),
+      body: JSON.stringify({ plan, requestId }),
     });
 
     const data = await res.json();
@@ -879,7 +959,13 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
 
     window.location.href = data.url;
   } catch (err: any) {
-    setError(err.message || "Failed to start checkout. Please try again.");
+    if (err?.status === 403 && err?.body?.error === "billing_disabled") {
+      setError("Billing is disabled for this account. Use Test Mode plan switching instead.");
+    } else if (err?.body?.error) {
+      setError(err.body.error);
+    } else {
+      setError(err.message || "Failed to start checkout. Please try again.");
+    }
     setActionLoading(null);
     setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
   }
@@ -890,16 +976,19 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   const openPortal = async () => {
     setActionLoading("portal");
     try {
+      if (isTestMode) {
+        setError("Billing portal is disabled in Test Mode. Use test-mode plan switches instead.");
+        setActionLoading(null);
+        return;
+      }
       // If no Stripe customer, guide user into Checkout to create one
       if (!hasStripeCustomer) {
         setShowManagePicker(true);
         setActionLoading(null);
         return;
       }
-      const res = await fetch(`${API_BASE}/api/billing/portal`, {
+      const res = await apiFetch(`${API_BASE}/api/billing/portal`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Portal failed");
@@ -907,6 +996,61 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     } catch (err: any) {
       setError(err.message);
       setActionLoading(null);
+    }
+  };
+
+  const openTestPlanModal = (planId: PlanId) => {
+    setTestModeTargetPlan(planId);
+    setTestModeSummary(null);
+    setTestModeModalOpen(true);
+  };
+
+  const closeTestModeModal = () => {
+    setTestModeModalOpen(false);
+    setTestModeTargetPlan(null);
+    setTestModeLoading(false);
+  };
+
+  const confirmTestPlanChange = async () => {
+    if (!testModeTargetPlan) return;
+    setTestModeLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/billing/test/change-plan`, {
+        method: "POST",
+        body: JSON.stringify({ newPlanId: testModeTargetPlan }),
+      });
+      const data = await res.json();
+      const newPlanId = (data?.planId || testModeTargetPlan) as PlanId;
+
+      setUser((prev) => (prev ? { ...prev, planId: newPlanId, pendingPlan: null } : prev));
+
+      try {
+        await Promise.all([refreshAuth(), loadEntitlements(), loadUsage()]);
+      } catch {}
+
+      const planMeta = plans.find((p) => canonicalPlanId(p.id) === newPlanId);
+      const name = planMeta?.name || newPlanId;
+      setTestModeSummary(`You are now simulating the ${name} plan. Limits and gates below use this plan.`);
+      showToast("Plan switched (Test Mode)");
+
+      setTestModeModalOpen(false);
+      setTestModeTargetPlan(null);
+    } catch (err: any) {
+      const code = err?.body?.error || err?.message;
+      if (code === "billing_live") {
+        setError("Live billing is enabled on this account. Test Mode switching is disabled.");
+      } else if (code === "test_mode_disabled") {
+        setError("Test Mode plan switching is disabled for this account.");
+      } else if (code === "too_many_requests") {
+        setError("Please wait a moment before switching plans again.");
+      } else if (code === "invalid_plan") {
+        setError("This plan is not available for Test Mode switching.");
+      } else {
+        setError("Failed to switch plan in Test Mode.");
+      }
+    } finally {
+      setTestModeLoading(false);
     }
   };
 
@@ -925,6 +1069,15 @@ const currentPlan = plans.find((p) => canonicalPlanId(p.id) === userPlanId);
 const status = user?.billingStatus;
 const hasStripeCustomer = !!(user?.billing?.customerId || (user as any)?.stripeCustomerId);
 
+// Canonical Test Mode detection prefers effectiveBillingEnabled, with legacy fallbacks
+// handled by the shared auth helper.
+const isTestMode = isAuthUserInTestMode(user as any);
+
+const targetPlanForModal = testModeTargetPlan
+  ? plans.find((p) => canonicalPlanId(p.id) === testModeTargetPlan)
+  : null;
+const targetPlanName = targetPlanForModal?.name || testModeTargetPlan || "";
+
 const isPaidPlan = userPlanId === "starter" || userPlanId === "pro" || userPlanId === "basic";
 const isBlocked = isPaidPlan && (status === "past_due" || status === "unpaid");
 const isPaidValid = status === "active" || status === "trialing";
@@ -934,16 +1087,6 @@ const isProcessing = !!actionLoading || (userPlanId !== "free" && !!user?.pendin
 
 const statusBadge = getStatusBadge(status, user?.billing?.cancelAtPeriodEnd);
 const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
-
-  const formatLimitLabel = (limit: number, unit?: string) => {
-    if (!unit) {
-      if (!limit || limit <= 0) return "Unlimited";
-      return `${limit}`;
-    }
-    const suffix = limit === 1 ? unit : `${unit}s`;
-    if (!limit || limit <= 0) return `Unlimited ${suffix}`;
-    return `${limit} ${suffix}`;
-  };
 
   const renderEntitlementPill = (
     label: string,
@@ -1024,6 +1167,34 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           <div style={S.errorBanner}>
             <span>⚠️ {error}</span>
             <button onClick={() => setError(null)} style={S.errorClose}>×</button>
+          </div>
+        )}
+
+        {/* Test Mode Banner */}
+        {isTestMode && (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: "12px 16px",
+              borderRadius: 12,
+              border: "1px dashed rgba(59,130,246,0.7)",
+              background: "rgba(37,99,235,0.18)",
+              color: "#bfdbfe",
+              fontSize: 13,
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              {user?.platformBillingEnabled === false
+                ? "Test Mode — Platform Billing Disabled"
+                : "Test Mode — Billing Disabled For This Account"}
+            </div>
+            <div>
+              Stripe checkout and the billing portal are disabled; plan changes here simulate purchases and apply limits
+              immediately.
+            </div>
+            {testModeSummary && (
+              <div style={{ marginTop: 6, color: "#e5e7eb" }}>{testModeSummary}</div>
+            )}
           </div>
         )}
 
@@ -1510,7 +1681,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         {/* ================================================================ */}
         {activeTab === "plan" && (
           <>
-            {isBlocked && (
+            {isBlocked && !isTestMode && (
               <div style={S.warningCard}>
                 <div style={S.warningIcon}>⚠️</div>
                 <div style={S.warningContent}>
@@ -1606,100 +1777,109 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
               {/* Primary Actions */}
               <div style={S.actionButtons}>
-                {/* Free user, no billing */}
-                {userPlanId === "free" && (!status || status === "none") && !isProcessing && (
+                {isTestMode ? (
+                  <div style={{ fontSize: 13, color: "#e5e7eb" }}>
+                    Billing is disabled for this workspace. Use the "Switch Plan (Test Mode)" buttons in the comparison grid
+                    below to simulate different plans. No Stripe charges will occur.
+                  </div>
+                ) : (
                   <>
-                    <button
-                      onClick={() => startCheckout("starter_trial")}
-                      style={S.primaryBtn}
-                      disabled={!!actionLoading}
-                    >
-                      {actionLoading === "starter_trial" ? "⏳ Loading..." : "🚀 Start Free Trial"}
-                    </button>
+                    {/* Free user, no billing */}
+                    {userPlanId === "free" && (!status || status === "none") && !isProcessing && (
+                      <>
+                        <button
+                          onClick={() => startCheckout("starter_trial")}
+                          style={S.primaryBtn}
+                          disabled={!!actionLoading}
+                        >
+                          {actionLoading === "starter_trial" ? "⏳ Loading..." : "🚀 Start Free Trial"}
+                        </button>
 
-                    <button
-                      onClick={() => startCheckout("basic")}
-                      style={S.secondaryBtn}
-                      disabled={!!actionLoading}
-                    >
-                      {actionLoading === "basic" ? "⏳ Loading..." : "Choose Basic Plan"}
-                    </button>
+                        <button
+                          onClick={() => startCheckout("basic")}
+                          style={S.secondaryBtn}
+                          disabled={!!actionLoading}
+                        >
+                          {actionLoading === "basic" ? "⏳ Loading..." : "Choose Basic Plan"}
+                        </button>
 
-                    <button
-                      onClick={() => startCheckout("starter_paid")}
-                      style={S.secondaryBtn}
-                      disabled={!!actionLoading}
-                    >
-                      {actionLoading === "starter_paid" ? "⏳ Loading..." : "Choose Starter Plan"}
-                    </button>
+                        <button
+                          onClick={() => startCheckout("starter_paid")}
+                          style={S.secondaryBtn}
+                          disabled={!!actionLoading}
+                        >
+                          {actionLoading === "starter_paid" ? "⏳ Loading..." : "Choose Starter Plan"}
+                        </button>
 
-                    <button
-                      onClick={() => startCheckout("pro")}
-                      style={S.secondaryBtn}
-                      disabled={!!actionLoading}
-                    >
-                      {actionLoading === "pro" ? "⏳ Loading..." : "Choose Pro Plan"}
-                    </button>
-                  </>
-                )}
+                        <button
+                          onClick={() => startCheckout("pro")}
+                          style={S.secondaryBtn}
+                          disabled={!!actionLoading}
+                        >
+                          {actionLoading === "pro" ? "⏳ Loading..." : "Choose Pro Plan"}
+                        </button>
+                      </>
+                    )}
 
-                {/* Trialing */}
-                {status === "trialing" && (
-                  <>
-                    <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
-                      {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
-                    </button>
-                    {userPlanId === "starter" && (
-                      <button
-                        onClick={() => startCheckout("pro")}
-                        style={S.secondaryBtn}
-                        disabled={!!actionLoading}
-                      >
-                        {actionLoading === "pro" ? "⏳ Loading..." : "Upgrade to Pro"}
+                    {/* Trialing */}
+                    {status === "trialing" && (
+                      <>
+                        <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
+                          {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
+                        </button>
+                        {userPlanId === "starter" && (
+                          <button
+                            onClick={() => startCheckout("pro")}
+                            style={S.secondaryBtn}
+                            disabled={!!actionLoading}
+                          >
+                            {actionLoading === "pro" ? "⏳ Loading..." : "Upgrade to Pro"}
+                          </button>
+                        )}
+                      </>
+                    )}
+
+                    {/* Active */}
+                    {status === "active" && (
+                      <>
+                        <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
+                          {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
+                        </button>
+                        {userPlanId === "starter" && (
+                          <button
+                            onClick={() => startCheckout("pro")}
+                            style={S.secondaryBtn}
+                            disabled={!!actionLoading}
+                          >
+                            {actionLoading === "pro" ? "⏳ Loading..." : "Upgrade to Pro"}
+                          </button>
+                        )}
+                      </>
+                    )}
+
+                    {/* Canceled but still has access */}
+                    {status === "canceled" && (
+                      <>
+                        <button
+                          onClick={() => startCheckout(checkoutPlanForResubscribe(user))}
+                          style={S.primaryBtn}
+                          disabled={!!actionLoading}
+                        >
+                          {actionLoading ? "⏳ Loading..." : "🔁 Resubscribe"}
+                        </button>
+                        <button onClick={openPortal} style={S.secondaryBtn} disabled={!!actionLoading}>
+                          Manage Billing
+                        </button>
+                      </>
+                    )}
+
+                    {/* Processing */}
+                    {isProcessing && (
+                      <button onClick={loadAllData} style={S.secondaryBtn}>
+                        🔄 Refresh Status
                       </button>
                     )}
                   </>
-                )}
-
-                {/* Active */}
-                {status === "active" && (
-                  <>
-                    <button onClick={openPortal} style={S.primaryBtn} disabled={!!actionLoading}>
-                      {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage Billing"}
-                    </button>
-                    {userPlanId === "starter" && (
-                      <button
-                        onClick={() => startCheckout("pro")}
-                        style={S.secondaryBtn}
-                        disabled={!!actionLoading}
-                      >
-                        {actionLoading === "pro" ? "⏳ Loading..." : "Upgrade to Pro"}
-                      </button>
-                    )}
-                  </>
-                )}
-
-                {/* Canceled but still has access */}
-                {status === "canceled" && (
-                  <>
-                    <button
-                      onClick={() => startCheckout(checkoutPlanForResubscribe(user))}
-                      style={S.primaryBtn}
-                      disabled={!!actionLoading}
-                    >
-                      {actionLoading ? "⏳ Loading..." : "🔁 Resubscribe"}
-                    </button>
-                    <button onClick={openPortal} style={S.secondaryBtn} disabled={!!actionLoading}>
-                      Manage Billing
-                    </button>
-                  </>
-                )}
-
-                {/* Processing */}
-                {isProcessing && (
-                  <button onClick={loadAllData} style={S.secondaryBtn}>
-                    🔄 Refresh Status
-                  </button>
                 )}
               </div>
             </div>
@@ -1765,10 +1945,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           label="Advanced Permissions Mode"
                           value={!!plan.features.advancedPermissions}
                           pill
-                          subBullets={plan.features.advancedPermissions && planId !== "starter" ? [
-                            "Create/edit/delete custom roles",
-                            "Edit co-host defaults & room role controls",
-                          ] : undefined}
+                          subBullets={plan.features.advancedPermissions && planId !== "starter" ? [] : undefined}
                         />
                         {plan.editing?.access && (
                           <>
@@ -1778,7 +1955,22 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         )}
                       </ul>
                       <div style={S.planCardAction}>
-                        {isCurrent ? (
+                        {isTestMode ? (
+                          isCurrent ? (
+                            <span style={S.currentLabel}>✅ Current Plan (Test Mode)</span>
+                          ) : (
+                            <button
+                              onClick={() => openTestPlanModal(planId)}
+                              style={{
+                                ...S.planUpgradeBtn,
+                                background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                              }}
+                              disabled={testModeLoading}
+                            >
+                              {testModeLoading && testModeTargetPlan === planId ? "⏳ Switching..." : "Switch Plan (Test Mode)"}
+                            </button>
+                          )
+                        ) : isCurrent ? (
                           <span style={S.currentLabel}>✅ Current Plan</span>
                         ) : planId === "basic" && (userPlan === "free" || userPlan === "starter") ? (
                           <button
@@ -2117,17 +2309,17 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               {renderEntitlementPill(
                 "Guests",
                 formatLimitLabel(entitlements.maxGuests, "guest"),
-                entitlements.maxGuests > 0
+                entitlements.maxGuests !== 0
               )}
               {renderEntitlementPill(
                 "Destinations",
                 formatLimitLabel(entitlements.maxDestinations, "destination"),
-                entitlements.maxDestinations > 0
+                entitlements.maxDestinations !== 0
               )}
               {renderEntitlementPill(
                 "Monthly minutes",
-                formatLimitLabel(entitlements.participantMinutes, "min"),
-                entitlements.participantMinutes >= 0
+                `${formatLimitLabel(entitlements.participantMinutes, "min")}${entitlements.participantMinutes > 0 ? "/mo" : ""}`,
+                entitlements.participantMinutes !== 0
               )}
             </div>
 
@@ -2244,6 +2436,70 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         )}
       </div>
 
+      {/* Test Mode Plan Switch Modal */}
+      {testModeModalOpen && (
+        <div
+          onClick={closeTestModeModal}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 480,
+              background: "#020617",
+              border: "1px solid #1f2937",
+              borderRadius: 16,
+              padding: 20,
+              boxShadow: "0 18px 60px rgba(0,0,0,0.75)",
+            }}
+          >
+            <h3 style={{ margin: 0, marginBottom: 8, fontSize: 18 }}>Switch plan in Test Mode?</h3>
+            <p style={{ marginTop: 0, marginBottom: 12, color: "#9ca3af", fontSize: 14 }}>
+              Billing is disabled for this account. This will simulate switching to the
+              {" "}
+              <strong>{targetPlanName || "selected"}</strong>
+              {" "}
+              plan so you can test its limits. No Stripe charges or real billing changes will occur.
+            </p>
+            <p style={{ marginTop: 0, marginBottom: 16, color: "#6b7280", fontSize: 12 }}>
+              After confirming, your entitlements and usage views will refresh automatically.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                onClick={closeTestModeModal}
+                style={{
+                  ...S.secondaryBtn,
+                  padding: "10px 18px",
+                }}
+                disabled={testModeLoading}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmTestPlanChange}
+                style={{
+                  ...S.primaryBtn,
+                  padding: "10px 18px",
+                  opacity: testModeLoading ? 0.8 : 1,
+                }}
+                disabled={testModeLoading}
+              >
+                {testModeLoading ? "Switching..." : "Confirm Switch"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Manage Picker Modal */}
       {showManagePicker && (
         <div
@@ -2335,6 +2591,27 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             })()}
 
           </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            background: "rgba(22,163,74,0.98)",
+            color: "#ecfdf5",
+            padding: "10px 16px",
+            borderRadius: 999,
+            fontSize: 14,
+            fontWeight: 600,
+            boxShadow: "0 12px 30px rgba(22,163,74,0.6)",
+            zIndex: 1200,
+          }}
+        >
+          ✓ {toast}
         </div>
       )}
 

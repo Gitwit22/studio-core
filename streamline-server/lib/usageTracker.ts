@@ -2,7 +2,14 @@
  * Usage tracking and enforcement utilities
  */
 
-import type { PlanDoc, UserOveragesSetting, UsageSnapshot, GateResult, CanStartStreamParams } from "./usageTypes";
+import type {
+  PlanDoc,
+  UserOveragesSetting,
+  UsageSnapshot,
+  GateResult,
+  CanStartStreamParams,
+} from "./usageTypes";
+import { resolveMaxDestinations } from "./planLimits";
 
 /**
  * Get current month key in YYYY-MM format
@@ -26,6 +33,8 @@ export function canStartStream(params: CanStartStreamParams): GateResult {
     currentUsage,
   } = params;
 
+  const maxDestinations = resolveMaxDestinations((plan.limits as any) || {});
+
   // 1) Check if plan allows RTMP multistream
   if (wantsRTMP && !plan.features.rtmpMultistream) {
     return {
@@ -35,11 +44,11 @@ export function canStartStream(params: CanStartStreamParams): GateResult {
     };
   }
 
-  // 2) Check if destinations count exceeds plan limit
-  if (selectedDestinationsCount > plan.limits.maxDestinations) {
+  // 2) Check if destinations count exceeds plan limit (only if a hard cap is configured)
+  if (maxDestinations > 0 && selectedDestinationsCount > maxDestinations) {
     return {
       allowed: false,
-      reason: `Your plan allows ${plan.limits.maxDestinations} destination(s), but you selected ${selectedDestinationsCount}`,
+      reason: `Your plan allows ${maxDestinations} destination(s), but you selected ${selectedDestinationsCount}`,
       requiresUpgrade: true,
     };
   }

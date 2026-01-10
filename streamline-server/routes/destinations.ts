@@ -1,5 +1,7 @@
 import { Router } from "express";
+import { randomUUID } from "crypto";
 import { firestore } from "../firebaseAdmin";
+import { resolveMaxDestinations } from "../lib/planLimits";
 import { requireAuth } from "../middleware/requireAuth";
 import type { DestinationStatus, DestinationStatusReason, ApiErrorCode, DestinationItem, DestinationsGetResponse, DestinationPostResponse, ValidateRequestBody, ValidateResponse } from "../types/streaming";
 import { decryptStreamKey, encryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
@@ -23,6 +25,13 @@ function normalizeName(name?: string | null): string {
   return (name || "").trim().toLowerCase();
 }
 
+function normalizeStreamKeyInput(key?: string | null): string | null {
+  if (typeof key !== "string") return null;
+  const cleaned = key.replace(/\s+/g, "");
+  const trimmed = cleaned.trim();
+  return trimmed || null;
+}
+
 function toItem(doc: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.DocumentData>): DestinationItem {
   const data = (doc.data() as any) || {};
   const hasEnc = !!data.streamKeyEnc;
@@ -32,9 +41,13 @@ function toItem(doc: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.Docume
   const { status, statusReason } = deriveStatus(hasEnc, dec, !!data.enabled);
   return {
     id: doc.id,
+    targetId: data.targetId || doc.id,
     platform: String(data.platform || ""),
     name: data.name || undefined,
     enabled: !!data.enabled,
+    mode: data.mode || "manual",
+    persistent: typeof data.persistent === "boolean" ? data.persistent : true,
+    oauthRef: data.oauthRef || null,
     rtmpUrlBase: String(data.rtmpUrlBase || ""),
     status,
     statusReason: statusReason ?? null,
@@ -70,7 +83,8 @@ router.get("/", requireAuth, async (req: any, res) => {
     const planSnap = await firestore.collection("plans").doc(planId).get();
     if (planSnap.exists) {
       const limits = (planSnap.data() || {}).limits || {};
-      limit = Number(limits.maxDestinations || 0) || undefined;
+      const resolved = resolveMaxDestinations(limits);
+      limit = resolved > 0 ? resolved : undefined;
     }
 
     const payload: DestinationsGetResponse = { ok: true, items, usedCount: items.length, limit };
@@ -87,7 +101,8 @@ async function getPlanLimit(uid: string): Promise<number | undefined> {
   const planSnap = await firestore.collection("plans").doc(planId).get();
   if (planSnap.exists) {
     const limits = (planSnap.data() || {}).limits || {};
-    const limit = Number(limits.maxDestinations || 0) || undefined;
+    const resolved = resolveMaxDestinations(limits);
+    const limit = resolved > 0 ? resolved : undefined;
     return limit;
   }
   return undefined;
@@ -103,7 +118,7 @@ router.post("/", requireAuth, async (req: any, res) => {
   try {
     const uid = req.user?.uid;
     if (!uid) return res.status(401).json({ error: "unauthorized" as ApiErrorCode });
-    const { platform, name, rtmpUrlBase, streamKeyEnc, streamKeyPlain, enabled } = req.body || {};
+    const { platform, name, rtmpUrlBase, streamKeyEnc, streamKeyPlain, enabled, mode, persistent, oauthRef } = req.body || {};
     if (!platform || !rtmpUrlBase) {
       return res.status(400).json({ error: "missing_required_fields" as ApiErrorCode, details: "platform and rtmpUrlBase are required" });
     }
@@ -124,16 +139,17 @@ router.post("/", requireAuth, async (req: any, res) => {
     // otherwise allow callers to supply an already-encrypted payload.
     let finalEnc: any = streamKeyEnc || null;
     let plainKey: string | null = null;
-    if (typeof streamKeyPlain === "string" && streamKeyPlain.trim()) {
-      const trimmed = streamKeyPlain.trim();
-      const enc = encryptStreamKey(trimmed);
+    const normalizedPlain = normalizeStreamKeyInput(streamKeyPlain);
+    if (normalizedPlain) {
+      const enc = encryptStreamKey(normalizedPlain);
       if (!enc) {
         return res.status(500).json({ error: "server_error" as ApiErrorCode, details: "stream key encryption is not configured" });
       }
       finalEnc = enc;
-      plainKey = trimmed;
+      plainKey = normalizedPlain;
     } else if (streamKeyEnc) {
-      plainKey = decryptStreamKey(streamKeyEnc as any);
+      const dec = decryptStreamKey(streamKeyEnc as any);
+      plainKey = normalizeStreamKeyInput(dec);
     }
 
     // Duplicate rules:
@@ -154,7 +170,8 @@ router.post("/", requireAuth, async (req: any, res) => {
       }
       if (plainKey) {
         const existingDec = data?.streamKeyEnc ? decryptStreamKey(data.streamKeyEnc) : null;
-        if (existingDec && existingDec === plainKey) {
+        const existingNorm = normalizeStreamKeyInput(existingDec);
+        if (existingNorm && existingNorm === plainKey) {
           return res.status(409).json({ error: "duplicate_stream_key" as ApiErrorCode });
         }
       }
@@ -164,10 +181,14 @@ router.post("/", requireAuth, async (req: any, res) => {
     const now = Date.now();
     const docData: any = {
       platform: normalizedPlatform,
+      targetId: randomUUID(),
       name: name ? String(name) : null,
       enabled: enabled === false ? false : true,
+      mode: mode === "connected" ? "connected" : "manual",
+      persistent: typeof persistent === "boolean" ? persistent : true,
+      oauthRef: oauthRef || null,
       rtmpUrlBase: normalizedBase,
-      streamKeyEnc: finalEnc || null,
+      streamKeyEnc: (typeof persistent === "boolean" && persistent === false) ? null : (finalEnc || null),
       updatedAt: now,
     };
 
@@ -204,11 +225,13 @@ router.post("/validate", requireAuth, async (req: any, res) => {
     const normalizedBase = normalizeRtmpBase(body.rtmpUrlBase);
     let dec: string | null = null;
     let hasEnc = false;
-    if (typeof body.streamKeyPlain === "string" && body.streamKeyPlain.trim()) {
-      dec = body.streamKeyPlain.trim();
-      hasEnc = true;
+    if (typeof body.streamKeyPlain === "string") {
+      const norm = normalizeStreamKeyInput(body.streamKeyPlain);
+      dec = norm;
+      hasEnc = !!norm;
     } else if (body.streamKeyEnc) {
-      dec = decryptStreamKey(body.streamKeyEnc as any);
+      const raw = decryptStreamKey(body.streamKeyEnc as any);
+      dec = normalizeStreamKeyInput(raw);
       hasEnc = !!body.streamKeyEnc;
     }
     const { status, statusReason } = deriveStatus(hasEnc, dec, true);
@@ -257,21 +280,29 @@ router.put("/:id", requireAuth, async (req: any, res) => {
     let nextPlatform = typeof updates.platform === "string" ? String(updates.platform).toLowerCase() : current.platform;
     let nextBase = typeof updates.rtmpUrlBase === "string" ? normalizeRtmpBase(String(updates.rtmpUrlBase)) : current.rtmpUrlBase;
     const nextNameNorm = normalizeName(typeof updates.name === "string" ? updates.name : current.name);
+    const nextMode = updates.mode === "connected" ? "connected" : "manual";
+    const nextPersistent = typeof updates.persistent === "boolean" ? updates.persistent : (typeof current.persistent === "boolean" ? current.persistent : true);
 
     // Resolve encrypted key updates. If a new plaintext key is provided, encrypt
-    // and store it. If streamKeyEnc is explicitly provided, honor it. Otherwise
-    // keep the existing value.
+    // and store it unless persistent is false (session-only). If streamKeyEnc is
+    // explicitly provided, honor it. Otherwise keep the existing value.
     let nextEnc: any = current.streamKeyEnc ?? null;
     let nextPlainKey: string | null = null;
     if (typeof updates.streamKeyPlain === "string") {
-      const trimmed = updates.streamKeyPlain.trim();
-      if (trimmed) {
-        const enc = encryptStreamKey(trimmed);
+      const normalizedPlain = normalizeStreamKeyInput(updates.streamKeyPlain);
+      if (normalizedPlain) {
+        if (updates.persistent === false || current.persistent === false) {
+          // Session-only: do not persist new key
+          nextEnc = null;
+          nextPlainKey = null;
+        } else {
+        const enc = encryptStreamKey(normalizedPlain);
         if (!enc) {
           return res.status(500).json({ error: "server_error" as ApiErrorCode, details: "stream key encryption is not configured" });
         }
         nextEnc = enc;
-        nextPlainKey = trimmed;
+        nextPlainKey = normalizedPlain;
+        }
       } else {
         // Empty string clears the key
         nextEnc = null;
@@ -279,9 +310,10 @@ router.put("/:id", requireAuth, async (req: any, res) => {
       }
     } else if (Object.prototype.hasOwnProperty.call(updates, "streamKeyEnc")) {
       nextEnc = updates.streamKeyEnc ?? null;
-      nextPlainKey = updates.streamKeyEnc ? decryptStreamKey(updates.streamKeyEnc as any) : null;
+      const dec = updates.streamKeyEnc ? decryptStreamKey(updates.streamKeyEnc as any) : null;
+      nextPlainKey = normalizeStreamKeyInput(dec);
     } else if (current.streamKeyEnc) {
-      nextPlainKey = decryptStreamKey(current.streamKeyEnc);
+      nextPlainKey = normalizeStreamKeyInput(decryptStreamKey(current.streamKeyEnc));
     }
 
     // Duplicate rules on update (exclude current doc):
@@ -303,7 +335,8 @@ router.put("/:id", requireAuth, async (req: any, res) => {
       }
       if (nextPlainKey) {
         const existingDec = data?.streamKeyEnc ? decryptStreamKey(data.streamKeyEnc) : null;
-        if (existingDec && existingDec === nextPlainKey) {
+        const existingNorm = normalizeStreamKeyInput(existingDec);
+        if (existingNorm && existingNorm === nextPlainKey) {
           return res.status(409).json({ error: "duplicate_stream_key" as ApiErrorCode });
         }
       }
@@ -320,9 +353,13 @@ router.put("/:id", requireAuth, async (req: any, res) => {
 
     const docData: any = {
       platform: nextPlatform,
+      targetId: current.targetId || current.id || snap.id,
       rtmpUrlBase: nextBase,
       name: typeof updates.name === "string" ? String(updates.name) : (current.name || null),
       enabled: typeof updates.enabled === "boolean" ? !!updates.enabled : !!current.enabled,
+      mode: nextMode,
+      persistent: nextPersistent,
+      oauthRef: typeof updates.oauthRef === "string" ? updates.oauthRef : (current.oauthRef || null),
       streamKeyEnc: nextEnc,
       updatedAt: Date.now(),
     };

@@ -10,7 +10,6 @@ const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const webhook_1 = __importDefault(require("./routes/webhook"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const admin_1 = __importDefault(require("./routes/admin"));
-const adminStatus_1 = __importDefault(require("./routes/adminStatus"));
 const account_1 = __importDefault(require("./routes/account"));
 const requireAuth_1 = require("./middleware/requireAuth");
 const billing_1 = __importDefault(require("./routes/billing"));
@@ -61,7 +60,6 @@ app.use("/api/webhooks", webhook_1.default);
 app.use("/api/auth", auth_1.default);
 app.use("/api/account", account_1.default);
 // Admin routes
-app.use("/api/admin/status", adminStatus_1.default);
 app.use("/api/admin", admin_1.default);
 // Health endpoint
 app.get("/api", (req, res) => {

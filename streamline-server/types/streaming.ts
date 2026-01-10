@@ -27,9 +27,13 @@ export type ApiErrorCode =
 // Optional request/response shapes (kept minimal for flexibility)
 export interface DestinationItem {
   id: string;
+  targetId: string; // stable identifier; defaults to doc id
   platform: string; // e.g., youtube|facebook|twitch|custom
   name?: string;
   enabled: boolean;
+  mode?: "manual" | "connected"; // manual = RTMP key; connected = OAuth-backed (gated)
+  persistent?: boolean; // true = save/reuse key; false = session-only key provided at start
+  oauthRef?: string | null; // placeholder for connected targets
   rtmpUrlBase: string; // normalized: no trailing slash
   status: DestinationStatus;
   statusReason?: DestinationStatusReason | null;

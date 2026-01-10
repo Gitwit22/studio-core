@@ -3,6 +3,8 @@ import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { clampPresetForPlan, getPresetById, getUserPlanId, MEDIA_PRESETS, MediaPresetId } from "../lib/mediaPresets";
 import { getCurrentMonthKey } from "../lib/usageTracker";
+import { resolveMaxDestinations } from "../lib/planLimits";
+import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import crypto from "crypto";
 
 const router = Router();
@@ -342,8 +344,9 @@ router.get("/me", async (req, res) => {
     if (!snap.exists) return res.status(404).json({ error: "user_not_found" });
 
     const data = snap.data() || {};
-    const { mediaPrefs, planId } = await getNormalizedMediaPrefs(uid);
+    const { mediaPrefs } = await getNormalizedMediaPrefs(uid);
     const adv = await getAdvancedPermissionsEnabled(uid);
+    const entitlements = await getEffectiveEntitlements(uid);
 
     const monthKey = getCurrentMonthKey();
     const usageDocId = `${uid}_${monthKey}`;
@@ -371,11 +374,49 @@ router.get("/me", async (req, res) => {
     const effectivePermissionsMode = adv.enabled && mediaPrefs.permissionsMode === "advanced" ? "advanced" : "simple";
     const permissionsModeLockReason = adv.globalLock ? "global_lock" : (adv.enabled ? undefined : "plan");
 
+    // Canonical effective entitlements payload (features + limits) for client gating
+    let effectiveEntitlements: any = null;
+    try {
+      const plan = entitlements.plan;
+      const limits = entitlements.limits;
+      const features = entitlements.features;
+
+      const rawFeatures = (plan.raw?.features || {}) as any;
+
+      // Honor all known multistream flags so internal/admin plans that only set
+      // rtmpMultistream or multistreamEnabled still unlock social streaming.
+      const rtmpMultistreamEnabled = Boolean(
+        rawFeatures.rtmpMultistream ??
+          rawFeatures.multistream ??
+          (plan.raw as any)?.multistreamEnabled ??
+          features.multistream
+      );
+
+      effectiveEntitlements = {
+        planId: entitlements.planId,
+        planName: plan.name || entitlements.planId,
+        features: {
+          recording: !!features.recording,
+          rtmpMultistream: rtmpMultistreamEnabled,
+          dualRecording: !!(rawFeatures.dualRecording ?? rawFeatures.dual_recording),
+          watermark: !!(rawFeatures.watermarkRecordings ?? rawFeatures.watermark),
+        },
+        limits: {
+          maxDestinations: resolveMaxDestinations(limits),
+          maxGuests: Number(limits.maxGuests || 0),
+          participantMinutes: Number(limits.monthlyMinutes || limits.monthlyMinutesIncluded || 0),
+          transcodeMinutes: Number(limits.transcodeMinutes || 0),
+          maxRecordingMinutesPerClip: Number(limits.maxRecordingMinutesPerClip || 0),
+        },
+      };
+    } catch (e) {
+      console.error("[account/me] failed to compute effectiveEntitlements", e);
+    }
+
     return res.json({
       id: uid,
       email: data.email || null,
       displayName: data.displayName || null,
-      planId,
       permissionsMode: mediaPrefs.permissionsMode,
       advancedPermissions: {
         enabled: adv.enabled,
@@ -389,6 +430,13 @@ router.get("/me", async (req, res) => {
       effectivePermissionsMode,
       permissionsModeLockReason: permissionsModeLockReason || null,
       mediaPrefs,
+      connectedPlatforms: {
+        youtube: !!data.youtubeConnected,
+        facebook: !!data.facebookConnected,
+        twitch: !!data.twitchConnected,
+      },
+      planId: effectiveEntitlements?.planId ?? entitlements.planId,
+      effectiveEntitlements,
       usage: {
         minutes: {
           live: {
@@ -416,7 +464,6 @@ router.patch("/media-prefs", async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "unauthorized" });
-
     const planId = await getUserPlanId(uid);
     const body = req.body || {};
     const updates: any = {};

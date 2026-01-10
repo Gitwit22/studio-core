@@ -1,7 +1,7 @@
 // server/routes/adminStatus.ts
 import { Router } from "express";
-import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
+import { isAdmin } from "../middleware/adminAuth";
 
 
 const router = Router();
@@ -22,16 +22,9 @@ router.get("/", requireAuth, async (req, res) => {
     }
 
     console.log("[adminStatus] Checking admin for UID:", uid);
-    let snap;
-    try {
-      snap = await firestore.collection("admins").doc(uid).get();
-      console.log("[adminStatus] Admin doc exists:", snap.exists, "Data:", snap.data());
-    } catch (firestoreErr) {
-      console.error("[adminStatus] Firestore error:", firestoreErr);
-      return res.status(500).json({ error: "Firestore error", details: (firestoreErr as any)?.message });
-    }
 
-    res.json({ isAdmin: snap.exists });
+    const isAdminUser = await isAdmin(uid);
+    res.json({ isAdmin: isAdminUser });
   } catch (err) {
     console.error("[adminStatus] Unexpected error:", err?.message, err?.stack || err);
     res.status(500).json({ error: "Internal server error", message: "Failed to verify admin status" });

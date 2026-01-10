@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from "react";
-import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiStartRecording, apiStopRecording } from "../lib/api";
@@ -7,6 +6,7 @@ import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
 import StreamSetupModalV2 from "../components/StreamSetupModal";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import RoleOverlay from "../components/RoleOverlay";
 import { HostAVControls } from "../components/HostAVControls";
 import { API_BASE } from "../lib/apiBase";
@@ -376,6 +376,18 @@ function StreamEndedModal({
           >
             {ready ? "⬇️ Download Recording" : "⏳ Processing..."}
           </button>
+          {confirmMessage && (
+            <div
+              style={{
+                marginTop: 4,
+                color: "#d1d5db",
+                fontSize: 13,
+                textAlign: "center",
+              }}
+            >
+              {confirmMessage}
+            </div>
+          )}
           <button
             onClick={onExitRoom}
             style={{
@@ -423,9 +435,6 @@ function StreamEndedModal({
             </div>
           </div>
         </div>
-      )}
-      {confirmMessage && (
-        <div style={{ marginTop: 12, color: "#d1d5db", fontSize: 13 }}>{confirmMessage}</div>
       )}
     </div>
   );
@@ -512,6 +521,11 @@ export default function Room() {
   const recordingStartRef = useRef<number | null>(null);
   const lastRecordingStatusRef = useRef<RecordingStatus>("idle");
   const [recordingElapsed, setRecordingElapsed] = useState(0);
+  const [recordingPlanId, setRecordingPlanId] = useState<string | null>(null);
+  const [maxRecordingMinutesPerClip, setMaxRecordingMinutesPerClip] = useState<number | null>(null);
+  const [recordingToast, setRecordingToast] = useState<string | null>(null);
+  const lastStopWasAutoRef = useRef<boolean>(false);
+  const autoStopTriggeredRef = useRef(false);
   const [viewerCount] = useState<number>(0);
   const [elapsedTime, setElapsedTime] = useState(0);
   const streamStartTimeRef = useRef<number | null>(null);
@@ -523,8 +537,6 @@ export default function Room() {
   const [dualRecordingAllowed, setDualRecordingAllowed] = useState<boolean>(false);
   const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(false);
   const [maxGuestsAllowed, setMaxGuestsAllowed] = useState<number | null>(null);
-  // Canonical plan id state
-  const [userPlanId, setUserPlanId] = useState<PlanId>("free");
   const [destinations, setDestinations] = useState<DestinationItem[]>([]);
   const [destinationsLoading, setDestinationsLoading] = useState(false);
   const [destinationsReady, setDestinationsReady] = useState(false);
@@ -649,74 +661,7 @@ export default function Room() {
     }
   }, [isViewer, showStreamSetup]);
 
-  // Load usage/plan to gate multistream for free users (hosts only)
-  useEffect(() => {
-    const role = localStorage.getItem("sl_current_role") || userRole;
-    if (role === "guest") return;
-
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/usage/me`, { credentials: 'include' });
-        if (res.status === 401) return; // guest or expired session
-        if (!res.ok) return;
-        const data = await res.json();
-        // Canonicalize plan id
-        let planIdRaw = data?.plan?.id || data?.user?.planId || 'free';
-        let canonicalPlanId: PlanId = "free";
-        if (planIdRaw === "starter_paid" || planIdRaw === "starter_trial") {
-          canonicalPlanId = "starter";
-        } else if (isPlanId(planIdRaw)) {
-          canonicalPlanId = planIdRaw;
-        }
-        setUserPlanId(canonicalPlanId);
-        const allowed = !!(data?.plan?.features?.rtmpMultistream) || planIdRaw === 'internal_unlimited';
-        setCanMultistream(allowed);
-        const recFlag = data?.plan?.features?.recording;
-        const recordingAllowed = planIdRaw === 'internal_unlimited' ? true : (recFlag === undefined ? true : !!recFlag);
-        setRecordingEnabled(recordingAllowed);
-        const dualFlag = data?.plan?.features?.dualRecording;
-        setDualRecordingAllowed(!!dualFlag);
-        const watermarkFlag = data?.plan?.features?.watermarkRecordings || data?.plan?.features?.watermark;
-        setWatermarkEnabled(planIdRaw === 'internal_unlimited' ? true : !!watermarkFlag);
-        const maxGuestsFromPlan = data?.plan?.features?.maxGuests;
-        if (typeof maxGuestsFromPlan === "number") {
-          setMaxGuestsAllowed(maxGuestsFromPlan);
-        }
-      } catch {}
-    })();
-  }, [API_BASE, userRole]);
-
-  useEffect(() => {
-    const role = localStorage.getItem("sl_current_role") || userRole;
-    if (role === "guest") return;
-
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/usage/entitlements`, { credentials: 'include' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (typeof data?.recording === "boolean") {
-          setRecordingEnabled(data.recording);
-        }
-        if (typeof data?.dualRecording === "boolean") {
-          setDualRecordingAllowed(data.dualRecording);
-        }
-        if (typeof data?.watermark === "boolean") {
-          setWatermarkEnabled(data.watermark);
-        }
-        if (typeof data?.maxGuests === "number") {
-          setMaxGuestsAllowed(data.maxGuests);
-        }
-        if (typeof data?.rtmpMultistream === "boolean") {
-          setCanMultistream(data.rtmpMultistream);
-        }
-      } catch (e) {
-        // ignore entitlements fetch failures
-      }
-    })();
-  }, [API_BASE, userRole]);
-
-  // Load media presets + defaults (hosts only)
+  // Load effective entitlements + media presets (hosts only)
   useEffect(() => {
     const role = localStorage.getItem("sl_current_role") || userRole;
     if (role === "guest") return;
@@ -756,14 +701,47 @@ export default function Room() {
             setSelectedPresetId(prefs.defaultPresetId);
             setEffectivePresetId(prefs.defaultPresetId);
           }
+
+          const eff = (me as any)?.effectiveEntitlements;
+          if (eff && typeof eff === "object") {
+            const features = eff.features || {};
+            const limits = eff.limits || {};
+            if (typeof eff.planId === "string") {
+              setRecordingPlanId(eff.planId);
+            }
+            if (typeof features.recording === "boolean") {
+              setRecordingEnabled(features.recording);
+            }
+            if (typeof features.dualRecording === "boolean") {
+              setDualRecordingAllowed(features.dualRecording);
+            }
+            if (typeof features.watermark === "boolean") {
+              setWatermarkEnabled(features.watermark);
+            }
+            if (typeof features.rtmpMultistream === "boolean") {
+              setCanMultistream(features.rtmpMultistream);
+            }
+            if (typeof limits.maxGuests === "number") {
+              setMaxGuestsAllowed(limits.maxGuests);
+            }
+            if (typeof limits.maxRecordingMinutesPerClip === "number" && limits.maxRecordingMinutesPerClip > 0) {
+              setMaxRecordingMinutesPerClip(limits.maxRecordingMinutesPerClip);
+            } else {
+              setMaxRecordingMinutesPerClip(null);
+            }
+          }
         }
       } catch (err) {
         if (!cancelled) {
-          console.error("[Room] failed to load media presets", err);
-          setMediaPresets((prev) => prev.length ? prev : [
-            { id: "standard_720p30", label: "Standard 720p30" },
-            { id: "hd_1080p30", label: "HD Event 1080p30" },
-          ]);
+          console.error("[Room] failed to load media prefs/entitlements", err);
+          setMediaPresets((prev) =>
+            prev.length
+              ? prev
+              : [
+                  { id: "standard_720p30", label: "Standard 720p30" },
+                  { id: "hd_1080p30", label: "HD Event 1080p30" },
+                ]
+          );
         }
       }
     })();
@@ -777,7 +755,8 @@ export default function Room() {
     if (
       recordingStatus === "stopped" &&
       recordingId &&
-      lastRecordingStatusRef.current !== "stopped"
+      lastRecordingStatusRef.current !== "stopped" &&
+      streamStatus !== "live"
     ) {
       setShowStreamEndedModal(true);
     } else if (recordingStatus !== "stopped") {
@@ -785,7 +764,7 @@ export default function Room() {
     }
 
     lastRecordingStatusRef.current = recordingStatus;
-  }, [recordingStatus, recordingId]);
+  }, [recordingStatus, recordingId, streamStatus]);
 
   useEffect(() => {
     if (streamStatus === "live") {
@@ -826,6 +805,33 @@ export default function Room() {
     recordingStartRef.current = null;
     setRecordingElapsed(0);
   }, [recordingStatus]);
+
+  // Auto-stop for per-clip cap when defined on plan (best-effort client-side)
+  useEffect(() => {
+    const capMinutes = maxRecordingMinutesPerClip;
+    if (!capMinutes || recordingStatus !== "recording") return;
+
+    const capSeconds = capMinutes * 60;
+    if (recordingElapsed >= capSeconds && !autoStopTriggeredRef.current) {
+      autoStopTriggeredRef.current = true;
+      console.log("[Room] Recording cap reached; auto-stopping recording", {
+        planId: recordingPlanId,
+        capMinutes,
+      });
+      // Best-effort auto-stop; ignore errors (stopRecording handles alerts)
+      (async () => {
+        try {
+          await stopRecording();
+          setRecordingToast(
+            `Recording stopped automatically after ${capMinutes} minutes. Start a new recording to continue.`
+          );
+          window.setTimeout(() => setRecordingToast(null), 5000);
+        } catch (err) {
+          console.error("[Room] auto-stop recording failed", err);
+        }
+      })();
+    }
+  }, [recordingElapsed, recordingStatus, maxRecordingMinutesPerClip, recordingPlanId]);
 
   // Load destinations (soft gate) - hosts only
   useEffect(() => {
@@ -993,6 +999,8 @@ export default function Room() {
 
     console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout, "mode:", requestedMode);
 
+    autoStopTriggeredRef.current = false;
+
     // Show a quick 3-2-1 countdown before kicking off the recording
     const sequence = ["3", "2", "1"];
     const stepMs = 900;
@@ -1066,6 +1074,8 @@ export default function Room() {
       setRecordingStatus("stopped");
       setRecordingId(id);
       recordingRef.current = null; // allow subsequent recordings after stop
+      recordingStartRef.current = null;
+      autoStopTriggeredRef.current = false;
     } catch (e) {
       console.error("❌ Failed to stop recording:", e);
       setRecordingStatus("error");
@@ -1095,13 +1105,24 @@ export default function Room() {
     handleLeftRoom();
   };
 
+  type EffectiveDestinationInput = {
+    platform: "youtube" | "facebook" | "twitch" | "custom";
+    source: "main" | "session";
+    streamKey?: string;
+    destinationId?: string;
+    targetId?: string;
+    rtmpUrlBase?: string;
+  };
+
   const handleStartMultistream = async (keys: {
     youtubeKey?: string;
     facebookKey?: string;
     twitchKey?: string;
     record?: boolean;
     layout?: "speaker" | "grid";
-    destinationIds?: string[];
+    enabledTargetIds?: string[];
+    sessionKeys?: Record<string, { rtmpUrlBase?: string; streamKey?: string }>;
+    destinations?: EffectiveDestinationInput[];
   }) => {
     if (isViewer) {
       alert("View-only mode: publishing controls are disabled.");
@@ -1118,10 +1139,64 @@ export default function Room() {
       return;
     }
     console.log("🎬 Room.tsx - handleStartMultistream called");
-    const destIds = Array.isArray(keys.destinationIds)
-      ? keys.destinationIds.filter((id) => !!id)
+    const destinationInputs = Array.isArray(keys.destinations) ? keys.destinations : [];
+    let youtubeKey = keys.youtubeKey;
+    let facebookKey = keys.facebookKey;
+    let twitchKey = keys.twitchKey;
+    let enabledTargetIds = Array.isArray(keys.enabledTargetIds) ? keys.enabledTargetIds.filter((id) => !!id) : [];
+    let sessionKeyMap: Record<string, { rtmpUrlBase?: string; streamKey?: string }> = keys.sessionKeys ? { ...keys.sessionKeys } : {};
+
+    if (destinationInputs.length) {
+      const fromDestinations: string[] = [];
+      destinationInputs.forEach((item) => {
+        const trimmed = (item.streamKey || "").trim();
+        if (item.source === "main" && item.destinationId) {
+          fromDestinations.push(item.destinationId);
+        }
+        if (item.source === "session" && trimmed) {
+          if (item.destinationId || item.targetId) {
+            const keyId = item.targetId || item.destinationId!;
+            sessionKeyMap[keyId] = { rtmpUrlBase: item.rtmpUrlBase, streamKey: trimmed };
+          } else {
+            if (item.platform === "youtube") youtubeKey = trimmed;
+            if (item.platform === "facebook") facebookKey = trimmed;
+            if (item.platform === "twitch") twitchKey = trimmed;
+            if (item.platform === "custom") {
+              let base = item.rtmpUrlBase;
+              let key = trimmed;
+              if (!base && trimmed.startsWith("rtmp")) {
+                const idx = trimmed.lastIndexOf("/");
+                if (idx > 8) {
+                  const maybeBase = trimmed.slice(0, idx);
+                  const maybeKey = trimmed.slice(idx + 1);
+                  if (maybeBase && maybeKey) {
+                    base = maybeBase;
+                    key = maybeKey;
+                  }
+                }
+              }
+              const keyId = `custom-${Object.keys(sessionKeyMap).length + 1}`;
+              sessionKeyMap[keyId] = { rtmpUrlBase: base, streamKey: key };
+            }
+          }
+        }
+      });
+      if (fromDestinations.length) {
+        const merged = [...enabledTargetIds];
+        fromDestinations.forEach((id) => {
+          if (!merged.includes(id)) merged.push(id);
+        });
+        enabledTargetIds = merged;
+      }
+    }
+
+    const destIds = Array.isArray(enabledTargetIds)
+      ? enabledTargetIds.filter((id) => !!id)
       : [];
-    if (!keys.youtubeKey && !keys.facebookKey && !keys.twitchKey && destIds.length === 0) {
+    const hasSessionKeys = Object.values(sessionKeyMap || {}).some((entry) => !!entry?.streamKey);
+    const hasDirectKeys = !!(youtubeKey || facebookKey || twitchKey);
+
+    if (!hasDirectKeys && !hasSessionKeys && destIds.length === 0) {
       alert("Select at least one saved destination or enter a stream key.");
       return;
     }
@@ -1142,10 +1217,11 @@ export default function Room() {
       try {
         setStreamStatus("starting");
         const requestBody = {
-          youtubeStreamKey: keys.youtubeKey,
-          facebookStreamKey: keys.facebookKey,
-          twitchStreamKey: keys.twitchKey,
-          destinationIds: destIds.length ? destIds : undefined,
+          youtubeStreamKey: youtubeKey,
+          facebookStreamKey: facebookKey,
+          twitchStreamKey: twitchKey,
+          enabledTargetIds: destIds.length ? destIds : undefined,
+          sessionKeys: hasSessionKeys ? sessionKeyMap : undefined,
           userId: getOrCreateUid(),
           presetId: selectedPresetId,
         };
@@ -1713,37 +1789,69 @@ export default function Room() {
         </div>
       )}
 
-      <StreamSetupModalV2
-        open={showStreamSetup && !isViewer}
-        onClose={() => setShowStreamSetup(false)}
-        roomName={roomName ?? ""}
-        presetOptions={mediaPresets}
-        selectedPresetId={selectedPresetId}
-        onPresetChange={handlePresetChange}
-        defaultLayout={defaultLayoutPref}
-        defaultRecordingMode={defaultRecordingModePref}
-        presetClamped={presetClamped}
-        streamStatus={streamStatus}
-        onStartStream={handleStartMultistream}
-        onStopStream={handleStopMultistream}
-        recordingStatus={recordingStatus}
-        onStartRecording={startRecording}
-        onStopRecording={stopRecording}
-        recordingEnabled={recordingEnabled}
-        multistreamAllowed={canMultistream}
-        dualRecordingAllowed={dualRecordingAllowed}
-        maxGuests={maxGuestsAllowed === null ? undefined : maxGuestsAllowed || undefined}
-        recordingElapsedSeconds={recordingElapsed}
-        savedDestinations={destinations
-          .filter((d) => d.enabled && d.status === "connected" && d.hasKey)
-          .map((d) => ({
-            id: d.id,
-            label: d.name ? `${d.platform} – ${d.name}` : d.platform,
-            status: d.status,
-            hasKey: d.hasKey,
-            keyPreview: d.keyPreview ?? null,
-          }))}
-      />
+      <ErrorBoundary
+        fallback={
+          <div
+            style={{
+              position: "fixed",
+              bottom: "80px",
+              right: "20px",
+              zIndex: 60,
+              background: "rgba(15,23,42,0.98)",
+              borderRadius: "0.75rem",
+              border: "1px solid rgba(248,113,113,0.6)",
+              padding: "0.9rem 1rem",
+              color: "#fee2e2",
+              maxWidth: "360px",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: "0.25rem", fontSize: "0.85rem" }}>
+              Stream setup crashed.
+            </div>
+            <div style={{ fontSize: "0.75rem", opacity: 0.9 }}>
+              Try closing this panel and reopening it. If it keeps happening, grab a screenshot of the browser console
+              and send it to support.
+            </div>
+          </div>
+        }
+      >
+        <StreamSetupModalV2
+          open={showStreamSetup && !isViewer}
+          onClose={() => setShowStreamSetup(false)}
+          roomName={roomName ?? ""}
+          selectedPresetId={selectedPresetId}
+          defaultLayout={defaultLayoutPref}
+          defaultRecordingMode={defaultRecordingModePref}
+          streamStatus={streamStatus}
+          onStartStream={handleStartMultistream}
+          onStopStream={handleStopMultistream}
+          recordingStatus={recordingStatus}
+          onStartRecording={startRecording}
+          onStopRecording={stopRecording}
+          recordingEnabled={recordingEnabled}
+          multistreamAllowed={canMultistream}
+          dualRecordingAllowed={dualRecordingAllowed}
+          maxGuests={maxGuestsAllowed === null ? undefined : maxGuestsAllowed || undefined}
+          planId={recordingPlanId || undefined}
+          recordingMaxMinutes={maxRecordingMinutesPerClip || undefined}
+          recordingElapsedSeconds={recordingElapsed}
+          savedDestinations={destinations
+            .filter((d) => d.enabled && (d.status === "connected" || d.persistent === false))
+            .map((d) => ({
+              id: d.id,
+              targetId: d.targetId || d.id,
+              platform: d.platform,
+              label: d.name ? `${d.platform} – ${d.name}` : d.platform,
+              status: d.status,
+              hasKey: d.hasKey,
+              keyPreview: d.keyPreview ?? null,
+              persistent: d.persistent,
+              rtmpUrlBase: d.rtmpUrlBase,
+              mode: d.mode,
+            }))}
+        />
+      </ErrorBoundary>
 
       {showStreamEndedModal && recordingId && (
         <StreamEndedModal
@@ -1752,6 +1860,28 @@ export default function Room() {
           onExitRoom={() => nav('/join', { replace: true })}
           onStayInRoom={handleStayInRoom}
         />
+      )}
+
+      {/* Recording cap toast (Free plan) */}
+      {recordingToast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            background: "rgba(24,24,27,0.96)",
+            color: "#f9fafb",
+            padding: "10px 16px",
+            borderRadius: 999,
+            fontSize: 13,
+            fontWeight: 500,
+            boxShadow: "0 14px 40px rgba(0,0,0,0.7)",
+            border: "1px solid rgba(248,250,252,0.15)",
+            zIndex: 1200,
+          }}
+        >
+          ⏱️ {recordingToast}
+        </div>
       )}
 
       <style>{`

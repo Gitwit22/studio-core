@@ -32,6 +32,7 @@ import {
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 
 const router = Router();
 
@@ -312,6 +313,251 @@ async function getSignedDownloadUrl(key: string, expiresIn: number = 300): Promi
 }
 
 // =============================================================================
+// Internal helper: stop a recording and update usage/locks
+// =============================================================================
+
+async function stopRecordingInternal(options: {
+  recordingId: string;
+  uid?: string | null;
+  reason: "manual" | "auto_cap";
+  enforceOwnership?: boolean;
+}): Promise<void> {
+  const { recordingId, uid: explicitUid, reason, enforceOwnership } = options;
+
+  const recordingRef = firestore.collection("recordings").doc(recordingId);
+  const snap = await recordingRef.get();
+
+  if (!snap.exists) {
+    console.warn("[recordings/stopInternal] Recording not found", { recordingId });
+    return;
+  }
+
+  const data = snap.data() || {};
+
+  // Resolve effective user id from explicit uid or recording owner
+  const ownerUid: string | null = typeof data.userId === "string" ? data.userId : null;
+  const uid = explicitUid || ownerUid;
+
+  if (!uid) {
+    console.warn("[recordings/stopInternal] No uid available for recording", { recordingId });
+    return;
+  }
+
+  if (enforceOwnership && ownerUid && ownerUid !== uid) {
+    throw new Error("forbidden");
+  }
+
+  const now = new Date();
+  const startedAt: Date | null = data.startedAt?.toDate?.()
+    ? data.startedAt.toDate()
+    : data.startedAt || null;
+  const durationMs = startedAt ? Math.max(0, now.getTime() - startedAt.getTime()) : 0;
+  const durationSeconds = Math.floor(durationMs / 1000);
+  const billedMinutes = durationMs > 0 ? Math.max(1, Math.ceil(durationMs / 60000)) : 0;
+
+  // Stop LiveKit egress using stored egressId (best-effort)
+  const egressId = data.egressId;
+  if (egressId) {
+    try {
+      const livekitCfg = getLiveKitConfig();
+      if (livekitCfg.isConfigured) {
+        const { EgressClient } = await getLiveKitSdk();
+        const egressClient = new EgressClient(
+          livekitCfg.url!,
+          livekitCfg.apiKey!,
+          livekitCfg.apiSecret!
+        );
+        await egressClient.stopEgress(egressId);
+        console.log(`[recordings/stopInternal] Stopped egress: ${egressId}`);
+      }
+    } catch (stopErr: any) {
+      console.warn("[recordings/stopInternal] stopEgress warning:", stopErr?.message);
+    }
+  } else {
+    console.warn("[recordings/stopInternal] No egressId to stop for:", recordingId);
+  }
+
+  // Update recording doc and usage in a single transaction (idempotent)
+  let usageCountedAlready = false;
+
+  const toNumber = (value: any) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : 0;
+  };
+
+  const usageType = typeof data.usageType === "string" ? data.usageType : "recording_only";
+
+  await firestore.runTransaction(async (tx) => {
+    const recSnap = await tx.get(recordingRef);
+    if (!recSnap.exists) throw new Error("recording_missing");
+    const recData = recSnap.data() || {};
+
+    const monthKey = getCurrentMonthKey();
+    const usageRef = firestore.collection("usageMonthly").doc(`${uid}_${monthKey}`);
+    const usageSnap = await tx.get(usageRef);
+    const existingUsage = usageSnap.exists ? (usageSnap.data() as any) : {};
+    const usage = existingUsage.usage || {};
+    const ytd = existingUsage.ytd || {};
+    const minutes = usage.minutes || {};
+    const ytdMinutes = ytd.minutes || {};
+
+    const liveCurrent = toNumber(minutes.live?.currentPeriod);
+    const liveLifetime = toNumber(minutes.live?.lifetime ?? ytdMinutes.live?.lifetime);
+    const recCurrentPrev = toNumber(minutes.recording?.currentPeriod);
+    const recLifetimePrev = toNumber(minutes.recording?.lifetime ?? ytdMinutes.recording?.lifetime);
+    const totalCurrentPrev = toNumber(minutes.total?.currentPeriod);
+    const totalLifetimePrev = toNumber(minutes.total?.lifetime ?? ytdMinutes.total?.lifetime);
+
+    const byUsageTypePrev = minutes.byUsageType || {};
+    const byUsageTypeYtd = ytdMinutes.byUsageType || {};
+    const typePrev = byUsageTypePrev[usageType] || {};
+    const typeLifetimePrev = toNumber(typePrev.lifetime ?? byUsageTypeYtd[usageType]?.lifetime);
+
+    if (recData.usageCounted === true) {
+      usageCountedAlready = true;
+      tx.update(recordingRef, {
+        status: "processing",
+        stoppedAt: recData.stoppedAt || now,
+        endedAt: recData.endedAt || now,
+        duration: recData.duration ?? durationSeconds,
+        durationSeconds: recData.durationSeconds ?? durationSeconds,
+        durationMs: recData.durationMs ?? durationMs,
+        billedMinutes: recData.billedMinutes ?? billedMinutes,
+        stopReason: recData.stopReason || reason,
+        updatedAt: now,
+        downloadReady: false,
+        downloadPath: recData.objectKey || recData.downloadPath || null,
+      });
+      return;
+    }
+
+    const billed = billedMinutes;
+
+    const nextMinutes = {
+      ...minutes,
+      live: {
+        currentPeriod: liveCurrent,
+        lifetime: liveLifetime,
+      },
+      recording: {
+        currentPeriod: recCurrentPrev + billed,
+        lifetime: recLifetimePrev + billed,
+      },
+      total: {
+        currentPeriod: totalCurrentPrev + billed,
+        lifetime: totalLifetimePrev + billed,
+      },
+      byUsageType: {
+        ...byUsageTypePrev,
+        [usageType]: {
+          currentPeriod: toNumber(typePrev.currentPeriod) + billed,
+          lifetime: typeLifetimePrev + billed,
+        },
+      },
+    };
+
+    const nextYtdMinutes = {
+      ...ytdMinutes,
+      live: { lifetime: liveLifetime },
+      recording: { lifetime: recLifetimePrev + billed },
+      total: { lifetime: totalLifetimePrev + billed },
+      byUsageType: {
+        ...byUsageTypeYtd,
+        [usageType]: { lifetime: typeLifetimePrev + billed },
+      },
+    };
+
+    tx.update(recordingRef, {
+      status: "processing",
+      stoppedAt: now,
+      endedAt: now,
+      duration: durationSeconds,
+      durationSeconds,
+      durationMs,
+      billedMinutes: billed,
+      usageCounted: true,
+      usageCountedAt: now,
+      stopReason: recData.stopReason || reason,
+      updatedAt: now,
+      downloadReady: false,
+      downloadPath: data.objectKey || null,
+    });
+
+    tx.set(
+      usageRef,
+      {
+        uid,
+        monthKey,
+        usage: {
+          ...usage,
+          minutes: nextMinutes,
+        },
+        ytd: {
+          ...ytd,
+          minutes: nextYtdMinutes,
+        },
+        createdAt: existingUsage.createdAt || now,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+  });
+
+  console.log(`[recordings/stopInternal] Recording ${recordingId} now processing`);
+
+  // Release active recording lock for this (user, room)
+  try {
+    const roomName = typeof data.roomName === "string" ? data.roomName : null;
+    if (roomName && uid) {
+      const activeKey = `${uid}_${roomName}`;
+      const activeRef = firestore.collection("activeRecordings").doc(activeKey);
+      await activeRef.set(
+        {
+          status: "stopped",
+          stoppedAt: now,
+          endedAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    }
+  } catch (lockErr: any) {
+    console.warn("[recordings/stopInternal] failed to update activeRecordings lock", lockErr?.message);
+  }
+
+  // Best-effort post-stop verification in case webhooks are delayed or dropped
+  const objectKey = data.objectKey as string | undefined;
+  if (objectKey) {
+    setTimeout(async () => {
+      try {
+        const size = await r2HeadObjectSize(objectKey);
+        if (size > 0) {
+          await recordingRef.update({
+            status: "ready",
+            downloadReady: true,
+            readyAt: new Date(),
+            fileSize: size,
+            updatedAt: new Date(),
+          });
+          console.log(
+            `[recordings/stopInternal] ✅ File confirmed via head-check: ${objectKey} (${size} bytes)`
+          );
+        } else {
+          console.warn(
+            `[recordings/stopInternal] head-check found no file yet for ${objectKey}`
+          );
+        }
+      } catch (checkErr: any) {
+        console.warn(
+          `[recordings/stopInternal] head-check error for ${objectKey}:`,
+          checkErr?.message
+        );
+      }
+    }, 4000);
+  }
+}
+
+// =============================================================================
 // POST /start - Start Recording
 // =============================================================================
 
@@ -351,15 +597,15 @@ router.post("/start", requireAuth, async (req, res) => {
     const layout = rawLayout === "speaker" ? "speaker" : "grid";
     const mode = rawMode === "dual" ? "dual" : "cloud";
 
-    // Plan + features
-    const planId = await getUserPlanId(uid);
-    const planSnap = await firestore.collection("plans").doc(planId).get();
-    const plan = planSnap.exists ? (planSnap.data() as any) : {};
-    const dualAllowed = plan?.features?.dualRecording || plan?.features?.dual_recording || false;
+    // Plan + features (canonical limits via EffectiveEntitlements)
+    const entitlements = await getEffectiveEntitlements(uid);
+    const planId = entitlements.planId;
+    const plan = entitlements.plan.raw || {};
+    const dualAllowed = !!(plan?.features?.dualRecording || plan?.features?.dual_recording);
     const allowHigherRecordingThanStream = !!(
-      plan?.features?.allowHigherRecordingThanStream ||
-      plan?.features?.allow_higher_recording_than_stream
+      plan?.features?.allowHigherRecordingThanStream || plan?.features?.allow_higher_recording_than_stream
     );
+    const maxRecordingMinutesPerClip = Number(entitlements.limits.maxRecordingMinutesPerClip || 0);
 
     // Plan gate for dual recording (feature: dualRecording)
     if (mode === "dual" && !dualAllowed) {
@@ -385,7 +631,6 @@ router.post("/start", requireAuth, async (req, res) => {
       rawUsageType === "live" || rawUsageType === "recording_only" || rawUsageType === "live+recording"
         ? rawUsageType
         : null;
-
     const usageType = requestedUsageType || (hasActiveStream ? "live+recording" : "recording_only");
 
     // Clamp preset to plan and (optionally) active stream preset
@@ -415,6 +660,15 @@ router.post("/start", requireAuth, async (req, res) => {
     const recordingId = firestore.collection("recordings").doc().id;
     const recordingRef = firestore.collection("recordings").doc(recordingId);
 
+    const autoStopAt =
+      maxRecordingMinutesPerClip > 0
+        ? new Date(now.getTime() + maxRecordingMinutesPerClip * 60_000)
+        : null;
+
+    // activeRecordings lock for (uid, room)
+    const activeKey = `${uid}_${roomName}`;
+    const activeRef = firestore.collection("activeRecordings").doc(activeKey);
+
     // =========================================================================
     // STEP 1: Create Firestore doc IMMEDIATELY with status=starting
     // =========================================================================
@@ -441,7 +695,7 @@ router.post("/start", requireAuth, async (req, res) => {
       duration: 0,
       viewerCount: 0,
       peakViewers: 0,
-      paywallState: "none", // Future hook
+      paywallState: "none",
       lastDownloadRequestedAt: null,
       downloadConfirmedAt: null,
       downloadIssueReportedAt: null,
@@ -453,10 +707,32 @@ router.post("/start", requireAuth, async (req, res) => {
       presetClampedToStream: clampedToStream,
       streamPresetId: activeStreamPresetId,
       usageType,
+      maxRecordingMinutesPerClip,
+      autoStopAt,
+      stopReason: null,
+      usageCounted: false,
+      usageCountedAt: null,
     };
 
     await recordingRef.set(initialDoc);
     console.log(`[recordings/start] Created doc ${recordingId} status=starting`);
+
+    // Initialize lock doc (best-effort)
+    try {
+      await activeRef.set(
+        {
+          uid,
+          roomName,
+          recordingId,
+          status: "starting",
+          createdAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.warn("[recordings/start] failed to create activeRecordings lock", (e as any)?.message);
+    }
 
     if (hasActiveStream) {
       try {
@@ -475,36 +751,19 @@ router.post("/start", requireAuth, async (req, res) => {
     let egressId: string | null = null;
 
     try {
-      const { EgressClient, EncodedFileOutput, EncodedFileType, S3Upload } =
-        await getLiveKitSdk();
+      const { EgressClient, EncodedFileOutput, EncodedFileType, S3Upload } = await getLiveKitSdk();
 
-      const egressClient = new EgressClient(
-        livekitCfg.url!,
-        livekitCfg.apiKey!,
-        livekitCfg.apiSecret!
-      );
+      const egressClient = new EgressClient(livekitCfg.url!, livekitCfg.apiKey!, livekitCfg.apiSecret!);
 
-      // =======================================================================
-      // S3Upload Configuration for Cloudflare R2
-      // 
-      // COMMON 400 ERROR CAUSES:
-      // 1. Wrong field names (accessKey vs accessKeyId)
-      // 2. Missing region (must be "auto" for R2)
-      // 3. Missing forcePathStyle: true
-      // 4. Wrong endpoint format (must be https://<acct>.r2.cloudflarestorage.com)
-      // 5. R2 API Token lacks "Edit" permission for bucket
-      // 6. objectKey starts with "/" (should be "recordings/..." not "/recordings/...")
-      // =======================================================================
       const s3UploadConfig = {
         bucket: r2Cfg.bucket,
         endpoint: r2Cfg.endpoint,
-        region: "auto",                    // REQUIRED for R2 - not "us-east-1"
-        accessKey: r2Cfg.accessKeyId,      // LiveKit SDK field name is "accessKey"
-        secret: r2Cfg.secretAccessKey,     // LiveKit SDK field name is "secret"
-        forcePathStyle: true,              // REQUIRED for R2
+        region: "auto",
+        accessKey: r2Cfg.accessKeyId,
+        secret: r2Cfg.secretAccessKey,
+        forcePathStyle: true,
       };
 
-      // Validate config before calling LiveKit
       const configErrors: string[] = [];
       if (!s3UploadConfig.bucket) configErrors.push("bucket is empty");
       if (!s3UploadConfig.endpoint) configErrors.push("endpoint is empty");
@@ -518,7 +777,7 @@ router.post("/start", requireAuth, async (req, res) => {
       }
 
       if (configErrors.length > 0) {
-        console.error("[recordings/start] ❌ S3 config errors:", configErrors);
+        console.error("[recordings/start] S3 config errors:", configErrors);
         await recordingRef.update({
           status: "failed",
           errorMessage: `S3 config errors: ${configErrors.join(", ")}`,
@@ -531,28 +790,24 @@ router.post("/start", requireAuth, async (req, res) => {
         });
       }
 
-      // Log config (values hidden for secrets)
       console.log("[recordings/start] S3Upload config:", {
         bucket: s3UploadConfig.bucket,
         endpoint: s3UploadConfig.endpoint,
         region: s3UploadConfig.region,
         forcePathStyle: s3UploadConfig.forcePathStyle,
-        accessKey: "✓ set",
-        secret: "✓ set",
+        accessKey: "set",
+        secret: "set",
         objectKey: objectKey,
       });
 
       const s3Upload = new S3Upload(s3UploadConfig);
 
-      // IMPORTANT: attach destination via oneof output { case: "s3", value }
       const fileOutput = new EncodedFileOutput({
         filepath: objectKey,
         fileType: EncodedFileType.MP4,
         output: { case: "s3", value: s3Upload },
       });
 
-      // Store the EXACT objectKey we're telling egress to use
-      // This must match what we HEAD check later
       console.log("[recordings/start] File output config:", {
         filepath: objectKey,
         fileType: "MP4",
@@ -561,7 +816,6 @@ router.post("/start", requireAuth, async (req, res) => {
       });
 
       const compositeOpts = {
-        // CRITICAL: Must be exactly "speaker" or "grid" - validated above
         layout: layout,
         audioOnly: false,
         videoOnly: false,
@@ -573,14 +827,10 @@ router.post("/start", requireAuth, async (req, res) => {
         layout: compositeOpts.layout,
       });
 
-      // =======================================================================
-      // EGRESS CALL - SDK 2.6.1 accepts direct EncodedFileOutput; ensure output.oneof is set
-      // =======================================================================
-      const egressResp = await egressClient.startRoomCompositeEgress(
-        roomName,
-        fileOutput,
-        { ...compositeOpts, encodingOptions }
-      );
+      const egressResp = await egressClient.startRoomCompositeEgress(roomName, fileOutput, {
+        ...compositeOpts,
+        encodingOptions,
+      });
 
       egressId = (egressResp as any)?.egressId || null;
 
@@ -589,9 +839,7 @@ router.post("/start", requireAuth, async (req, res) => {
       }
 
       console.log(`[recordings/start] Egress started: ${egressId}`);
-
     } catch (egressError: any) {
-      // Egress failed - update doc to failed status
       console.error("[recordings/start] Egress start failed:", {
         message: egressError?.message,
         code: egressError?.code,
@@ -626,6 +874,19 @@ router.post("/start", requireAuth, async (req, res) => {
       updatedAt: new Date(),
     });
 
+    // Mark lock as fully active
+    try {
+      await activeRef.set(
+        {
+          status: "recording",
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.warn("[recordings/start] failed to update activeRecordings lock", (e as any)?.message);
+    }
+
     console.log(`[recordings/start] Complete in ${Date.now() - startTime}ms`);
 
     const finalSnap = await recordingRef.get();
@@ -649,6 +910,50 @@ router.post("/start", requireAuth, async (req, res) => {
       error: "Failed to start recording",
       details: err?.message,
     });
+  }
+});
+
+// =============================================================================
+// POST /sweep - Stop overdue recordings based on autoStopAt
+// Intended for a scheduled job / admin trigger
+// =============================================================================
+
+router.post("/sweep", async (_req, res) => {
+  const now = new Date();
+  console.log("[recordings/sweep] Starting sweep at", now.toISOString());
+
+  try {
+    const snap = await firestore
+      .collection("recordings")
+      .where("status", "==", "recording")
+      .where("autoStopAt", "<=", now)
+      .limit(50)
+      .get();
+
+    if (snap.empty) {
+      console.log("[recordings/sweep] No overdue recordings found");
+      return res.json({ ok: true, processed: 0 });
+    }
+
+    const docs = snap.docs;
+    console.log(`[recordings/sweep] Found ${docs.length} overdue recordings`);
+
+    for (const doc of docs) {
+      const recordingId = doc.id;
+      try {
+        await stopRecordingInternal({ recordingId, reason: "auto_cap" });
+      } catch (err: any) {
+        console.error("[recordings/sweep] Failed to stop recording", {
+          recordingId,
+          error: err?.message || String(err),
+        });
+      }
+    }
+
+    return res.json({ ok: true, processed: docs.length });
+  } catch (err: any) {
+    console.error("[recordings/sweep] Error during sweep", err);
+    return res.status(500).json({ error: "sweep_failed", details: err?.message || String(err) });
   }
 });
 
@@ -841,6 +1146,26 @@ router.post("/stop", requireAuth, async (req, res) => {
 
     console.log(`[recordings/stop] Recording ${recordingId} now processing`);
 
+    // Release active recording lock for this (user, room)
+    try {
+      const roomName = typeof data.roomName === "string" ? data.roomName : null;
+      if (roomName) {
+        const activeKey = `${uid}_${roomName}`;
+        const activeRef = firestore.collection("activeRecordings").doc(activeKey);
+        await activeRef.set(
+          {
+            status: "stopped",
+            stoppedAt: now,
+            endedAt: now,
+            updatedAt: now,
+          },
+          { merge: true }
+        );
+      }
+    } catch (lockErr: any) {
+      console.warn("[recordings/stop] failed to update activeRecordings lock", lockErr?.message);
+    }
+
     // Best-effort post-stop verification in case webhooks are delayed or dropped
     const objectKey = data.objectKey as string | undefined;
     if (objectKey) {
@@ -894,6 +1219,8 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
 
     // Per spec: Query recordings where userId == uid AND status == "ready"
     // Order by createdAt descending, limit 1
+    // NOTE: This requires a Firestore composite index on the recordings collection:
+    // fields: status ASC, userId ASC, createdAt DESC
     const snap = await firestore
       .collection("recordings")
       .where("userId", "==", uid)
