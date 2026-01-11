@@ -570,29 +570,45 @@ export default function Room() {
     const fetchToken = async () => {
       try {
         console.log(`[Room] Fetching room token (role=${role || "host"})...`);
-        const endpoint = isGuest ? `${API_BASE}/api/roomToken/guest` : `${API_BASE}/api/roomToken`;
-        const payload: any = {
-          roomName,
-          identity: displayName,
-        };
-        if (isGuest) {
-          payload.displayName = displayName;
-          payload.guestId = getOrCreateUid();
-        } else {
-          payload.uid = getOrCreateUid();
-          // Moderator tokens require admin grants; signal intent so the server can downgrade safely
-          if (role === "moderator") {
-            payload.roomAdmin = true;
+        const buildRoomTokenRequest = (mode: "auth" | "guest") => {
+          const endpoint = mode === "guest" ? `${API_BASE}/api/roomToken/guest` : `${API_BASE}/api/roomToken`;
+          const payload: any = { roomName, identity: displayName };
+
+          if (mode === "guest") {
+            payload.displayName = displayName;
+            payload.guestId = getOrCreateUid();
+          } else {
+            payload.uid = getOrCreateUid();
+            // Pass invite role through so cohost/moderator links work for logged-in users.
+            // Never send "host" (localStorage can be spoofed; host is derived separately).
+            if (role === "participant" || role === "cohost" || role === "moderator") {
+              payload.role = role;
+            }
           }
+
+          return { endpoint, payload };
+        };
+
+        const tryFetch = async (mode: "auth" | "guest") => {
+          const { endpoint, payload } = buildRoomTokenRequest(mode);
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            credentials: "include",
+          });
+          return { res, mode };
+        };
+
+        // Primary: if role is not guest, try auth token first. If it fails due to auth, fall back to guest token.
+        let attempt = await tryFetch(isGuest ? "guest" : "auth");
+        if (!attempt.res.ok && !isGuest && (attempt.res.status === 401 || attempt.res.status === 403)) {
+          console.warn("[Room] auth roomToken denied; falling back to guest token", attempt.res.status);
+          attempt = await tryFetch("guest");
         }
 
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          credentials: 'include',
-        });
-        console.log("[Room] roomToken status:", res.status);
+        const res = attempt.res;
+        console.log("[Room] roomToken status:", res.status, "mode:", attempt.mode);
 
         let data: any = null;
         let rawText: string | null = null;
@@ -640,7 +656,10 @@ export default function Room() {
             setUserRole("viewer");
           }
         }
-        if (typeof data?.role === "string") {
+        if (typeof data?.effectiveRoleKey === "string") {
+          setUserRole(data.effectiveRoleKey);
+          if (data.effectiveRoleKey === "viewer") setIsHost(false);
+        } else if (typeof data?.role === "string") {
           setUserRole(data.role);
           if (data.role === "viewer") setIsHost(false);
         }

@@ -394,11 +394,16 @@ router.post("/test/change-plan", requireAuth, async (req, res) => {
         .json({ success: false, error: "billing_live" });
     }
 
-    // Optional safety rail: in production, require explicit tester flag
+    const platformDisabled = account.platformBillingEnabled === false;
+    const userDisabled = account.billingEnabled === false;
+
+    // Optional safety rail:
+    // - If billing is disabled platform-wide, treat it as an intentional test/staging mode and allow.
+    // - If only the user is in test mode while platform billing is enabled, require explicit tester flag in production.
     const isProd = process.env.NODE_ENV === "production";
     const raw = account.rawUser || {};
     const isTester = !!(raw.tester || raw.isTester);
-    if (isProd && !isTester) {
+    if (isProd && !platformDisabled && userDisabled && !isTester) {
       return res
         .status(403)
         .json({ success: false, error: "test_mode_disabled" });

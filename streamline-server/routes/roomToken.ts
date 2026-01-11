@@ -3,6 +3,7 @@ import { Router } from "express";
 import crypto from "crypto";
 import { InviteClaims, requireAuthOrInvite, verifyInviteToken } from "../middleware/requireAuth";
 import { firestore } from "../firebaseAdmin";
+import { isAdmin } from "../middleware/adminAuth";
 import { SIMPLE_ROLE_DEFAULTS } from "./account";
 
 // Dynamic import for AccessToken constructor
@@ -280,7 +281,15 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     const inviteIdentity = invite?.identity || invite?.uid || invite?.sub || null;
     const tokenIdentity = (identity && identity.trim()) || uid || inviteIdentity || `invite-${roomName}`; // prefer provided identity, fallback to auth/ invite
 
-    const resolved = await resolveRoleForInvite({ uid, requestedRole: rawRole });
+    // Safety: moderator tokens are admin-only.
+    // If a non-admin requests moderator (e.g. via invite link role param), downgrade to participant.
+    let requestedRole = rawRole;
+    if (uid && String(rawRole || "").toLowerCase() === "moderator") {
+      const ok = await isAdmin(uid);
+      if (!ok) requestedRole = "participant";
+    }
+
+    const resolved = await resolveRoleForInvite({ uid, requestedRole });
     if (resolved.ok === false) {
       const payload = resolved.error;
       return res.status(400).json(payload);
