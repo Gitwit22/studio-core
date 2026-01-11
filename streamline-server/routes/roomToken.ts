@@ -5,6 +5,7 @@ import { InviteClaims, requireAuthOrInvite, verifyInviteToken } from "../middlew
 import { firestore } from "../firebaseAdmin";
 import { isAdmin } from "../middleware/adminAuth";
 import { SIMPLE_ROLE_DEFAULTS } from "./account";
+import { intersectPermissionsWithEntitlements } from "../lib/rolePermissions";
 
 // Dynamic import for AccessToken constructor
 async function getAccessTokenCtor() {
@@ -62,6 +63,14 @@ function roleToGrant(role: GrantRole) {
   return { ...base, canPublish: true, canPublishData: true, canUpdateMetadata: false, roomAdmin: false };
 }
 
+async function getAdvancedPermissionsFlag() {
+  const snap = await firestore.collection("featureFlags").doc("advancedPermissions").get();
+  const data = snap.exists ? (snap.data() as any) || {} : {};
+  // Default to enabled if the flag doc is missing.
+  const enabled = data.enabled === undefined ? true : !!data.enabled;
+  return { enabled };
+}
+
 async function getAdvancedPermissionsEnabled(uid: string) {
   const userSnap = await firestore.collection("users").doc(uid).get();
   const userData = userSnap.exists ? userSnap.data() || {} : {};
@@ -71,7 +80,9 @@ async function getAdvancedPermissionsEnabled(uid: string) {
   const planFlag = !!planFeatures.advancedPermissions;
   const override = (userData as any).advancedPermissionsOverride === true;
   const force = await firestore.collection("featureFlags").doc("forceSimpleMode").get();
-  const globalLock = force.exists ? !!(force.data() as any)?.enabled : false;
+  const forceEnabled = force.exists ? !!(force.data() as any)?.enabled : false;
+  const advFlag = await getAdvancedPermissionsFlag();
+  const globalLock = forceEnabled || advFlag.enabled === false;
   return { enabled: !globalLock && (planFlag || override), planFlag, override, globalLock };
 }
 
@@ -115,7 +126,7 @@ async function resolveRoleForInvite(opts: { uid?: string; requestedRole?: string
       };
     }
 
-    const perms = effectiveRoleKey === "host" || effectiveRoleKey === "moderator"
+    const basePerms = effectiveRoleKey === "host" || effectiveRoleKey === "moderator"
       ? SIMPLE_ROLE_DEFAULTS.moderator
       : SIMPLE_ROLE_DEFAULTS[effectiveRoleKey];
 
@@ -125,11 +136,13 @@ async function resolveRoleForInvite(opts: { uid?: string; requestedRole?: string
         ? "participant"
         : (effectiveRoleKey as GrantRole);
 
+    const permissions = await intersectPermissionsWithEntitlements(basePerms, opts.uid);
+
     return {
       ok: true,
       result: {
         grantRole,
-        permissions: perms,
+        permissions,
         effectiveRoleKey,
         locked: true,
       },
@@ -143,7 +156,8 @@ async function resolveRoleForInvite(opts: { uid?: string; requestedRole?: string
   const grantRole: GrantRole = wantsModerator ? "moderator" : normalizedRole === "cohost" ? "participant" : normalizedRole;
   const effectiveRoleKey: ResolvedRole["effectiveRoleKey"] = normalizedRole === "cohost" ? "cohost" : (normalizedRole as any);
   // Advanced mode currently does not hydrate custom profiles; keep existing grant mapping
-  const permissions = { canStream: true, canRecord: true, canDestinations: true, canModerate: grantRole === "moderator", canLayout: true, canScreenShare: true, canInvite: true, canAnalytics: grantRole === "moderator" };
+  const basePerms = { canStream: true, canRecord: true, canDestinations: true, canModerate: grantRole === "moderator", canLayout: true, canScreenShare: true, canInvite: true, canAnalytics: grantRole === "moderator" };
+  const permissions = await intersectPermissionsWithEntitlements(basePerms, opts.uid);
   return { ok: true, result: { grantRole, permissions, effectiveRoleKey, locked: false } };
 }
 
@@ -281,21 +295,59 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     const inviteIdentity = invite?.identity || invite?.uid || invite?.sub || null;
     const tokenIdentity = (identity && identity.trim()) || uid || inviteIdentity || `invite-${roomName}`; // prefer provided identity, fallback to auth/ invite
 
-    // Safety: moderator tokens are admin-only.
-    // If a non-admin requests moderator (e.g. via invite link role param), downgrade to participant.
+    // Determine which account's entitlements and permission mode should apply.
+    // For invite-based joins, we always scope permissions to the host who
+    // created the invite; otherwise we fall back to the authenticated user.
+    const entitlementsUid = (invite as any)?.createdByUid || uid;
+
+    // Invites are currently guest/participant-only.
+    // Prefer role from invite claims when present; map "guest" to participant and
+    // downgrade any elevated roles.
     let requestedRole = rawRole;
-    if (uid && String(rawRole || "").toLowerCase() === "moderator") {
+    const inviteRoleRaw = (invite as any)?.role as string | undefined;
+    if (inviteRoleRaw) {
+      const v = String(inviteRoleRaw).toLowerCase();
+      if (v === "guest" || v === "participant") requestedRole = "participant";
+      else requestedRole = "participant";
+    }
+
+    const normalizedRequested = String(requestedRole || "participant").toLowerCase();
+    const elevatedRequested = normalizedRequested === "cohost" || normalizedRequested === "moderator";
+
+    // If an elevated role is requested but the caller is not authenticated,
+    // reject even if an invite token is present.
+    if (elevatedRequested && !uid) {
+      return res.status(401).json({ error: "auth_required_for_elevated_role" });
+    }
+
+    // Safety: moderator tokens are admin-only unless an invite explicitly
+    // authorizes it. If an authenticated user requests moderator without any
+    // invite, require admin and otherwise downgrade.
+    if (uid && !invite && normalizedRequested === "moderator") {
       const ok = await isAdmin(uid);
       if (!ok) requestedRole = "participant";
     }
 
-    const resolved = await resolveRoleForInvite({ uid, requestedRole });
+    const resolved = await resolveRoleForInvite({ uid: entitlementsUid, requestedRole });
     if (resolved.ok === false) {
       const payload = resolved.error;
       return res.status(400).json(payload);
     }
     const { grantRole, permissions, effectiveRoleKey, locked } = resolved.result;
     const isViewer = grantRole === "viewer";
+
+    if (process.env.AUTH_DEBUG === "1") {
+      console.log("[invite-debug] mint room token", {
+        roomName,
+        uid,
+        hasInvite: !!invite,
+        requestedRole: rawRole || null,
+        grantRole,
+        effectiveRoleKey,
+        permissions,
+        locked,
+      });
+    }
 
     const AccessToken = await getAccessTokenCtor();
     const at = new AccessToken(apiKey, apiSecret, { identity: tokenIdentity });
@@ -388,6 +440,16 @@ router.post("/guest", async (req, res) => {
     });
     const jwt = await at.toJwt();
     const serverUrl = process.env.LIVEKIT_URL || null;
+    if (process.env.AUTH_DEBUG === "1") {
+      console.log("[invite-debug] mint guest room token", {
+        roomName,
+        hostUid,
+        grantRole: resolved.result.grantRole,
+        effectiveRoleKey: resolved.result.effectiveRoleKey,
+        permissions: resolved.result.permissions,
+        locked: resolved.result.locked,
+      });
+    }
     return res.status(200).json({ token: jwt, serverUrl, identity, role: resolved.result.grantRole, isViewer: false, permissions: resolved.result.permissions, effectiveRoleKey: resolved.result.effectiveRoleKey, locked: resolved.result.locked });
   } catch (err: any) {
     console.error("roomToken guest error:", err);

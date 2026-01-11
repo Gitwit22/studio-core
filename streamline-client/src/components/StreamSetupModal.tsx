@@ -173,7 +173,15 @@ export default function StreamSetupModalV2({
 
   useEffect(() => {
     if (!open) {
-      setPlatformState(buildDefaultPlatformState());
+      // Preserve entered keys across close/reopen within the same session.
+      // Only clear transient errors/flags.
+      setPlatformState((prev) => {
+        const next: Record<PlatformKey, PlatformState> = { ...prev };
+        (Object.keys(next) as PlatformKey[]).forEach((p) => {
+          next[p] = { ...next[p], error: null, info: null };
+        });
+        return next;
+      });
       setStartError(null);
       setWarmupStartedAt(null);
       setWarmupReadyMap({ youtube: false, facebook: false, twitch: false, custom: false });
@@ -227,10 +235,14 @@ export default function StreamSetupModalV2({
 
   const streamIsLive = streamStatus === "live";
   const streamIsBusy = streamStatus === "starting" || streamStatus === "stopping";
+  // When multistreamAllowed is false, the caller has already determined that
+  // this user lacks in-room permissions (roomPermissions) to manage streaming.
   const streamDisallowed = !multistreamAllowed;
   
   const recordingIsActive = recordingStatus === "recording";
   const recordingIsBusy = recordingStatus === "stopping";
+  // Recording controls are visible when the caller indicates recording is allowed
+  // for this session (again based on roomPermissions).
   const showRecordingControls = recordingEnabled !== false;
 
   const hasRecordingCap = typeof recordingMaxMinutes === "number" && recordingMaxMinutes > 0;
@@ -259,7 +271,7 @@ export default function StreamSetupModalV2({
 
   const handleStartStream = async () => {
     if (streamDisallowed) {
-      alert("Multistreaming is disabled for this plan. Upgrade in Settings → Usage to enable external destinations.");
+      alert("You don't have permission to start streaming in this room.");
       return;
     }
     const sessionKeyPayload: Record<string, { rtmpUrlBase?: string; streamKey?: string }> = {};

@@ -15,6 +15,17 @@ import { API_BASE } from "../lib/apiBase";
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 type RecordingStatus = "idle" | "recording" | "stopping" | "stopped" | "error";
 
+type RoomPermissions = {
+  canStream: boolean;
+  canRecord: boolean;
+  canDestinations: boolean;
+  canModerate: boolean;
+  canLayout: boolean;
+  canScreenShare: boolean;
+  canInvite: boolean;
+  canAnalytics: boolean;
+};
+
 function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: boolean; onHome?: () => void }) {
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -496,8 +507,22 @@ export default function Room() {
   const [showStreamEndedModal, setShowStreamEndedModal] = useState(false);
   const currentUserId = getOrCreateUid();
   const [isHost, setIsHost] = useState(false);
-  const [userRole, setUserRole] = useState<string>("guest");
+  const [userRole, setUserRole] = useState<string>(() => {
+    try {
+      return localStorage.getItem("sl_current_role") || "guest";
+    } catch {
+      return "guest";
+    }
+  });
+  const [inviteToken, setInviteToken] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem("sl_invite_token") || null;
+    } catch {
+      return null;
+    }
+  });
   const [isViewer, setIsViewer] = useState(false);
+  const [roomPermissions, setRoomPermissions] = useState<RoomPermissions | null>(null);
   const [recordingCountdown, setRecordingCountdown] = useState<string | null>(null);
   const [isRecordingCountdown, setIsRecordingCountdown] = useState(false);
   const recordingCountdownTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -505,15 +530,75 @@ export default function Room() {
   const [isLiveCountdown, setIsLiveCountdown] = useState(false);
   const liveCountdownTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
+  const currentRole = userRole;
+  const isGuestRole = currentRole === "guest";
+  const can = (key: keyof RoomPermissions) => isHost || !!roomPermissions?.[key];
+  const canInviteLinks = !isViewer && (isHost || can("canInvite"));
+  const canManageStream = !isViewer && (isHost || can("canStream") || can("canRecord") || can("canDestinations"));
+
   useEffect(() => {
     if (!roomName) return;
     const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
     const willBeHost = createdRooms.includes(roomName);
     setIsHost(willBeHost);
-    const currentRole = localStorage.getItem("sl_current_role") || "guest";
-    setUserRole(currentRole);
-    console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost, role: currentRole });
+    const storedRole = (() => {
+      try {
+        return localStorage.getItem("sl_current_role") || "guest";
+      } catch {
+        return "guest";
+      }
+    })();
+    const nextRole = willBeHost ? "host" : storedRole;
+    setUserRole(nextRole);
+    try {
+      if (willBeHost) localStorage.setItem("sl_current_role", "host");
+      setInviteToken(localStorage.getItem("sl_invite_token") || null);
+    } catch {
+      // ignore
+    }
+    console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost, role: nextRole });
   }, [roomName, currentUserId]);
+
+  // If we have an inviteToken but the role isn't set (or got reset), resolve it here
+  // so we mint the correct room token (cohost/mod) and permissions.
+  useEffect(() => {
+    if (!roomName || !inviteToken) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/invites/resolve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inviteToken }),
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!data || cancelled) return;
+
+        const resolvedRoom = String(data.roomName || "");
+        const rawResolvedRole = String(data.role || "guest");
+        const resolvedRole = rawResolvedRole === "cohost" || rawResolvedRole === "moderator" ? "guest" : rawResolvedRole;
+        if (!resolvedRoom || resolvedRoom !== roomName) return;
+
+        // Only override when we're not host and our role is low-trust.
+        if (!isHost && (userRole === "guest" || userRole === "participant")) {
+          setUserRole(resolvedRole);
+          try {
+            localStorage.setItem("sl_current_role", resolvedRole);
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE, inviteToken, isHost, roomName, userRole]);
 
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
@@ -532,8 +617,9 @@ export default function Room() {
   const lastElapsedRef = useRef(0);
   const usagePostedRef = useRef(false);
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);
-  const [canMultistream, setCanMultistream] = useState<boolean>(false);
-  const [recordingEnabled, setRecordingEnabled] = useState<boolean>(true);
+  // Plan/entitlement flags are informational only; in-room gating is driven by roomPermissions.
+  const [planMultistreamEnabled, setPlanMultistreamEnabled] = useState<boolean>(false);
+  const [planRecordingEnabled, setPlanRecordingEnabled] = useState<boolean>(true);
   const [dualRecordingAllowed, setDualRecordingAllowed] = useState<boolean>(false);
   const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(false);
   const [maxGuestsAllowed, setMaxGuestsAllowed] = useState<number | null>(null);
@@ -564,8 +650,9 @@ export default function Room() {
 
   useEffect(() => {
     if (!roomName || !displayName) return;
-    const role = localStorage.getItem("sl_current_role") || userRole;
+    const role = userRole === "cohost" || userRole === "moderator" ? "guest" : userRole;
     const isGuest = role === "guest";
+    const roleNeedsAuth = false;
 
     const fetchToken = async () => {
       try {
@@ -574,16 +661,16 @@ export default function Room() {
           const endpoint = mode === "guest" ? `${API_BASE}/api/roomToken/guest` : `${API_BASE}/api/roomToken`;
           const payload: any = { roomName, identity: displayName };
 
+          if (inviteToken) {
+            payload.inviteToken = inviteToken;
+          }
+
           if (mode === "guest") {
             payload.displayName = displayName;
             payload.guestId = getOrCreateUid();
           } else {
             payload.uid = getOrCreateUid();
-            // Pass invite role through so cohost/moderator links work for logged-in users.
-            // Never send "host" (localStorage can be spoofed; host is derived separately).
-            if (role === "participant" || role === "cohost" || role === "moderator") {
-              payload.role = role;
-            }
+            // Invites are currently guest/participant-only (no elevated roles).
           }
 
           return { endpoint, payload };
@@ -600,9 +687,15 @@ export default function Room() {
           return { res, mode };
         };
 
-        // Primary: if role is not guest, try auth token first. If it fails due to auth, fall back to guest token.
+        // Primary: if role is not guest, try auth token first.
+        // If denied due to auth, we only fall back to guest for low-trust roles.
         let attempt = await tryFetch(isGuest ? "guest" : "auth");
         if (!attempt.res.ok && !isGuest && (attempt.res.status === 401 || attempt.res.status === 403)) {
+          if (roleNeedsAuth) {
+            const next = `${window.location.pathname}${window.location.search}`;
+            nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
+            return;
+          }
           console.warn("[Room] auth roomToken denied; falling back to guest token", attempt.res.status);
           attempt = await tryFetch("guest");
         }
@@ -644,6 +737,21 @@ export default function Room() {
           console.error("[Room] Invalid token returned:", data);
           return;
         }
+
+        if (data?.permissions && typeof data.permissions === "object") {
+          setRoomPermissions({
+            canStream: !!data.permissions.canStream,
+            canRecord: !!data.permissions.canRecord,
+            canDestinations: !!data.permissions.canDestinations,
+            canModerate: !!data.permissions.canModerate,
+            canLayout: !!data.permissions.canLayout,
+            canScreenShare: !!data.permissions.canScreenShare,
+            canInvite: !!data.permissions.canInvite,
+            canAnalytics: !!data.permissions.canAnalytics,
+          });
+        } else {
+          setRoomPermissions(null);
+        }
         const { token, serverUrl } = data;
         const finalServerUrl = serverUrl || import.meta.env.VITE_LIVEKIT_URL;
         console.log("[Room] token received:", !!token, "serverUrl:", finalServerUrl);
@@ -672,7 +780,7 @@ export default function Room() {
     };
 
     fetchToken();
-  }, [roomName, displayName]);
+    }, [roomName, displayName, inviteToken, userRole]);
 
   useEffect(() => {
     if (isViewer && showStreamSetup) {
@@ -729,7 +837,7 @@ export default function Room() {
               setRecordingPlanId(eff.planId);
             }
             if (typeof features.recording === "boolean") {
-              setRecordingEnabled(features.recording);
+              setPlanRecordingEnabled(features.recording);
             }
             if (typeof features.dualRecording === "boolean") {
               setDualRecordingAllowed(features.dualRecording);
@@ -738,7 +846,7 @@ export default function Room() {
               setWatermarkEnabled(features.watermark);
             }
             if (typeof features.rtmpMultistream === "boolean") {
-              setCanMultistream(features.rtmpMultistream);
+              setPlanMultistreamEnabled(features.rtmpMultistream);
             }
             if (typeof limits.maxGuests === "number") {
               setMaxGuestsAllowed(limits.maxGuests);
@@ -893,6 +1001,7 @@ export default function Room() {
   useEffect(() => {
     const role = localStorage.getItem("sl_current_role") || userRole;
     if (role === "guest") return;
+    if (!canManageStream) return;
     const runPreflight = async () => {
       setPreflightLoading(true);
       try {
@@ -908,7 +1017,7 @@ export default function Room() {
       }
     };
     if (showStreamSetup) runPreflight();
-  }, [showStreamSetup, userRole]);
+  }, [showStreamSetup, userRole, canManageStream]);
 
   function buildPreflightItems(): Array<{ id: string; label: string; ok: boolean; detail?: string }> {
     const dests = (preflightResult?.destinations || []) as Array<{ id: string; platform: string; status: string; statusReason?: string | null }>;
@@ -975,6 +1084,14 @@ export default function Room() {
 
   const handleLeftRoom = () => {
     sendUsageOnExit();
+    // Drop elevated cohost/moderator roles on leave; a fresh invite
+    // (or host/participant flow) must re-establish them on rejoin.
+    try {
+      const storedRole = localStorage.getItem("sl_current_role");
+      if (storedRole === "cohost" || storedRole === "moderator") {
+        localStorage.setItem("sl_current_role", "participant");
+      }
+    } catch {}
     if (isHost) {
       nav('/join', { replace: true });
     } else {
@@ -1000,6 +1117,14 @@ export default function Room() {
   }: { layout?: "speaker" | "grid"; mode?: "cloud" | "dual"; presetId?: string }) => {
     if (isViewer) {
       console.warn("startRecording blocked for viewer role");
+      return;
+    }
+    if (isGuestRole) {
+      alert("Recording requires an account. Please sign in.");
+      return;
+    }
+    if (!can("canRecord")) {
+      alert("You don't have permission to start recording in this room.");
       return;
     }
     if (!roomName) {
@@ -1078,6 +1203,14 @@ export default function Room() {
       console.warn("stopRecording blocked for viewer role");
       return;
     }
+    if (isGuestRole) {
+      alert("Recording requires an account. Please sign in.");
+      return;
+    }
+    if (!can("canRecord")) {
+      alert("You don't have permission to stop recording in this room.");
+      return;
+    }
     console.log("🛑 stopRecording called");
     const id = recordingRef.current;
     if (!id || id === "unknown") {
@@ -1103,11 +1236,11 @@ export default function Room() {
   };
 
   const handleEndStream = async () => {
-    if (isHost && streamStatus === "live") {
+    if (canManageStream && streamStatus === "live") {
       alert("⏹️ Stream is still live. Stop the stream first.");
       return;
     }
-    if (isHost && recordingStatus === "recording") {
+    if (canManageStream && recordingStatus === "recording") {
       alert("⏹️ Recording is still active. Stop the stream first.");
       return;
     }
@@ -1147,14 +1280,18 @@ export default function Room() {
       alert("View-only mode: publishing controls are disabled.");
       return;
     }
+    if (isGuestRole) {
+      alert("Going live requires an account. Please sign in.");
+      return;
+    }
+    if (!can("canStream") && !can("canDestinations")) {
+      alert("You don't have permission to manage streaming in this room.");
+      return;
+    }
     if (streamStatus === "starting" || streamStatus === "live") return;
     if (isLiveCountdown) return;
     if (!roomName) {
       alert("No room name");
-      return;
-    }
-    if (!canMultistream) {
-      alert("Multistream is not available on your current plan. Please upgrade to enable streaming to external platforms.");
       return;
     }
     console.log("🎬 Room.tsx - handleStartMultistream called");
@@ -1313,6 +1450,14 @@ export default function Room() {
       alert("View-only mode: publishing controls are disabled.");
       return;
     }
+    if (isGuestRole) {
+      alert("Going live requires an account. Please sign in.");
+      return;
+    }
+    if (!can("canStream") && !can("canDestinations")) {
+      alert("You don't have permission to manage streaming in this room.");
+      return;
+    }
     const streamEgressId = streamEgressRef.current;
     if (!streamEgressId) {
       alert("No active stream");
@@ -1360,24 +1505,42 @@ export default function Room() {
         const res = await fetch(`${API_BASE}/api/account/roles`, { credentials: "include" });
         if (!res.ok) throw new Error("roles failed");
         const data = await res.json();
-        if (Array.isArray(data?.roles)) setRoleProfiles(data.roles);
-        if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds);
+        // Invite links are currently guest/participant-only.
+        if (Array.isArray(data?.roles)) setRoleProfiles(data.roles.filter((r: any) => r?.id === "participant"));
+        if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds.filter((id: any) => id === "participant"));
       } catch (err) {
         console.warn("roles load failed, using defaults", err);
-        setRoleProfiles([
-          { id: "participant", label: "Participant" },
-          { id: "cohost", label: "Co-host" },
-          { id: "moderator", label: "Moderator" },
-        ]);
-        setQuickRoleIds(["participant", "cohost", "moderator"]);
+        setRoleProfiles([{ id: "participant", label: "Participant" }]);
+        setQuickRoleIds(["participant"]);
       }
     })();
   }, []);
 
-  const copyInviteLink = (role: string, label: string) => {
-    const url = `${window.location.origin}/join?room=${encodeURIComponent(roomName || '')}&role=${encodeURIComponent(role)}`;
-    navigator.clipboard.writeText(url);
-    alert(`${label} link copied!\n${url}`);
+  const copyInviteLink = (_role: string, label: string) => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/invites/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          // Invites are currently guest/participant-only.
+          body: JSON.stringify({ roomName, role: "guest" }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.inviteToken) {
+          alert("Failed to create invite link");
+          return;
+        }
+
+        const url = `${window.location.origin}/i/${encodeURIComponent(data.inviteToken)}`;
+        await navigator.clipboard.writeText(url);
+        alert(`${label} link copied!\n${url}`);
+      } catch (err) {
+        console.error("invite create failed", err);
+        alert("Failed to create invite link");
+      }
+    })();
   };
 
   // ==================== RENDER ====================
@@ -1534,7 +1697,9 @@ export default function Room() {
   }
 
   const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
-  const entitlementSummary = `Rec:${recordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • Multi:${canMultistream ? "on" : "off"} • Guests:${guestCapLabel}`;
+  const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • Multi:${planMultistreamEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
+  const recordingEnabled = planRecordingEnabled && can("canRecord");
+  const canMultistream = planMultistreamEnabled && can("canDestinations");
 
   return (
     <>
@@ -1563,7 +1728,7 @@ export default function Room() {
 
           <span className="text-sm opacity-80">{roomName}</span>
 
-          {isHost && (
+          {canInviteLinks && (
             <button
               onClick={() => setInviteModalOpen(true)}
               style={{
@@ -1604,30 +1769,34 @@ export default function Room() {
           )}
         </div>
 
-        {isHost && !isViewer && (
+        {!isViewer && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{
-              padding: '0.35rem 0.6rem',
-              borderRadius: '0.375rem',
-              border: '1px solid rgba(148, 163, 184, 0.4)',
-              color: '#e5e7eb',
-              fontSize: '0.7rem',
-              background: 'rgba(255, 255, 255, 0.04)',
-              whiteSpace: 'nowrap'
-            }}>
-              {entitlementSummary}
-            </div>
-            <div style={{
-              padding: '0.35rem 0.6rem',
-              borderRadius: '0.375rem',
-              border: presetClamped ? '1px solid rgba(251,191,36,0.6)' : '1px solid rgba(148, 163, 184, 0.35)',
-              color: presetClamped ? '#fbbf24' : '#e5e7eb',
-              fontSize: '0.7rem',
-              background: presetClamped ? 'rgba(251,191,36,0.12)' : 'rgba(255, 255, 255, 0.04)',
-              whiteSpace: 'nowrap'
-            }}>
-              Preset: {activePresetLabel}{presetClamped ? " (clamped)" : ""}
-            </div>
+            {isHost && (
+              <>
+                <div style={{
+                  padding: '0.35rem 0.6rem',
+                  borderRadius: '0.375rem',
+                  border: '1px solid rgba(148, 163, 184, 0.4)',
+                  color: '#e5e7eb',
+                  fontSize: '0.7rem',
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {entitlementSummary}
+                </div>
+                <div style={{
+                  padding: '0.35rem 0.6rem',
+                  borderRadius: '0.375rem',
+                  border: presetClamped ? '1px solid rgba(251,191,36,0.6)' : '1px solid rgba(148, 163, 184, 0.35)',
+                  color: presetClamped ? '#fbbf24' : '#e5e7eb',
+                  fontSize: '0.7rem',
+                  background: presetClamped ? 'rgba(251,191,36,0.12)' : 'rgba(255, 255, 255, 0.04)',
+                  whiteSpace: 'nowrap'
+                }}>
+                  Preset: {activePresetLabel}{presetClamped ? " (clamped)" : ""}
+                </div>
+              </>
+            )}
             <button
               onClick={() => setDashboardOpen(v => !v)}
               style={{
@@ -1644,35 +1813,39 @@ export default function Room() {
               Dashboard
             </button>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: '#ffffff' }}>
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: streamStatus === "live" ? "#ef4444" : "#6b7280"
-                }}
-              />
-              <span>{streamStatus === "live" ? "LIVE" : "OFFLINE"}</span>
-            </div>
+            {canManageStream && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: '#ffffff' }}>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: streamStatus === "live" ? "#ef4444" : "#6b7280"
+                    }}
+                  />
+                  <span>{streamStatus === "live" ? "LIVE" : "OFFLINE"}</span>
+                </div>
 
-            <button
-              onClick={() => setShowStreamSetup(v => !v)}
-              style={{
-                padding: '0.375rem 0.75rem',
-                fontSize: '0.75rem',
-                borderRadius: '0.375rem',
-                background: 'linear-gradient(135deg, #dc2626, #ef4444)',
-                color: '#ffffff',
-                border: 'none',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                fontWeight: '500'
-              }}
-            >
-              {streamStatus === "live" ? "Manage Stream" : "Setup Stream"}
-            </button>
+                <button
+                  onClick={() => setShowStreamSetup(v => !v)}
+                  style={{
+                    padding: '0.375rem 0.75rem',
+                    fontSize: '0.75rem',
+                    borderRadius: '0.375rem',
+                    background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                    color: '#ffffff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    fontWeight: '500'
+                  }}
+                >
+                  {streamStatus === "live" ? "Manage Stream" : "Setup Stream"}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1713,13 +1886,13 @@ export default function Room() {
           <RoleOverlay
             open={dashboardOpen}
             onClose={() => setDashboardOpen(false)}
-            role={isHost ? "host" : (userRole === "moderator" ? "moderator" : "participant")}
+            role={isHost ? "host" : "participant"}
             roomName={roomName || ''}
           />
         </LiveKitRoom>
       )}
 
-      {inviteModalOpen && isHost && (
+      {inviteModalOpen && canInviteLinks && (
         <div
           style={{
             position: "fixed",
@@ -1762,11 +1935,11 @@ export default function Room() {
             </div>
 
             <p style={{ marginTop: 0, marginBottom: 14, color: "#94a3b8", fontSize: 13 }}>
-              Copy the right link for your guest role. Moderator requires admin access; we’ll downgrade if missing.
+              Copy a link to invite participants.
             </p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {(quickRoleIds.length ? quickRoleIds : ["participant", "cohost", "moderator"]).map((roleId) => {
+              {(quickRoleIds.length ? quickRoleIds : ["participant"]).map((roleId) => {
                 const roleLabel = roleProfiles.find((r) => r.id === roleId)?.label || roleId;
                 return { role: roleId, label: roleLabel };
               }).map((item) => (
@@ -1784,7 +1957,7 @@ export default function Room() {
                 >
                   <div style={{ display: "flex", flexDirection: "column" }}>
                     <span style={{ fontWeight: 600, fontSize: 14 }}>{item.label}</span>
-                    <span style={{ fontSize: 12, color: "#9ca3af" }}>{item.role === "participant" ? "Standard guest join" : item.role === "cohost" ? "Co-host profile" : item.role === "moderator" ? "Moderator controls" : "Custom role (uses participant token)"}</span>
+                    <span style={{ fontSize: 12, color: "#9ca3af" }}>Standard guest join</span>
                   </div>
                   <button
                     onClick={() => copyInviteLink(item.role, item.label)}
@@ -1836,7 +2009,7 @@ export default function Room() {
         }
       >
         <StreamSetupModalV2
-          open={showStreamSetup && !isViewer}
+          open={showStreamSetup && canManageStream}
           onClose={() => setShowStreamSetup(false)}
           roomName={roomName ?? ""}
           selectedPresetId={selectedPresetId}

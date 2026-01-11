@@ -21,13 +21,13 @@ const DEFAULT_MEDIA_PREFS = {
 
 const DEFAULT_COHOST_PROFILE = {
   label: "Co-Host",
-  canStream: false,
-  canRecord: false,
-  canDestinations: false,
+  canStream: true,
+  canRecord: true,
+  canDestinations: true,
   canModerate: false,
-  canLayout: false,
-  canScreenShare: false,
-  canInvite: false,
+  canLayout: true,
+  canScreenShare: true,
+  canInvite: true,
   canAnalytics: false,
   expiresHours: 24,
   maxUses: 1,
@@ -146,13 +146,13 @@ export const SIMPLE_ROLE_DEFAULTS: Record<"participant" | "moderator" | "cohost"
     canAnalytics: false,
   },
   cohost: {
-    canStream: false,
-    canRecord: false,
-    canDestinations: false,
+    canStream: true,
+    canRecord: true,
+    canDestinations: true,
     canModerate: false,
     canLayout: true,
     canScreenShare: true,
-    canInvite: false,
+    canInvite: true,
     canAnalytics: false,
   },
 };
@@ -193,22 +193,46 @@ async function getForceSimpleMode() {
   };
 }
 
+async function getAdvancedPermissionsFlag() {
+  const snap = await firestore.collection("featureFlags").doc("advancedPermissions").get();
+  const data = snap.exists ? (snap.data() as any) || {} : {};
+  // Default to enabled if the flag doc is missing.
+  const enabled = data.enabled === undefined ? true : !!data.enabled;
+  return {
+    enabled,
+    reason: typeof data.reason === "string" ? data.reason : undefined,
+  };
+}
+
 async function getAdvancedPermissionsEnabled(uid: string) {
   const userSnap = await firestore.collection("users").doc(uid).get();
   const userData = userSnap.exists ? userSnap.data() || {} : {};
   const planId = await getUserPlanId(uid);
   const planFeatures = await getPlanFeatures(planId);
   const force = await getForceSimpleMode();
+  const flag = await getAdvancedPermissionsFlag();
   const override = userData.advancedPermissionsOverride === true;
-  const enabled = !force.enabled && (planFeatures.advancedPermissions || override);
-  const lockReason = force.enabled ? "global_lock" : enabled ? undefined : "plan";
+
+  // Global disables should always force simple mode regardless of plan/override.
+  const globallyDisabled = force.enabled || flag.enabled === false;
+  const enabled = !globallyDisabled && (planFeatures.advancedPermissions || override);
+
+  const lockReason = force.enabled
+    ? "global_lock"
+    : flag.enabled === false
+      ? "coming_soon"
+      : enabled
+        ? undefined
+        : "plan";
+
+  const globalReason = force.enabled ? force.reason : flag.enabled === false ? flag.reason : undefined;
   return {
     enabled,
     planFlag: planFeatures.advancedPermissions,
     override,
-    globalLock: force.enabled,
+    globalLock: globallyDisabled,
     lockReason,
-    globalReason: force.reason,
+    globalReason,
     planId,
     userData,
   };

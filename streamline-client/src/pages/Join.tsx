@@ -69,9 +69,12 @@ export default function Join() {
     }
   });
 
-  // Check for invite link (room query parameter)
-  const isParticipant = searchParams.get("room") !== null;
-  const role = searchParams.get("role") || "guest"; // Get role from URL
+  // Invite handling:
+  // - New flow: /join?inviteToken=... (preferred)
+  // - Legacy guest link: /join?room=... (guest/viewer style)
+  const inviteTokenParam = searchParams.get("inviteToken");
+  const legacyInviteRoomParam = searchParams.get("room");
+  const isParticipant = !!inviteTokenParam || legacyInviteRoomParam !== null;
 
 // Use /api/auth/me for admin status
 const { user: authUser, loading: authLoading } = useAuthMe();
@@ -100,15 +103,57 @@ const adminLoading = authLoading;
   }, [authUser, didEditDisplayName, displayName]);
 
   useEffect(() => {
-    const inviteRoom = searchParams.get("room");
-    if (inviteRoom) {
-      const decodedRoom = decodeURIComponent(inviteRoom);
-      setRoomName(decodedRoom);
+    let cancelled = false;
 
-      // Store role for later use in room
-      localStorage.setItem("sl_current_role", role);
-    }
-  }, [searchParams, role]);
+    const run = async () => {
+      // Preferred: inviteToken resolves room+role server-side
+      if (inviteTokenParam) {
+        try {
+          const res = await fetch(`${API_BASE}/api/invites/resolve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ inviteToken: inviteTokenParam }),
+          });
+
+          if (!res.ok) return;
+          const data = await res.json().catch(() => null);
+          if (!data || cancelled) return;
+
+          const decodedRoom = String(data.roomName || "");
+          // Invites are currently guest/participant-only.
+          const resolvedRole = "guest";
+          if (decodedRoom) setRoomName(decodedRoom);
+
+          try {
+            localStorage.setItem("sl_invite_token", inviteTokenParam);
+            localStorage.setItem("sl_current_role", resolvedRole);
+          } catch {
+            // ignore
+          }
+          return;
+        } catch {
+          return;
+        }
+      }
+
+      // Legacy: /join?room=... (treat as guest)
+      if (legacyInviteRoomParam) {
+        const decodedRoom = decodeURIComponent(legacyInviteRoomParam);
+        setRoomName(decodedRoom);
+        try {
+          localStorage.removeItem("sl_invite_token");
+          localStorage.setItem("sl_current_role", "guest");
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteTokenParam, legacyInviteRoomParam]);
 
   const lastRoom = useMemo(() => {
     try {

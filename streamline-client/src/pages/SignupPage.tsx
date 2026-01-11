@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 import { API_BASE } from "../services/apiBase";
@@ -14,6 +14,20 @@ function validateEmail(email: string): boolean {
 
 export const SignupPage = () => {
   const nav = useNavigate();
+  const location = useLocation();
+
+  const nextUrl = (() => {
+    try {
+      const sp = new URLSearchParams(location.search || "");
+      const next = sp.get("next") || "";
+      if (!next || typeof next !== "string") return null;
+      if (!next.startsWith("/")) return null;
+      if (next.startsWith("//")) return null;
+      return next;
+    } catch {
+      return null;
+    }
+  })();
 
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -117,6 +131,12 @@ export const SignupPage = () => {
       setLoading(false);
       // Log auth/user info after signup
       logAuthDebugContext("After Signup Success");
+
+      // If signup was initiated from an invite flow, go back to that route.
+      if (nextUrl) {
+        nav(nextUrl, { replace: true });
+        return;
+      }
 
       // After signup, send users to Streaming settings first (unless they explicitly
       // skipped onboarding). From there they can configure destinations/keys and

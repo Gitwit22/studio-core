@@ -1322,23 +1322,34 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
                   <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                    {advancedPermissions.lockReason === "global_lock"
-                      ? "Advanced Permissions temporarily disabled during an upgrade. Check back soon."
-                      : advancedPermissions.enabled
-                        ? "Need custom roles and fine-grained permissions? Enable Advanced Permissions Mode."
-                        : "Advanced Permissions Mode is not included on this plan. Upgrade or ask an admin for an override."}
+                    {advancedPermissions.lockReason === "coming_soon"
+                      ? "Advanced Permissions is coming soon."
+                      : advancedPermissions.lockReason === "global_lock"
+                        ? "Advanced Permissions temporarily disabled during an upgrade. Check back soon."
+                        : advancedPermissions.enabled
+                          ? "Need custom roles and fine-grained permissions? Enable Advanced Permissions Mode."
+                          : "Advanced Permissions Mode is not included on this plan. Upgrade or ask an admin for an override."}
                   </span>
-                  <button
-                    onClick={() => updatePermissionsMode("advanced")}
-                    style={advancedPermissions.enabled && advancedPermissions.lockReason !== "global_lock" ? S.primaryBtn : { ...S.primaryBtn, opacity: 0.5, cursor: "not-allowed" }}
-                    disabled={!advancedPermissions.enabled || advancedPermissions.lockReason === "global_lock"}
-                  >
-                    {advancedPermissions.lockReason === "global_lock"
-                      ? "Temporarily disabled"
-                      : advancedPermissions.enabled
-                        ? "Enable Advanced Permissions Mode"
-                        : "Locked on current plan"}
-                  </button>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                    <button
+                      onClick={() => updatePermissionsMode("advanced")}
+                      style={advancedPermissions.enabled && !advancedPermissions.globalLock ? S.primaryBtn : { ...S.primaryBtn, opacity: 0.5, cursor: "not-allowed" }}
+                      disabled={!advancedPermissions.enabled || advancedPermissions.globalLock}
+                    >
+                      {advancedPermissions.lockReason === "coming_soon"
+                        ? "Coming soon"
+                        : advancedPermissions.lockReason === "global_lock"
+                          ? "Temporarily disabled"
+                          : advancedPermissions.enabled
+                            ? "Enable Advanced Permissions Mode"
+                            : "Locked on current plan"}
+                    </button>
+                    {advancedPermissions.lockReason === "coming_soon" ? (
+                      <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                        Coming soon.
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1941,12 +1952,14 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         <FeatureRow label="RTMP destinations" value={plan.limits.rtmpDestinationsMax} />
                         <FeatureRow label="Recording" value={plan.features.recording} />
                         <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
-                        <FeatureRow
-                          label="Advanced Permissions Mode"
-                          value={!!plan.features.advancedPermissions}
-                          pill
-                          subBullets={plan.features.advancedPermissions && planId !== "starter" ? [] : undefined}
-                        />
+                        {advancedPermissions.lockReason !== "coming_soon" ? (
+                          <FeatureRow
+                            label="Advanced Permissions Mode"
+                            value={!!plan.features.advancedPermissions}
+                            pill
+                            subBullets={plan.features.advancedPermissions && planId !== "starter" ? [] : undefined}
+                          />
+                        ) : null}
                         {plan.editing?.access && (
                           <>
                             <FeatureRow label="Projects" value={plan.editing.maxProjects} />
@@ -2372,8 +2385,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 label="RTMP Destinations"
                 used={usage.rtmpDestinations.used}
                 limit={
-                  usage.rtmpDestinations.limit ||
-                  currentPlan.limits?.rtmpDestinationsMax ||
+                  entitlements.maxDestinations ??
+                  usage.rtmpDestinations.limit ??
+                  currentPlan.limits?.rtmpDestinationsMax ??
                   0
                 }
                 unit=""

@@ -10,6 +10,8 @@ export type InviteClaims = {
   identity?: string;
   uid?: string;
   sub?: string;
+  role?: string;
+  createdByUid?: string;
 };
 
 function getJwtSecret() {
@@ -74,6 +76,23 @@ export function requireAuthOrInvite(req: Request, res: Response, next: NextFunct
     const user = tryGetAuthUser(req);
     if (user) {
       (req as any).user = user;
+      // If caller also provided an invite token, validate it and attach claims.
+      // This enables authenticated cohost/mod flows to be authorized by invite.
+      const inviteToken =
+        (req.headers["x-invite-token"] as string | undefined) ||
+        (req.body as any)?.inviteToken ||
+        (req.query as any)?.inviteToken;
+
+      if (inviteToken) {
+        try {
+          const claims = verifyInviteToken(inviteToken);
+          (req as any).invite = claims;
+        } catch (err) {
+          console.warn("[requireAuthOrInvite] Provided invite token invalid for authed request");
+          // ignore invalid invite token when user is authenticated
+        }
+      }
+
       return next();
     }
   } catch (err) {

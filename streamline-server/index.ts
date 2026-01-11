@@ -13,6 +13,7 @@ import recordingsRoutes from "./routes/recordings";
 import usageRoutes from "./routes/usageRoutes";
 import plansRoutes from "./routes/plans";
 import roomTokenRoute from "./routes/roomToken";
+import invitesRoutes from "./routes/invites";
 import multistreamRoutes from "./routes/multistream";
 import destinationsRoutes from "./routes/destinations";
 import liveRoutes from "./routes/live";
@@ -109,6 +110,9 @@ app.use("/api/usage", usageRoutes); // gives /api/usage/summary
 
 // Token route used by the frontend
 app.use("/api/roomToken", roomTokenRoute);
+
+// Invite resolve/accept flow
+app.use("/api/invites", invitesRoutes);
 
 // Multistream routes (YouTube/FB/Twitch)
 app.use("/api/rooms", multistreamRoutes);

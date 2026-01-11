@@ -360,7 +360,7 @@ export const LoginPage = () => {
             Don't have an account?{' '}
           </span>
           <button
-            onClick={() => nav("/signup")}
+            onClick={() => nav(nextUrl ? `/signup?next=${encodeURIComponent(nextUrl)}` : "/signup")}
             style={{
               fontSize: '14px',
               color: '#ef4444',
