@@ -54,7 +54,7 @@ declare global {
 router.post(
   "/upload",
   authenticateToken,
-  upload.single('video'), // ✅ Parse file from FormData
+  upload.single('video') as any, // ✅ Parse file from FormData (typed as any for TS)
   async (req: Request, res: Response) => {
     try {
       console.log("📤 Upload request received");

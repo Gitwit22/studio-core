@@ -39,6 +39,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 
 const app = express();
+app.listen(PORT, () => console.log(`Server listening on ${PORT}`));
 
 // Allow primary client plus local dev hosts for testing/incognito shares
 const allowedOrigins = [
