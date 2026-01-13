@@ -185,13 +185,17 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const CLIENT_URL = process.env.CLIENT_URL;
     if (!CLIENT_URL) throw new Error("Missing env var: CLIENT_URL");
 
-    // Normalize account and hard-block Stripe when billing is effectively disabled
-    const account = await getUserAccount(uid);
+    // Normalize account and bypass Stripe when billing is effectively disabled
+    const account = (req as any).account || await getUserAccount(uid);
+
     if (account.effectiveBillingEnabled === false) {
-      return res
-        .status(403)
-        .json({ success: false, error: "billing_disabled" });
+      // Billing is OFF (dev/admin override). Allow preflight without Stripe checks.
+      return res.json({
+        success: true,
+        billing: { mode: "disabled" },
+      });
     }
+
 
     const userRef = getUserRef(uid);
     const snap = await userRef.get();
@@ -344,11 +348,12 @@ router.post("/portal", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
-    const account = await getUserAccount(uid);
+    const account = (req as any).account || await getUserAccount(uid);
     if (account.effectiveBillingEnabled === false) {
-      return res
-        .status(403)
-        .json({ success: false, error: "billing_disabled" });
+      // Billing is disabled (Test Mode). Do not talk to Stripe; instead signal
+      // to the client that the portal is unavailable due to billing being off,
+      // but use a 200 status so this is not treated as a hard auth error.
+      return res.json({ success: false, error: "billing_disabled" });
     }
 
     const snap = await getUserRef(uid).get();
@@ -385,7 +390,7 @@ router.post("/test/change-plan", requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: "missing_plan" });
     }
 
-    const account = await getUserAccount(uid);
+    const account = (req as any).account || await getUserAccount(uid);
 
     // Only allowed when billing is effectively disabled (platform-wide or per-user)
     if (account.effectiveBillingEnabled !== false) {
@@ -477,7 +482,7 @@ router.get("/me", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
-    const account = await getUserAccount(uid);
+    const account = (req as any).account || await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();
     const raw = snap.exists ? snap.data() : account.rawUser;
@@ -502,7 +507,7 @@ router.get("/pending-change", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
-    const account = await getUserAccount(uid);
+    const account = (req as any).account || await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();
     if (!snap.exists) return res.status(404).json({ error: "User not found" });
@@ -583,7 +588,7 @@ router.get("/status", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
-    const account = await getUserAccount(uid);
+    const account = (req as any).account || await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();
     if (!snap.exists) return res.status(404).json({ error: "User not found" });

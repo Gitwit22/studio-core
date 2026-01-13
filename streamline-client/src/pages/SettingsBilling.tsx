@@ -102,6 +102,8 @@ interface UserData {
   billing?: BillingInfo;
   hasHadTrial?: boolean;
   billingEnabled?: boolean;
+  platformBillingEnabled?: boolean;
+  effectiveBillingEnabled?: boolean;
   billingMode?: "test" | "live";
 }
 
@@ -242,7 +244,7 @@ type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro" | "basic";
 type ActionLoading = CheckoutPlanVariant | "portal" | null;
 
 function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
-  const p = getCanonicalPlanId(user); // expected: "free" | "starter" | "pro" | ...
+  const p = (user?.planId as string | undefined) || "free"; // expected: "free" | "starter" | "pro" | ...
   if (p === "pro" || p === "internal_unlimited") return "pro";
   // default resubscribe goes to paid Starter
   return "starter_paid";

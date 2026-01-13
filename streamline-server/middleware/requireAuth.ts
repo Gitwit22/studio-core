@@ -1,6 +1,7 @@
 // StreamLine uses custom auth UID (JWT) as canonical user identity.
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { getUserAccount } from "../lib/userAccount";
 
 type AuthUser = { uid: string };
 
@@ -47,7 +48,7 @@ export function tryGetAuthUser(req: Request): AuthUser | null {
   return { uid: decoded.uid };
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const user = tryGetAuthUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
@@ -55,6 +56,18 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
       console.log("[auth-debug] requireAuth ok", { uid: user.uid, path: req.path, method: req.method });
     }
     (req as any).user = user;
+
+    // Attach normalized account to the request so downstream routes and
+    // feature checks can reuse it instead of calling getUserAccount(uid)
+    // multiple times per request.
+    try {
+      const account = await getUserAccount(user.uid);
+      (req as any).account = account;
+    } catch (err) {
+      console.error("[requireAuth] getUserAccount failed:", (err as any)?.message || err);
+      // Continue without req.account; callers can still compute it on demand.
+    }
+
     return next();
   } catch (err) {
     console.error("[requireAuth] Unauthorized:", (err as any)?.message || err);

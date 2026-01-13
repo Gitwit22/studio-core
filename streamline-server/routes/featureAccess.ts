@@ -1,4 +1,5 @@
 import { firestore as db } from "../firebaseAdmin";
+import { getUserAccount, UserAccount } from "../lib/userAccount";
 
 type AccessResult = {
   allowed: boolean;
@@ -73,17 +74,18 @@ function billingBlocks(user: any): string | null {
 }
 
 export async function canAccessFeature(
-  uid: string,
+  uidOrAccount: string | UserAccount,
   featureKey: string
 ): Promise<AccessResult> {
-  // 1) Load user
-  const userSnap = await db.collection("users").doc(uid).get();
-  if (!userSnap.exists) {
-    return { allowed: false, reason: "User not found" };
-  }
+  // 1) Load normalized account + user snapshot (from cache when available)
+  const account =
+    typeof uidOrAccount === "string"
+      ? await getUserAccount(uidOrAccount)
+      : uidOrAccount;
 
-  const user = userSnap.data() as any;
-  const planId = user?.planId || "free";
+  const uid = account.uid;
+  const user = account.rawUser || {};
+  const planId = user?.planId || account.planId || "free";
   if (process.env.DEBUG_FEATURE_ACCESS === "1") {
     console.log(
       `[featureAccess] uid=${uid} feature=${featureKey} planId=${planId} adminOverride=${!!user?.adminOverride}`
@@ -112,13 +114,18 @@ export async function canAccessFeature(
     return { allowed: true };
   }
 
-  // 2) STRICT BILLING BLOCK (NEW)
-  const billingBlockReason = billingBlocks(user);
-  if (billingBlockReason) {
-    return {
-      allowed: false,
-      reason: `Billing issue: ${billingBlockReason}`,
-    };
+  // 2) STRICT BILLING BLOCK (RESPECTS PLATFORM BILLING FLAG)
+  // When the platform billing flag disables billing (effectiveBillingEnabled === false),
+  // we bypass billing-based feature blocks so Test Mode users on paid plans can
+  // still access features like streaming/recording without a live subscription.
+  if (account.effectiveBillingEnabled !== false) {
+    const billingBlockReason = billingBlocks(user);
+    if (billingBlockReason) {
+      return {
+        allowed: false,
+        reason: `Billing issue: ${billingBlockReason}`,
+      };
+    }
   }
 
   // 3) Load plan

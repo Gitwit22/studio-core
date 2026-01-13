@@ -75,7 +75,7 @@ if (!roomName) return res.status(400).json({ error: "Missing roomName param" });
     if (!userSnap.exists) return res.status(401).json({ error: "User not found" });
     const planId = await getUserPlanId(uid);
 
-    const access = await canAccessFeature(uid, "multistream");
+    const access = await canAccessFeature((req as any).account || uid, "multistream");
     if (!access.allowed) {
       return res.status(403).json({ error: access.reason || "Multistreaming is not available on your plan" });
     }

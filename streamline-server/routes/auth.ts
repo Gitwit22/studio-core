@@ -49,8 +49,7 @@ router.get("/me", requireAuth, async (req, res) => {
     const user = (req as any).user || {};
     const userId = user.id || user.uid;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-    const account = await getUserAccount(userId);
+    const account = (req as any).account || await getUserAccount(userId);
 
     // Load the latest Firestore snapshot so we can strip sensitive fields
     const snap = await db.collection("users").doc(userId).get();

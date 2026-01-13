@@ -572,7 +572,7 @@ router.post("/start", requireAuth, async (req, res) => {
     }
 
     // Feature access gate
-    const access = await canAccessFeature(uid, "recording");
+    const access = await canAccessFeature((req as any).account || uid, "recording");
     if (!access.allowed) {
       return res.status(403).json({
         success: false,
