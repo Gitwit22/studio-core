@@ -67,13 +67,14 @@ app.use(cors({
 
 
 
-// Body parsers must come before any routes that need req.body
+// Stripe/Billing webhooks MUST run before JSON body parsing so Stripe
+// webhook signature verification can use the raw request body.
+app.use("/api/webhooks", webhookRouter);
+
+// Body parsers for the rest of the API
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-// Stripe/Billing webhooks
-app.use("/api/webhooks", webhookRouter);
 app.use("/api/auth", authRoutes);
 app.use("/api/account", accountRoutes);
 
