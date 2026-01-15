@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import Hls from "hls.js";
 import { API_BASE } from "../lib/apiBase";
@@ -11,8 +11,6 @@ import {
   Users,
   Signal,
   AlertCircle,
-  Link2,
-  Copy,
 } from "lucide-react";
 import logoUrl from "../assets/logosmaller.png"; 
 
@@ -59,10 +57,9 @@ export default function Live() {
   const [status, setStatus] = useState<StreamStatus>("loading");
   const [isMuted, setIsMuted] = useState(true);
   const [isRetrying, setIsRetrying] = useState(false);
-  const [copied, setCopied] = useState<null | "viewer" | "playlist">(null);
 
   // NOTE: viewerCount is a placeholder until you wire a real metric
-  const viewerCount = useMemo(() => 0, []);
+  const viewerCount = 0;
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -256,22 +253,6 @@ export default function Live() {
     }
   };
 
-  const viewerLink = useMemo(() => {
-    const id = (roomId || routeRoomId || "").trim();
-    if (!id) return "";
-    return `${window.location.origin}/live/${encodeURIComponent(id)}${token ? `?t=${encodeURIComponent(token)}` : ""}`;
-  }, [roomId, routeRoomId, token]);
-
-  const copyText = async (kind: "viewer" | "playlist", text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(kind);
-      window.setTimeout(() => setCopied(null), 1200);
-    } catch {
-      // ignore
-    }
-  };
-
   const StatusBadge = () => {
     const map: Record<StreamStatus, { label: string; dot: string; ring: string; text: string }> = {
       live: { label: "LIVE", dot: "bg-red-500", ring: "border-red-500/60", text: "text-red-300" },
@@ -290,12 +271,6 @@ export default function Live() {
       </div>
     );
   };
-
-  const TitleText = useMemo(() => {
-    if (roomName) return roomName;
-    const id = (roomId || routeRoomId || "").trim();
-    return id ? `Room: ${id}` : "StreamLine Live";
-  }, [roomName, roomId, routeRoomId]);
 
   return (
     <div className="min-h-screen bg-black relative overflow-hidden">
@@ -351,17 +326,11 @@ export default function Live() {
             {/* Info strip */}
             <div className="mb-4 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-white font-semibold">{TitleText}</div>
+                <div className="text-white font-semibold">StreamLine Live</div>
                 <div className="text-xs text-neutral-500">
                   {ended ? "Stream ended." : status === "live" ? "Watching live" : "Waiting for the host to start HLS"}
                 </div>
               </div>
-
-              {role && (
-                <div className="text-xs text-neutral-500">
-                  Link role: <span className="text-neutral-300 font-semibold">{role}</span>
-                </div>
-              )}
 
               {error && (
                 <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200">
@@ -473,50 +442,7 @@ export default function Live() {
               </div>
             </div>
 
-            {/* Bottom utility bar */}
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                <div className="text-xs text-neutral-400 flex items-center gap-2">
-                  <Signal className="w-4 h-4 text-red-400" />
-                  <span className="font-semibold text-neutral-300">HLS Status:</span>
-                  <span className="uppercase tracking-wide">{hlsStatus || "idle"}</span>
-                </div>
-                {playlistUrl && (
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <div className="text-xs text-neutral-500 truncate">
-                      <span className="text-neutral-400">Playlist:</span> {playlistUrl}
-                    </div>
-                    <button
-                      onClick={() => copyText("playlist", playlistUrl)}
-                      className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-red-500/20 border border-white/10 hover:border-red-500/40 text-xs text-white"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      {copied === "playlist" ? "Copied" : "Copy"}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                <div className="text-xs text-neutral-400 flex items-center gap-2">
-                  <Link2 className="w-4 h-4 text-red-400" />
-                  <span className="font-semibold text-neutral-300">Viewer Link</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <div className="text-xs text-neutral-500 truncate">{viewerLink || "—"}</div>
-                  <button
-                    onClick={() => viewerLink && copyText("viewer", viewerLink)}
-                    disabled={!viewerLink}
-                    className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-red-500/20 border border-white/10 hover:border-red-500/40 text-xs text-white disabled:opacity-50"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    {copied === "viewer" ? "Copied" : "Copy"}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 text-center text-xs text-neutral-700">
+            <div className="mt-5 text-center text-lg text-neutral-700">
               Powered by <span className="text-red-500 font-medium">StreamLine</span>
             </div>
           </div>

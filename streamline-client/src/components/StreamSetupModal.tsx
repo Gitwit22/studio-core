@@ -1408,50 +1408,6 @@ export default function StreamSetupModalV2({
                 </div>
               </div>
 
-              {/* Viewer link */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Viewer Link (/live/:roomId)</span>
-                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    readOnly
-                    value={hlsStatus === 'live' && hlsViewerUrl ? hlsViewerUrl : ''}
-                    placeholder={hlsStatus === 'live' ? 'Viewer link will appear when live' : 'Viewer link available when HLS is live'}
-                    style={{
-                      flex: 1,
-                      padding: '0.4rem 0.55rem',
-                      borderRadius: '0.35rem',
-                      border: '1px solid rgba(75,85,99,0.7)',
-                      background: 'rgba(15,23,42,0.9)',
-                      color: '#e5e7eb',
-                      fontSize: '0.8rem',
-                    }}
-                  />
-                  <button
-                    type="button"
-                    disabled={!(hlsStatus === 'live' && hlsViewerUrl)}
-                    onClick={async () => {
-                      if (!(hlsStatus === 'live' && hlsViewerUrl)) return;
-                      try {
-                        await navigator.clipboard.writeText(hlsViewerUrl);
-                        alert('Viewer link copied');
-                      } catch {/* ignore */}
-                    }}
-                    style={{
-                      padding: '0.35rem 0.6rem',
-                      borderRadius: '0.35rem',
-                      border: '1px solid rgba(148,163,184,0.7)',
-                      background: 'rgba(15,23,42,0.95)',
-                      color: '#e5e7eb',
-                      fontSize: '0.75rem',
-                      cursor: hlsStatus === 'live' && hlsViewerUrl ? 'pointer' : 'not-allowed',
-                      opacity: hlsStatus === 'live' && hlsViewerUrl ? 1 : 0.5,
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
             </div>
 
             {hlsError && hlsStatus === 'error' && (

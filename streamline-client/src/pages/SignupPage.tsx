@@ -44,6 +44,9 @@ export const SignupPage = () => {
   const [defaultPrivacy, setDefaultPrivacy] = useState("public");
   const [skipOnboarding, setSkipOnboarding] = useState(false);
 
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -76,6 +79,12 @@ export const SignupPage = () => {
 
     if (password.length < 6) {
       setError("Password must be at least 6 characters.");
+      setLoading(false);
+      return;
+    }
+
+    if (!termsAccepted) {
+      setError("You must agree to the Terms of Service to create an account.");
       setLoading(false);
       return;
     }
@@ -523,6 +532,52 @@ export const SignupPage = () => {
           </>
         )}
 
+        {/* Terms of Service agreement (required) */}
+        <div>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "0.5rem",
+              fontSize: "0.8rem",
+              cursor: "pointer",
+              padding: "0.5rem",
+              borderRadius: "0.375rem",
+              background: "rgba(31, 41, 55, 0.3)",
+              lineHeight: 1.4,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={termsAccepted}
+              onChange={(e) => setTermsAccepted(e.target.checked)}
+              style={{ marginTop: "0.1rem", accentColor: "#dc2626" }}
+              required
+            />
+            <span>
+              I agree to the
+              {" "}
+              <button
+                type="button"
+                onClick={() => setShowTermsModal(true)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  margin: 0,
+                  color: "#dc2626",
+                  fontWeight: 600,
+                  textDecoration: "underline",
+                  cursor: "pointer",
+                }}
+              >
+                Terms of Service
+              </button>
+              .
+            </span>
+          </label>
+        </div>
+
         <button
           type="submit"
           disabled={loading}
@@ -554,6 +609,100 @@ export const SignupPage = () => {
           {loading ? "Creating account..." : "Create account"}
         </button>
       </form>
+
+      {showTermsModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.8)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 40,
+          }}
+          onClick={() => setShowTermsModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: "720px",
+              maxHeight: "80vh",
+              background: "#020617",
+              borderRadius: "1rem",
+              border: "1px solid rgba(248,113,113,0.4)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.8)",
+              padding: "1.5rem",
+              color: "#f9fafb",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <h2 style={{ fontSize: "1.25rem", fontWeight: 700 }}>Terms of Service</h2>
+              <button
+                type="button"
+                onClick={() => setShowTermsModal(false)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#9ca3af",
+                  fontSize: "1.25rem",
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ fontSize: "0.85rem", color: "#d1d5db", marginBottom: "0.75rem" }}>
+              By creating a StreamLine account you agree to our Terms of
+              Service. This is a summary; the full legal text is available on
+              the dedicated Terms page.
+            </p>
+
+            <ul style={{ fontSize: "0.8rem", color: "#9ca3af", paddingLeft: "1.1rem", marginBottom: "0.75rem" }}>
+              <li>Use StreamLine only for lawful, authorized content and activity.</li>
+              <li>You are responsible for your account and any activity under it.</li>
+              <li>
+                Paid plans, if enabled, are billed on a recurring basis and may
+                have usage limits.
+              </li>
+              <li>
+                We may suspend or terminate accounts that violate these terms or
+                abuse the service.
+              </li>
+            </ul>
+
+            <p style={{ fontSize: "0.8rem", color: "#9ca3af", marginBottom: "0.75rem" }}>
+              For full details, including acceptable use, billing, and
+              limitations of liability, review the complete Terms of Service.
+            </p>
+
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: "inline-block",
+                marginTop: "0.25rem",
+                fontSize: "0.8rem",
+                color: "#fecaca",
+                textDecoration: "underline",
+              }}
+            >
+              Open full Terms of Service in a new tab
+            </a>
+          </div>
+        </div>
+      )}
 
       {error && (
         <p style={{
