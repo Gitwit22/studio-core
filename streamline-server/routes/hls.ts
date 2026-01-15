@@ -3,8 +3,79 @@ import { getRoom, setHlsError, setHlsIdle, setHlsLive, setHlsStarting } from "..
 import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
 import { requireAuth } from "../middleware/requireAuth";
 import { startHlsEgress, HlsPresetId, stopEgress } from "../services/livekitEgress";
+import { firestore } from "../firebaseAdmin";
+import { getCurrentMonthKey } from "../lib/usageTracker";
+import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { assertRoomOwner, RoomPermissionError } from "../lib/rolePermissions";
 
 const router = Router();
+
+async function assertCanStartHls(req: any, uid: string) {
+  try {
+    const entitlements = await getEffectiveEntitlements((req as any).account || uid);
+    const features = entitlements.features as any;
+    const rawFeatures = (entitlements.plan.raw?.features || {}) as any;
+
+    const canHls = Boolean(
+      features.canHls ??
+        rawFeatures.canHls ??
+        rawFeatures.hls ??
+        rawFeatures.hlsBroadcast
+    );
+
+    if (!canHls) {
+      return {
+        ok: false as const,
+        reason: "hls_not_in_plan",
+      };
+    }
+
+    return { ok: true as const };
+  } catch (err) {
+    console.error("[hls] failed to load entitlements for HLS", err);
+    // Fail closed on entitlements errors
+    return {
+      ok: false as const,
+      reason: "hls_not_in_plan",
+    };
+  }
+}
+
+async function incrementHlsUsageMinutes(uid: string, minutes: number) {
+  const safeMinutes = Math.max(0, Math.round(Number(minutes || 0)));
+  if (!uid || !safeMinutes) return;
+
+  const monthKey = getCurrentMonthKey();
+  const usageDocId = `${uid}_${monthKey}`;
+  const usageRef = firestore.collection("usageMonthly").doc(usageDocId);
+  const usageSnap = await usageRef.get();
+  const existing = usageSnap.exists ? (usageSnap.data() as any) : {};
+
+  const prevUsage = existing.usage || {};
+  const prevYtd = existing.ytd || {};
+
+  const nextUsage = {
+    ...prevUsage,
+    hlsMinutes: Number(prevUsage.hlsMinutes || 0) + safeMinutes,
+  };
+
+  const nextYtd = {
+    ...prevYtd,
+    hlsMinutes: Number(prevYtd.hlsMinutes || 0) + safeMinutes,
+  };
+
+  await usageRef.set(
+    {
+      uid,
+      monthKey,
+      usage: nextUsage,
+      ytd: nextYtd,
+      createdAt: existing.createdAt || new Date(),
+      updatedAt: new Date(),
+    },
+    { merge: true }
+  );
+}
 
 function getHlsPublicBaseUrl(): string {
   const raw = process.env.HLS_PUBLIC_BASE_URL;
@@ -63,15 +134,24 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
   const presetId = (req.body?.presetId || "hls_720p") as HlsPresetId;
 
   try {
-    const { ref: roomRef, data: room } = await getRoom(roomId);
-
     const uid = (req as any).user?.uid;
     if (!uid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
+    try {
+      await assertRoomOwner(req as any, roomId);
+    } catch (err: any) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
+    }
 
-    if (room.ownerId !== uid) {
-      return res.status(403).json({ error: "not_room_owner" });
+    const { ref: roomRef, data: room } = await getRoom(roomId);
+
+    const gate = await assertCanStartHls(req, uid);
+    if (!gate.ok) {
+      return res.status(403).json({ error: gate.reason });
     }
 
     if (room.roomType !== "rtc") return res.status(400).json({ error: "roomType must be rtc" });
@@ -207,7 +287,9 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    if (room.ownerId !== uid) {
+    // HLS stop remains owner-only: room owner can always stop,
+    // even if plan/entitlements changed mid-session.
+    if (room.ownerId && room.ownerId !== uid) {
       return res.status(403).json({ error: "not_room_owner" });
     }
 
@@ -223,7 +305,33 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
       }
     }
 
+    let durationMinutes = 0;
+    const startedAt: any = hls.startedAt;
+    try {
+      const startedDate: Date | null = startedAt
+        ? startedAt.toDate
+          ? startedAt.toDate()
+          : new Date(startedAt)
+        : null;
+      if (startedDate && !Number.isNaN(startedDate.getTime())) {
+        const diffMs = Date.now() - startedDate.getTime();
+        if (diffMs > 0) {
+          durationMinutes = Math.max(1, Math.round(diffMs / (60 * 1000)));
+        }
+      }
+    } catch (e) {
+      console.error("[hls] failed to compute HLS duration", e);
+    }
+
     await setHlsIdle(roomRef);
+
+    if (durationMinutes > 0) {
+      try {
+        await incrementHlsUsageMinutes(uid, durationMinutes);
+      } catch (e) {
+        console.error("[hls] failed to increment HLS usage", e);
+      }
+    }
 
     const updated = {
       status: "idle" as const,

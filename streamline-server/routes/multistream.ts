@@ -6,6 +6,7 @@ import type { ApiErrorCode } from "../types/streaming";
 import { decryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
 import { clampPresetForPlan, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
+import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
 let _lkMod: any | null = null;
@@ -42,6 +43,15 @@ router.post("/:roomId/start-multistream", requireAuth, async (req, res) => {
     if (!resolvedRoom) return res.status(400).json({ error: "Invalid room" });
     const roomId = resolvedRoom.roomId;
     const roomName = resolvedRoom.roomName;
+
+    try {
+      await assertRoomPerm(req as any, roomId, "canDestinations");
+    } catch (err) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code as ApiErrorCode });
+      }
+      throw err;
+    }
 
     const streamDocId = `${uid}_${roomId}`; // canonical
     const ref = firestore.collection("activeStreams").doc(streamDocId);
@@ -300,6 +310,15 @@ router.post("/:roomId/stop-multistream", requireAuth, async (req, res) => {
     if (!resolvedRoom) return res.status(400).json({ error: "Invalid room" });
     const roomId = resolvedRoom.roomId;
     const roomName = resolvedRoom.roomName;
+
+    try {
+      await assertRoomPerm(req as any, roomId, "canDestinations");
+    } catch (err) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code as ApiErrorCode });
+      }
+      throw err;
+    }
 
     const streamDocId = `${uid}_${roomId}`;
     const ref = firestore.collection("activeStreams").doc(streamDocId);

@@ -6,6 +6,12 @@ import { getCurrentMonthKey } from "../lib/usageTracker";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import crypto from "crypto";
+import { CURRENT_TOS_VERSION } from "../lib/tos";
+import {
+  DEFAULT_ROLE_PROFILES,
+  DEFAULT_ROLE_PROFILES_BY_ID,
+  type RolePermissionMap,
+} from "../lib/permissions/defaultRoleProfiles";
 
 const router = Router();
 
@@ -33,16 +39,7 @@ const DEFAULT_COHOST_PROFILE = {
   maxUses: 1,
 };
 
-type PermissionSet = {
-  canStream: boolean;
-  canRecord: boolean;
-  canDestinations: boolean;
-  canModerate: boolean;
-  canLayout: boolean;
-  canScreenShare: boolean;
-  canInvite: boolean;
-  canAnalytics: boolean;
-};
+type PermissionSet = RolePermissionMap;
 
 type RoleProfile = {
   id: string;
@@ -53,107 +50,26 @@ type RoleProfile = {
   slug?: string;
 };
 
-const DEFAULT_ROLE_TEMPLATES: RoleProfile[] = [
-  {
-    id: "viewer",
-    slug: "viewer",
-    label: "Viewer",
-    system: true,
-    lockedName: true,
-    permissions: {
-      canStream: false,
-      canRecord: false,
-      canDestinations: false,
-      canModerate: false,
-      canLayout: false,
-      canScreenShare: false,
-      canInvite: false,
-      canAnalytics: false,
-    },
-  },
-  {
-    id: "participant",
-    slug: "participant",
-    label: "Participant",
-    system: true,
-    lockedName: true,
-    permissions: {
-      canStream: false,
-      canRecord: false,
-      canDestinations: false,
-      canModerate: false,
-      canLayout: false,
-      canScreenShare: false,
-      canInvite: false,
-      canAnalytics: false,
-    },
-  },
-  {
-    id: "cohost",
-    slug: "cohost",
-    label: "Co-host",
-    system: true,
-    lockedName: true,
-    permissions: {
-      canStream: false,
-      canRecord: false,
-      canDestinations: false,
-      canModerate: false,
-      canLayout: true,
-      canScreenShare: true,
-      canInvite: false,
-      canAnalytics: false,
-    },
-  },
-  {
-    id: "moderator",
-    slug: "moderator",
-    label: "Moderator",
-    system: true,
-    lockedName: true,
-    permissions: {
-      canStream: false,
-      canRecord: false,
-      canDestinations: false,
-      canModerate: true,
-      canLayout: true,
-      canScreenShare: false,
-      canInvite: false,
-      canAnalytics: false,
-    },
-  },
-];
+const DEFAULT_ROLE_TEMPLATES: RoleProfile[] = DEFAULT_ROLE_PROFILES.map((profile) => ({
+  id: profile.id,
+  slug: profile.id,
+  label: profile.name,
+  system: profile.isSystemDefault,
+  lockedName: !!profile.lockedName,
+  permissions: profile.permissions,
+}));
+
+const DEFAULT_QUICK_ROLE_IDS: string[] = ["participant", "cohost", "moderator"];
 
 export const SIMPLE_ROLE_DEFAULTS: Record<"participant" | "moderator" | "cohost", PermissionSet> = {
   participant: {
-    canStream: false,
-    canRecord: false,
-    canDestinations: false,
-    canModerate: false,
-    canLayout: false,
-    canScreenShare: false,
-    canInvite: false,
-    canAnalytics: false,
+    ...DEFAULT_ROLE_PROFILES_BY_ID.participant.permissions,
   },
   moderator: {
-    canStream: false,
-    canRecord: false,
-    canDestinations: false,
-    canModerate: true,
-    canLayout: true,
-    canScreenShare: false,
-    canInvite: false,
-    canAnalytics: false,
+    ...DEFAULT_ROLE_PROFILES_BY_ID.moderator.permissions,
   },
   cohost: {
-    canStream: true,
-    canRecord: true,
-    canDestinations: true,
-    canModerate: false,
-    canLayout: true,
-    canScreenShare: true,
-    canInvite: true,
-    canAnalytics: false,
+    ...DEFAULT_ROLE_PROFILES_BY_ID.cohost.permissions,
   },
 };
 
@@ -264,7 +180,7 @@ function normalizeCohostProfile(raw: any) {
 }
 
 function normalizePermissions(raw: any): PermissionSet {
-  return {
+  const perms: PermissionSet = {
     canStream: !!raw?.canStream,
     canRecord: !!raw?.canRecord,
     canDestinations: !!raw?.canDestinations,
@@ -274,6 +190,20 @@ function normalizePermissions(raw: any): PermissionSet {
     canInvite: !!raw?.canInvite,
     canAnalytics: !!raw?.canAnalytics,
   };
+
+  return clampNeverPermissions(perms);
+}
+
+/**
+ * Central hook for hard "never" rules on role permissions.
+ *
+ * Today this is a no-op beyond boolean normalization, but any
+ * permission keys that must never be enabled (regardless of
+ * stored data) should be enforced here so that all roleProfiles
+ * writes and reads are consistently clamped.
+ */
+function clampNeverPermissions(perms: PermissionSet): PermissionSet {
+  return perms;
 }
 
 function normalizeRoleProfiles(rawRoles: any): RoleProfile[] {
@@ -325,7 +255,7 @@ async function loadRolesForUser(uid: string) {
   const roleProfiles = normalizeRoleProfiles(data.roleProfiles);
   const quickRoleIdsRaw: string[] = Array.isArray((data as any).quickRoleIds) ? (data as any).quickRoleIds : [];
   const quickRoleIds = quickRoleIdsRaw.filter((id) => roleProfiles.find((r) => r.id === id));
-  const ensuredQuick = quickRoleIds.length ? quickRoleIds : DEFAULT_ROLE_TEMPLATES.map((r) => r.id);
+  const ensuredQuick = quickRoleIds.length ? quickRoleIds : DEFAULT_QUICK_ROLE_IDS;
   return { roleProfiles, quickRoleIds: ensuredQuick };
 }
 
@@ -386,10 +316,16 @@ router.get("/me", async (req, res) => {
       return Number.isFinite(num) ? num : 0;
     };
 
-    const liveCurrent = toNumber(usageMinutes.live?.currentPeriod ?? usage.participantMinutes);
-    const liveLifetime = toNumber(
+    const hlsCurrent = toNumber(usage.hlsMinutes);
+    const hlsLifetime = toNumber(ytd.hlsMinutes);
+
+    const liveCurrentBase = toNumber(usageMinutes.live?.currentPeriod ?? usage.participantMinutes);
+    const liveLifetimeBase = toNumber(
       usageMinutes.live?.lifetime ?? ytdMinutes.live?.lifetime ?? ytd.participantMinutes
     );
+
+    const liveCurrent = liveCurrentBase + hlsCurrent;
+    const liveLifetime = liveLifetimeBase + hlsLifetime;
     const recordingCurrent = toNumber(usageMinutes.recording?.currentPeriod);
     const recordingLifetime = toNumber(
       usageMinutes.recording?.lifetime ?? ytdMinutes.recording?.lifetime
@@ -416,6 +352,13 @@ router.get("/me", async (req, res) => {
           features.multistream
       );
 
+      const canHls = Boolean(
+        (features as any).canHls ??
+          rawFeatures.canHls ??
+          rawFeatures.hls ??
+          rawFeatures.hlsBroadcast
+      );
+
       effectiveEntitlements = {
         planId: entitlements.planId,
         planName: plan.name || entitlements.planId,
@@ -424,6 +367,7 @@ router.get("/me", async (req, res) => {
           rtmpMultistream: rtmpMultistreamEnabled,
           dualRecording: !!(rawFeatures.dualRecording ?? rawFeatures.dual_recording),
           watermark: !!(rawFeatures.watermarkRecordings ?? rawFeatures.watermark),
+          canHls,
         },
         limits: {
           maxDestinations: resolveMaxDestinations(limits),
@@ -459,6 +403,9 @@ router.get("/me", async (req, res) => {
         facebook: !!data.facebookConnected,
         twitch: !!data.twitchConnected,
       },
+      tosVersion: typeof (data as any).tosVersion === "string" ? (data as any).tosVersion : null,
+      tosAcceptedAt: typeof (data as any).tosAcceptedAt === "number" ? (data as any).tosAcceptedAt : null,
+      currentTosVersion: CURRENT_TOS_VERSION,
       planId: effectiveEntitlements?.planId ?? entitlements.planId,
       effectiveEntitlements,
       usage: {
@@ -470,6 +417,10 @@ router.get("/me", async (req, res) => {
           recording: {
             currentPeriod: recordingCurrent,
             lifetime: recordingLifetime,
+          },
+          hls: {
+            currentPeriod: hlsCurrent,
+            lifetime: hlsLifetime,
           },
         },
       },
@@ -600,7 +551,15 @@ router.get("/roles", async (req, res) => {
       await firestore.collection("users").doc(uid).set({ roleProfiles, quickRoleIds }, { merge: true });
     }
 
-    return res.json({ roles: roleProfiles, quickRoleIds, locked: simpleMode, lockReason: adv.globalLock ? "global_lock" : undefined });
+    const defaultRoleProfiles = DEFAULT_ROLE_PROFILES;
+
+    return res.json({
+      roles: roleProfiles,
+      quickRoleIds,
+      locked: simpleMode,
+      lockReason: adv.globalLock ? "global_lock" : undefined,
+      defaultRoleProfiles,
+    });
   } catch (err: any) {
     console.error("[account/roles] error", err);
     return res.status(500).json({ error: "failed_to_load_roles" });
@@ -708,7 +667,7 @@ router.put("/roles/quick", async (req, res) => {
     }
     const requested: string[] = Array.isArray(req.body?.roleIds) ? req.body.roleIds.map((r: any) => String(r)) : [];
     const filtered = requested.filter((id) => roleProfiles.find((r) => r.id === id));
-    const quickRoleIds = filtered.length ? filtered : DEFAULT_ROLE_TEMPLATES.map((r) => r.id);
+    const quickRoleIds = filtered.length ? filtered : DEFAULT_QUICK_ROLE_IDS;
 
     await firestore.collection("users").doc(uid).set({ roleProfiles, quickRoleIds }, { merge: true });
     return res.json({ roles: roleProfiles, quickRoleIds });

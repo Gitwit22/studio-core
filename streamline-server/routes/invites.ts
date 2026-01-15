@@ -1,8 +1,9 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { firestore } from "../firebaseAdmin";
-import { tryGetAuthUser, verifyInviteToken } from "../middleware/requireAuth";
+import { requireAuth, tryGetAuthUser, verifyInviteToken } from "../middleware/requireAuth";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
+import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 
 type InviteRole = "guest" | "cohost" | "moderator";
 
@@ -47,26 +48,35 @@ const router = Router();
 
 /**
  * POST /api/invites/create
- * Body: { roomName, role }
+ * Body: { roomId, role }
  * Auth: required (host/streamer)
  * Returns: { inviteToken, url }
  */
-router.post("/create", async (req, res) => {
+router.post("/create", requireAuth, async (req, res) => {
   try {
-    const user = tryGetAuthUser(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const user = (req as any).user as { uid: string } | undefined;
+    if (!user?.uid) return res.status(401).json({ error: "Unauthorized" });
 
     const requestedRoomId = normalizeRoomId((req.body as any)?.roomId);
-    const requestedRoomName = normalizeRoomName((req.body as any)?.roomName);
     const role = normalizeRole((req.body as any)?.role);
 
-    if (!requestedRoomId && !requestedRoomName) return res.status(400).json({ error: "roomId_or_roomName_required" });
+    if (!requestedRoomId) return res.status(400).json({ error: "roomId_required" });
     if (!role) return res.status(400).json({ error: "role_disabled" });
 
-    const resolved = await resolveRoomIdentity({ roomId: requestedRoomId, roomName: requestedRoomName });
-    if (!resolved) return res.status(400).json({ error: "roomId_or_roomName_required" });
+    // Enforce that caller owns the room or has canInvite for this room.
+    let roomName: string = requestedRoomId;
+    try {
+      const ctx = await assertRoomPerm(req as any, requestedRoomId, "canInvite");
+      const roomDoc = ctx.room as any;
+      roomName = normalizeRoomName(roomDoc?.roomName || roomDoc?.name || ctx.roomId) || ctx.roomId;
+    } catch (err: any) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
+    }
 
-    const { roomId, roomName } = resolved;
+    const roomId = requestedRoomId;
 
     const claims: InviteTokenClaims = {
       roomId,

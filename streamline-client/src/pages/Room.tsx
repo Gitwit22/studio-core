@@ -529,6 +529,7 @@ export default function Room() {
   // Plan/entitlement flags are informational only; in-room gating is driven by roomPermissions.
   const [planMultistreamEnabled, setPlanMultistreamEnabled] = useState<boolean>(false);
   const [planRecordingEnabled, setPlanRecordingEnabled] = useState<boolean>(true);
+  const [planHlsEnabled, setPlanHlsEnabled] = useState<boolean>(false);
   const [dualRecordingAllowed, setDualRecordingAllowed] = useState<boolean>(false);
   const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(false);
   const [maxGuestsAllowed, setMaxGuestsAllowed] = useState<number | null>(null);
@@ -882,6 +883,9 @@ export default function Room() {
             }
             if (typeof features.rtmpMultistream === "boolean") {
               setPlanMultistreamEnabled(features.rtmpMultistream);
+            }
+            if (typeof (features as any).canHls === "boolean") {
+              setPlanHlsEnabled((features as any).canHls);
             }
             if (typeof limits.maxGuests === "number") {
               setMaxGuestsAllowed(limits.maxGuests);
@@ -1754,9 +1758,14 @@ export default function Room() {
   }
 
   const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
-  const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • Multi:${planMultistreamEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
+  const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • Multi:${planMultistreamEnabled ? "on" : "off"} • HLS:${planHlsEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
   const recordingEnabled = planRecordingEnabled && can("canRecord");
   const canMultistream = planMultistreamEnabled && can("canDestinations");
+  const canHls = planHlsEnabled && isHost;
+
+  const handleUpgradeHls = () => {
+    nav("/settings/billing");
+  };
 
   return (
     <>
@@ -2114,6 +2123,8 @@ export default function Room() {
           onStopRecording={stopRecording}
           recordingEnabled={recordingEnabled}
           multistreamAllowed={canMultistream}
+          hlsEnabled={canHls}
+          onUpgradeHls={handleUpgradeHls}
           dualRecordingAllowed={dualRecordingAllowed}
           maxGuests={maxGuestsAllowed === null ? undefined : maxGuestsAllowed || undefined}
           planId={recordingPlanId || undefined}

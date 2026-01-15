@@ -20,6 +20,7 @@ export type CanonicalPlan = {
     rtmp: boolean;
     multistream: boolean;
     advancedPermissions: boolean;
+    canHls: boolean;
   };
   // Raw fields that callers might still want for display/debug
   raw: any;
@@ -118,6 +119,16 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
     return 0;
   })();
 
+  const rawFeatures = features as any;
+  const rawData: any = data;
+
+  const canHls = toBool(
+    rawFeatures.canHls ??
+      rawFeatures.hls ??
+      rawData.hlsEnabled ??
+      rawData.hlsBroadcastEnabled
+  );
+
   return {
     id,
     name: String(data.name || id),
@@ -140,6 +151,7 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
       rtmp: toBool(features.rtmp ?? data.rtmpEnabled),
       multistream: toBool(features.multistream ?? data.multistreamEnabled),
       advancedPermissions: toBool(features.advancedPermissions ?? data.advancedPermissionsEnabled),
+      canHls,
     },
     raw: data,
   };

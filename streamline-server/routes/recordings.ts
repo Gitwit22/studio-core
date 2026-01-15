@@ -34,6 +34,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
+import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 
 const router = Router();
 
@@ -609,6 +610,15 @@ router.post("/start", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Unable to resolve room identity" });
     }
 
+    try {
+      await assertRoomPerm(req as any, roomId, "canRecord");
+    } catch (err) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
+    }
+
     // CRITICAL: Layout must be exactly "speaker" or "grid" - anything else causes 400
     const layout = rawLayout === "speaker" ? "speaker" : "grid";
     const mode = rawMode === "dual" ? "dual" : "cloud";
@@ -1008,9 +1018,30 @@ router.post("/stop", requireAuth, async (req, res) => {
 
     const data = snap.data() || {};
 
-    // Verify ownership
-    if (data.userId && data.userId !== uid) {
-      return res.status(403).json({ error: "Forbidden" });
+    // Derive roomId from recording and enforce room-level canRecord permissions.
+    let roomId: string | null = typeof (data as any).roomId === "string" ? (data as any).roomId.trim() : null;
+    const roomName: string | null = typeof (data as any).roomName === "string" ? (data as any).roomName.trim() : null;
+
+    if (!roomId && roomName) {
+      try {
+        const identity = await resolveRoomIdentity({ roomId: undefined, roomName });
+        roomId = identity?.roomId || null;
+      } catch (e) {
+        console.warn("[recordings/stop] failed to resolve roomId from roomName", e);
+      }
+    }
+
+    if (!roomId) {
+      return res.status(400).json({ error: "invalid_recording_room" });
+    }
+
+    try {
+      await assertRoomPerm(req as any, roomId, "canRecord");
+    } catch (err: any) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
     }
 
     // Calculate duration

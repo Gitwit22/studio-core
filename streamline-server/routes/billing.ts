@@ -6,6 +6,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { PLAN_IDS, PlanId, isPlanId } from "../types/plan";
 import { getUserAccount } from "../lib/userAccount";
+import { CURRENT_TOS_VERSION, hasAcceptedCurrentTos } from "../lib/tos";
 
 // Plan change guardrails
 const PLAN_CHANGE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
@@ -156,7 +157,11 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
 
-    const { plan, requestId } = (req.body || {}) as { plan?: CheckoutPlanVariant; requestId?: string };
+    const { plan, requestId, tosAccepted } = (req.body || {}) as {
+      plan?: CheckoutPlanVariant;
+      requestId?: string;
+      tosAccepted?: boolean;
+    };
     if (!plan || typeof plan !== "string") {
       return res.status(400).json({ success: false, error: "Missing plan" });
     }
@@ -226,6 +231,31 @@ router.post("/checkout", requireAuth, async (req, res) => {
     }
 
     const userAtLock = lockedUser?.user ?? user;
+
+    // Enforce Terms of Service acceptance before creating a checkout session.
+    if (!hasAcceptedCurrentTos(userAtLock)) {
+      if (tosAccepted === true) {
+        const now = Date.now();
+        await userRef.set(
+          {
+            tosVersion: CURRENT_TOS_VERSION,
+            tosAcceptedAt: now,
+            tosAcceptedIp: req.ip || undefined,
+            tosUserAgent: req.get("user-agent") || undefined,
+          },
+          { merge: true }
+        );
+        (userAtLock as any).tosVersion = CURRENT_TOS_VERSION;
+        (userAtLock as any).tosAcceptedAt = now;
+      } else {
+        return res.status(403).json({
+          success: false,
+          error: "tos_not_accepted",
+          tosVersion: (userAtLock as any)?.tosVersion || null,
+          currentTosVersion: CURRENT_TOS_VERSION,
+        });
+      }
+    }
 
     // Trial eligibility
     const hasHadTrial = userAtLock?.billing?.hasHadTrial === true;

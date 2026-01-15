@@ -32,6 +32,8 @@ import jwt from "jsonwebtoken";
 import hlsRoutes from "./routes/hls";
 import publicHlsRoutes from "./routes/publicHls";
 import { sanitizeDisplayName } from "./lib/sanitizeDisplayName";
+import { resolveRoomIdentity } from "./lib/roomIdentity";
+import { assertRoomPerm, RoomPermissionError } from "./lib/rolePermissions";
 
 
 import { uploadVideo } from "./lib/storageClient";
@@ -201,6 +203,19 @@ app.post("/api/roomModeration/mute", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "room, identity and muted are required" });
     }
 
+    try {
+      const resolved = await resolveRoomIdentity({ roomName: room });
+      if (!resolved || !resolved.roomId) {
+        return res.status(400).json({ error: "invalid_room" });
+      }
+      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+    } catch (err) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
+    }
+
     console.log("ADMIN MUTE", { room, identity, muted });
 
     const roomService = await getRoomService();
@@ -247,6 +262,19 @@ app.post("/api/roomModeration/mute-all", requireAuth, async (req, res) => {
 
     if (!room || typeof muted !== "boolean") {
       return res.status(400).json({ error: "room and muted are required" });
+    }
+
+    try {
+      const resolved = await resolveRoomIdentity({ roomName: room });
+      if (!resolved || !resolved.roomId) {
+        return res.status(400).json({ error: "invalid_room" });
+      }
+      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+    } catch (err) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
     }
 
     console.log("ADMIN MUTE-ALL", { room, muted });
@@ -299,6 +327,19 @@ app.post("/api/roomModeration/mute-lock", requireAuth, async (req, res) => {
 
     if (!room || typeof muteLock !== "boolean") {
       return res.status(400).json({ error: "room and muteLock are required" });
+    }
+
+    try {
+      const resolved = await resolveRoomIdentity({ roomName: room });
+      if (!resolved || !resolved.roomId) {
+        return res.status(400).json({ error: "invalid_room" });
+      }
+      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+    } catch (err) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
     }
 
     roomMuteLocks.set(room, muteLock);
@@ -377,6 +418,19 @@ app.post("/api/roomModeration/remove", requireAuth, async (req, res) => {
 
     if (!room || !identity) {
       return res.status(400).json({ ok: false, error: "room and identity are required" });
+    }
+
+    try {
+      const resolved = await resolveRoomIdentity({ roomName: room });
+      if (!resolved || !resolved.roomId) {
+        return res.status(400).json({ ok: false, error: "invalid_room" });
+      }
+      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+    } catch (err) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ ok: false, error: err.code });
+      }
+      throw err;
     }
 
     const roomService = await getRoomService(); // or getRoomServiceClient()
@@ -820,6 +874,8 @@ app.post("/api/usage/streamEnded", async (req, res) => {
     const nextUsage = {
       participantMinutes: Number(prevUsage.participantMinutes || 0) + durationMinutes,
       transcodeMinutes: Number(prevUsage.transcodeMinutes || 0) + transcodeMinutes,
+      // Preserve any existing HLS minutes; HLS-specific updates occur in the HLS stop handler.
+      hlsMinutes: Number(prevUsage.hlsMinutes || 0),
       minutes: {
         live: {
           currentPeriod: Number(prevMinutes.live?.currentPeriod || 0) + durationMinutes,
@@ -840,6 +896,8 @@ app.post("/api/usage/streamEnded", async (req, res) => {
     const nextYtd = {
       participantMinutes: Number(prevYtd.participantMinutes || 0) + durationMinutes,
       transcodeMinutes: Number(prevYtd.transcodeMinutes || 0) + transcodeMinutes,
+      // Preserve any existing HLS minutes.
+      hlsMinutes: Number(prevYtd.hlsMinutes || 0),
       minutes: {
         live: {
           lifetime:

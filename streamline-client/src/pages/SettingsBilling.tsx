@@ -31,7 +31,7 @@ const PERMISSION_ITEMS = [{
 }, { key: "canLayout", label: "Change Layout/Scene" }, { key: "canScreenShare", label: "Share Screen" }, {
   key: "canInvite", label: "Invite/Generate Links",
 }, { key: "canAnalytics", label: "View Analytics" }];
-
+// Temporary fallback; canonical defaults come from the server.
 const SIMPLE_ROLE_DEFAULTS = {
   participant: {
     label: "Participant",
@@ -62,13 +62,13 @@ const SIMPLE_ROLE_DEFAULTS = {
   cohost: {
     label: "Co-host",
     permissions: {
-      canStream: false,
-      canRecord: false,
-      canDestinations: false,
+      canStream: true,
+      canRecord: true,
+      canDestinations: true,
       canModerate: false,
       canLayout: true,
       canScreenShare: true,
-      canInvite: false,
+      canInvite: true,
       canAnalytics: false,
     },
     expiresHours: 24,
@@ -105,6 +105,9 @@ interface UserData {
   platformBillingEnabled?: boolean;
   effectiveBillingEnabled?: boolean;
   billingMode?: "test" | "live";
+  tosVersion?: string | null;
+  tosAcceptedAt?: number | null;
+  currentTosVersion?: string | null;
 }
 
 interface PlanDefinition {
@@ -124,6 +127,7 @@ interface PlanDefinition {
     rtmp: boolean;
     multistream?: boolean;
     advancedPermissions?: boolean;
+    canHls?: boolean;
   };
   editing?: {
     access: boolean;
@@ -146,6 +150,7 @@ interface Entitlements {
   recording: boolean;
   dualRecording: boolean;
   rtmpMultistream: boolean;
+   canHls?: boolean;
   maxGuests: number;
   maxDestinations: number;
   participantMinutes: number;
@@ -171,6 +176,14 @@ interface AdvancedPermissionsState {
   effectivePermissionsMode?: "simple" | "advanced";
   permissionsModeLockReason?: string | null;
 }
+
+type ServerDefaultRoleProfile = {
+  id: string;
+  name: string;
+  permissions: typeof EMPTY_PERMISSIONS;
+  lockedName?: boolean;
+  isSystemDefault?: boolean;
+};
 
 // Plans are loaded from the API; no hardcoded defaults to keep the DB/admin as source of truth.
 
@@ -298,6 +311,7 @@ export default function SettingsBilling() {
   const [entitlements, setEntitlements] = useState<Entitlements>(DEFAULT_ENTITLEMENTS);
   const [mediaPrefs, setMediaPrefs] = useState<MediaPrefs>(DEFAULT_MEDIA_PREFS);
   const [advancedPermissions, setAdvancedPermissions] = useState<AdvancedPermissionsState>({ enabled: false, plan: false, override: false, globalLock: false, lockReason: null, effectivePermissionsMode: "simple", permissionsModeLockReason: null });
+  const [serverDefaultRoleProfiles, setServerDefaultRoleProfiles] = useState<ServerDefaultRoleProfile[] | null>(null);
   const [presetOptions, setPresetOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [mediaPrefsSaving, setMediaPrefsSaving] = useState(false);
   const [mediaPrefsMessage, setMediaPrefsMessage] = useState<string | null>(null);
@@ -337,6 +351,8 @@ export default function SettingsBilling() {
   const [testModeModalOpen, setTestModeModalOpen] = useState(false);
   const [testModeLoading, setTestModeLoading] = useState(false);
   const [testModeSummary, setTestModeSummary] = useState<string | null>(null);
+  const [checkoutTosAccepted, setCheckoutTosAccepted] = useState(false);
+  const [checkoutTosError, setCheckoutTosError] = useState<string | null>(null);
   const effectivePermissionsMode = advancedPermissions.effectivePermissionsMode || ((advancedPermissions.enabled && (mediaPrefs.permissionsMode ?? "simple") === "advanced") ? "advanced" : "simple");
   const simpleMode = effectivePermissionsMode === "simple";
   useEffect(() => {
@@ -453,6 +469,18 @@ export default function SettingsBilling() {
       }
       const data = await res.json();
 
+      // Capture Terms of Service metadata for display and gating.
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              tosVersion: (data as any)?.tosVersion ?? null,
+              tosAcceptedAt: (data as any)?.tosAcceptedAt ?? null,
+              currentTosVersion: (data as any)?.currentTosVersion ?? null,
+            }
+          : prev
+      );
+
       const eff = (data as any)?.effectiveEntitlements;
 
       if (eff && typeof eff === "object") {
@@ -464,6 +492,7 @@ export default function SettingsBilling() {
           recording: !!features.recording,
           dualRecording: !!features.dualRecording,
           rtmpMultistream: !!features.rtmpMultistream,
+          canHls: (features as any).canHls === true,
           maxGuests: Number(limits.maxGuests ?? 0),
           maxDestinations: Number(limits.maxDestinations ?? 0),
           participantMinutes: Number(limits.participantMinutes ?? 0),
@@ -482,6 +511,7 @@ export default function SettingsBilling() {
         recording: !!legacy?.recording,
         dualRecording: !!legacy?.dualRecording,
         rtmpMultistream: !!legacy?.rtmpMultistream,
+        canHls: !!legacy?.canHls,
         maxGuests: Number(legacy?.maxGuests ?? 0),
         maxDestinations: Number(legacy?.maxDestinations ?? 0),
         participantMinutes: Number(legacy?.participantMinutes ?? 0),
@@ -615,6 +645,9 @@ export default function SettingsBilling() {
           }
 
           setMediaPrefs(prefs);
+          if (Array.isArray(me?.defaultRoleProfiles)) {
+            setServerDefaultRoleProfiles(me.defaultRoleProfiles);
+          }
         } catch (err) {
           console.error("Failed to parse /account/me", err);
           setMediaPrefs(DEFAULT_MEDIA_PREFS);
@@ -647,9 +680,21 @@ export default function SettingsBilling() {
   };
 
   const applySimpleRoleDefaults = () => {
+    const source = serverDefaultRoleProfiles ?? null;
+    const ensureDefaults = (id: string) => {
+      const fromServer = source?.find((p) => p.id === id);
+      if (fromServer) {
+        return {
+          label: fromServer.name,
+          permissions: fromServer.permissions,
+        };
+      }
+      const key = id as keyof typeof SIMPLE_ROLE_DEFAULTS;
+      return SIMPLE_ROLE_DEFAULTS[key];
+    };
+
     const simpleList = ["participant", "cohost", "moderator"].map((key) => {
-      const roleKey = key as keyof typeof SIMPLE_ROLE_DEFAULTS;
-      const def = SIMPLE_ROLE_DEFAULTS[roleKey];
+      const def = ensureDefaults(key);
       return {
         id: key,
         label: def.label,
@@ -671,6 +716,9 @@ export default function SettingsBilling() {
       const res = await fetch(`${API_BASE}/api/account/roles`, { credentials: "include" });
       if (!res.ok) throw new Error("roles endpoint failed");
       const data = await res.json();
+      if (Array.isArray(data?.defaultRoleProfiles)) {
+        setServerDefaultRoleProfiles(data.defaultRoleProfiles);
+      }
       if (Array.isArray(data?.roles)) {
         setRoleProfiles(data.roles);
         if (!selectedRoleId && data.roles.length) {
@@ -832,10 +880,13 @@ export default function SettingsBilling() {
         setEditingRoleId(null);
         setEditingDraft(null);
         setSelectedRoleId(null);
+        const cohostFromServer = serverDefaultRoleProfiles?.find((p) => p.id === "cohost");
+        const cohostPerms = cohostFromServer?.permissions ?? SIMPLE_ROLE_DEFAULTS.cohost.permissions;
+        const cohostLabel = cohostFromServer?.name ?? SIMPLE_ROLE_DEFAULTS.cohost.label;
         setCohostProfile((prev) => ({
           ...prev,
-          ...SIMPLE_ROLE_DEFAULTS.cohost.permissions,
-          label: SIMPLE_ROLE_DEFAULTS.cohost.label,
+          ...cohostPerms,
+          label: cohostLabel,
           expiresHours: SIMPLE_ROLE_DEFAULTS.cohost.expiresHours || 24,
           maxUses: SIMPLE_ROLE_DEFAULTS.cohost.maxUses || 1,
         }));
@@ -945,13 +996,23 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     return;
   }
 
+  // Require Terms of Service agreement before starting checkout.
+  const hasAcceptedCurrentTos = Boolean(
+    user && user.tosVersion && user.currentTosVersion && user.tosVersion === user.currentTosVersion && user.tosAcceptedAt
+  );
+  if (!hasAcceptedCurrentTos && !checkoutTosAccepted) {
+    setCheckoutTosError("You must agree to the Terms of Service before changing plans.");
+    setActionLoading(null);
+    return;
+  }
+
   setActionLoading(plan);
   const requestId = `${plan}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
   try {
     const res = await apiFetch(`${API_BASE}/api/billing/checkout`, {
       method: "POST",
-      body: JSON.stringify({ plan, requestId }),
+      body: JSON.stringify({ plan, requestId, tosAccepted: true }),
     });
 
     const data = await res.json();
@@ -963,6 +1024,8 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   } catch (err: any) {
     if (err?.status === 403 && err?.body?.error === "billing_disabled") {
       setError("Billing is disabled for this account. Use Test Mode plan switching instead.");
+    } else if (err?.status === 403 && err?.body?.error === "tos_not_accepted") {
+      setCheckoutTosError("You must agree to the Terms of Service before changing plans.");
     } else if (err?.body?.error) {
       setError(err.body.error);
     } else {
@@ -1273,9 +1336,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                   Simple permissions keep Participant, Co-host, and Moderator fixed. Switch to Advanced to customize.
                 </p>
                 {["participant", "cohost", "moderator"].map((key) => {
+                  const fromServer = serverDefaultRoleProfiles?.find((p) => p.id === key);
                   const roleKey = key as keyof typeof SIMPLE_ROLE_DEFAULTS;
-                  const role = SIMPLE_ROLE_DEFAULTS[roleKey];
-                  const perms = role.permissions;
+                  const fallback = SIMPLE_ROLE_DEFAULTS[roleKey];
+                  const roleLabel = fromServer?.name || fallback.label;
+                  const perms = fromServer?.permissions || fallback.permissions;
                   return (
                     <div key={roleKey} style={{
                       border: "1px solid #1f2937",
@@ -1287,7 +1352,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <span style={{ fontWeight: 700 }}>{role.label}</span>
+                          <span style={{ fontWeight: 700 }}>{roleLabel}</span>
                           <span style={{
                             color: "#22c55e",
                             background: "rgba(34,197,94,0.12)",
@@ -1788,6 +1853,38 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </div>
               )}
 
+              {/* Terms of Service status + checkbox for checkout */}
+              <div style={{ marginTop: 16, padding: "10px 12px", borderRadius: 10, border: "1px solid #1f2937", background: "rgba(15,23,42,0.8)", display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontSize: 13, color: "#e5e7eb" }}>
+                  <strong>Legal</strong>
+                </div>
+                <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                  {user?.tosVersion && user?.tosAcceptedAt ? (
+                    <>
+                      Last accepted Terms of Service: v{user.tosVersion} on {formatDate(user.tosAcceptedAt)}
+                    </>
+                  ) : (
+                    <>You have not yet accepted the latest Terms of Service.</>
+                  )}
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#e5e7eb" }}>
+                  <input
+                    type="checkbox"
+                    checked={checkoutTosAccepted}
+                    onChange={(e) => {
+                      setCheckoutTosAccepted(e.target.checked);
+                      setCheckoutTosError(null);
+                    }}
+                  />
+                  <span>
+                    I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: "#60a5fa", textDecoration: "underline" }}>Terms of Service</a>.
+                  </span>
+                </label>
+                {checkoutTosError && (
+                  <div style={{ fontSize: 12, color: "#f97316" }}>{checkoutTosError}</div>
+                )}
+              </div>
+
               {/* Primary Actions */}
               <div style={S.actionButtons}>
                 {isTestMode ? (
@@ -1954,6 +2051,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         <FeatureRow label="RTMP destinations" value={plan.limits.rtmpDestinationsMax} />
                         <FeatureRow label="Recording" value={plan.features.recording} />
                         <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
+                        <FeatureRow label="HLS Broadcast Page" value={(plan as any).features?.canHls} />
                         {advancedPermissions.lockReason !== "coming_soon" ? (
                           <FeatureRow
                             label="Advanced Permissions Mode"

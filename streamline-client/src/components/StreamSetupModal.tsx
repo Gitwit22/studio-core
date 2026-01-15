@@ -100,6 +100,8 @@ interface Props {
   dualRecordingAllowed?: boolean;
   maxGuests?: number;
   multistreamAllowed?: boolean;
+  hlsEnabled?: boolean;
+  onUpgradeHls?: () => void;
 
   // Optional: plan + per-clip recording cap (in minutes)
   planId?: string;
@@ -129,6 +131,8 @@ export default function StreamSetupModalV2({
   dualRecordingAllowed = false,
   maxGuests,
   multistreamAllowed = true,
+  hlsEnabled = true,
+  onUpgradeHls,
   planId,
   recordingMaxMinutes,
   savedDestinations,
@@ -430,6 +434,8 @@ export default function StreamSetupModalV2({
   const showRecordingControls = recordingEnabled !== false;
 
   const hasRecordingCap = typeof recordingMaxMinutes === "number" && recordingMaxMinutes > 0;
+
+  const hlsAllowed = hlsEnabled !== false;
 
   const badgeItems = [
     { label: "Recording", value: recordingEnabled ? "On" : "Off", ok: recordingEnabled },
@@ -1362,16 +1368,57 @@ export default function StreamSetupModalV2({
                 : 'Start HLS to create a public watch link. Viewers can watch without joining the room.'}
             </div>
 
+            {!hlsAllowed && (
+              <div
+                style={{
+                  marginBottom: '0.75rem',
+                  padding: '0.65rem 0.75rem',
+                  borderRadius: '0.5rem',
+                  background: 'rgba(30,64,175,0.25)',
+                  border: '1px solid rgba(59,130,246,0.6)',
+                  fontSize: '0.75rem',
+                  color: '#dbeafe',
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>HLS Broadcast Page not included in this plan.</div>
+                <div style={{ marginBottom: '0.45rem' }}>
+                  Upgrade your plan to unlock a shareable /live viewer link for your audience.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onUpgradeHls) {
+                      onUpgradeHls();
+                    } else {
+                      window.location.href = "/settings/billing";
+                    }
+                  }}
+                  style={{
+                    padding: '0.45rem 0.8rem',
+                    borderRadius: '999px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg,#3b82f6,#2563eb)',
+                    color: '#f9fafb',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Upgrade to enable HLS
+                </button>
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.6rem' }}>
-              {/* Direct playlist URL */}
+              {/* Viewer link */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Direct HLS Playlist URL</span>
+                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Viewer Link (/live/:roomId)</span>
                 <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                   <input
                     type="text"
                     readOnly
-                    value={hlsStatus === 'live' && hlsPlaylistUrl ? hlsPlaylistUrl : ''}
-                    placeholder={hlsStatus === 'live' ? 'Waiting for playlist URL…' : 'Playlist available when HLS is live'}
+                    value={hlsStatus === 'live' && hlsViewerUrl ? hlsViewerUrl : ''}
+                    placeholder={hlsStatus === 'live' ? 'Viewer link will appear when live' : 'Viewer link available when HLS is live'}
                     style={{
                       flex: 1,
                       padding: '0.4rem 0.55rem',
@@ -1384,12 +1431,12 @@ export default function StreamSetupModalV2({
                   />
                   <button
                     type="button"
-                    disabled={!(hlsStatus === 'live' && hlsPlaylistUrl)}
+                    disabled={!(hlsStatus === 'live' && hlsViewerUrl)}
                     onClick={async () => {
-                      if (!(hlsStatus === 'live' && hlsPlaylistUrl)) return;
+                      if (!(hlsStatus === 'live' && hlsViewerUrl)) return;
                       try {
-                        await navigator.clipboard.writeText(hlsPlaylistUrl);
-                        alert('Playlist URL copied');
+                        await navigator.clipboard.writeText(hlsViewerUrl);
+                        alert('Viewer link copied');
                       } catch {/* ignore */}
                     }}
                     style={{
@@ -1399,15 +1446,14 @@ export default function StreamSetupModalV2({
                       background: 'rgba(15,23,42,0.95)',
                       color: '#e5e7eb',
                       fontSize: '0.75rem',
-                      cursor: hlsStatus === 'live' && hlsPlaylistUrl ? 'pointer' : 'not-allowed',
-                      opacity: hlsStatus === 'live' && hlsPlaylistUrl ? 1 : 0.5,
+                      cursor: hlsStatus === 'live' && hlsViewerUrl ? 'pointer' : 'not-allowed',
+                      opacity: hlsStatus === 'live' && hlsViewerUrl ? 1 : 0.5,
                     }}
                   >
                     Copy
                   </button>
                 </div>
               </div>
-
             </div>
 
             {hlsError && hlsStatus === 'error' && (
@@ -1430,23 +1476,23 @@ export default function StreamSetupModalV2({
               <button
                 type="button"
                 onClick={handleStartHls}
-                disabled={!hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
+                disabled={!hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
                 style={{
                   flex: 1,
                   padding: '0.6rem 0.7rem',
                   borderRadius: '0.45rem',
                   border: 'none',
                   background:
-                    !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
+                    !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
                       ? 'rgba(37,99,235,0.4)'
                       : 'linear-gradient(135deg, #22c55e, #16a34a)',
                   color: '#ffffff',
                   fontSize: '0.8rem',
                   fontWeight: 600,
                   cursor:
-                    !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
+                    !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
                   opacity:
-                    !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
+                    !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
                 }}
               >
                 {hlsBusy && (hlsStatus === 'starting' || hlsStatus === 'idle')

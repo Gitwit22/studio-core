@@ -96,6 +96,8 @@ export const SignupPage = () => {
         password,
         timeZone: timeZone || "America/Chicago",
         skipOnboarding,
+        // Explicitly signal Terms of Service acceptance to the backend.
+        tosAccepted: true,
       };
 
       if (!skipOnboarding) {

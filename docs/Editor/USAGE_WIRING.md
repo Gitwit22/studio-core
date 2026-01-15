@@ -38,6 +38,12 @@ interface ActiveStream {
 - Calculates `durationMinutes = ceil((now - startedAt) / 60000)`
 - **Calls `addUsageForUser(userId, durationMinutes, { guestCount })`**
 - Returns usage update info in response
+
+### 3. HLS Broadcast Usage
+
+- When an HLS Broadcast is active, only the host's HLS session time counts toward usage.
+- Viewers who join the `/live/:roomId` page do **not** affect usage.
+- On HLS stop, the server computes the elapsed HLS duration and records it as `hlsMinutes` for the host. This value is then rolled into the overall "live minutes" bucket exposed by usage APIs.
 - Cleans up tracking (both memory and Firestore)
 
 ### 3. `server/index.ts` - New Endpoint

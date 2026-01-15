@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { requireAuth } from "../middleware/requireAuth";
 import { firestore as db } from "../firebaseAdmin";
 import { getUserAccount } from "../lib/userAccount";
+import { CURRENT_TOS_VERSION } from "../lib/tos";
 
 console.log("✅ auth router loaded");
 
@@ -138,17 +139,17 @@ router.post("/login", async (req, res) => {
   }
 });
 
-/**
- * POST /api/auth/signup
- * Body: { email, password, displayName?, timeZone? }
- * Creates user doc + sets auth cookie.
- */
 router.post("/signup", async (req, res) => {
   try {
-    const { email, password, displayName, timeZone } = (req.body || {}) as any;
+    const { email, password, displayName, timeZone, tosAccepted } = (req.body || {}) as any;
 
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password required" });
+    }
+
+    // Require explicit Terms of Service acceptance for new accounts.
+    if (tosAccepted !== true) {
+      return res.status(400).json({ error: "tos_required" });
     }
 
     const emailNorm = String(email).trim().toLowerCase();
@@ -168,6 +169,8 @@ router.post("/signup", async (req, res) => {
     const userRef = db.collection("users").doc();
     const uid = userRef.id;
 
+    const now = Date.now();
+
     const userData = {
       email: emailNorm,
       displayName: displayName ? String(displayName) : "",
@@ -175,8 +178,12 @@ router.post("/signup", async (req, res) => {
       planId: "free",
       billingActive: false,
       billingStatus: "none",
-      createdAt: Date.now(),
+      createdAt: now,
       timeZone: timeZone ? String(timeZone) : "America/Chicago",
+      tosVersion: CURRENT_TOS_VERSION,
+      tosAcceptedAt: now,
+      tosAcceptedIp: req.ip || undefined,
+      tosUserAgent: req.get("user-agent") || undefined,
     };
 
     await userRef.set(userData);
