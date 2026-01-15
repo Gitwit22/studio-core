@@ -14,6 +14,37 @@ type UsageData = {
   planId: PlanId;
 };
 
+// Restrict display names to a safe, URL/log-friendly subset:
+// letters, digits, space, hyphen, en dash, apostrophe, ampersand.
+function sanitizeDisplayName(input: string): string {
+  if (!input) return "";
+  return input.replace(/[^A-Za-z0-9 \-–'&]/g, "");
+}
+
+function applyIncrementingSuffix(baseName: string, lastRoom: string | null): string {
+  if (!lastRoom) return baseName;
+
+  // If the last room exactly matches the base name, start at #2
+  if (lastRoom === baseName) {
+    return `${baseName} #2`;
+  }
+
+  // If the last room already has a numeric suffix and shares the same base, increment it
+  const match = lastRoom.match(/^(.*) #(\d+)$/);
+  if (match) {
+    const [, priorBase, numStr] = match;
+    if (priorBase === baseName) {
+      const current = parseInt(numStr, 10);
+      if (!Number.isNaN(current) && current >= 2) {
+        return `${baseName} #${current + 1}`;
+      }
+    }
+  }
+
+  // Otherwise just use the base name
+  return baseName;
+}
+
 function formatDefaultRoomName(displayName: string) {
   const now = new Date();
   const dateFmt = new Intl.DateTimeFormat("en-US", {
@@ -41,16 +72,26 @@ export default function Join() {
       const rawUser = localStorage.getItem("sl_user");
       if (rawUser && rawUser !== "undefined") {
         const parsed = JSON.parse(rawUser);
-        if (parsed?.displayName) return parsed.displayName as string;
+        if (parsed?.displayName) return sanitizeDisplayName(parsed.displayName as string);
       }
     } catch {
       // ignore parse errors and fall back
     }
-    return localStorage.getItem("sl_displayName") || "";
+    const cached = localStorage.getItem("sl_displayName") || "";
+    return sanitizeDisplayName(cached);
   });
   const [didEditDisplayName, setDidEditDisplayName] = useState(false);
   const [roomName, setRoomName] = useState("");
+  const [inviteRoomId, setInviteRoomId] = useState<string | null>(null);
   const [showEditingModal, setShowEditingModal] = useState(false);
+  const [showLegacyJoinToast, setShowLegacyJoinToast] = useState(false);
+  const [hideLegacyJoinToast, setHideLegacyJoinToast] = useState(() => {
+    try {
+      return localStorage.getItem("sl_hide_legacy_join_toast") === "true";
+    } catch {
+      return false;
+    }
+  });
 
   // Usage state
   const [usageData, setUsageData] = useState<UsageData | null>(null);
@@ -70,9 +111,10 @@ export default function Join() {
   });
 
   // Invite handling:
-  // - New flow: /join?inviteToken=... (preferred)
+  // - New flow: /join?t=... (preferred, roomId-based)
+  // - Also accept /join?inviteToken=... for backward compatibility
   // - Legacy guest link: /join?room=... (guest/viewer style)
-  const inviteTokenParam = searchParams.get("inviteToken");
+  const inviteTokenParam = searchParams.get("t") || searchParams.get("inviteToken");
   const legacyInviteRoomParam = searchParams.get("room");
   const isParticipant = !!inviteTokenParam || legacyInviteRoomParam !== null;
 
@@ -94,9 +136,9 @@ const adminLoading = authLoading;
       "";
 
     if (!candidate) return;
-    setDisplayName(candidate);
+    setDisplayName(sanitizeDisplayName(candidate));
     try {
-      localStorage.setItem("sl_displayName", candidate);
+      localStorage.setItem("sl_displayName", sanitizeDisplayName(candidate));
     } catch {
       // ignore
     }
@@ -119,9 +161,11 @@ const adminLoading = authLoading;
           const data = await res.json().catch(() => null);
           if (!data || cancelled) return;
 
+          const decodedRoomId = String(data.roomId || "");
           const decodedRoom = String(data.roomName || "");
           // Invites are currently guest/participant-only.
           const resolvedRole = "guest";
+          if (decodedRoomId) setInviteRoomId(decodedRoomId);
           if (decodedRoom) setRoomName(decodedRoom);
 
           try {
@@ -173,14 +217,9 @@ const adminLoading = authLoading;
     if (isParticipant) return; // never override invite room
     if (roomName.trim()) return; // respect user edits
 
-    // Prefer recent room name, else generate a deterministic friendly default
-    if (lastRoom) {
-      setRoomName(lastRoom);
-      return;
-    }
-
-    const fallback = formatDefaultRoomName(displayName.trim());
-    setRoomName(fallback);
+    const baseName = formatDefaultRoomName(displayName.trim());
+    const nextName = applyIncrementingSuffix(baseName, lastRoom);
+    setRoomName(nextName);
   }, [displayName, isParticipant, lastRoom, roomName]);
 
   // Fetch real usage summary (for all authenticated users)
@@ -231,31 +270,110 @@ const adminLoading = authLoading;
     };
   }, [user]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    const name = displayName.trim();
-    const room = roomName.trim();
-    if (!name || !room) return;
+    const name = sanitizeDisplayName(displayName).trim();
+    const roomLabel = roomName.trim();
+    if (!name || !roomLabel) {
+      if (!name) {
+        alert(
+          "Please enter a valid name using letters, numbers, spaces, -, –, ', & only."
+        );
+      }
+      return;
+    }
 
     localStorage.setItem("sl_displayName", name);
 
-    // Mark this room as created by this user (only if not joining via invite)
+    // Host flow: create a Firestore room first, then navigate to /room/:roomId
     if (!isParticipant) {
-      const createdRooms = JSON.parse(
-        localStorage.getItem("sl_created_rooms") || "[]"
-      );
-      if (!createdRooms.includes(room)) {
-        createdRooms.push(room);
-        localStorage.setItem("sl_created_rooms", JSON.stringify(createdRooms));
+      try {
+        const res = await fetch(`${API_BASE}/api/rooms/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ livekitRoomName: roomLabel, roomType: "rtc" }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.error("Failed to create room", res.status, text);
+
+          // If auth is missing/expired, send host to login with a return URL
+          if (res.status === 401 || res.status === 403) {
+            const next = `${window.location.pathname}${window.location.search}`;
+            nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
+            return;
+          }
+
+          alert("Failed to create room. Please try again.");
+          return;
+        }
+
+        const data = await res.json().catch(() => null as any);
+        const roomId = String(data?.roomId || "").trim();
+        const livekitRoomName = String(data?.livekitRoomName || roomLabel).trim();
+
+        if (!roomId) {
+          console.error("Missing roomId in /api/rooms/create response", data);
+          alert("Failed to create room. Please try again.");
+          return;
+        }
+
+        // Mark this room as created by this user using the Firestore roomId
+        const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
+        if (!createdRooms.includes(roomId)) {
+          createdRooms.push(roomId);
+          localStorage.setItem("sl_created_rooms", JSON.stringify(createdRooms));
+        }
+
+        localStorage.setItem("sl_last_room", livekitRoomName);
+        localStorage.setItem("sl_last_room_ts", String(Date.now()));
+        localStorage.setItem("sl_current_role", "host");
+
+        nav(`/room/${encodeURIComponent(roomId)}`, {
+          state: { livekitRoomName },
+        });
+        return;
+      } catch (err) {
+        console.error("Error creating room", err);
+        alert("Failed to create room. Please try again.");
+        return;
       }
-      localStorage.setItem("sl_last_room", room);
-      localStorage.setItem("sl_last_room_ts", String(Date.now()));
-      // Set role to 'host' when creating a room
-      localStorage.setItem("sl_current_role", "host");
     }
 
-    nav(`/room/${encodeURIComponent(room)}`);
+    // Participant / invite flows:
+    // Prefer roomId-based navigation when we have an invite token.
+    if (isParticipant && inviteTokenParam && inviteRoomId) {
+      nav(`/room/${encodeURIComponent(inviteRoomId)}?t=${encodeURIComponent(inviteTokenParam)}`);
+      return;
+    }
+
+    // Legacy fallback: room name based join (to be fully removed later)
+    if (!hideLegacyJoinToast) {
+      setShowLegacyJoinToast(true);
+      console.log("[Join] Legacy room-name join fallback", { roomName: roomLabel });
+      try {
+        fetch(`${API_BASE}/api/telemetry/event`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            event: "legacy_roomname_join_attempt",
+            roomName: roomLabel,
+            source: "join",
+            ts: Date.now(),
+          }),
+        }).catch((err) => {
+          console.warn("Failed to send telemetry event", err);
+        });
+      } catch (err) {
+        console.warn("Error scheduling telemetry event", err);
+      }
+    }
+
+    nav(`/room/${encodeURIComponent(roomLabel)}`);
   }
 
   const streamingPercent =
@@ -681,7 +799,8 @@ const adminLoading = authLoading;
                 value={displayName}
                 onChange={(e) => {
                   setDidEditDisplayName(true);
-                  setDisplayName(e.target.value);
+                  const safe = sanitizeDisplayName(e.target.value);
+                  setDisplayName(safe);
                 }}
                 required
                 style={{
@@ -825,6 +944,115 @@ const adminLoading = authLoading;
           </button>
         </div>
       </div>
+
+      {/* Legacy room-name join deprecation toast */}
+      {showLegacyJoinToast && !hideLegacyJoinToast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 40,
+            maxWidth: "520px",
+            width: "calc(100% - 32px)",
+            background: "rgba(15,15,15,0.95)",
+            borderRadius: "12px",
+            border: "1px solid rgba(248,113,113,0.5)",
+            boxShadow: "0 20px 40px rgba(0,0,0,0.6)",
+            padding: "14px 16px",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "12px",
+          }}
+        >
+          <div
+            style={{
+              width: "32px",
+              height: "32px",
+              borderRadius: "999px",
+              background: "rgba(248,113,113,0.15)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: "18px" }}>⚠️</span>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontSize: "14px",
+                fontWeight: 600,
+                marginBottom: "4px",
+              }}
+            >
+              Heads up
+            </div>
+            <div
+              style={{
+                fontSize: "13px",
+                color: "#e5e7eb",
+                marginBottom: "8px",
+              }}
+            >
+              Heads up: joining by room name is being phased out. Ask the host for an invite link.
+            </div>
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "12px",
+                color: "#9ca3af",
+                cursor: "pointer",
+                userSelect: "none",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={hideLegacyJoinToast}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setHideLegacyJoinToast(next);
+                  try {
+                    if (next) {
+                      localStorage.setItem("sl_hide_legacy_join_toast", "true");
+                    } else {
+                      localStorage.removeItem("sl_hide_legacy_join_toast");
+                    }
+                  } catch {
+                    // ignore
+                  }
+                }}
+                style={{
+                  width: "14px",
+                  height: "14px",
+                  borderRadius: "4px",
+                }}
+              />
+              Don't show again
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowLegacyJoinToast(false)}
+            aria-label="Dismiss legacy join warning"
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "#9ca3af",
+              cursor: "pointer",
+              padding: 0,
+              marginLeft: "4px",
+              fontSize: "16px",
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Editing Suite Coming Soon Modal */}
       {showEditingModal && (

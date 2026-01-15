@@ -5,6 +5,7 @@ import { canAccessFeature } from "./featureAccess";
 import type { ApiErrorCode } from "../types/streaming";
 import { decryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
 import { clampPresetForPlan, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
+import { resolveRoomIdentity } from "../lib/roomIdentity";
 
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
 let _lkMod: any | null = null;
@@ -28,17 +29,22 @@ async function getPlanLimit(uid: string, field: string): Promise<number | undefi
 
 const router = Router();
 
-router.post("/:roomName/start-multistream", requireAuth, async (req, res) => {
+router.post("/:roomId/start-multistream", requireAuth, async (req, res) => {
   try {
     const requestStartedAt = Date.now();
     const uid = (req as any).user?.uid;
-const roomName = String(req.params.roomName || "").trim();
+    const roomIdOrName = String((req.params as any).roomId || "").trim();
 
-if (!uid) return res.status(401).json({ error: "Unauthorized" });
-if (!roomName) return res.status(400).json({ error: "Missing roomName param" });
+    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!roomIdOrName) return res.status(400).json({ error: "Missing roomId param" });
 
-  const streamDocId = `${uid}_${roomName}`; // always non-empty if checks passed
-  const ref = firestore.collection("activeStreams").doc(streamDocId);
+    const resolvedRoom = await resolveRoomIdentity({ roomId: roomIdOrName, roomName: roomIdOrName });
+    if (!resolvedRoom) return res.status(400).json({ error: "Invalid room" });
+    const roomId = resolvedRoom.roomId;
+    const roomName = resolvedRoom.roomName;
+
+    const streamDocId = `${uid}_${roomId}`; // canonical
+    const ref = firestore.collection("activeStreams").doc(streamDocId);
 
     // if your client sends individual keys or destination IDs:
     const rawBody = req.body || {};
@@ -47,7 +53,7 @@ if (!roomName) return res.status(400).json({ error: "Missing roomName param" });
     const facebookStreamKey = trimKey(rawBody.facebookStreamKey) || undefined;
     const twitchStreamKey = trimKey(rawBody.twitchStreamKey) || undefined;
     const { guestCount, destinationIds, enabledTargetIds, sessionKeys, presetId } = rawBody;
-    console.log("[multistream:start] uid:", uid, "room:", roomName, {
+    console.log("[multistream:start] uid:", uid, "room:", roomId, {
       youtubeStreamKey: !!youtubeStreamKey,
       facebookStreamKey: !!facebookStreamKey,
       twitchStreamKey: !!twitchStreamKey,
@@ -94,6 +100,7 @@ if (!roomName) return res.status(400).json({ error: "Missing roomName param" });
     await ref.set(
       {
         uid,
+        roomId,
         roomName,
         youtubeStreamKey: youtubeStreamKey || null,
         facebookStreamKey: facebookStreamKey || null,
@@ -282,14 +289,19 @@ if (!roomName) return res.status(400).json({ error: "Missing roomName param" });
 });
 
 
-router.post("/:roomName/stop-multistream", requireAuth, async (req, res) => {
+router.post("/:roomId/stop-multistream", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    const roomName = String(req.params.roomName || "").trim();
+    const roomIdOrName = String((req.params as any).roomId || "").trim();
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
-    if (!roomName) return res.status(400).json({ error: "Missing roomName param" });
+    if (!roomIdOrName) return res.status(400).json({ error: "Missing roomId param" });
 
-    const streamDocId = `${uid}_${roomName}`;
+    const resolvedRoom = await resolveRoomIdentity({ roomId: roomIdOrName, roomName: roomIdOrName });
+    if (!resolvedRoom) return res.status(400).json({ error: "Invalid room" });
+    const roomId = resolvedRoom.roomId;
+    const roomName = resolvedRoom.roomName;
+
+    const streamDocId = `${uid}_${roomId}`;
     const ref = firestore.collection("activeStreams").doc(streamDocId);
     let doc = await ref.get();
     let egressId = null;
@@ -298,8 +310,19 @@ router.post("/:roomName/stop-multistream", requireAuth, async (req, res) => {
       const data = doc.data();
       egressId = data?.egressId;
     } else {
+      // Legacy fallback: older docs were keyed by uid_roomName
+      const legacyStreamDocId = `${uid}_${roomName}`;
+      const legacyRef = firestore.collection("activeStreams").doc(legacyStreamDocId);
+      const legacyDoc = await legacyRef.get();
+      if (legacyDoc.exists) {
+        const data = legacyDoc.data();
+        egressId = data?.egressId;
+        doc = legacyDoc;
+        foundRef = legacyRef;
+      }
+
       // Fallback: search for activeStreams doc with matching egressId from request body
-      egressId = req.body.egressId;
+      egressId = egressId || req.body.egressId;
       if (!egressId) {
         return res.status(404).json({ error: "No active multistream found for this room and no egressId provided" });
       }
@@ -316,16 +339,19 @@ router.post("/:roomName/stop-multistream", requireAuth, async (req, res) => {
       const data = (candidate.data() || {}) as any;
 
       const ownerUid = data.uid;
+      const ownerRoomId = typeof data.roomId === "string" ? data.roomId.trim() : undefined;
       const ownerRoomName = typeof data.roomName === "string" ? data.roomName.trim() : undefined;
 
-      const roomMatches = ownerRoomName
-        ? ownerRoomName === roomName
-        : candidate.id === streamDocId;
+      const roomMatches = ownerRoomId
+        ? ownerRoomId === roomId
+        : ownerRoomName
+          ? ownerRoomName === roomName
+          : candidate.id === streamDocId;
 
       if (ownerUid !== uid || !roomMatches) {
         console.info("[multistream:stop] egressId owner/room mismatch; denying stop", {
           uid,
-          roomName,
+          roomId,
           activeUid: ownerUid,
           activeRoomName: ownerRoomName || null,
         });

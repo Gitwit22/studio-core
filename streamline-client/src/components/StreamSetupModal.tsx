@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { type DestinationItem } from "../services/destinations";
 import { formatLimitLabel } from "../lib/entitlements";
+import { API_BASE } from "../lib/apiBase";
+import { APP_BASE } from "../lib/appBase";
+import CollapsibleSection from "./CollapsibleSection";
 
 type PlatformKey = "youtube" | "facebook" | "twitch" | "custom";
 
@@ -36,6 +39,20 @@ const buildDefaultPlatformState = (): Record<PlatformKey, PlatformState> => ({
   custom: { selected: false, manualFields: [], error: null, info: null },
 });
 
+type RoomUiSectionKey = "destinations" | "recording" | "layout" | "audio" | "hls";
+
+type RoomUiState = Record<RoomUiSectionKey, boolean>;
+
+const DEFAULT_ROOM_UI_STATE: RoomUiState = {
+  destinations: false,
+  recording: false,
+  layout: false,
+  audio: false,
+  hls: false,
+};
+
+const ROOM_UI_STORAGE_PREFIX = "sl_room_ui_v1";
+
 function getDefaultRtmpBase(p: PlatformKey): string {
   switch (p) {
     case "youtube":
@@ -55,6 +72,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   roomName: string;
+  roomId: string;
+  roomAccessToken?: string;
   selectedPresetId?: string;
   defaultLayout?: "speaker" | "grid";
   defaultRecordingMode?: "cloud" | "dual";
@@ -94,6 +113,8 @@ export default function StreamSetupModalV2({
   open,
   onClose,
   roomName,
+  roomId,
+  roomAccessToken,
   selectedPresetId,
   defaultLayout = "speaker",
   defaultRecordingMode = "cloud",
@@ -126,10 +147,29 @@ export default function StreamSetupModalV2({
   });
   const [warmupLogged, setWarmupLogged] = useState(false);
 
+  const [roomUiState, setRoomUiState] = useState<RoomUiState>(DEFAULT_ROOM_UI_STATE);
+
+  const [hlsStatus, setHlsStatus] = useState<"idle" | "starting" | "live" | "error">("idle");
+  const [hlsPlaylistUrl, setHlsPlaylistUrl] = useState<string | null>(null);
+  const [hlsEgressId, setHlsEgressId] = useState<string | null>(null);
+  const [hlsError, setHlsError] = useState<string | null>(null);
+  const [hlsBusy, setHlsBusy] = useState(false);
+
   const platformOrder: PlatformKey[] = ["youtube", "facebook", "twitch", "custom"];
 
   const [layout, setLayout] = useState<"speaker" | "grid">(defaultLayout);
   const [recordingMode, setRecordingMode] = useState<"cloud" | "dual">(defaultRecordingMode);
+
+  // Canonical: HLS is always keyed by Firestore roomId.
+  const hlsRoomId = roomId?.trim() || "";
+
+  const looksLikeName =
+    hlsRoomId.includes(" ") || hlsRoomId.includes("–") || hlsRoomId.includes("#");
+
+  // HLS controls unlock once we have a canonical Firestore roomId
+  // (and not a human-readable name). This matches the host/control-plane
+  // contract where everything is keyed by roomId.
+  const hlsRoomReady = !!hlsRoomId && !looksLikeName;
 
   // Keep local layout/mode in sync with defaults from account prefs
   useEffect(() => {
@@ -143,6 +183,150 @@ export default function StreamSetupModalV2({
   useEffect(() => {
     setDestinations(savedDestinations || []);
   }, [savedDestinations]);
+
+  // Load per-room UI state (collapsible sections) from localStorage on first open
+  useEffect(() => {
+    if (!hlsRoomId) return;
+    try {
+      const key = `${ROOM_UI_STORAGE_PREFIX}:${hlsRoomId}`;
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        setRoomUiState(DEFAULT_ROOM_UI_STATE);
+        return;
+      }
+      const parsed = JSON.parse(raw) || {};
+      const next: RoomUiState = {
+        destinations: !!parsed.destinations,
+        recording: !!parsed.recording,
+        layout: !!parsed.layout,
+        audio: !!parsed.audio,
+        hls: !!parsed.hls,
+      };
+      setRoomUiState(next);
+    } catch {
+      setRoomUiState(DEFAULT_ROOM_UI_STATE);
+    }
+  }, [hlsRoomId]);
+
+  const updateRoomUiSection = (section: RoomUiSectionKey, open: boolean) => {
+    setRoomUiState((prev) => {
+      const safePrev = prev || DEFAULT_ROOM_UI_STATE;
+      const next: RoomUiState = { ...DEFAULT_ROOM_UI_STATE, ...safePrev, [section]: open };
+      try {
+        const key = `${ROOM_UI_STORAGE_PREFIX}:${hlsRoomId}`;
+        window.localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  };
+
+  const hlsViewerUrl = hlsRoomId
+    ? `${APP_BASE || (typeof window !== "undefined" ? window.location.origin : "")}/live/${encodeURIComponent(
+        hlsRoomId
+      )}`
+    : "";
+
+  // Initial one-shot fetch of HLS status so we can show chip even when collapsed
+  useEffect(() => {
+    if (!hlsRoomId) return;
+
+    if (looksLikeName) {
+      setHlsError("HLS must use Firestore roomId, not roomName.");
+      return;
+    }
+    let cancelled = false;
+
+    const fetchStatus = async () => {
+      try {
+        const url = `${API_BASE}/api/hls/status/${encodeURIComponent(hlsRoomId)}`;
+        const headers: Record<string, string> = {};
+        if (roomAccessToken) {
+          headers["Authorization"] = `Bearer ${roomAccessToken}`;
+        }
+        const res = await fetch(url, {
+          credentials: "include",
+          headers,
+        });
+        if (cancelled) return;
+        if (!res.ok) {
+          if (res.status === 404) {
+            setHlsStatus("idle");
+            setHlsPlaylistUrl(null);
+            setHlsEgressId(null);
+            setHlsError(null);
+            return;
+          }
+          setHlsError("Failed to fetch HLS status");
+          return;
+        }
+        const data: any = await res.json().catch(() => ({}));
+        const status = (data?.status as string) || "idle";
+        setHlsStatus(status === "starting" || status === "live" || status === "error" ? status : "idle");
+        setHlsPlaylistUrl(data?.playlistUrl ?? null);
+        setHlsEgressId(data?.egressId ?? null);
+        setHlsError(data?.error ?? null);
+      } catch {
+        if (!cancelled) {
+          setHlsError("Failed to fetch HLS status");
+        }
+      }
+    };
+
+    fetchStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hlsRoomId]);
+
+  // Poll while HLS section is open or status is starting
+  useEffect(() => {
+    if (!hlsRoomId) return;
+
+    if (looksLikeName) {
+      setHlsError("HLS must use Firestore roomId, not roomName.");
+      return;
+    }
+
+    const shouldPoll = roomUiState.hls || hlsStatus === "starting";
+    if (!shouldPoll) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (roomAccessToken) {
+          headers["Authorization"] = `Bearer ${roomAccessToken}`;
+        }
+        const res = await fetch(`${API_BASE}/api/hls/status/${encodeURIComponent(hlsRoomId)}`, {
+          credentials: "include",
+          headers,
+        });
+        if (cancelled) return;
+        if (!res.ok) return;
+        const data: any = await res.json().catch(() => ({}));
+        const status = (data?.status as string) || "idle";
+        setHlsStatus(status === "starting" || status === "live" || status === "error" ? status : "idle");
+        setHlsPlaylistUrl(data?.playlistUrl ?? null);
+        setHlsEgressId(data?.egressId ?? null);
+        setHlsError(data?.error ?? null);
+      } catch {
+        if (!cancelled) {
+          // Soft failure; keep last known status
+        }
+      }
+    };
+
+    poll();
+    const id = window.setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [hlsRoomId, roomUiState.hls, hlsStatus]);
 
   const mainByPlatform = useMemo(() => {
     const map: Partial<Record<PlatformKey, DestinationItem>> = {};
@@ -268,6 +452,71 @@ export default function StreamSetupModalV2({
     return !(mainUsable || manual);
   });
   const startDisabled = streamIsBusy || streamDisallowed || selectedPlatforms.length === 0 || missingKeySelected || warmupActive;
+
+  const handleStartHls = async () => {
+    if (!hlsRoomId) return;
+    if (hlsStatus === "starting" || hlsStatus === "live") return;
+    setHlsBusy(true);
+    setHlsError(null);
+    setHlsStatus("starting");
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (roomAccessToken) {
+        headers["Authorization"] = `Bearer ${roomAccessToken}`;
+      }
+      const res = await fetch(`${API_BASE}/api/hls/start/${encodeURIComponent(hlsRoomId)}`, {
+        method: "POST",
+        headers,
+        credentials: "include",
+        body: JSON.stringify({ presetId: "hls_720p" }),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setHlsStatus("error");
+        setHlsError(data?.error || "Failed to start HLS");
+        return;
+      }
+      const status = (data?.status as string) || "live";
+      setHlsStatus(status === "starting" || status === "live" || status === "error" ? status : "live");
+      setHlsPlaylistUrl(data?.playlistUrl ?? null);
+      setHlsEgressId(data?.egressId ?? null);
+      setHlsError(null);
+    } catch (err: any) {
+      setHlsStatus("error");
+      setHlsError(err?.message || "Failed to start HLS");
+    } finally {
+      setHlsBusy(false);
+    }
+  };
+
+  const handleStopHls = async () => {
+    if (!hlsRoomId) return;
+    if (hlsStatus === "idle") return;
+    setHlsBusy(true);
+    try {
+      const headers: Record<string, string> = {};
+      if (roomAccessToken) {
+        headers["Authorization"] = `Bearer ${roomAccessToken}`;
+      }
+      const res = await fetch(`${API_BASE}/api/hls/stop/${encodeURIComponent(hlsRoomId)}`, {
+        method: "POST",
+        headers,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data: any = await res.json().catch(() => ({}));
+        setHlsError(data?.error || "Failed to stop HLS");
+        return;
+      }
+      setHlsStatus("idle");
+      setHlsError(null);
+      // playlistUrl may remain for debugging; UI only exposes when live
+    } catch (err: any) {
+      setHlsError(err?.message || "Failed to stop HLS");
+    } finally {
+      setHlsBusy(false);
+    }
+  };
 
   const handleStartStream = async () => {
     if (streamDisallowed) {
@@ -417,10 +666,10 @@ export default function StreamSetupModalV2({
         backdropFilter: 'blur(20px)',
         boxShadow: '0 20px 60px rgba(220, 38, 38, 0.2)',
         width: '380px',
-        maxHeight: '70vh',
+        maxHeight: '80vh',
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
+        overflowY: 'auto',
         color: '#ffffff'
       }}>
         {/* Header */}
@@ -465,50 +714,77 @@ export default function StreamSetupModalV2({
           </button>
         </div>
 
-        {/* Content - Scrollable */}
+        {/* Content */}
         <div style={{
           padding: '1rem',
-          flex: 1,
-          overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
           gap: '1rem'
         }}>
 
-          {/* Entitlements summary */}
+          {/* Features Panel (constant, always visible) */}
           {badgeItems.length > 0 && (
             <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-              gap: '0.5rem',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '0.5rem',
-              padding: '0.6rem',
-              background: 'rgba(255,255,255,0.02)'
+              borderRadius: '0.75rem',
+              border: '1px solid rgba(148,163,184,0.35)',
+              background: 'radial-gradient(circle at top left, rgba(248,113,113,0.3), rgba(15,23,42,0.95))',
+              padding: '0.75rem 0.8rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.55rem'
             }}>
-              {badgeItems.map((item) => (
-                <div
-                  key={item.label}
-                  style={{
-                    border: `1px solid ${item.ok ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}`,
-                    background: item.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.06)',
-                    color: item.ok ? '#bbf7d0' : '#fecdd3',
-                    borderRadius: '0.45rem',
-                    padding: '0.35rem 0.5rem',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.1rem',
-                    minHeight: '48px'
-                  }}
-                >
-                  <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>{item.label}</span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>{item.value}</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#e5e7eb' }}>
+                  Features Panel
                 </div>
-              ))}
+                {planId && (
+                  <div style={{
+                    fontSize: '0.7rem',
+                    padding: '0.2rem 0.5rem',
+                    borderRadius: '999px',
+                    background: 'rgba(15,23,42,0.85)',
+                    border: '1px solid rgba(148,163,184,0.6)',
+                    color: '#cbd5f5'
+                  }}>
+                    Plan: {planId}
+                  </div>
+                )}
+              </div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                gap: '0.5rem'
+              }}>
+                {badgeItems.map((item) => (
+                  <div
+                    key={item.label}
+                    style={{
+                      border: `1px solid ${item.ok ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}`,
+                      background: item.ok ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.09)',
+                      color: item.ok ? '#bbf7d0' : '#fecdd3',
+                      borderRadius: '0.6rem',
+                      padding: '0.4rem 0.55rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.15rem',
+                      minHeight: '52px'
+                    }}
+                  >
+                    <span style={{ fontSize: '0.7rem', opacity: 0.78 }}>{item.label}</span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>{item.value}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
           {/* SECTION 1: STREAM PLATFORMS */}
+          <CollapsibleSection
+            id="destinations"
+            title="Destinations / Platforms"
+            defaultOpen={roomUiState.destinations}
+            onToggle={(open) => updateRoomUiSection("destinations", open)}
+          >
           <div style={{
             background: 'rgba(59, 130, 246, 0.05)',
             border: '1px solid rgba(59, 130, 246, 0.2)',
@@ -821,9 +1097,16 @@ export default function StreamSetupModalV2({
               )}
             </div>
           </div>
+          </CollapsibleSection>
 
           {/* SECTION 2: RECORDING CONTROL */}
           {showRecordingControls && (
+            <CollapsibleSection
+              id="recording"
+              title="Recording settings"
+              defaultOpen={roomUiState.recording}
+              onToggle={(open) => updateRoomUiSection("recording", open)}
+            >
             <div style={{
               background: 'rgba(220, 38, 38, 0.05)',
               border: '1px solid rgba(220, 38, 38, 0.2)',
@@ -1009,7 +1292,239 @@ export default function StreamSetupModalV2({
                 </div>
               )}
             </div>
+            </CollapsibleSection>
           )}
+
+          {/* HLS Broadcast section (collapsible) */}
+          <CollapsibleSection
+            id="hls"
+            title="HLS Broadcast"
+            defaultOpen={roomUiState.hls}
+            onToggle={(open) => updateRoomUiSection("hls", open)}
+            rightBadge={(
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                  padding: '0.1rem 0.45rem',
+                  borderRadius: '999px',
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  background:
+                    hlsStatus === 'live'
+                      ? 'rgba(220,38,38,0.16)'
+                      : hlsStatus === 'starting'
+                      ? 'rgba(234,179,8,0.16)'
+                      : hlsStatus === 'error'
+                      ? 'rgba(248,113,113,0.16)'
+                      : 'rgba(31,41,55,0.9)',
+                  border:
+                    hlsStatus === 'live'
+                      ? '1px solid rgba(220,38,38,0.7)'
+                      : hlsStatus === 'starting'
+                      ? '1px solid rgba(234,179,8,0.7)'
+                      : hlsStatus === 'error'
+                      ? '1px solid rgba(248,113,113,0.7)'
+                      : '1px solid rgba(148,163,184,0.6)',
+                  color:
+                    hlsStatus === 'live'
+                      ? '#fecaca'
+                      : hlsStatus === 'starting'
+                      ? '#facc15'
+                      : hlsStatus === 'error'
+                      ? '#fecaca'
+                      : '#e5e7eb',
+                }}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '999px',
+                    backgroundColor:
+                      hlsStatus === 'live'
+                        ? '#ef4444'
+                        : hlsStatus === 'starting'
+                        ? '#eab308'
+                        : hlsStatus === 'error'
+                        ? '#f97373'
+                        : '#6b7280',
+                  }}
+                />
+                <span>{hlsStatus === 'idle' ? 'Idle' : hlsStatus === 'starting' ? 'Starting' : hlsStatus === 'live' ? 'Live' : 'Error'}</span>
+              </span>
+            )}
+          >
+            <div style={{ fontSize: '0.75rem', color: 'rgba(209, 213, 219, 0.9)', marginBottom: '0.65rem' }}>
+              {!hlsRoomReady
+                ? 'Loading room… HLS controls will unlock once the Firestore roomId is known.'
+                : 'Start HLS to create a public watch link. Viewers can watch without joining the room.'}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.6rem' }}>
+              {/* Direct playlist URL */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Direct HLS Playlist URL</span>
+                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    value={hlsStatus === 'live' && hlsPlaylistUrl ? hlsPlaylistUrl : ''}
+                    placeholder={hlsStatus === 'live' ? 'Waiting for playlist URL…' : 'Playlist available when HLS is live'}
+                    style={{
+                      flex: 1,
+                      padding: '0.4rem 0.55rem',
+                      borderRadius: '0.35rem',
+                      border: '1px solid rgba(75,85,99,0.7)',
+                      background: 'rgba(15,23,42,0.9)',
+                      color: '#e5e7eb',
+                      fontSize: '0.8rem',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!(hlsStatus === 'live' && hlsPlaylistUrl)}
+                    onClick={async () => {
+                      if (!(hlsStatus === 'live' && hlsPlaylistUrl)) return;
+                      try {
+                        await navigator.clipboard.writeText(hlsPlaylistUrl);
+                        alert('Playlist URL copied');
+                      } catch {/* ignore */}
+                    }}
+                    style={{
+                      padding: '0.35rem 0.6rem',
+                      borderRadius: '0.35rem',
+                      border: '1px solid rgba(148,163,184,0.7)',
+                      background: 'rgba(15,23,42,0.95)',
+                      color: '#e5e7eb',
+                      fontSize: '0.75rem',
+                      cursor: hlsStatus === 'live' && hlsPlaylistUrl ? 'pointer' : 'not-allowed',
+                      opacity: hlsStatus === 'live' && hlsPlaylistUrl ? 1 : 0.5,
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              {/* Viewer link */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Viewer Link (/live/:roomId)</span>
+                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    readOnly
+                    value={hlsStatus === 'live' && hlsViewerUrl ? hlsViewerUrl : ''}
+                    placeholder={hlsStatus === 'live' ? 'Viewer link will appear when live' : 'Viewer link available when HLS is live'}
+                    style={{
+                      flex: 1,
+                      padding: '0.4rem 0.55rem',
+                      borderRadius: '0.35rem',
+                      border: '1px solid rgba(75,85,99,0.7)',
+                      background: 'rgba(15,23,42,0.9)',
+                      color: '#e5e7eb',
+                      fontSize: '0.8rem',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!(hlsStatus === 'live' && hlsViewerUrl)}
+                    onClick={async () => {
+                      if (!(hlsStatus === 'live' && hlsViewerUrl)) return;
+                      try {
+                        await navigator.clipboard.writeText(hlsViewerUrl);
+                        alert('Viewer link copied');
+                      } catch {/* ignore */}
+                    }}
+                    style={{
+                      padding: '0.35rem 0.6rem',
+                      borderRadius: '0.35rem',
+                      border: '1px solid rgba(148,163,184,0.7)',
+                      background: 'rgba(15,23,42,0.95)',
+                      color: '#e5e7eb',
+                      fontSize: '0.75rem',
+                      cursor: hlsStatus === 'live' && hlsViewerUrl ? 'pointer' : 'not-allowed',
+                      opacity: hlsStatus === 'live' && hlsViewerUrl ? 1 : 0.5,
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {hlsError && hlsStatus === 'error' && (
+              <div
+                style={{
+                  marginTop: '0.5rem',
+                  fontSize: '0.75rem',
+                  color: '#fecaca',
+                  background: 'rgba(248,113,113,0.1)',
+                  border: '1px solid rgba(248,113,113,0.6)',
+                  borderRadius: '0.4rem',
+                  padding: '0.4rem 0.5rem',
+                }}
+              >
+                ❌ {hlsError}
+              </div>
+            )}
+
+            <div style={{ marginTop: '0.65rem', display: 'flex', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={handleStartHls}
+                disabled={!hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
+                style={{
+                  flex: 1,
+                  padding: '0.6rem 0.7rem',
+                  borderRadius: '0.45rem',
+                  border: 'none',
+                  background:
+                    !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
+                      ? 'rgba(37,99,235,0.4)'
+                      : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                  color: '#ffffff',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor:
+                    !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
+                  opacity:
+                    !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
+                }}
+              >
+                {hlsBusy && (hlsStatus === 'starting' || hlsStatus === 'idle')
+                  ? 'Starting HLS…'
+                  : 'Start HLS'}
+              </button>
+              <button
+                type="button"
+                onClick={handleStopHls}
+                disabled={hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')}
+                style={{
+                  flex: 1,
+                  padding: '0.6rem 0.7rem',
+                  borderRadius: '0.45rem',
+                  border: 'none',
+                  background:
+                    hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')
+                      ? 'rgba(248,113,113,0.35)'
+                      : 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                  color: '#ffffff',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor:
+                    hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 'not-allowed' : 'pointer',
+                  opacity:
+                    hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 0.6 : 1,
+                }}
+              >
+                {hlsBusy && (hlsStatus === 'live' || hlsStatus === 'starting')
+                  ? 'Stopping HLS…'
+                  : 'Stop HLS'}
+              </button>
+            </div>
+          </CollapsibleSection>
 
           {/* Help Text */}
           <div style={{ 

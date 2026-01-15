@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiStartRecording, apiStopRecording } from "../lib/api";
 import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
@@ -10,6 +10,7 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import RoleOverlay from "../components/RoleOverlay";
 import { HostAVControls } from "../components/HostAVControls";
 import { API_BASE } from "../lib/apiBase";
+import { APP_BASE } from "../lib/appBase";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
@@ -84,37 +85,6 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
           50% { transform: translateY(-20px) rotate(180deg); }
         }
       `}</style>
-          {recordingCountdown && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "none",
-                zIndex: 50,
-              }}
-            >
-              <div
-                key={recordingCountdown}
-                style={{
-                  padding: "14px 22px",
-                  borderRadius: "12px",
-                  background: "rgba(0, 0, 0, 0.65)",
-                  color: "#ffffff",
-                  fontSize: "30px",
-                  fontWeight: 700,
-                  letterSpacing: "0.04em",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                  boxShadow: "0 12px 40px rgba(0,0,0,0.35)",
-                  animation: "fadeScale 0.9s ease",
-                }}
-              >
-                {recordingCountdown}
-              </div>
-            </div>
-          )}
 
       <div style={{
         background: 'rgba(39, 39, 42, 0.5)',
@@ -480,7 +450,10 @@ export default function Room() {
 
   const streamEgressRef = useRef<string | null>(null);
   const nav = useNavigate();
-  const { roomName } = useParams<{ roomName: string }>();
+  const location = useLocation();
+  const { roomName: routeRoomIdParam } = useParams<{ roomName?: string }>();
+  const routeRoomId = routeRoomIdParam ? decodeURIComponent(routeRoomIdParam) : null;
+  const [searchParams] = useSearchParams();
 
   const [displayName, setDisplayName] = useState(() => {
     // Prefer profile displayName if available, then fall back to cached value
@@ -536,70 +509,6 @@ export default function Room() {
   const canInviteLinks = !isViewer && (isHost || can("canInvite"));
   const canManageStream = !isViewer && (isHost || can("canStream") || can("canRecord") || can("canDestinations"));
 
-  useEffect(() => {
-    if (!roomName) return;
-    const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
-    const willBeHost = createdRooms.includes(roomName);
-    setIsHost(willBeHost);
-    const storedRole = (() => {
-      try {
-        return localStorage.getItem("sl_current_role") || "guest";
-      } catch {
-        return "guest";
-      }
-    })();
-    const nextRole = willBeHost ? "host" : storedRole;
-    setUserRole(nextRole);
-    try {
-      if (willBeHost) localStorage.setItem("sl_current_role", "host");
-      setInviteToken(localStorage.getItem("sl_invite_token") || null);
-    } catch {
-      // ignore
-    }
-    console.log('🏠 Host Check:', { roomName, createdRooms, isHost: willBeHost, role: nextRole });
-  }, [roomName, currentUserId]);
-
-  // If we have an inviteToken but the role isn't set (or got reset), resolve it here
-  // so we mint the correct room token (cohost/mod) and permissions.
-  useEffect(() => {
-    if (!roomName || !inviteToken) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/invites/resolve`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inviteToken }),
-        });
-        if (!res.ok) return;
-        const data = await res.json().catch(() => null);
-        if (!data || cancelled) return;
-
-        const resolvedRoom = String(data.roomName || "");
-        const rawResolvedRole = String(data.role || "guest");
-        const resolvedRole = rawResolvedRole === "cohost" || rawResolvedRole === "moderator" ? "guest" : rawResolvedRole;
-        if (!resolvedRoom || resolvedRoom !== roomName) return;
-
-        // Only override when we're not host and our role is low-trust.
-        if (!isHost && (userRole === "guest" || userRole === "participant")) {
-          setUserRole(resolvedRole);
-          try {
-            localStorage.setItem("sl_current_role", resolvedRole);
-          } catch {
-            // ignore
-          }
-        }
-      } catch {
-        // ignore
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [API_BASE, inviteToken, isHost, roomName, userRole]);
-
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
   const recordingRef = useRef<string | null>(null);
@@ -635,6 +544,100 @@ export default function Room() {
   const [presetClamped, setPresetClamped] = useState(false);
   const [defaultLayoutPref, setDefaultLayoutPref] = useState<"speaker" | "grid">("speaker");
   const [defaultRecordingModePref, setDefaultRecordingModePref] = useState<"cloud" | "dual">("cloud");
+  const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
+  const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
+  const roomId = firestoreRoomId ?? routeRoomId ?? null;
+  const [roomName, setRoomName] = useState<string>(() => {
+    const fromState = (location.state as any)?.livekitRoomName;
+    if (typeof fromState === "string" && fromState.trim()) return fromState.trim();
+    const cached = localStorage.getItem("sl_last_room");
+    return cached || "";
+  });
+  const effectiveRoomName = roomName;
+
+  useEffect(() => {
+    const candidateKey = roomId;
+    if (!candidateKey) return;
+    const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
+    const willBeHost = createdRooms.includes(candidateKey);
+    setIsHost(willBeHost);
+    const storedRole = (() => {
+      try {
+        return localStorage.getItem("sl_current_role") || "guest";
+      } catch {
+        return "guest";
+      }
+    })();
+    const nextRole = willBeHost ? "host" : storedRole;
+    setUserRole(nextRole);
+    try {
+      if (willBeHost) localStorage.setItem("sl_current_role", "host");
+      setInviteToken(localStorage.getItem("sl_invite_token") || null);
+    } catch {
+      // ignore
+    }
+    console.log("🏠 Host Check:", { roomKey: candidateKey, roomId, createdRooms, isHost: willBeHost, role: nextRole });
+  }, [currentUserId, roomId]);
+
+  // If we have an inviteToken but the role isn't set (or got reset), resolve it here
+  // so we mint the correct room token (cohost/mod) and permissions.
+  useEffect(() => {
+    if (!inviteToken) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/invites/resolve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inviteToken }),
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!data || cancelled) return;
+
+        const resolvedId = String(data.roomId || "");
+        const resolvedName = String(data.roomName || "");
+        const rawResolvedRole = String(data.role || "guest");
+        const resolvedRole = rawResolvedRole === "cohost" || rawResolvedRole === "moderator" ? "guest" : rawResolvedRole;
+        const expectedId = roomId || "";
+        const expectedName = effectiveRoomName || "";
+        if (expectedId && resolvedId && resolvedId !== expectedId) return;
+        if (!expectedId && expectedName && resolvedName && resolvedName !== expectedName) return;
+
+        // Only override when we're not host and our role is low-trust.
+        if (!isHost && (userRole === "guest" || userRole === "participant")) {
+          setUserRole(resolvedRole);
+          try {
+            localStorage.setItem("sl_current_role", resolvedRole);
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE, roomId, effectiveRoomName, inviteToken, isHost, userRole]);
+
+  // Token-only routing support: /room?t=<token>
+  useEffect(() => {
+    const t = String(searchParams.get("t") || "").trim();
+    if (!t) return;
+    try {
+      setRoomAccessToken(t);
+      // For backward compatibility, treat `t` as the inviteToken as well.
+      // If it's a roomAccessToken instead, /api/roomToken will ignore it.
+      setInviteToken(t);
+      localStorage.setItem("sl_invite_token", t);
+    } catch {
+      // ignore
+    }
+  }, [searchParams]);
 
   const presetLabelFor = (id?: string | null) => {
     if (!id) return "Standard 720p30";
@@ -649,8 +652,11 @@ export default function Room() {
   };
 
   useEffect(() => {
-    if (!roomName || !displayName) return;
-    const role = userRole === "cohost" || userRole === "moderator" ? "guest" : userRole;
+    if (!effectiveRoomName || !displayName) return;
+    // Role used to mint the LiveKit token + roomAccessToken.
+    // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
+    const requestedRole = isHost ? "host" : userRole;
+    const role = requestedRole === "cohost" || requestedRole === "moderator" ? "guest" : requestedRole;
     const isGuest = role === "guest";
     const roleNeedsAuth = false;
 
@@ -659,11 +665,23 @@ export default function Room() {
         console.log(`[Room] Fetching room token (role=${role || "host"})...`);
         const buildRoomTokenRequest = (mode: "auth" | "guest") => {
           const endpoint = mode === "guest" ? `${API_BASE}/api/roomToken/guest` : `${API_BASE}/api/roomToken`;
-          const payload: any = { roomName, identity: displayName };
+          const payload: any = { identity: displayName };
+
+          // If we have a canonical roomId, send only that.
+          // Otherwise, fall back to roomName so the server can resolve.
+          if (roomId) {
+            payload.roomId = roomId;
+          } else {
+            payload.roomName = effectiveRoomName;
+          }
 
           if (inviteToken) {
             payload.inviteToken = inviteToken;
           }
+
+          // Tell the backend what role we want this token minted as.
+          // The backend will clamp/lock it as needed.
+          payload.role = role;
 
           if (mode === "guest") {
             payload.displayName = displayName;
@@ -738,6 +756,10 @@ export default function Room() {
           return;
         }
 
+        if (typeof data?.roomName === "string" && data.roomName.trim()) {
+          setRoomName(data.roomName.trim());
+        }
+
         if (data?.permissions && typeof data.permissions === "object") {
           setRoomPermissions({
             canStream: !!data.permissions.canStream,
@@ -752,7 +774,18 @@ export default function Room() {
         } else {
           setRoomPermissions(null);
         }
-        const { token, serverUrl } = data;
+        const { token, serverUrl, roomId: returnedRoomId, roomAccessToken: roomAccessTokenRaw } = data as any;
+        if (typeof returnedRoomId === "string" && returnedRoomId.trim()) {
+          setFirestoreRoomId(returnedRoomId.trim());
+        } else {
+          console.warn("[Room] /roomToken did not return roomId; leaving firestoreRoomId null", data);
+          setFirestoreRoomId(null);
+        }
+        if (typeof roomAccessTokenRaw === "string" && roomAccessTokenRaw.trim()) {
+          setRoomAccessToken(roomAccessTokenRaw.trim());
+        } else {
+          setRoomAccessToken(null);
+        }
         const finalServerUrl = serverUrl || import.meta.env.VITE_LIVEKIT_URL;
         console.log("[Room] token received:", !!token, "serverUrl:", finalServerUrl);
         setToken(token);
@@ -780,7 +813,9 @@ export default function Room() {
     };
 
     fetchToken();
-    }, [roomName, displayName, inviteToken, userRole]);
+  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole]);
+
+  
 
   useEffect(() => {
     if (isViewer && showStreamSetup) {
@@ -882,8 +917,7 @@ export default function Room() {
     if (
       recordingStatus === "stopped" &&
       recordingId &&
-      lastRecordingStatusRef.current !== "stopped" &&
-      streamStatus !== "live"
+      lastRecordingStatusRef.current !== "stopped"
     ) {
       setShowStreamEndedModal(true);
     } else if (recordingStatus !== "stopped") {
@@ -891,7 +925,7 @@ export default function Room() {
     }
 
     lastRecordingStatusRef.current = recordingStatus;
-  }, [recordingStatus, recordingId, streamStatus]);
+  }, [recordingStatus, recordingId]);
 
   useEffect(() => {
     if (streamStatus === "live") {
@@ -1127,8 +1161,8 @@ export default function Room() {
       alert("You don't have permission to start recording in this room.");
       return;
     }
-    if (!roomName) {
-      console.log("❌ No roomName, can't start recording");
+    if (!roomId) {
+      console.log("❌ No roomId, can't start recording");
       return;
     }
     if (recordingRef.current || recordingStatus === "recording" || isRecordingCountdown) {
@@ -1141,7 +1175,7 @@ export default function Room() {
       console.warn("Dual recording requested but not allowed; falling back to cloud mode.");
     }
 
-    console.log("🎬 startRecording called. roomName:", roomName, "layout:", layout, "mode:", requestedMode);
+    console.log("🎬 startRecording called. roomId:", roomId, "layout:", layout, "mode:", requestedMode);
 
     autoStopTriggeredRef.current = false;
 
@@ -1162,7 +1196,7 @@ export default function Room() {
       setRecordingCountdown("You're recording");
       try {
         console.log("📡 Calling apiStartRecording...");
-        const response = await apiStartRecording(roomName, layout, requestedMode, presetId || selectedPresetId);
+        const response = await apiStartRecording(roomId, layout, requestedMode, presetId || selectedPresetId);
         console.log("📡 Got response:", response);
         const recId = response?.data?.recordingId ?? response?.recordingId;
         console.log("🎬 Extracted recordingId:", recId);
@@ -1290,8 +1324,8 @@ export default function Room() {
     }
     if (streamStatus === "starting" || streamStatus === "live") return;
     if (isLiveCountdown) return;
-    if (!roomName) {
-      alert("No room name");
+    if (!roomId) {
+      alert("No room id");
       return;
     }
     console.log("🎬 Room.tsx - handleStartMultistream called");
@@ -1383,7 +1417,7 @@ export default function Room() {
         };
         console.log("   Sending to API:", requestBody);
         const res = await fetch(
-          `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/start-multistream`,
+          `${API_BASE}/api/multistream/${encodeURIComponent(roomId)}/start-multistream`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1463,36 +1497,51 @@ export default function Room() {
       alert("No active stream");
       return;
     }
-    if (!roomName) {
-      alert("No room name");
+    if (!roomId) {
+      alert("No room id");
       return;
     }
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      console.warn("stop-multistream request timed out; aborting");
+      controller.abort();
+    }, 10000);
     try {
       setStreamStatus("stopping");
       const res = await fetch(
-        `${API_BASE}/api/rooms/${encodeURIComponent(roomName)}/stop-multistream`,
+        `${API_BASE}/api/multistream/${encodeURIComponent(roomId)}/stop-multistream`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ egressId: streamEgressId }),
-          credentials: 'include',
+          credentials: "include",
+          signal: controller.signal,
         }
       );
       if (!res.ok) {
-        alert("Failed to stop multistream");
-        setStreamStatus("live");
-        return;
+        const text = await res.text().catch(() => "");
+        console.error("Failed to stop multistream", res.status, text);
+        alert(
+          "We couldn't confirm that the stream fully stopped. If it still appears live, try refreshing or stopping it from the destination dashboard."
+        );
       }
+    } catch (err) {
+      if ((err as any)?.name === "AbortError") {
+        console.warn("stop-multistream aborted due to timeout", err);
+      } else {
+        console.error("Error stopping multistream", err);
+      }
+      alert(
+        "We couldn't confirm that the stream fully stopped. If it still appears live, try refreshing or stopping it from the destination dashboard."
+      );
+    } finally {
+      window.clearTimeout(timeoutId);
       setEgressId(null);
       setStreamStatus("idle");
       streamEgressRef.current = null;
       if (recordingStatus === "recording") {
         console.log("ℹ️ Stream stopped but recording still active");
       }
-    } catch (err) {
-      console.error("Error stopping multistream", err);
-      alert("Error stopping multistream");
-      setStreamStatus("live");
     }
   };
 
@@ -1519,12 +1568,16 @@ export default function Room() {
   const copyInviteLink = (_role: string, label: string) => {
     (async () => {
       try {
+        if (!roomId && !effectiveRoomName) {
+          alert("No room identity available yet");
+          return;
+        }
         const res = await fetch(`${API_BASE}/api/invites/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           // Invites are currently guest/participant-only.
-          body: JSON.stringify({ roomName, role: "guest" }),
+          body: JSON.stringify({ roomId: roomId || undefined, roomName: effectiveRoomName || undefined, role: "guest" }),
         });
 
         const data = await res.json().catch(() => ({}));
@@ -1533,7 +1586,11 @@ export default function Room() {
           return;
         }
 
-        const url = `${window.location.origin}/i/${encodeURIComponent(data.inviteToken)}`;
+        const base = APP_BASE || window.location.origin;
+        const relativeUrl = typeof data?.url === "string" && data.url.startsWith("/")
+          ? data.url
+          : `/room?t=${encodeURIComponent(data.inviteToken)}`;
+        const url = `${base}${relativeUrl}`;
         await navigator.clipboard.writeText(url);
         alert(`${label} link copied!\n${url}`);
       } catch (err) {
@@ -1708,8 +1765,39 @@ export default function Room() {
           👀 View-only mode — publishing controls are disabled.
         </div>
       )}
+      {recordingCountdown && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 50,
+          }}
+        >
+          <div
+            key={recordingCountdown}
+            style={{
+              padding: "14px 22px",
+              borderRadius: "12px",
+              background: "rgba(0, 0, 0, 0.65)",
+              color: "#ffffff",
+              fontSize: "30px",
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              border: "1px solid rgba(255, 255, 255, 0.2)",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.35)",
+              animation: "fadeScale 0.9s ease",
+            }}
+          >
+            {recordingCountdown}
+          </div>
+        </div>
+      )}
       {recordingStatus === "recording" && (
-        <div className="fixed bottom-4 left-4 flex items-center gap-2 bg-red-600 px-4 py-3 rounded-lg shadow-lg z-40">
+        <div className="fixed bottom-16 left-4 flex items-center gap-2 bg-red-600 px-4 py-3 rounded-lg shadow-lg z-40">
           <div className="w-3 h-3 bg-white rounded-full animate-pulse" />
           <span className="text-sm font-bold">RECORDING</span>
           <span className="text-xs text-gray-200 ml-2">{recordingId}</span>
@@ -1857,7 +1945,7 @@ export default function Room() {
           token={token}
           serverUrl={serverUrl}
           connect={true}
-          connectOptions={isViewer ? { audio: false, video: false } : undefined}
+          connectOptions={isViewer ? { autoSubscribe: true } : undefined}
           onDisconnected={handleLeftRoom}
           style={{
             width: "100%",
@@ -2012,6 +2100,9 @@ export default function Room() {
           open={showStreamSetup && canManageStream}
           onClose={() => setShowStreamSetup(false)}
           roomName={roomName ?? ""}
+          roomId={roomId || ""}
+          roomAccessToken={roomAccessToken || undefined}
+          
           selectedPresetId={selectedPresetId}
           defaultLayout={defaultLayoutPref}
           defaultRecordingMode={defaultRecordingModePref}
@@ -2034,6 +2125,8 @@ export default function Room() {
               id: d.id,
               targetId: d.targetId || d.id,
               platform: d.platform,
+              name: d.name,
+              enabled: d.enabled,
               label: d.name ? `${d.platform} – ${d.name}` : d.platform,
               status: d.status,
               hasKey: d.hasKey,

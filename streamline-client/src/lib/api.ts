@@ -31,14 +31,14 @@ export async function getToken(
 }
 
 export async function apiStartRecording(
-  roomName: string,
+  roomId: string,
   layout: "speaker" | "grid",
   mode: "cloud" | "dual" = "cloud",
   presetId?: string
 ) {
   const res = await apiFetch(`${API_BASE}/api/recordings/start`, {
     method: "POST",
-    body: JSON.stringify({ roomName, layout, mode, presetId }),
+    body: JSON.stringify({ roomId, layout, mode, presetId }),
   });
   return res.json();
 }

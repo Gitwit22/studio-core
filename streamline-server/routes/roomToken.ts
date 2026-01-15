@@ -3,9 +3,14 @@ import { Router } from "express";
 import crypto from "crypto";
 import { InviteClaims, requireAuthOrInvite, verifyInviteToken } from "../middleware/requireAuth";
 import { firestore } from "../firebaseAdmin";
+import admin from "firebase-admin";
+import { ensureRoomDoc } from "../services/rooms";
 import { isAdmin } from "../middleware/adminAuth";
 import { SIMPLE_ROLE_DEFAULTS } from "./account";
 import { intersectPermissionsWithEntitlements } from "../lib/rolePermissions";
+import { resolveRoomIdentity } from "../lib/roomIdentity";
+import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
+import jwt from "jsonwebtoken";
 
 // Dynamic import for AccessToken constructor
 async function getAccessTokenCtor() {
@@ -173,6 +178,15 @@ async function getPlanLimit(uid: string, field: string): Promise<number | undefi
   return Number.isFinite(num) ? num : undefined;
 }
 
+function getRoomAccessSecret() {
+  const env = String(process.env.NODE_ENV || "development").toLowerCase();
+  const raw = process.env.ROOM_ACCESS_TOKEN_SECRET || process.env.JWT_SECRET || "";
+  if ((env === "production" || env === "staging") && (!process.env.ROOM_ACCESS_TOKEN_SECRET || raw === "dev-secret")) {
+    throw new Error("ROOM_ACCESS_TOKEN_SECRET must be set (no dev-secret in production)");
+  }
+  return raw || "dev-secret";
+}
+
 function nowTs() {
   return FirebaseFirestore.Timestamp.now();
 }
@@ -199,6 +213,53 @@ async function getParticipantCount(roomName: string): Promise<number | null> {
 }
 
 const router = Router();
+
+// Hard cutoff for legacy name-only joins (no roomId anywhere).
+// After this date, requests that rely solely on roomName should be rejected.
+export const LEGACY_ROOMNAME_JOIN_SUNSET = "2026-02-01";
+
+function isLegacyJoinExpired() {
+  const ts = Date.parse(LEGACY_ROOMNAME_JOIN_SUNSET);
+  if (!Number.isFinite(ts)) return false;
+  return Date.now() >= ts;
+}
+
+async function recordLegacyRoomNameJoin(ctx: {
+  route: string;
+  roomName: string;
+  uid?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+}) {
+  try {
+    console.warn("[metrics] legacy_roomname_join", {
+      event: "legacy_roomname_join",
+      route: ctx.route,
+      roomName: ctx.roomName,
+      uid: ctx.uid || null,
+      ip: ctx.ip || null,
+      userAgent: ctx.userAgent || null,
+    });
+
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const ref = firestore
+      .collection("metrics")
+      .doc("legacyJoinEvents")
+      .collection("days")
+      .doc(today);
+
+    await ref.set(
+      {
+        count: admin.firestore.FieldValue.increment(1),
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    // Metrics should never break auth/token flows.
+    console.warn("[metrics] failed to record legacy_roomname_join", err);
+  }
+}
 
 async function createViewerInvite(roomId: string, opts: {
   createdBy?: string;
@@ -230,11 +291,11 @@ async function createViewerInvite(roomId: string, opts: {
   return { inviteId: docRef.id };
 }
 
-async function validateViewerInvite(inviteToken: string, roomName: string, sessionId: string, passcode?: string) {
+async function validateViewerInvite(inviteToken: string, roomId: string, sessionId: string, passcode?: string) {
   const doc = await firestore.collection("viewerInvites").doc(inviteToken).get();
   if (!doc.exists) return { ok: false, reason: "not_found" } as const;
   const data = doc.data() as ViewerInvite;
-  if (data.roomId !== roomName) return { ok: false, reason: "room_mismatch" } as const;
+  if (data.roomId !== roomId) return { ok: false, reason: "room_mismatch" } as const;
   if (data.revokedAt) return { ok: false, reason: "revoked" } as const;
 
   // Expiry checks
@@ -273,17 +334,57 @@ async function validateViewerInvite(inviteToken: string, roomName: string, sessi
 
 router.post("/", requireAuthOrInvite, async (req, res) => {
   try {
-    const { roomName, identity, role: rawRole } = req.body as { roomName?: string; identity?: string; inviteToken?: string; role?: string };
+    const { roomName: rawRoomName, roomId: rawRoomId, identity, role: rawRole } = req.body as {
+      roomName?: string;
+      roomId?: string;
+      identity?: string;
+      inviteToken?: string;
+      role?: string;
+    };
     const uid = (req as any).user?.uid as string | undefined;
     const invite = (req as any).invite as InviteClaims | undefined;
 
     if (!uid && !invite) return res.status(401).json({ error: "Unauthorized" });
-    if (!roomName || !roomName.trim()) return res.status(400).json({ error: "roomName is required" });
+
+    const trimmedRoomId = String(rawRoomId || "").trim();
+    const trimmedRoomName = sanitizeDisplayName(String(rawRoomName || "")).trim();
+
+    // Host/control-plane contract: authenticated callers without an invite
+    // must provide a canonical roomId. Name-only is rejected so we never
+    // depend on roomName for host/control flows.
+    if (uid && !invite && !trimmedRoomId) {
+      return res.status(400).json({ error: "roomId_required_for_host" });
+    }
+
+    const inviteRoomId = String(invite?.roomId || "").trim();
+    const inviteRoomName = String(invite?.roomName || invite?.room || "").trim();
+
+    const isLegacyNameOnly = !trimmedRoomId && !inviteRoomId && !!trimmedRoomName;
+    if (isLegacyNameOnly) {
+      if (isLegacyJoinExpired()) {
+        return res.status(410).json({ error: "legacy_roomname_join_disabled" });
+      }
+      await recordLegacyRoomNameJoin({
+        route: "/api/roomToken",
+        roomName: trimmedRoomName,
+        uid,
+        ip: (req as any).ip || null,
+        userAgent: (req.headers["user-agent"] as string) || null,
+      });
+    }
+
+    const resolvedRoom = await resolveRoomIdentity({
+      roomId: trimmedRoomId || inviteRoomId || null,
+      roomName: trimmedRoomName || inviteRoomName || null,
+    });
+
+    if (!resolvedRoom) return res.status(400).json({ error: "roomId_or_roomName_required" });
+    const roomId = resolvedRoom.roomId;
+    const roomName = resolvedRoom.roomName;
 
     if (invite) {
-      const inviteRoom = invite.roomName || invite.room;
-      if (!inviteRoom) return res.status(400).json({ error: "invite_token_missing_room" });
-      if (inviteRoom !== roomName) return res.status(403).json({ error: "invite_room_mismatch" });
+      if (inviteRoomId && inviteRoomId !== roomId) return res.status(403).json({ error: "invite_room_mismatch" });
+      if (inviteRoomName && inviteRoomName !== roomName) return res.status(403).json({ error: "invite_room_mismatch" });
     }
 
     const apiKey = process.env.LIVEKIT_API_KEY;
@@ -328,6 +429,21 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       if (!ok) requestedRole = "participant";
     }
 
+    if (entitlementsUid) {
+      try {
+        await ensureRoomDoc({
+          roomId,
+          ownerId: entitlementsUid,
+          livekitRoomName: roomName,
+          roomType: "rtc",
+          initialStatus: "live",
+        });
+      } catch (err) {
+        console.error("[roomToken] ensureRoomDoc failed", err);
+        return res.status(500).json({ error: "room_init_failed" });
+      }
+    }
+
     const resolved = await resolveRoleForInvite({ uid: entitlementsUid, requestedRole });
     if (resolved.ok === false) {
       const payload = resolved.error;
@@ -355,10 +471,34 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       room: roomName,
       ...roleToGrant(grantRole),
     });
-    const jwt = await at.toJwt();
-    console.log("✅ roomToken jwt typeof:", typeof jwt, "len:", jwt.length);
+    const lkJwt = await at.toJwt();
+    console.log("✅ roomToken jwt typeof:", typeof lkJwt, "len:", lkJwt.length);
+
     const serverUrl = process.env.LIVEKIT_URL || null;
-    return res.status(200).json({ token: jwt, serverUrl, role: grantRole, isViewer, permissions, effectiveRoleKey, locked });
+
+    const roomAccessPayload = {
+      roomId,
+      roomName,
+      role: effectiveRoleKey,
+      permissions,
+    } as const;
+
+    const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), {
+      expiresIn: "12h",
+    });
+
+    return res.status(200).json({
+      token: lkJwt,
+      serverUrl,
+      role: grantRole,
+      isViewer,
+      permissions,
+      effectiveRoleKey,
+      locked,
+      roomId,
+      roomName,
+      roomAccessToken,
+    });
   } catch (err: any) {
     console.error("roomToken error:", err);
     return res.status(500).json({ error: "Failed to create room token" });
@@ -368,36 +508,22 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
 // Public guest token: subscribe only (downgraded to viewer when over cap)
 router.post("/guest", async (req, res) => {
   try {
-    const { roomName, displayName, guestId, inviteToken } = req.body as {
+    const { roomName: rawRoomName, roomId: rawRoomId, displayName, guestId, inviteToken } = req.body as {
       roomName?: string;
+      roomId?: string;
       displayName?: string;
       guestId?: string;
       inviteToken?: string;
     };
 
-    if (!roomName || !roomName.trim()) return res.status(400).json({ error: "roomName is required" });
-    if (!displayName || !displayName.trim()) return res.status(400).json({ error: "displayName is required" });
-
-    if (inviteToken) {
-      try {
-        const claims = verifyInviteToken(inviteToken);
-        const inviteRoom = claims.roomName || claims.room;
-        if (inviteRoom && inviteRoom !== roomName) {
-          return res.status(403).json({ error: "invite_room_mismatch" });
-        }
-      } catch (err) {
-        console.error("guest invite verify failed", (err as any)?.message || err);
-        return res.status(401).json({ error: "invalid_invite" });
-      }
+    if ((!rawRoomName || !rawRoomName.trim()) && (!rawRoomId || !rawRoomId.trim()) && !inviteToken) {
+      return res.status(400).json({ error: "roomId_or_roomName_required" });
+    }
+    const sanitizedDisplayName = sanitizeDisplayName(displayName).trim();
+    if (!sanitizedDisplayName) {
+      return res.status(400).json({ error: "invalid_display_name" });
     }
 
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    if (!apiKey || !apiSecret) {
-      return res.status(500).json({ error: "LiveKit keys missing in env" });
-    }
-
-    // Guest cap check (plan-aware via host, fallback to env)
     let inviteClaims: InviteClaims | undefined;
     if (inviteToken) {
       try {
@@ -408,6 +534,47 @@ router.post("/guest", async (req, res) => {
       }
     }
 
+    const inputRoomId = String(rawRoomId || "").trim();
+    const inputRoomName = sanitizeDisplayName(String(rawRoomName || "")).trim();
+    const inviteRoomId = String(inviteClaims?.roomId || "").trim();
+    const inviteRoomName = String((inviteClaims as any)?.roomName || (inviteClaims as any)?.room || "").trim();
+
+    const isLegacyNameOnly = !inputRoomId && !inviteRoomId && !!inputRoomName;
+    if (isLegacyNameOnly) {
+      if (isLegacyJoinExpired()) {
+        return res.status(410).json({ error: "legacy_roomname_join_disabled" });
+      }
+      await recordLegacyRoomNameJoin({
+        route: "/api/roomToken/guest",
+        roomName: inputRoomName,
+        uid: (req.body as any)?.hostUid || null,
+        ip: (req as any).ip || null,
+        userAgent: (req.headers["user-agent"] as string) || null,
+      });
+    }
+
+    const resolvedRoom = await resolveRoomIdentity({
+      roomId: inputRoomId || inviteRoomId || null,
+      roomName: inputRoomName || inviteRoomName || null,
+    });
+    if (!resolvedRoom) return res.status(400).json({ error: "roomId_or_roomName_required" });
+    const roomId = resolvedRoom.roomId;
+    const roomName = resolvedRoom.roomName;
+
+    if (inviteClaims) {
+      const inviteRoomId = String(inviteClaims.roomId || "").trim();
+      const inviteRoomName = String(inviteClaims.roomName || inviteClaims.room || "").trim();
+      if (inviteRoomId && inviteRoomId !== roomId) return res.status(403).json({ error: "invite_room_mismatch" });
+      if (inviteRoomName && inviteRoomName !== roomName) return res.status(403).json({ error: "invite_room_mismatch" });
+    }
+
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    if (!apiKey || !apiSecret) {
+      return res.status(500).json({ error: "LiveKit keys missing in env" });
+    }
+
+    // Guest cap check (plan-aware via host, fallback to env)
     const hostUid = (inviteClaims as any)?.uid || (inviteClaims as any)?.sub || (req.body as any)?.hostUid;
     const maxGuestsPlan = hostUid ? await getPlanLimit(hostUid, "maxGuests") : undefined;
     const maxGuestsEnv = Number(process.env.MAX_GUESTS_PER_ROOM || "0");
@@ -438,7 +605,7 @@ router.post("/guest", async (req, res) => {
       room: roomName,
       ...roleToGrant(resolved.result.grantRole),
     });
-    const jwt = await at.toJwt();
+    const lkJwt = await at.toJwt();
     const serverUrl = process.env.LIVEKIT_URL || null;
     if (process.env.AUTH_DEBUG === "1") {
       console.log("[invite-debug] mint guest room token", {
@@ -450,7 +617,31 @@ router.post("/guest", async (req, res) => {
         locked: resolved.result.locked,
       });
     }
-    return res.status(200).json({ token: jwt, serverUrl, identity, role: resolved.result.grantRole, isViewer: false, permissions: resolved.result.permissions, effectiveRoleKey: resolved.result.effectiveRoleKey, locked: resolved.result.locked });
+
+    const roomAccessPayload = {
+      roomId,
+      roomName,
+      role: resolved.result.effectiveRoleKey,
+      permissions: resolved.result.permissions,
+    } as const;
+
+    const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), {
+      expiresIn: "12h",
+    });
+
+    return res.status(200).json({
+      token: lkJwt,
+      serverUrl,
+      identity,
+      role: resolved.result.grantRole,
+      isViewer: false,
+      permissions: resolved.result.permissions,
+      effectiveRoleKey: resolved.result.effectiveRoleKey,
+      locked: resolved.result.locked,
+      roomId,
+      roomName,
+      roomAccessToken,
+    });
   } catch (err: any) {
     console.error("roomToken guest error:", err);
     return res.status(500).json({ error: "Failed to create guest token" });

@@ -70,3 +70,12 @@ export async function startHlsEgress(params: {
 
   return { egressId: info.egressId };
 }
+
+export async function stopEgress(egressId: string): Promise<void> {
+  const livekitUrl = requireEnv("LIVEKIT_URL");
+  const apiKey = requireEnv("LIVEKIT_API_KEY");
+  const apiSecret = requireEnv("LIVEKIT_API_SECRET");
+
+  const client = new EgressClient(livekitUrl, apiKey, apiSecret);
+  await client.stopEgress(egressId);
+}

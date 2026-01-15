@@ -1,54 +1,104 @@
 import { Router } from "express";
+import { getRoom, setHlsError, setHlsIdle, setHlsLive, setHlsStarting } from "../services/rooms";
+import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
 import { requireAuth } from "../middleware/requireAuth";
-import { getRoom, setHlsError, setHlsLive, setHlsStarting } from "../services/rooms";
-import { startHlsEgress, HlsPresetId } from "../services/livekitEgress";
+import { startHlsEgress, HlsPresetId, stopEgress } from "../services/livekitEgress";
 
 const router = Router();
 
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
+function getHlsPublicBaseUrl(): string {
+  const raw = process.env.HLS_PUBLIC_BASE_URL;
+  if (raw && String(raw).trim()) return String(raw).trim().replace(/\/+$/, "");
+
+  const env = String(process.env.NODE_ENV || "development").toLowerCase();
+  // In local/dev, default to the documented Wrangler dev URL to avoid hard-failing
+  // when .env isn't configured yet.
+  if (env !== "production" && env !== "staging") {
+    return "http://localhost:8787/hls";
+  }
+
+  throw new Error("Missing env: HLS_PUBLIC_BASE_URL");
 }
 
 router.get("/ping", (req, res) => res.send("hls ok"));
 
-router.post("/start/:roomId", requireAuth as any, async (req: any, res) => {
+// Public viewer-safe endpoint: returns only minimal, non-sensitive info.
+// GET /api/hls/public/:roomId -> { status, playlistUrl }
+router.get("/public/:roomId", async (req: any, res) => {
   const roomId = req.params.roomId;
+  if (/[ \u2013#]/.test(roomId)) {
+    return res.status(400).json({ error: "invalid_room_id" });
+  }
+  try {
+    const { data: room } = await getRoom(roomId);
+    const hls = room.hls || {};
+    return res.json({
+      status: hls.status || "idle",
+      playlistUrl: hls.playlistUrl || null,
+    });
+  } catch (e: any) {
+    if (e?.message === "room_not_found") {
+      return res.status(404).json({ error: "room_not_found" });
+    }
+    console.error("HLS public status error", e);
+    return res.status(500).json({ error: "Failed to fetch HLS status" });
+  }
+});
 
-  const userId = req.user?.uid;
-  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
+  const roomId = req.params.roomId;
+  if (/[ \u2013#]/.test(roomId)) {
+    return res.status(400).json({ error: "invalid_room_id" });
+  }
+
+  const access = (req as any).roomAccess as RoomAccessClaims | undefined;
+  if (!access || !access.roomId) {
+    return res.status(401).json({ error: "room_token_required" });
+  }
+
+  if (access.roomId !== roomId) {
+    return res.status(403).json({ error: "room_mismatch" });
+  }
 
   const presetId = (req.body?.presetId || "hls_720p") as HlsPresetId;
 
-  const { ref: roomRef, data: room } = await getRoom(roomId);
-
-  if (room.ownerId !== userId) return res.status(403).json({ error: "Forbidden" });
-  if (room.roomType !== "rtc") return res.status(400).json({ error: "roomType must be rtc" });
-
-  // IDEMPOTENT: if already starting/live, just return what we have
-  const status = room.hls?.status || "idle";
-  if (status === "starting" || status === "live") {
-    return res.json({
-      roomId,
-      status,
-      egressId: room.hls?.egressId || null,
-      playlistUrl: room.hls?.playlistUrl || null,
-    });
-  }
-
-  // Build stable paths
-  const prefix = `hls/${roomId}/`;
-  const playlistName = `room.m3u8`;
-  const publicBase = requireEnv("HLS_PUBLIC_BASE_URL");
-  const playlistUrl = `${publicBase}/${roomId}/${playlistName}`;
-
-  const lkRoomName = room.livekitRoomName || roomId;
-
-  // 1) Mark starting first (crash-safe)
-  await setHlsStarting(roomRef, { presetId, prefix });
-
   try {
+    const { ref: roomRef, data: room } = await getRoom(roomId);
+
+    const uid = (req as any).user?.uid;
+    if (!uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (room.ownerId !== uid) {
+      return res.status(403).json({ error: "not_room_owner" });
+    }
+
+    if (room.roomType !== "rtc") return res.status(400).json({ error: "roomType must be rtc" });
+
+    // IDEMPOTENT: if already starting/live, just return what we have
+    const status = room.hls?.status || "idle";
+    if (status === "starting" || status === "live") {
+      return res.json({
+        roomId,
+        status,
+        egressId: room.hls?.egressId || null,
+        playlistUrl: room.hls?.playlistUrl || null,
+      });
+    }
+
+    // Build stable paths
+    const prefix = `hls/${roomId}/`;
+    const playlistName = `room.m3u8`;
+    const publicBase = getHlsPublicBaseUrl();
+    const playlistUrl = `${publicBase}/${roomId}/${playlistName}`;
+
+    const lkRoomName = room.livekitRoomName || roomId;
+
+    // 1) Mark starting first (crash-safe)
+    await setHlsStarting(roomRef, { presetId, prefix });
+
+    try {
     // 2) Start egress
     const { egressId } = await startHlsEgress({
       roomName: lkRoomName,
@@ -68,9 +118,130 @@ router.post("/start/:roomId", requireAuth as any, async (req: any, res) => {
       egressId,
       playlistUrl,
     });
+    } catch (e: any) {
+      await setHlsError(roomRef, e?.message || "Failed to start HLS egress");
+      return res.status(500).json({ error: "Failed to start HLS egress", details: e?.message });
+    }
   } catch (e: any) {
-    await setHlsError(roomRef, e?.message || "Failed to start HLS egress");
-    return res.status(500).json({ error: "Failed to start HLS egress", details: e?.message });
+    if (e?.message === "room_not_found") {
+      return res.status(404).json({ error: "room_not_found" });
+    }
+    if (typeof e?.message === "string" && e.message.startsWith("Missing env:")) {
+      return res.status(500).json({ error: "missing_env", details: e.message });
+    }
+    console.error("HLS start error", e);
+    return res.status(500).json({ error: "Failed to start HLS" });
+  }
+});
+
+// GET /api/hls/status/:roomId
+// Returns current HLS state for the room so the client can poll
+router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
+  const roomId = req.params.roomId;
+  if (/[ \u2013#]/.test(roomId)) {
+    return res.status(400).json({ error: "invalid_room_id" });
+  }
+
+  const access = (req as any).roomAccess as RoomAccessClaims | undefined;
+  if (!access || !access.roomId) {
+    return res.status(401).json({ error: "room_token_required" });
+  }
+
+  if (access.roomId !== roomId) {
+    return res.status(403).json({ error: "room_mismatch" });
+  }
+
+  try {
+    const { data: room } = await getRoom(roomId);
+
+    const uid = (req as any).user?.uid;
+    if (!uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (room.ownerId !== uid) {
+      return res.status(403).json({ error: "not_room_owner" });
+    }
+
+    const hls = room.hls || {};
+
+    // Phase 3 spec: return flat shape so clients can
+    // poll for playlistUrl without re-starting HLS
+    return res.json({
+      status: hls.status || "idle",
+      playlistUrl: hls.playlistUrl || null,
+      egressId: hls.egressId || null,
+      error: hls.error || null,
+    });
+  } catch (e: any) {
+    if (e?.message === "room_not_found") {
+      return res.status(404).json({ error: "room_not_found" });
+    }
+    console.error("HLS status error", e);
+    return res.status(500).json({ error: "Failed to fetch HLS status" });
+  }
+});
+
+// POST /api/hls/stop/:roomId
+// Stops the LiveKit egress for this room and marks HLS idle
+router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
+  const roomId = req.params.roomId;
+  if (/[ \u2013#]/.test(roomId)) {
+    return res.status(400).json({ error: "invalid_room_id" });
+  }
+
+  const access = (req as any).roomAccess as RoomAccessClaims | undefined;
+  if (!access || !access.roomId) {
+    return res.status(401).json({ error: "room_token_required" });
+  }
+
+  if (access.roomId !== roomId) {
+    return res.status(403).json({ error: "room_mismatch" });
+  }
+
+  try {
+    const { ref: roomRef, data: room } = await getRoom(roomId);
+
+    const uid = (req as any).user?.uid;
+    if (!uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (room.ownerId !== uid) {
+      return res.status(403).json({ error: "not_room_owner" });
+    }
+
+    const hls = room.hls || {};
+    const egressId = hls.egressId;
+
+    if (egressId) {
+      try {
+        await stopEgress(egressId);
+      } catch (e: any) {
+        // Treat stop as best-effort; log but still move room to idle
+        console.error("Failed to stop HLS egress", e);
+      }
+    }
+
+    await setHlsIdle(roomRef);
+
+    const updated = {
+      status: "idle" as const,
+      playlistUrl: hls.playlistUrl || null,
+      egressId: hls.egressId || null,
+      error: null,
+      runId: hls.runId || null,
+      startedAt: hls.startedAt || null,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return res.json({ roomId, hls: updated });
+  } catch (e: any) {
+    if (e?.message === "room_not_found") {
+      return res.status(404).json({ error: "room_not_found" });
+    }
+    console.error("HLS stop error", e);
+    return res.status(500).json({ error: "Failed to stop HLS" });
   }
 });
 

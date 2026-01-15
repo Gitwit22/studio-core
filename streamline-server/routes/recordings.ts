@@ -33,6 +33,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { resolveRoomIdentity } from "../lib/roomIdentity";
 
 const router = Router();
 
@@ -276,8 +277,8 @@ function getAuthUserId(req: any): string | null {
  * Generate recording path for R2
  * CRITICAL: No leading slash - use "recordings/..." not "/recordings/..."
  */
-function generateRecordingPath(userId: string, roomName: string, timestamp: number): string {
-  const safeRoom = roomName.replace(/[^a-zA-Z0-9_-]/g, "_");
+function generateRecordingPath(userId: string, roomKey: string, timestamp: number): string {
+  const safeRoom = roomKey.replace(/[^a-zA-Z0-9_-]/g, "_");
   // Ensure no leading slash - R2/S3 keys should not start with /
   return `recordings/${userId}/${safeRoom}/${timestamp}.mp4`;
 }
@@ -507,9 +508,11 @@ async function stopRecordingInternal(options: {
 
   // Release active recording lock for this (user, room)
   try {
+    const roomId = typeof (data as any).roomId === "string" ? (data as any).roomId : null;
     const roomName = typeof data.roomName === "string" ? data.roomName : null;
-    if (roomName && uid) {
-      const activeKey = `${uid}_${roomName}`;
+    const roomKey = roomId || roomName;
+    if (roomKey && uid) {
+      const activeKey = `${uid}_${roomKey}`;
       const activeRef = firestore.collection("activeRecordings").doc(activeKey);
       await activeRef.set(
         {
@@ -581,7 +584,8 @@ router.post("/start", requireAuth, async (req, res) => {
     }
 
     // Validate request
-    const { roomName, layout: rawLayout, mode: rawMode, presetId, usageType: rawUsageType } = req.body as {
+    const { roomId: rawRoomId, roomName: rawRoomName, layout: rawLayout, mode: rawMode, presetId, usageType: rawUsageType } = req.body as {
+      roomId?: string;
       roomName?: string;
       layout?: string;
       mode?: string; // "cloud" | "dual"
@@ -589,8 +593,20 @@ router.post("/start", requireAuth, async (req, res) => {
       usageType?: string;
     };
 
-    if (!roomName) {
-      return res.status(400).json({ error: "roomName is required" });
+    if ((!rawRoomId || !String(rawRoomId).trim()) && (!rawRoomName || !String(rawRoomName).trim())) {
+      return res.status(400).json({ error: "roomId or roomName is required" });
+    }
+
+    const identity = await resolveRoomIdentity({
+      roomId: typeof rawRoomId === "string" ? rawRoomId : undefined,
+      roomName: typeof rawRoomName === "string" ? rawRoomName : undefined,
+    });
+
+    const roomId = String(identity.roomId || rawRoomId || rawRoomName || "").trim();
+    const roomName = String(identity.roomName || rawRoomName || roomId || "").trim();
+
+    if (!roomId || !roomName) {
+      return res.status(400).json({ error: "Unable to resolve room identity" });
     }
 
     // CRITICAL: Layout must be exactly "speaker" or "grid" - anything else causes 400
@@ -613,11 +629,17 @@ router.post("/start", requireAuth, async (req, res) => {
     }
 
     // If a stream is live, lower recording quality to stream preset when required
-    const streamDocId = `${uid}_${roomName}`;
+    const streamDocIdNew = `${uid}_${roomId}`;
+    const streamDocIdLegacy = `${uid}_${roomName}`;
+    let streamDocId = streamDocIdNew;
     let activeStreamPresetId: string | null = null;
     let hasActiveStream = false;
     try {
-      const streamSnap = await firestore.collection("activeStreams").doc(streamDocId).get();
+      let streamSnap = await firestore.collection("activeStreams").doc(streamDocIdNew).get();
+      if (!streamSnap.exists && streamDocIdLegacy !== streamDocIdNew) {
+        streamSnap = await firestore.collection("activeStreams").doc(streamDocIdLegacy).get();
+        if (streamSnap.exists) streamDocId = streamDocIdLegacy;
+      }
       if (streamSnap.exists) {
         hasActiveStream = true;
         const data = streamSnap.data() || {};
@@ -656,7 +678,7 @@ router.post("/start", requireAuth, async (req, res) => {
     // Generate recording path and ID
     const now = new Date();
     const timestamp = now.getTime();
-    const objectKey = generateRecordingPath(uid, roomName, timestamp);
+    const objectKey = generateRecordingPath(uid, roomId, timestamp);
     const recordingId = firestore.collection("recordings").doc().id;
     const recordingRef = firestore.collection("recordings").doc(recordingId);
 
@@ -666,7 +688,7 @@ router.post("/start", requireAuth, async (req, res) => {
         : null;
 
     // activeRecordings lock for (uid, room)
-    const activeKey = `${uid}_${roomName}`;
+    const activeKey = `${uid}_${roomId}`;
     const activeRef = firestore.collection("activeRecordings").doc(activeKey);
 
     // =========================================================================
@@ -675,6 +697,7 @@ router.post("/start", requireAuth, async (req, res) => {
     const initialDoc = {
       id: recordingId,
       userId: uid,
+      roomId,
       roomName,
       layout: layout || "grid",
       mode,
@@ -722,6 +745,7 @@ router.post("/start", requireAuth, async (req, res) => {
       await activeRef.set(
         {
           uid,
+          roomId,
           roomName,
           recordingId,
           status: "starting",
@@ -1148,9 +1172,11 @@ router.post("/stop", requireAuth, async (req, res) => {
 
     // Release active recording lock for this (user, room)
     try {
+      const roomId = typeof (data as any).roomId === "string" ? (data as any).roomId : null;
       const roomName = typeof data.roomName === "string" ? data.roomName : null;
-      if (roomName) {
-        const activeKey = `${uid}_${roomName}`;
+      const roomKey = roomId || roomName;
+      if (roomKey) {
+        const activeKey = `${uid}_${roomKey}`;
         const activeRef = firestore.collection("activeRecordings").doc(activeKey);
         await activeRef.set(
           {
@@ -1230,7 +1256,7 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
       .get();
 
     if (snap.empty) {
-      // Fallback: try to find any recording with an objectKey
+      // Fallback: try to find any recent recording with a stored path
       const fallbackSnap = await firestore
         .collection("recordings")
         .where("userId", "==", uid)
@@ -1242,7 +1268,8 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
       fallbackSnap.forEach((doc) => {
         if (!fallbackDoc) {
           const d = doc.data() || {};
-          if (d.objectKey && d.paywallState !== "requires_payment") {
+          const hasPath = !!(d.objectKey || d.downloadPath);
+          if (hasPath && d.paywallState !== "requires_payment") {
             fallbackDoc = doc;
           }
         }
@@ -1256,9 +1283,21 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
         });
       }
 
-      // Verify fallback file exists
+      // Verify fallback file exists (prefer objectKey, fall back to downloadPath)
       const fallbackData = fallbackDoc.data() || {};
-      const size = await r2HeadObjectSize(fallbackData.objectKey);
+      const fallbackKey: string | undefined =
+        (fallbackData.objectKey as string | undefined) ||
+        (fallbackData.downloadPath as string | undefined);
+
+      if (!fallbackKey) {
+        return res.status(200).json({
+          success: false,
+          noRecording: true,
+          message: "Recording missing file reference",
+        });
+      }
+
+      const size = await r2HeadObjectSize(fallbackKey);
       if (size <= 0) {
         return res.status(200).json({
           success: false,
@@ -1267,11 +1306,25 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
         });
       }
 
-      const signedUrl = await getSignedDownloadUrl(fallbackData.objectKey, 15 * 60);
+      const signedUrl = await getSignedDownloadUrl(fallbackKey, 15 * 60);
+
+      const nowTs = Timestamp.now();
       await firestore
         .collection("recordings")
         .doc(fallbackDoc.id)
-        .set({ lastDownloadRequestedAt: Timestamp.now() }, { merge: true });
+        .set(
+          {
+            lastDownloadRequestedAt: nowTs,
+            status: "ready",
+            downloadReady: true,
+            objectKey: fallbackKey,
+            downloadPath: fallbackKey,
+            fileSize: size,
+            readyAt: fallbackData.readyAt || nowTs,
+            updatedAt: nowTs,
+          },
+          { merge: true }
+        );
 
       return res.status(200).json({
         success: true,
@@ -1280,7 +1333,7 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
           recordingId: fallbackDoc.id,
           fallbackUsed: true,
           size,
-          status: fallbackData.status,
+          status: "ready",
         },
       });
     }
@@ -1288,7 +1341,9 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
     // Found a ready recording
     const readyDoc = snap.docs[0];
     const readyData = readyDoc.data() || {};
-    const objectKey = readyData.objectKey;
+    const objectKey: string | undefined =
+      (readyData.objectKey as string | undefined) ||
+      (readyData.downloadPath as string | undefined);
 
     if (!objectKey) {
       return res.json({
@@ -1300,11 +1355,22 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
 
     // Generate signed URL (15-minute TTL per spec)
     const signedUrl = await getSignedDownloadUrl(objectKey, 15 * 60);
-    
+
+    const nowTs = Timestamp.now();
     await firestore
       .collection("recordings")
       .doc(readyDoc.id)
-      .set({ lastDownloadRequestedAt: Timestamp.now() }, { merge: true });
+      .set(
+        {
+          lastDownloadRequestedAt: nowTs,
+          objectKey,
+          downloadPath: objectKey,
+          status: "ready",
+          downloadReady: true,
+          updatedAt: nowTs,
+        },
+        { merge: true }
+      );
 
     return res.status(200).json({
       success: true,

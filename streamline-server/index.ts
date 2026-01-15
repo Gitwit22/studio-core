@@ -13,11 +13,14 @@ import recordingsRoutes from "./routes/recordings";
 import usageRoutes from "./routes/usageRoutes";
 import plansRoutes from "./routes/plans";
 import roomTokenRoute from "./routes/roomToken";
+import roomsCreateRoutes from "./routes/roomsCreate";
 import invitesRoutes from "./routes/invites";
 import multistreamRoutes from "./routes/multistream";
+import roomsResolveRoutes from "./routes/roomsResolve";
 import destinationsRoutes from "./routes/destinations";
 import liveRoutes from "./routes/live";
 import statsRoutes from "./routes/stats";
+import telemetryRoutes from "./routes/telemetry";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
@@ -26,7 +29,9 @@ import { getCurrentMonthKey } from "./lib/usageTracker";
 import admin from "firebase-admin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-
+import hlsRoutes from "./routes/hls";
+import publicHlsRoutes from "./routes/publicHls";
+import { sanitizeDisplayName } from "./lib/sanitizeDisplayName";
 
 
 import { uploadVideo } from "./lib/storageClient";
@@ -92,13 +97,16 @@ app.get("/api", (req, res) => {
       "/api/webhooks",
       "/api/recordings",
       "/api/rooms",
-      "/api/admin"
+      "/api/admin",
+      "/api/hls",
     ]
   });
 });
 
-
-
+// HLS routes
+app.use("/api/hls", hlsRoutes);
+// Public viewer HLS status (no auth, tiny payload)
+app.use("/api/public/hls", publicHlsRoutes);
 // Recordings API - This handles GET /:id and POST /start, /stop
 app.use("/api/recordings", recordingsRoutes);
 
@@ -113,11 +121,16 @@ app.use("/api/usage", usageRoutes); // gives /api/usage/summary
 // Token route used by the frontend
 app.use("/api/roomToken", roomTokenRoute);
 
+// Room creation (host flow)
+app.use("/api/rooms", roomsCreateRoutes);
+
 // Invite resolve/accept flow
 app.use("/api/invites", invitesRoutes);
 
 // Multistream routes (YouTube/FB/Twitch)
-app.use("/api/rooms", multistreamRoutes);
+app.use("/api/multistream", multistreamRoutes);
+// Room resolve endpoint (/api/rooms/resolve)
+app.use("/api/rooms", roomsResolveRoutes);
 // Destinations management (encrypted keys)
 app.use("/api/destinations", destinationsRoutes);
 // Live preflight
@@ -130,6 +143,8 @@ app.use("/api/billing", billingRoutes);
 app.use("/api/plans", plansRoutes);
 // Public stats for landing page
 app.use("/api/stats", statsRoutes);
+// Lightweight telemetry events
+app.use("/api/telemetry", telemetryRoutes);
 
 
 // Storage test route
@@ -450,7 +465,7 @@ app.post("/api/auth/signup", async (req, res) => {
     // Build userData (DO NOT store passwordHash)
 const userData: any = {
   email: email.trim().toLowerCase(),
-  displayName: displayName?.trim() || "",
+  displayName: sanitizeDisplayName(displayName).trim(),
   timeZone: timeZone || "America/Chicago",
 
   // Plan assignment

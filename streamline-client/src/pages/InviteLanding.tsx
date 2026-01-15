@@ -3,14 +3,16 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import { API_BASE } from "../lib/apiBase";
 
 type ResolveResponse = {
+  roomId?: string;
   roomName: string;
-  role: "guest" | "cohost" | "moderator";
+  role: string;
   requiresAuth: boolean;
 };
 
 type AcceptResponse = {
+  roomId?: string;
   roomName: string;
-  role: "guest" | "cohost" | "moderator";
+  role: string;
   requiresAuth: boolean;
 };
 
@@ -54,15 +56,23 @@ export default function InviteLanding() {
         const accepted = await postJson<AcceptResponse>(`${API_BASE}/api/invites/accept`, { inviteToken }, true);
         if (cancelled) return;
 
+        const targetRoomId = String(resolved.roomId || accepted.roomId || "").trim();
+
         try {
           sessionStorage.removeItem("sl_pending_invite");
           localStorage.setItem("sl_invite_token", inviteToken);
+          // Invites are currently participant-only in the UI.
           localStorage.setItem("sl_current_role", "guest");
         } catch {
           // ignore storage errors
         }
 
-        nav(`/join?inviteToken=${encodeURIComponent(inviteToken)}`, { replace: true });
+        if (targetRoomId) {
+          nav(`/room/${encodeURIComponent(targetRoomId)}?t=${encodeURIComponent(inviteToken)}`, { replace: true });
+        } else {
+          // Fallback: token-only route if roomId missing for some reason
+          nav(`/room?t=${encodeURIComponent(inviteToken)}`, { replace: true });
+        }
       } catch (e: any) {
         if (cancelled) return;
         setStatus("error");

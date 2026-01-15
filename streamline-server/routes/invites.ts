@@ -2,10 +2,12 @@ import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { firestore } from "../firebaseAdmin";
 import { tryGetAuthUser, verifyInviteToken } from "../middleware/requireAuth";
+import { resolveRoomIdentity } from "../lib/roomIdentity";
 
 type InviteRole = "guest" | "cohost" | "moderator";
 
 type InviteTokenClaims = {
+  roomId: string;
   roomName: string;
   role: InviteRole;
   createdByUid?: string;
@@ -34,6 +36,13 @@ function normalizeRoomName(raw: unknown): string | null {
   return v;
 }
 
+function normalizeRoomId(raw: unknown): string | null {
+  const v = String(raw || "").trim();
+  if (!v) return null;
+  if (v.length > 200) return null;
+  return v;
+}
+
 const router = Router();
 
 /**
@@ -47,13 +56,20 @@ router.post("/create", async (req, res) => {
     const user = tryGetAuthUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    const roomName = normalizeRoomName((req.body as any)?.roomName);
+    const requestedRoomId = normalizeRoomId((req.body as any)?.roomId);
+    const requestedRoomName = normalizeRoomName((req.body as any)?.roomName);
     const role = normalizeRole((req.body as any)?.role);
 
-    if (!roomName) return res.status(400).json({ error: "roomName_required" });
+    if (!requestedRoomId && !requestedRoomName) return res.status(400).json({ error: "roomId_or_roomName_required" });
     if (!role) return res.status(400).json({ error: "role_disabled" });
 
+    const resolved = await resolveRoomIdentity({ roomId: requestedRoomId, roomName: requestedRoomName });
+    if (!resolved) return res.status(400).json({ error: "roomId_or_roomName_required" });
+
+    const { roomId, roomName } = resolved;
+
     const claims: InviteTokenClaims = {
+      roomId,
       roomName,
       role,
       createdByUid: user.uid,
@@ -62,10 +78,15 @@ router.post("/create", async (req, res) => {
     const expiresIn = "30d";
     const inviteToken = jwt.sign(claims, getInviteSecret(), { expiresIn });
 
+    // New canonical format: /join?t=<inviteToken>
+    // Room pages should prefer /room/<roomId>?t=<inviteToken> when navigating
+    // internally after resolving the invite.
     return res.json({
       inviteToken,
-      url: `/i/${encodeURIComponent(inviteToken)}`,
+      url: `/join?t=${encodeURIComponent(inviteToken)}`,
+      legacyUrl: `/i/${encodeURIComponent(inviteToken)}`,
       role,
+      roomId,
       roomName,
       requiresAuth: false,
     });
@@ -87,13 +108,18 @@ router.post("/resolve", async (req, res) => {
     if (!inviteToken) return res.status(400).json({ error: "inviteToken_required" });
 
     const claims = verifyInviteToken(inviteToken) as any;
+    const roomId = normalizeRoomId(claims?.roomId);
     const roomName = normalizeRoomName(claims?.roomName || claims?.room);
     const role = normalizeRole(claims?.role || "guest") || "guest";
 
-    if (!roomName) return res.status(400).json({ error: "invite_room_missing" });
+    if (!roomId && !roomName) return res.status(400).json({ error: "invite_room_missing" });
+
+    const resolved = await resolveRoomIdentity({ roomId, roomName });
+    if (!resolved) return res.status(400).json({ error: "invite_room_missing" });
 
     return res.json({
-      roomName,
+      roomId: resolved.roomId,
+      roomName: resolved.roomName,
       role,
       requiresAuth: false,
     });
@@ -115,10 +141,14 @@ router.post("/accept", async (req, res) => {
     if (!inviteToken) return res.status(400).json({ error: "inviteToken_required" });
 
     const claims = verifyInviteToken(inviteToken) as any;
+    const roomId = normalizeRoomId(claims?.roomId);
     const roomName = normalizeRoomName(claims?.roomName || claims?.room);
     const role = normalizeRole(claims?.role || "guest") || "guest";
 
-    if (!roomName) return res.status(400).json({ error: "invite_room_missing" });
+    if (!roomId && !roomName) return res.status(400).json({ error: "invite_room_missing" });
+
+    const resolved = await resolveRoomIdentity({ roomId, roomName });
+    if (!resolved) return res.status(400).json({ error: "invite_room_missing" });
 
     const user = tryGetAuthUser(req);
 
@@ -127,7 +157,8 @@ router.post("/accept", async (req, res) => {
       await firestore.collection("inviteAcceptances").doc(docId).set(
         {
           uid: user.uid,
-          roomName,
+          roomId: resolved.roomId,
+          roomName: resolved.roomName,
           role,
           createdByUid: claims?.createdByUid || null,
           acceptedAt: new Date(),
@@ -137,7 +168,8 @@ router.post("/accept", async (req, res) => {
     }
 
     return res.json({
-      roomName,
+      roomId: resolved.roomId,
+      roomName: resolved.roomName,
       role,
       requiresAuth: false,
     });

@@ -6,6 +6,7 @@ import { getUserAccount } from "../lib/userAccount";
 type AuthUser = { uid: string };
 
 export type InviteClaims = {
+  roomId?: string;
   roomName?: string;
   room?: string;
   identity?: string;
