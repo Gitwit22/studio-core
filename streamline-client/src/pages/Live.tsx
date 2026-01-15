@@ -321,14 +321,9 @@ export default function Live() {
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className="w-10 h-10 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center overflow-hidden shadow-lg shadow-red-500/20">
-  <img
-    src={logoUrl}
-    alt="StreamLine"
-    className="w-full h-full object-contain p-1"
-  />
-</div>
-
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center shadow-lg shadow-red-500/30">
+                  <Radio className="w-5 h-5 text-white" />
+                </div>
                 <div className="absolute -inset-1 bg-red-500/30 rounded-xl blur-md -z-10" />
               </div>
               <div>
