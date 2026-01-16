@@ -12,7 +12,7 @@ const PLATFORM_CONFIG: Record<PlatformKey, { label: string; accent: string }> = 
   youtube: { label: "YouTube", accent: "#ef4444" },
   facebook: { label: "Facebook", accent: "#3b82f6" },
   twitch: { label: "Twitch", accent: "#a855f7" },
-  custom: { label: "Custom RTMP", accent: "#14b8a6" },
+  custom: { label: "Custom (RTMP)", accent: "#14b8a6" },
 };
 
 const MAX_MANUAL_FIELDS = 3;
@@ -535,7 +535,7 @@ export default function StreamSetupModalV2({
       }
 
       if (platform === "custom" && !rtmpBase) {
-        nextPlatformState[platform].error = "Base RTMP URL required.";
+        nextPlatformState[platform].error = "RTMP ingest URL required.";
         hasErrors = true;
         return;
       }
@@ -573,12 +573,12 @@ export default function StreamSetupModalV2({
     setPlatformState(nextPlatformState);
 
     if (!hasSelection) {
-      setStartError("Pick at least one platform to stream to.");
+      setStartError("Select at least one stream destination.");
       return;
     }
 
     if (hasErrors) {
-      setStartError("Fix the highlighted platforms before starting.");
+      setStartError("Fix the highlighted destinations before starting.");
       return;
     }
 
@@ -741,7 +741,7 @@ export default function StreamSetupModalV2({
           {/* SECTION 1: STREAM PLATFORMS */}
           <CollapsibleSection
             id="destinations"
-            title="Destinations / Platforms"
+            title="Stream Destinations"
             defaultOpen={roomUiState.destinations}
             onToggle={(open) => updateRoomUiSection("destinations", open)}
           >
@@ -765,7 +765,7 @@ export default function StreamSetupModalV2({
                 fontSize: '0.75rem',
                 color: '#fca5a5'
               }}>
-                Multistream is disabled for this plan. Upgrade in Settings → Usage to enable streaming to external destinations.
+                Stream Destinations are disabled for this plan. Upgrade in Settings → Usage to enable streaming to external destinations.
               </div>
             )}
 
@@ -778,7 +778,7 @@ export default function StreamSetupModalV2({
                 const disabled = streamIsLive || streamIsBusy || streamDisallowed;
                 const connectedMode = false;
                 const mainPreview = main?.hasKey && main?.keyPreview ? ` • ••••${main.keyPreview}` : main?.hasKey ? "" : "";
-                const manualLabel = platform === "custom" ? "Custom stream key" : "Session stream key (this stream only)";
+                const manualLabel = platform === "custom" ? "Custom stream key (RTMP)" : "Session stream key (this stream only)";
                 const manualMissing = state.selected && !mainHasKey && !state.manualFields.find((f) => f.value.trim());
                 const manualLimitReached = state.manualFields.length >= MAX_MANUAL_FIELDS;
 
@@ -839,13 +839,13 @@ export default function StreamSetupModalV2({
                             cursor: (disabled || manualLimitReached) ? 'not-allowed' : 'pointer'
                           }}
                         >
-                          Add
+                          Add key
                         </button>
                       </div>
                     </div>
                     {!main && (
                       <div style={{ fontSize: '0.75rem', color: 'rgba(226,232,240,0.7)' }}>
-                        No main key saved. Add one in Settings to reuse across sessions.
+                        No saved destination yet. Add one in Settings → Stream Destinations to reuse across sessions.
                       </div>
                     )}
 
@@ -903,7 +903,7 @@ export default function StreamSetupModalV2({
                                     const nextFields = state.manualFields.map((f) => (f.id === field.id ? { ...f, base: e.target.value } : f));
                                     updatePlatformState(platform, { manualFields: nextFields, error: null });
                                   }}
-                                  placeholder="Optional base RTMP URL"
+                                  placeholder="Optional RTMP ingest URL (base)"
                                   disabled={streamIsLive || streamDisallowed}
                                   style={{
                                     flex: 1,
@@ -1007,7 +1007,7 @@ export default function StreamSetupModalV2({
                             ? "facebook"
                             : warmupPlatforms[0]) as PlatformKey;
                           const primaryConfig = PLATFORM_CONFIG[primaryKey];
-                          const primaryLabel = primaryConfig?.label || "your destinations";
+                          const primaryLabel = primaryConfig?.label || "your stream destinations";
                           return `Connecting to ${primaryLabel}… this usually takes 5–10 seconds.`;
                         })()}
                       </div>

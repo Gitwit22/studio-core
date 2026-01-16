@@ -1398,7 +1398,7 @@ export default function Room() {
     const hasDirectKeys = !!(youtubeKey || facebookKey || twitchKey);
 
     if (!hasDirectKeys && !hasSessionKeys && destIds.length === 0) {
-      alert("Select at least one saved destination or enter a stream key.");
+      alert("Select at least one saved stream destination or enter a stream key.");
       return;
     }
     const sequence = ["3", "2", "1"];
@@ -1452,13 +1452,13 @@ export default function Room() {
         console.log("🔍 startMultistream full response:", data);
         if (!res.ok) {
           console.error("Start multistream failed", data);
-          alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
+          alert(`Failed to start streaming to Stream Destinations: ${data.error || data.message || "Unknown error"}`);
           setStreamStatus("idle");
           return;
         }
         if (data?.success === false || data?.error) {
           console.error("Start multistream API indicated failure", data);
-          alert(`Failed to start multistream: ${data.error || data.message || "Unknown error"}`);
+          alert(`Failed to start streaming to Stream Destinations: ${data.error || data.message || "Unknown error"}`);
           setStreamStatus("idle");
           return;
         }
@@ -1476,7 +1476,7 @@ export default function Room() {
         console.log("✅ Stream started! Egress ID:", egressIdVal);
       } catch (err) {
         console.error("Error starting multistream:", err);
-        alert("Error starting multistream");
+        alert("Error starting stream");
         setStreamStatus("idle");
       } finally {
         const clearTimer = setTimeout(() => {
@@ -1533,7 +1533,7 @@ export default function Room() {
         const text = await res.text().catch(() => "");
         console.error("Failed to stop multistream", res.status, text);
         alert(
-          "We couldn't confirm that the stream fully stopped. If it still appears live, try refreshing or stopping it from the destination dashboard."
+          "We couldn't confirm that the stream fully stopped. If it still appears live, try refreshing or stopping it from the platform dashboard."
         );
       }
     } catch (err) {
@@ -1543,7 +1543,7 @@ export default function Room() {
         console.error("Error stopping multistream", err);
       }
       alert(
-        "We couldn't confirm that the stream fully stopped. If it still appears live, try refreshing or stopping it from the destination dashboard."
+        "We couldn't confirm that the stream fully stopped. If it still appears live, try refreshing or stopping it from the platform dashboard."
       );
     } finally {
       window.clearTimeout(timeoutId);

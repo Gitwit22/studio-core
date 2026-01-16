@@ -2048,7 +2048,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       <ul style={S.featureList}>
                         <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
                         <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
-                        <FeatureRow label="RTMP destinations" value={plan.limits.rtmpDestinationsMax} />
+                        <FeatureRow label="Stream destinations" value={plan.limits.rtmpDestinationsMax} />
                         <FeatureRow label="Recording" value={plan.features.recording} />
                         <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
                         <FeatureRow label="HLS Broadcast Page" value={(plan as any).features?.canHls} />
@@ -2416,7 +2416,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               )}
               {renderEntitlementPill(
                 "Multistream",
-                entitlements.rtmpMultistream ? "RTMP enabled" : "Single platform",
+                entitlements.rtmpMultistream ? "Enabled" : "Single destination",
                 entitlements.rtmpMultistream
               )}
               {renderEntitlementPill(
@@ -2425,8 +2425,8 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 entitlements.maxGuests !== 0
               )}
               {renderEntitlementPill(
-                "Destinations",
-                formatLimitLabel(entitlements.maxDestinations, "destination"),
+                "Stream Destinations",
+                formatLimitLabel(entitlements.maxDestinations, "stream destination"),
                 entitlements.maxDestinations !== 0
               )}
               {renderEntitlementPill(
@@ -2482,7 +2482,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 unit="min"
               />
               <UsageBar
-                label="RTMP Destinations"
+                label="Stream Destinations"
                 used={usage.rtmpDestinations.used}
                 limit={
                   entitlements.maxDestinations ??

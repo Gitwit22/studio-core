@@ -39,7 +39,7 @@ export function canStartStream(params: CanStartStreamParams): GateResult {
   if (wantsRTMP && !plan.features.rtmpMultistream) {
     return {
       allowed: false,
-      reason: "Your plan does not include RTMP multistreaming",
+      reason: "Your plan does not include Stream Destinations (RTMP)",
       requiresUpgrade: true,
     };
   }
@@ -48,7 +48,7 @@ export function canStartStream(params: CanStartStreamParams): GateResult {
   if (maxDestinations > 0 && selectedDestinationsCount > maxDestinations) {
     return {
       allowed: false,
-      reason: `Your plan allows ${maxDestinations} destination(s), but you selected ${selectedDestinationsCount}`,
+      reason: `Your plan allows ${maxDestinations} stream destination(s), but you selected ${selectedDestinationsCount}`,
       requiresUpgrade: true,
     };
   }

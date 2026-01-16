@@ -183,8 +183,8 @@ const FEATURE_META: Record<
     description?: string;
   }
 > = {
-  multistream: { category: "Streaming", label: "Multistream", description: "Send to multiple RTMP destinations." },
-  rtmp_multistream: { category: "Streaming", label: "RTMP Multistream", description: "Legacy RTMP toggle." },
+  multistream: { category: "Streaming", label: "Multistream", description: "Send to multiple stream destinations (RTMP)." },
+  rtmp_multistream: { category: "Streaming", label: "Stream Destinations (Legacy)", description: "Legacy Stream Destinations (RTMP) toggle." },
   live_captions: { category: "Streaming", label: "Live Captions", description: "Enable captions during live sessions." },
   low_latency: { category: "Streaming", label: "Low Latency", description: "Prefer lower-latency LiveKit profiles." },
 
@@ -1163,7 +1163,7 @@ export default function AdminDashboard() {
                           {resolvePlanMaxDestinations(plan.limits) > 0 ? (
                             <div style={S.stat}>
                               <span style={S.statValue}>{resolvePlanMaxDestinations(plan.limits)}</span>
-                              <span style={S.statLabel}>destinations</span>
+                              <span style={S.statLabel}>stream destinations</span>
                             </div>
                           ) : null}
                           {plan.editing?.access && plan.editing?.maxProjects > 0 && (
@@ -1285,7 +1285,7 @@ export default function AdminDashboard() {
                                 onChange={(v) => updatePlanField(plan.id, "limits.maxGuests", Number(v))}
                               />
                               <EditRow
-                                label="Destinations Max (RTMP)"
+                                label="Stream Destinations Max (RTMP)"
                                 value={resolvePlanMaxDestinations(plan.limits)}
                                 onChange={(v) => {
                                   const num = Number(v);
@@ -1302,14 +1302,14 @@ export default function AdminDashboard() {
                               <ToggleRow label="Recording" value={plan.features?.recording} onChange={(v) => updatePlanField(plan.id, "features.recording", v)} />
                               <ToggleRow label="Dual Recording" value={plan.features?.dualRecording} onChange={(v) => updatePlanField(plan.id, "features.dualRecording", v)} />
                               <ToggleRow
-                                label="RTMP Multistream"
+                                label="Multistream (Stream Destinations)"
                                 value={plan.features?.rtmpMultistream ?? plan.multistreamEnabled}
                                 onChange={(v) => {
                                   // Canonical schema: write only features.rtmpMultistream
                                   updatePlanField(plan.id, "features.rtmpMultistream", v);
                                 }}
                               />
-                              <ToggleRow label="RTMP Streaming" value={plan.features?.rtmp} onChange={(v) => updatePlanField(plan.id, "features.rtmp", v)} />
+                              <ToggleRow label="Stream Destinations (RTMP)" value={plan.features?.rtmp} onChange={(v) => updatePlanField(plan.id, "features.rtmp", v)} />
                               <ToggleRow
                                 label="HLS Broadcast Page"
                                 value={plan.features?.canHls}
