@@ -3,6 +3,7 @@ import { type DestinationItem } from "../services/destinations";
 import { formatLimitLabel } from "../lib/entitlements";
 import { API_BASE } from "../lib/apiBase";
 import { APP_BASE } from "../lib/appBase";
+import { getHlsStatus, startHls, stopHls } from "../services/hls";
 import CollapsibleSection from "./CollapsibleSection";
 
 type PlatformKey = "youtube" | "facebook" | "twitch" | "custom";
@@ -102,6 +103,8 @@ interface Props {
   multistreamAllowed?: boolean;
   hlsEnabled?: boolean;
   onUpgradeHls?: () => void;
+  // Controls whether the HLS section/tab is rendered at all (platform-level flag).
+  showHlsSection?: boolean;
 
   // Optional: plan + per-clip recording cap (in minutes)
   planId?: string;
@@ -133,6 +136,7 @@ export default function StreamSetupModalV2({
   multistreamAllowed = true,
   hlsEnabled = true,
   onUpgradeHls,
+  showHlsSection = true,
   planId,
   recordingMaxMinutes,
   savedDestinations,
@@ -244,37 +248,24 @@ export default function StreamSetupModalV2({
 
     const fetchStatus = async () => {
       try {
-        const url = `${API_BASE}/api/hls/status/${encodeURIComponent(hlsRoomId)}`;
-        const headers: Record<string, string> = {};
-        if (roomAccessToken) {
-          headers["Authorization"] = `Bearer ${roomAccessToken}`;
-        }
-        const res = await fetch(url, {
-          credentials: "include",
-          headers,
-        });
+        const data = await getHlsStatus(hlsRoomId, roomAccessToken || undefined);
         if (cancelled) return;
-        if (!res.ok) {
-          if (res.status === 404) {
-            setHlsStatus("idle");
-            setHlsPlaylistUrl(null);
-            setHlsEgressId(null);
-            setHlsError(null);
-            return;
-          }
-          setHlsError("Failed to fetch HLS status");
-          return;
-        }
-        const data: any = await res.json().catch(() => ({}));
         const status = (data?.status as string) || "idle";
         setHlsStatus(status === "starting" || status === "live" || status === "error" ? status : "idle");
         setHlsPlaylistUrl(data?.playlistUrl ?? null);
         setHlsEgressId(data?.egressId ?? null);
         setHlsError(data?.error ?? null);
-      } catch {
-        if (!cancelled) {
-          setHlsError("Failed to fetch HLS status");
+      } catch (err: any) {
+        if (cancelled) return;
+        const msg = String(err?.message || "");
+        if (msg.startsWith("status_failed_404")) {
+          setHlsStatus("idle");
+          setHlsPlaylistUrl(null);
+          setHlsEgressId(null);
+          setHlsError(null);
+          return;
         }
+        setHlsError("Failed to fetch HLS status");
       }
     };
 
@@ -301,17 +292,8 @@ export default function StreamSetupModalV2({
 
     const poll = async () => {
       try {
-        const headers: Record<string, string> = {};
-        if (roomAccessToken) {
-          headers["Authorization"] = `Bearer ${roomAccessToken}`;
-        }
-        const res = await fetch(`${API_BASE}/api/hls/status/${encodeURIComponent(hlsRoomId)}`, {
-          credentials: "include",
-          headers,
-        });
+        const data = await getHlsStatus(hlsRoomId, roomAccessToken || undefined);
         if (cancelled) return;
-        if (!res.ok) return;
-        const data: any = await res.json().catch(() => ({}));
         const status = (data?.status as string) || "idle";
         setHlsStatus(status === "starting" || status === "live" || status === "error" ? status : "idle");
         setHlsPlaylistUrl(data?.playlistUrl ?? null);
@@ -466,22 +448,7 @@ export default function StreamSetupModalV2({
     setHlsError(null);
     setHlsStatus("starting");
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (roomAccessToken) {
-        headers["Authorization"] = `Bearer ${roomAccessToken}`;
-      }
-      const res = await fetch(`${API_BASE}/api/hls/start/${encodeURIComponent(hlsRoomId)}`, {
-        method: "POST",
-        headers,
-        credentials: "include",
-        body: JSON.stringify({ presetId: "hls_720p" }),
-      });
-      const data: any = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setHlsStatus("error");
-        setHlsError(data?.error || "Failed to start HLS");
-        return;
-      }
+      const data = await startHls(hlsRoomId, roomAccessToken || undefined);
       const status = (data?.status as string) || "live";
       setHlsStatus(status === "starting" || status === "live" || status === "error" ? status : "live");
       setHlsPlaylistUrl(data?.playlistUrl ?? null);
@@ -500,20 +467,7 @@ export default function StreamSetupModalV2({
     if (hlsStatus === "idle") return;
     setHlsBusy(true);
     try {
-      const headers: Record<string, string> = {};
-      if (roomAccessToken) {
-        headers["Authorization"] = `Bearer ${roomAccessToken}`;
-      }
-      const res = await fetch(`${API_BASE}/api/hls/stop/${encodeURIComponent(hlsRoomId)}`, {
-        method: "POST",
-        headers,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const data: any = await res.json().catch(() => ({}));
-        setHlsError(data?.error || "Failed to stop HLS");
-        return;
-      }
+      await stopHls(hlsRoomId, roomAccessToken || undefined);
       setHlsStatus("idle");
       setHlsError(null);
       // playlistUrl may remain for debugging; UI only exposes when live
@@ -1298,235 +1252,261 @@ export default function StreamSetupModalV2({
                 </div>
               )}
             </div>
-            </CollapsibleSection>
+          </CollapsibleSection>
           )}
 
           {/* HLS Broadcast section (collapsible) */}
-          <CollapsibleSection
-            id="hls"
-            title="HLS Broadcast"
-            defaultOpen={roomUiState.hls}
-            onToggle={(open) => updateRoomUiSection("hls", open)}
-            rightBadge={(
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.3rem',
-                  padding: '0.1rem 0.45rem',
-                  borderRadius: '999px',
-                  fontSize: '0.7rem',
-                  fontWeight: 600,
-                  background:
-                    hlsStatus === 'live'
-                      ? 'rgba(220,38,38,0.16)'
-                      : hlsStatus === 'starting'
-                      ? 'rgba(234,179,8,0.16)'
-                      : hlsStatus === 'error'
-                      ? 'rgba(248,113,113,0.16)'
-                      : 'rgba(31,41,55,0.9)',
-                  border:
-                    hlsStatus === 'live'
-                      ? '1px solid rgba(220,38,38,0.7)'
-                      : hlsStatus === 'starting'
-                      ? '1px solid rgba(234,179,8,0.7)'
-                      : hlsStatus === 'error'
-                      ? '1px solid rgba(248,113,113,0.7)'
-                      : '1px solid rgba(148,163,184,0.6)',
-                  color:
-                    hlsStatus === 'live'
-                      ? '#fecaca'
-                      : hlsStatus === 'starting'
-                      ? '#facc15'
-                      : hlsStatus === 'error'
-                      ? '#fecaca'
-                      : '#e5e7eb',
-                }}
-              >
+          {showHlsSection && (
+            <CollapsibleSection
+              id="hls"
+              title="HLS Broadcast"
+              defaultOpen={roomUiState.hls}
+              onToggle={(open) => updateRoomUiSection("hls", open)}
+              rightBadge={(
                 <span
                   style={{
-                    width: 8,
-                    height: 8,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    padding: '0.1rem 0.45rem',
                     borderRadius: '999px',
-                    backgroundColor:
-                      hlsStatus === 'live'
-                        ? '#ef4444'
-                        : hlsStatus === 'starting'
-                        ? '#eab308'
-                        : hlsStatus === 'error'
-                        ? '#f97373'
-                        : '#6b7280',
-                  }}
-                />
-                <span>{hlsStatus === 'idle' ? 'Idle' : hlsStatus === 'starting' ? 'Starting' : hlsStatus === 'live' ? 'Live' : 'Error'}</span>
-              </span>
-            )}
-          >
-            <div style={{ fontSize: '0.75rem', color: 'rgba(209, 213, 219, 0.9)', marginBottom: '0.65rem' }}>
-              {!hlsRoomReady
-                ? 'Loading room… HLS controls will unlock once the Firestore roomId is known.'
-                : 'Start HLS to create a public watch link. Viewers can watch without joining the room.'}
-            </div>
-
-            {!hlsAllowed && (
-              <div
-                style={{
-                  marginBottom: '0.75rem',
-                  padding: '0.65rem 0.75rem',
-                  borderRadius: '0.5rem',
-                  background: 'rgba(30,64,175,0.25)',
-                  border: '1px solid rgba(59,130,246,0.6)',
-                  fontSize: '0.75rem',
-                  color: '#dbeafe',
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>HLS Broadcast Page not included in this plan.</div>
-                <div style={{ marginBottom: '0.45rem' }}>
-                  Upgrade your plan to unlock a shareable /live viewer link for your audience.
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onUpgradeHls) {
-                      onUpgradeHls();
-                    } else {
-                      window.location.href = "/settings/billing";
-                    }
-                  }}
-                  style={{
-                    padding: '0.45rem 0.8rem',
-                    borderRadius: '999px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg,#3b82f6,#2563eb)',
-                    color: '#f9fafb',
-                    fontSize: '0.78rem',
+                    fontSize: '0.7rem',
                     fontWeight: 600,
-                    cursor: 'pointer',
+                    background:
+                      hlsStatus === 'live'
+                        ? 'rgba(220,38,38,0.16)'
+                        : hlsStatus === 'starting'
+                        ? 'rgba(234,179,8,0.16)'
+                        : hlsStatus === 'error'
+                        ? 'rgba(248,113,113,0.16)'
+                        : 'rgba(31,41,55,0.9)',
+                    border:
+                      hlsStatus === 'live'
+                        ? '1px solid rgba(220,38,38,0.7)'
+                        : hlsStatus === 'starting'
+                        ? '1px solid rgba(234,179,8,0.7)'
+                        : hlsStatus === 'error'
+                        ? '1px solid rgba(248,113,113,0.7)'
+                        : '1px solid rgba(148,163,184,0.6)',
+                    color:
+                      hlsStatus === 'live'
+                        ? '#fecaca'
+                        : hlsStatus === 'starting'
+                        ? '#facc15'
+                        : hlsStatus === 'error'
+                        ? '#fecaca'
+                        : '#e5e7eb',
                   }}
                 >
-                  Upgrade to enable HLS
-                </button>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.6rem' }}>
-              {/* Viewer link */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Viewer Link (/live/:roomId)</span>
-                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    readOnly
-                    value={hlsStatus === 'live' && hlsViewerUrl ? hlsViewerUrl : ''}
-                    placeholder={hlsStatus === 'live' ? 'Viewer link will appear when live' : 'Viewer link available when HLS is live'}
+                  <span
                     style={{
-                      flex: 1,
-                      padding: '0.4rem 0.55rem',
-                      borderRadius: '0.35rem',
-                      border: '1px solid rgba(75,85,99,0.7)',
-                      background: 'rgba(15,23,42,0.9)',
-                      color: '#e5e7eb',
-                      fontSize: '0.8rem',
+                      width: 8,
+                      height: 8,
+                      borderRadius: '999px',
+                      backgroundColor:
+                        hlsStatus === 'live'
+                          ? '#ef4444'
+                          : hlsStatus === 'starting'
+                          ? '#eab308'
+                          : hlsStatus === 'error'
+                          ? '#f97373'
+                          : '#6b7280',
                     }}
                   />
+                  <span>{hlsStatus === 'idle' ? 'Idle' : hlsStatus === 'starting' ? 'Starting' : hlsStatus === 'live' ? 'Live' : 'Error'}</span>
+                </span>
+              )}
+            >
+              <div style={{ fontSize: '0.75rem', color: 'rgba(209, 213, 219, 0.9)', marginBottom: '0.65rem' }}>
+                {!hlsRoomReady
+                  ? 'Loading room… HLS controls will unlock once the Firestore roomId is known.'
+                  : 'Start HLS to create a public watch link. Viewers can watch without joining the room.'}
+              </div>
+
+              {!hlsAllowed && (
+                <div
+                  style={{
+                    marginBottom: '0.75rem',
+                    padding: '0.65rem 0.75rem',
+                    borderRadius: '0.5rem',
+                    background: 'rgba(30,64,175,0.25)',
+                    border: '1px solid rgba(59,130,246,0.6)',
+                    fontSize: '0.75rem',
+                    color: '#dbeafe',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>HLS Broadcast Page not included in this plan.</div>
+                  <div style={{ marginBottom: '0.45rem' }}>
+                    Upgrade your plan to unlock a shareable /live viewer link for your audience.
+                  </div>
                   <button
                     type="button"
-                    disabled={!(hlsStatus === 'live' && hlsViewerUrl)}
-                    onClick={async () => {
-                      if (!(hlsStatus === 'live' && hlsViewerUrl)) return;
-                      try {
-                        await navigator.clipboard.writeText(hlsViewerUrl);
-                        alert('Viewer link copied');
-                      } catch {/* ignore */}
+                    onClick={() => {
+                      if (onUpgradeHls) {
+                        onUpgradeHls();
+                      } else {
+                        window.location.href = "/settings/billing";
+                      }
                     }}
                     style={{
-                      padding: '0.35rem 0.6rem',
-                      borderRadius: '0.35rem',
-                      border: '1px solid rgba(148,163,184,0.7)',
-                      background: 'rgba(15,23,42,0.95)',
-                      color: '#e5e7eb',
-                      fontSize: '0.75rem',
-                      cursor: hlsStatus === 'live' && hlsViewerUrl ? 'pointer' : 'not-allowed',
-                      opacity: hlsStatus === 'live' && hlsViewerUrl ? 1 : 0.5,
+                      padding: '0.45rem 0.8rem',
+                      borderRadius: '999px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg,#3b82f6,#2563eb)',
+                      color: '#f9fafb',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
                     }}
                   >
-                    Copy
+                    Upgrade to enable HLS
                   </button>
                 </div>
-              </div>
-            </div>
+              )}
 
-            {hlsError && hlsStatus === 'error' && (
-              <div
-                style={{
-                  marginTop: '0.5rem',
-                  fontSize: '0.75rem',
-                  color: '#fecaca',
-                  background: 'rgba(248,113,113,0.1)',
-                  border: '1px solid rgba(248,113,113,0.6)',
-                  borderRadius: '0.4rem',
-                  padding: '0.4rem 0.5rem',
-                }}
-              >
-                ❌ {hlsError}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.6rem' }}>
+                {/* Viewer link */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Viewer Link (/live/:roomId)</span>
+                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      readOnly
+                      value={hlsStatus === 'live' && hlsViewerUrl ? hlsViewerUrl : ''}
+                      placeholder={hlsStatus === 'live' ? 'Viewer link will appear when live' : 'Viewer link available when HLS is live'}
+                      style={{
+                        flex: 1,
+                        padding: '0.4rem 0.55rem',
+                        borderRadius: '0.35rem',
+                        border: '1px solid rgba(75,85,99,0.7)',
+                        background: 'rgba(15,23,42,0.9)',
+                        color: '#e5e7eb',
+                        fontSize: '0.8rem',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={!(hlsStatus === 'live' && hlsViewerUrl)}
+                      onClick={async () => {
+                        if (!(hlsStatus === 'live' && hlsViewerUrl)) return;
+                        try {
+                          await navigator.clipboard.writeText(hlsViewerUrl);
+                          alert('Viewer link copied');
+                        } catch {/* ignore */}
+                      }}
+                      style={{
+                        padding: '0.35rem 0.6rem',
+                        borderRadius: '0.35rem',
+                        border: '1px solid rgba(148,163,184,0.7)',
+                        background: 'rgba(15,23,42,0.95)',
+                        color: '#e5e7eb',
+                        fontSize: '0.75rem',
+                        cursor: hlsStatus === 'live' && hlsViewerUrl ? 'pointer' : 'not-allowed',
+                        opacity: hlsStatus === 'live' && hlsViewerUrl ? 1 : 0.5,
+                      }}
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!(hlsStatus === 'live' && hlsViewerUrl)}
+                      onClick={async () => {
+                        if (!(hlsStatus === 'live' && hlsViewerUrl)) return;
+                        const embed = `<iframe src="${hlsViewerUrl}" style="width:100%;height:100%;border:0;" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+                        try {
+                          await navigator.clipboard.writeText(embed);
+                          alert('Embed code copied');
+                        } catch {/* ignore */}
+                      }}
+                      style={{
+                        padding: '0.35rem 0.6rem',
+                        borderRadius: '0.35rem',
+                        border: '1px solid rgba(148,163,184,0.7)',
+                        background: 'rgba(15,23,42,0.95)',
+                        color: '#e5e7eb',
+                        fontSize: '0.75rem',
+                        cursor: hlsStatus === 'live' && hlsViewerUrl ? 'pointer' : 'not-allowed',
+                        opacity: hlsStatus === 'live' && hlsViewerUrl ? 1 : 0.5,
+                      }}
+                    >
+                      Copy Embed Code
+                    </button>
+                  </div>
+                </div>
               </div>
-            )}
 
-            <div style={{ marginTop: '0.65rem', display: 'flex', gap: '0.5rem' }}>
-              <button
-                type="button"
-                onClick={handleStartHls}
-                disabled={!hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
-                style={{
-                  flex: 1,
-                  padding: '0.6rem 0.7rem',
-                  borderRadius: '0.45rem',
-                  border: 'none',
-                  background:
-                    !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
-                      ? 'rgba(37,99,235,0.4)'
-                      : 'linear-gradient(135deg, #22c55e, #16a34a)',
-                  color: '#ffffff',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor:
-                    !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
-                  opacity:
-                    !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
-                }}
-              >
-                {hlsBusy && (hlsStatus === 'starting' || hlsStatus === 'idle')
-                  ? 'Starting HLS…'
-                  : 'Start HLS'}
-              </button>
-              <button
-                type="button"
-                onClick={handleStopHls}
-                disabled={hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')}
-                style={{
-                  flex: 1,
-                  padding: '0.6rem 0.7rem',
-                  borderRadius: '0.45rem',
-                  border: 'none',
-                  background:
-                    hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')
-                      ? 'rgba(248,113,113,0.35)'
-                      : 'linear-gradient(135deg, #dc2626, #b91c1c)',
-                  color: '#ffffff',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor:
-                    hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 'not-allowed' : 'pointer',
-                  opacity:
-                    hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 0.6 : 1,
-                }}
-              >
-                {hlsBusy && (hlsStatus === 'live' || hlsStatus === 'starting')
-                  ? 'Stopping HLS…'
-                  : 'Stop HLS'}
-              </button>
-            </div>
-          </CollapsibleSection>
+              {hlsError && hlsStatus === 'error' && (
+                <div
+                  style={{
+                    marginTop: '0.5rem',
+                    fontSize: '0.75rem',
+                    color: '#fecaca',
+                    background: 'rgba(248,113,113,0.1)',
+                    border: '1px solid rgba(248,113,113,0.6)',
+                    borderRadius: '0.4rem',
+                    padding: '0.4rem 0.5rem',
+                  }}
+                >
+                  ❌ {hlsError}
+                </div>
+              )}
+
+              <div style={{ marginTop: '0.65rem', display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={handleStartHls}
+                  disabled={!hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
+                  style={{
+                    flex: 1,
+                    padding: '0.6rem 0.7rem',
+                    borderRadius: '0.45rem',
+                    border: 'none',
+                    background:
+                      !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
+                        ? 'rgba(37,99,235,0.4)'
+                        : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                    color: '#ffffff',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor:
+                      !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
+                    opacity:
+                      !hlsAllowed || !hlsRoomReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
+                  }}
+                >
+                  {hlsBusy && (hlsStatus === 'starting' || hlsStatus === 'idle')
+                    ? 'Starting HLS…'
+                    : 'Start HLS'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStopHls}
+                  disabled={hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')}
+                  style={{
+                    flex: 1,
+                    padding: '0.6rem 0.7rem',
+                    borderRadius: '0.45rem',
+                    border: 'none',
+                    background:
+                      hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')
+                        ? 'rgba(248,113,113,0.35)'
+                        : 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                    color: '#ffffff',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor:
+                      hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 'not-allowed' : 'pointer',
+                    opacity:
+                      hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 0.6 : 1,
+                  }}
+                >
+                  {hlsBusy && (hlsStatus === 'live' || hlsStatus === 'starting')
+                    ? 'Stopping HLS…'
+                    : 'Stop HLS'}
+                </button>
+              </div>
+            </CollapsibleSection>
+          )}
 
           {/* Help Text */}
           <div style={{ 

@@ -5,41 +5,10 @@ import { requireAuth } from "../middleware/requireAuth";
 import { startHlsEgress, HlsPresetId, stopEgress } from "../services/livekitEgress";
 import { firestore } from "../firebaseAdmin";
 import { getCurrentMonthKey } from "../lib/usageTracker";
-import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
-import { assertRoomOwner, RoomPermissionError } from "../lib/rolePermissions";
+import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
+import { canAccessFeature } from "./featureAccess";
 
 const router = Router();
-
-async function assertCanStartHls(req: any, uid: string) {
-  try {
-    const entitlements = await getEffectiveEntitlements((req as any).account || uid);
-    const features = entitlements.features as any;
-    const rawFeatures = (entitlements.plan.raw?.features || {}) as any;
-
-    const canHls = Boolean(
-      features.canHls ??
-        rawFeatures.canHls ??
-        rawFeatures.hls ??
-        rawFeatures.hlsBroadcast
-    );
-
-    if (!canHls) {
-      return {
-        ok: false as const,
-        reason: "hls_not_in_plan",
-      };
-    }
-
-    return { ok: true as const };
-  } catch (err) {
-    console.error("[hls] failed to load entitlements for HLS", err);
-    // Fail closed on entitlements errors
-    return {
-      ok: false as const,
-      reason: "hls_not_in_plan",
-    };
-  }
-}
 
 async function incrementHlsUsageMinutes(uid: string, minutes: number) {
   const safeMinutes = Math.max(0, Math.round(Number(minutes || 0)));
@@ -138,8 +107,16 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     if (!uid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
+    const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
+    if (!featureAccess.allowed) {
+      return res.status(403).json({
+        error: "hls_not_in_plan",
+        reason: featureAccess.reason || "HLS is not available on your plan",
+      });
+    }
+
     try {
-      await assertRoomOwner(req as any, roomId);
+      await assertRoomPerm(req as any, roomId, "canStream");
     } catch (err: any) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ error: err.code });
@@ -148,11 +125,6 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     }
 
     const { ref: roomRef, data: room } = await getRoom(roomId);
-
-    const gate = await assertCanStartHls(req, uid);
-    if (!gate.ok) {
-      return res.status(403).json({ error: gate.reason });
-    }
 
     if (room.roomType !== "rtc") return res.status(400).json({ error: "roomType must be rtc" });
 
@@ -232,15 +204,27 @@ router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any,
   }
 
   try {
-    const { data: room } = await getRoom(roomId);
-
     const uid = (req as any).user?.uid;
     if (!uid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
+    const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
+    if (!featureAccess.allowed) {
+      return res.status(403).json({
+        error: "hls_not_in_plan",
+        reason: featureAccess.reason || "HLS is not available on your plan",
+      });
+    }
 
-    if (room.ownerId !== uid) {
-      return res.status(403).json({ error: "not_room_owner" });
+    let room;
+    try {
+      const ctx = await assertRoomPerm(req as any, roomId, "canStream");
+      room = ctx.room;
+    } catch (err: any) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
     }
 
     const hls = room.hls || {};
@@ -254,9 +238,6 @@ router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any,
       error: hls.error || null,
     });
   } catch (e: any) {
-    if (e?.message === "room_not_found") {
-      return res.status(404).json({ error: "room_not_found" });
-    }
     console.error("HLS status error", e);
     return res.status(500).json({ error: "Failed to fetch HLS status" });
   }
@@ -280,17 +261,29 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
   }
 
   try {
-    const { ref: roomRef, data: room } = await getRoom(roomId);
-
     const uid = (req as any).user?.uid;
     if (!uid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
+    const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
+    if (!featureAccess.allowed) {
+      return res.status(403).json({
+        error: "hls_not_in_plan",
+        reason: featureAccess.reason || "HLS is not available on your plan",
+      });
+    }
 
-    // HLS stop remains owner-only: room owner can always stop,
-    // even if plan/entitlements changed mid-session.
-    if (room.ownerId && room.ownerId !== uid) {
-      return res.status(403).json({ error: "not_room_owner" });
+    let roomRef;
+    let room;
+    try {
+      const ctx = await assertRoomPerm(req as any, roomId, "canStream");
+      room = ctx.room;
+      roomRef = firestore.collection("rooms").doc(roomId);
+    } catch (err: any) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ error: err.code });
+      }
+      throw err;
     }
 
     const hls = room.hls || {};

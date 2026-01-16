@@ -112,6 +112,7 @@ interface Plan {
     rtmp: boolean;
     dualRecording?: boolean;
     rtmpMultistream?: boolean;
+    canHls?: boolean;
     advancedPermissions?: boolean;
     watermarkRecordings: boolean;
   };
@@ -212,6 +213,7 @@ const FEATURE_META: Record<
   experiment_a: { category: "Experiments", label: "Experiment A" },
   experiment_b: { category: "Experiments", label: "Experiment B" },
     forcesimplemode: { category: "Security", label: "Advanced Permissions Global Lock", description: "Force everyone into Simple permissions temporarily." },
+  hlssettingstab: { category: "Streaming", label: "HLS Settings Tab", description: "Globally toggle the HLS controls section in room settings." },
 };
 
 const titleize = (value: string) =>
@@ -1308,6 +1310,15 @@ export default function AdminDashboard() {
                                 }}
                               />
                               <ToggleRow label="RTMP Streaming" value={plan.features?.rtmp} onChange={(v) => updatePlanField(plan.id, "features.rtmp", v)} />
+                              <ToggleRow
+                                label="HLS Broadcast Page"
+                                value={plan.features?.canHls}
+                                onChange={(v) => {
+                                  // Write both canHls and hls for clear plan docs and backward compatibility
+                                  updatePlanField(plan.id, "features.canHls", v);
+                                  updatePlanField(plan.id, "features.hls", v);
+                                }}
+                              />
                               <ToggleRow
                                 label="Advanced Permissions Mode"
                                 value={plan.features?.advancedPermissions}

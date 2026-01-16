@@ -120,6 +120,18 @@ async function getAdvancedPermissionsFlag() {
   };
 }
 
+async function getHlsUiFlag() {
+  // Global HLS UI/tab flag, driven from the featureFlags collection.
+  // When missing, we default to enabled so HLS UI is visible by default.
+  const snap = await firestore.collection("featureFlags").doc("hlsSettingsTab").get();
+  const data = snap.exists ? (snap.data() as any) || {} : {};
+  const enabled = data.enabled === undefined ? true : !!data.enabled;
+  return {
+    enabled,
+    reason: typeof data.reason === "string" ? data.reason : undefined,
+  };
+}
+
 async function getAdvancedPermissionsEnabled(uid: string) {
   const userSnap = await firestore.collection("users").doc(uid).get();
   const userData = userSnap.exists ? userSnap.data() || {} : {};
@@ -301,6 +313,7 @@ router.get("/me", async (req, res) => {
     const { mediaPrefs } = await getNormalizedMediaPrefs(uid);
     const adv = await getAdvancedPermissionsEnabled(uid);
     const entitlements = await getEffectiveEntitlements(uid);
+    const hlsUi = await getHlsUiFlag();
 
     const monthKey = getCurrentMonthKey();
     const usageDocId = `${uid}_${monthKey}`;
@@ -406,6 +419,9 @@ router.get("/me", async (req, res) => {
       tosVersion: typeof (data as any).tosVersion === "string" ? (data as any).tosVersion : null,
       tosAcceptedAt: typeof (data as any).tosAcceptedAt === "number" ? (data as any).tosAcceptedAt : null,
       currentTosVersion: CURRENT_TOS_VERSION,
+      platformFlags: {
+        hlsEnabled: hlsUi.enabled,
+      },
       planId: effectiveEntitlements?.planId ?? entitlements.planId,
       effectiveEntitlements,
       usage: {

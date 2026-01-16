@@ -409,14 +409,16 @@ const Welcome = () => {
         >
           Privacy
         </Link>
-        <Link 
-          to="/terms" 
+        <a
+          href="/terms"
+          target="_blank"
+          rel="noopener noreferrer"
           style={{ color: '#4b5563', textDecoration: 'none', transition: 'color 0.3s ease' }}
           onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
           onMouseLeave={(e) => e.currentTarget.style.color = '#4b5563'}
         >
           Terms
-        </Link>
+        </a>
         <Link 
           to="/support" 
           style={{ color: '#4b5563', textDecoration: 'none', transition: 'color 0.3s ease' }}

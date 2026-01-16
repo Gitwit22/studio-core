@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import Hls from "hls.js";
 import { API_BASE } from "../lib/apiBase";
+import { getPublicHls } from "../services/hls";
 import {
   Radio,
   RefreshCw,
@@ -112,8 +113,7 @@ export default function Live() {
     };
   }, [token]);
 
-  // Fetch HLS status + playlist URL by roomId.
-  // If token is present, prefer the authenticated endpoint; otherwise fall back to public.
+  // Fetch HLS status + playlist URL by roomId using the public viewer-safe endpoint.
   const fetchHlsStatus = useCallback(async () => {
     const currentRoomId = (roomId || routeRoomId || "").trim();
     if (!currentRoomId) return;
@@ -126,14 +126,7 @@ export default function Live() {
 
     setIsRetrying(true);
     try {
-      const url = token
-        ? `${API_BASE}/api/hls/status/${encodeURIComponent(currentRoomId)}`
-        : `${API_BASE}/api/public/hls/${encodeURIComponent(currentRoomId)}`;
-
-      const res = await fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
-      if (!res.ok) return;
-
-      const data = (await res.json().catch(() => null)) as PublicHlsResponse | null;
+      const data = (await getPublicHls(currentRoomId).catch(() => null)) as PublicHlsResponse | null;
       if (!data) return;
 
       const nextStatus = (data.status || "idle") as PublicHlsResponse["status"];
@@ -328,7 +321,7 @@ export default function Live() {
               <div className="flex items-center justify-between gap-3">
                 <div className="text-white font-semibold">StreamLine Live</div>
                 <div className="text-xs text-neutral-500">
-                  {ended ? "Stream ended." : status === "live" ? "Watching live" : "Waiting for the host to start HLS"}
+                  {status === "live" ? "Watching live" : ended ? "Stream ended." : "Starting soon"}
                 </div>
               </div>
 

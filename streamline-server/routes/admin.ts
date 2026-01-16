@@ -75,6 +75,7 @@ router.get("/env-sanity", async (req, res) => {
         planId,
         planLegacy: user.plan ?? null,
         adminOverride: Boolean(user.adminOverride),
+        adminOverrideHls: Boolean((user as any).adminOverrideHls),
         admin: user.admin ?? null,
         isAdminUserField: Boolean(user.admin?.isAdmin ?? user.isAdmin),
       },

@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-
-type HlsStatusResponse = {
-  status?: string; // "idle" | "starting" | "live" | "active" | "error" | etc.
-  playlistUrl?: string | null;
-  egressId?: string | null;
-  error?: string | null;
-};
+import { getHlsStatus, type HlsStatusResponse } from "../services/hls";
 
 type UseHlsStatusArgs = {
   apiBase: string;
@@ -29,18 +23,8 @@ export function useHlsStatus({ apiBase, roomId, roomAccessToken }: UseHlsStatusA
 
     if (!apiBase || !roomId || !roomAccessToken) return;
 
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${roomAccessToken}`,
-    };
-
     const fetchOnce = async () => {
-      const url = `${apiBase}/api/hls/status/${encodeURIComponent(roomId)}`;
-      const res = await fetch(url, { headers, credentials: "include" });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(`status_failed_${res.status}:${txt}`);
-      }
-      return (await res.json()) as HlsStatusResponse;
+      return await getHlsStatus(roomId, roomAccessToken);
     };
 
     const schedule = (ms: number) => {

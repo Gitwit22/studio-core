@@ -97,6 +97,10 @@ export async function canAccessFeature(
   if (user?.adminOverride) {
     return { allowed: true };
   }
+  // Source 1b: per-feature admin override for HLS only
+  if (featureKey === "hls" && user?.adminOverrideHls) {
+    return { allowed: true };
+  }
   // Source 2: membership in /admins collection
   try {
     const adminSnap = await db.collection("admins").doc(uid).get();
@@ -155,6 +159,20 @@ export async function canAccessFeature(
       if (process.env.DEBUG_FEATURE_ACCESS === "1") {
         console.log(
           `[featureAccess] alias check result enabled=${enabled} via multistream|rtmp|rtmpMultistream|multistreamEnabled`
+        );
+      }
+    } else if (featureKey === "hls") {
+      enabled = Boolean(
+        plan?.features?.hls ||
+        plan?.features?.canHls ||
+        plan?.features?.hlsBroadcast ||
+        plan?.hls ||
+        plan?.canHls ||
+        plan?.hlsBroadcast
+      );
+      if (process.env.DEBUG_FEATURE_ACCESS === "1") {
+        console.log(
+          `[featureAccess] alias check result enabled=${enabled} via hls|canHls|hlsBroadcast`
         );
       }
     }

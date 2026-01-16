@@ -530,6 +530,7 @@ export default function Room() {
   const [planMultistreamEnabled, setPlanMultistreamEnabled] = useState<boolean>(false);
   const [planRecordingEnabled, setPlanRecordingEnabled] = useState<boolean>(true);
   const [planHlsEnabled, setPlanHlsEnabled] = useState<boolean>(false);
+  const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
   const [dualRecordingAllowed, setDualRecordingAllowed] = useState<boolean>(false);
   const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(false);
   const [maxGuestsAllowed, setMaxGuestsAllowed] = useState<number | null>(null);
@@ -866,6 +867,12 @@ export default function Room() {
           }
 
           const eff = (me as any)?.effectiveEntitlements;
+          const platformFlags = (me as any)?.platformFlags || {};
+          if (typeof platformFlags.hlsEnabled === "boolean") {
+            setPlatformHlsEnabled(platformFlags.hlsEnabled);
+          } else {
+            setPlatformHlsEnabled(true);
+          }
           if (eff && typeof eff === "object") {
             const features = eff.features || {};
             const limits = eff.limits || {};
@@ -2124,6 +2131,7 @@ export default function Room() {
           recordingEnabled={recordingEnabled}
           multistreamAllowed={canMultistream}
           hlsEnabled={canHls}
+          showHlsSection={platformHlsEnabled}
           onUpgradeHls={handleUpgradeHls}
           dualRecordingAllowed={dualRecordingAllowed}
           maxGuests={maxGuestsAllowed === null ? undefined : maxGuestsAllowed || undefined}

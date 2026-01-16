@@ -20,7 +20,10 @@ export type CanonicalPlan = {
     rtmp: boolean;
     multistream: boolean;
     advancedPermissions: boolean;
+    // canHls is the canonical HLS-plan feature used by entitlements
     canHls: boolean;
+    // hls mirrors canHls so callers can use either name
+    hls: boolean;
   };
   // Raw fields that callers might still want for display/debug
   raw: any;
@@ -122,12 +125,39 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
   const rawFeatures = features as any;
   const rawData: any = data;
 
-  const canHls = toBool(
+  // Derive canonical HLS feature flag with sensible defaults:
+  // - Respect any explicit HLS flags on the plan document first.
+  // - When no HLS-related keys are present, default based on plan id
+  //   (Pro+/enterprise-style tiers get HLS, Free/Starter-style do not).
+  const hasExplicitHlsFlag =
+    rawFeatures.canHls !== undefined ||
+    rawFeatures.hls !== undefined ||
+    rawData.hlsEnabled !== undefined ||
+    rawData.hlsBroadcastEnabled !== undefined;
+
+  let canHls = toBool(
     rawFeatures.canHls ??
       rawFeatures.hls ??
       rawData.hlsEnabled ??
       rawData.hlsBroadcastEnabled
   );
+
+  if (!hasExplicitHlsFlag) {
+    const idLower = String(id).toLowerCase();
+    // Default matrix:
+    // - Free/Starter-style tiers: HLS OFF
+    // - Paid/enterprise/internal tiers: HLS ON
+    if (idLower === "free" || idLower === "starter") {
+      canHls = false;
+    } else if (
+      idLower === "pro" ||
+      idLower === "basic" ||
+      idLower === "enterprise" ||
+      idLower === "internal_unlimited"
+    ) {
+      canHls = true;
+    }
+  }
 
   return {
     id,
@@ -152,6 +182,7 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
       multistream: toBool(features.multistream ?? data.multistreamEnabled),
       advancedPermissions: toBool(features.advancedPermissions ?? data.advancedPermissionsEnabled),
       canHls,
+      hls: canHls,
     },
     raw: data,
   };
