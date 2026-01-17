@@ -131,9 +131,10 @@ async function resolveRoleForInvite(opts: { uid?: string; requestedRole?: string
       };
     }
 
-    const basePerms = effectiveRoleKey === "host" || effectiveRoleKey === "moderator"
-      ? SIMPLE_ROLE_DEFAULTS.moderator
-      : SIMPLE_ROLE_DEFAULTS[effectiveRoleKey];
+    const basePerms =
+      effectiveRoleKey === "host"
+        ? SIMPLE_ROLE_DEFAULTS.host
+        : SIMPLE_ROLE_DEFAULTS[effectiveRoleKey as "participant" | "moderator" | "cohost"];
 
     const grantRole: GrantRole = effectiveRoleKey === "moderator" || effectiveRoleKey === "host"
       ? "moderator"

@@ -61,7 +61,7 @@ const DEFAULT_ROLE_TEMPLATES: RoleProfile[] = DEFAULT_ROLE_PROFILES.map((profile
 
 const DEFAULT_QUICK_ROLE_IDS: string[] = ["participant", "cohost", "moderator"];
 
-export const SIMPLE_ROLE_DEFAULTS: Record<"participant" | "moderator" | "cohost", PermissionSet> = {
+export const SIMPLE_ROLE_DEFAULTS: Record<"participant" | "moderator" | "cohost" | "host", PermissionSet> = {
   participant: {
     ...DEFAULT_ROLE_PROFILES_BY_ID.participant.permissions,
   },
@@ -70,6 +70,9 @@ export const SIMPLE_ROLE_DEFAULTS: Record<"participant" | "moderator" | "cohost"
   },
   cohost: {
     ...DEFAULT_ROLE_PROFILES_BY_ID.cohost.permissions,
+  },
+  host: {
+    ...DEFAULT_ROLE_PROFILES_BY_ID.host.permissions,
   },
 };
 
