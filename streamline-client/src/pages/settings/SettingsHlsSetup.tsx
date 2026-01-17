@@ -453,11 +453,11 @@ export default function SettingsHlsSetup({
               For now, each embed uses a default viewer page you can share.
             </div>
             <div style={{ fontSize: 11, color: "#6b7280" }}>
-              <span>{60 - createName.length}</span> name characters left  b7 <span>{200 - createDescription.length}</span> description characters left
+              <span>{60 - createName.length}</span> name characters left · <span>{200 - createDescription.length}</span> description characters left
             </div>
 
             <button type="submit" disabled={creating || isCreateInvalid} style={{ ...S.primaryBtn, padding: "12px 16px", fontSize: 14 }}>
-              {creating ? "Creating" : "Create Embed"}
+              {creating ? "Creating…" : "Create Embed"}
             </button>
           </form>
 
@@ -804,29 +804,30 @@ export default function SettingsHlsSetup({
                   <span>{60 - editName.length}</span> name characters left · <span>{200 - editDescription.length}</span> description characters left
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => !editSaving && setEditingEmbed(null)}
-                  style={{
-                    ...S.secondaryBtn,
-                    padding: "8px 14px",
-                    fontSize: 13,
-                  }}
-                  disabled={editSaving}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
+                  <button
+                    type="button"
+                    onClick={() => !editSaving && setEditingEmbed(null)}
+                    style={{
+                      ...S.secondaryBtn,
+                      padding: "8px 14px",
+                      fontSize: 13,
+                    }}
+                    disabled={editSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
                     disabled={editSaving || isEditUnchanged}
-                  style={{
-                    ...S.primaryBtn,
-                    padding: "8px 16px",
-                    fontSize: 13,
-                  }}
-                >
-                  {editSaving ? "Saving…" : "Save"}
-                </button>
+                    style={{
+                      ...S.primaryBtn,
+                      padding: "8px 16px",
+                      fontSize: 13,
+                    }}
+                  >
+                    {editSaving ? "Saving…" : "Save"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
