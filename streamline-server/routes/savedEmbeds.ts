@@ -154,12 +154,10 @@ router.post("/", requireAuth as any, async (req: any, res) => {
       savedEmbedId,
       embedId: savedEmbedId,
       name: resolvedName,
-      description: descriptionRes.value || undefined,
       createdBy: uid,
       createdAt: serverTimestamp,
       updatedAt: serverTimestamp,
       isDeleted: false,
-      deletedAt: undefined,
       activeRoomId: null as any, // stored as null until a host room links this embed
 
       // Legacy fields
@@ -167,6 +165,12 @@ router.post("/", requireAuth as any, async (req: any, res) => {
       roomId,
       archived: false,
     };
+
+    // Only set description when provided to avoid any undefined
+    // values in the initial Firestore document.
+    if (descriptionRes.value !== undefined) {
+      (doc as any).description = descriptionRes.value;
+    }
 
     await embedRef.set(doc as any, { merge: false });
 
