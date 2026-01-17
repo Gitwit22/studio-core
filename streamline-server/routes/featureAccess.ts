@@ -166,9 +166,11 @@ export async function canAccessFeature(
         plan?.features?.hls ||
         plan?.features?.canHls ||
         plan?.features?.hlsBroadcast ||
-        plan?.hls ||
+        plan?.hlsEnabled ||
+        plan?.hlsBroadcastEnabled ||
         plan?.canHls ||
-        plan?.hlsBroadcast
+        // Legacy shape: plan.hls is an object
+        plan?.hls?.enabled
       );
       if (process.env.DEBUG_FEATURE_ACCESS === "1") {
         console.log(

@@ -17,10 +17,13 @@ import roomsCreateRoutes from "./routes/roomsCreate";
 import invitesRoutes from "./routes/invites";
 import multistreamRoutes from "./routes/multistream";
 import roomsResolveRoutes from "./routes/roomsResolve";
+import roomsHlsConfigRoutes from "./routes/roomsHlsConfig";
+import roomsActiveEmbedRoutes from "./routes/roomsActiveEmbed";
 import destinationsRoutes from "./routes/destinations";
 import liveRoutes from "./routes/live";
 import statsRoutes from "./routes/stats";
 import telemetryRoutes from "./routes/telemetry";
+import savedEmbedsRoutes from "./routes/savedEmbeds";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
@@ -31,6 +34,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import hlsRoutes from "./routes/hls";
 import publicHlsRoutes from "./routes/publicHls";
+import publicRoomsHlsConfigRoutes from "./routes/publicRoomsHlsConfig";
 import { sanitizeDisplayName } from "./lib/sanitizeDisplayName";
 import { resolveRoomIdentity } from "./lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "./lib/rolePermissions";
@@ -108,6 +112,8 @@ app.get("/api", (req, res) => {
 app.use("/api/hls", hlsRoutes);
 // Public viewer HLS status (no auth, tiny payload)
 app.use("/api/public/hls", publicHlsRoutes);
+// Public viewer-safe HLS config (no auth)
+app.use("/api/public/rooms", publicRoomsHlsConfigRoutes);
 // Recordings API - This handles GET /:id and POST /start, /stop
 app.use("/api/recordings", recordingsRoutes);
 
@@ -132,10 +138,17 @@ app.use("/api/invites", invitesRoutes);
 app.use("/api/multistream", multistreamRoutes);
 // Room resolve endpoint (/api/rooms/resolve)
 app.use("/api/rooms", roomsResolveRoutes);
+// Room-level persistent HLS config (NOT runtime HLS state)
+app.use("/api/rooms", roomsHlsConfigRoutes);
+// Room-level selection of which Saved Embed to use for HLS control
+app.use("/api/rooms", roomsActiveEmbedRoutes);
 // Destinations management (encrypted keys)
 app.use("/api/destinations", destinationsRoutes);
 // Live preflight
 app.use("/api/live", liveRoutes);
+
+// Saved embeds (user-owned) -> stable Firestore rooms
+app.use("/api/saved-embeds", savedEmbedsRoutes);
 
 // Billing routes
 app.use("/api/billing", billingRoutes);

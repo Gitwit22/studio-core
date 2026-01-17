@@ -7,6 +7,7 @@ import { firestore } from "../firebaseAdmin";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 import { canAccessFeature } from "./featureAccess";
+import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 
 const router = Router();
 
@@ -147,8 +148,24 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
 
     const lkRoomName = room.livekitRoomName || roomId;
 
+    // Cap enforcement (per-session): compute stopAt at start and persist in room.hls
+    // caps.hlsMaxMinutesPerSession: null/missing => unlimited
+    let capMinutes: number | null = null;
+    let stopAt: string | null = null;
+    try {
+      const entitlements = await getEffectiveEntitlements((req as any).account || uid);
+      const rawCap = entitlements?.caps?.hlsMaxMinutesPerSession;
+      const n = rawCap === null || rawCap === undefined ? null : Number(rawCap);
+      if (n !== null && Number.isFinite(n) && n > 0) {
+        capMinutes = Math.round(n);
+        stopAt = new Date(Date.now() + capMinutes * 60 * 1000).toISOString();
+      }
+    } catch {
+      // ignore cap lookup failures (treat as unlimited)
+    }
+
     // 1) Mark starting first (crash-safe)
-    await setHlsStarting(roomRef, { presetId, prefix });
+    await setHlsStarting(roomRef, { presetId, prefix, stopAt, capMinutes });
 
     try {
     // 2) Start egress
@@ -228,6 +245,61 @@ router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any,
     }
 
     const hls = room.hls || {};
+
+    // Option B (MVP): enforce cap on status polling.
+    // If stopAt has passed and status is live, stop egress and mark idle.
+    const stopAtIso = typeof (hls as any).stopAt === "string" ? String((hls as any).stopAt).trim() : "";
+    if ((hls.status || "idle") === "live" && stopAtIso) {
+      const stopAtMs = Date.parse(stopAtIso);
+      if (Number.isFinite(stopAtMs) && Date.now() >= stopAtMs) {
+        const roomRef = firestore.collection("rooms").doc(roomId);
+
+        if (hls.egressId) {
+          try {
+            await stopEgress(hls.egressId);
+          } catch (e: any) {
+            console.error("[hls] auto-stop failed to stop egress", e);
+          }
+        }
+
+        // Compute and track usage against the room owner when available.
+        let durationMinutes = 0;
+        const startedAt: any = hls.startedAt;
+        try {
+          const startedDate: Date | null = startedAt
+            ? startedAt.toDate
+              ? startedAt.toDate()
+              : new Date(startedAt)
+            : null;
+          if (startedDate && !Number.isNaN(startedDate.getTime())) {
+            const diffMs = Date.now() - startedDate.getTime();
+            if (diffMs > 0) {
+              durationMinutes = Math.max(1, Math.round(diffMs / (60 * 1000)));
+            }
+          }
+        } catch (e) {
+          console.error("[hls] failed to compute HLS duration (auto-stop)", e);
+        }
+
+        const usageUid = (room as any).ownerId || uid;
+        if (durationMinutes > 0 && usageUid) {
+          try {
+            await incrementHlsUsageMinutes(usageUid, durationMinutes);
+          } catch (e) {
+            console.error("[hls] failed to increment HLS usage (auto-stop)", e);
+          }
+        }
+
+        await setHlsIdle(roomRef);
+
+        return res.json({
+          status: "idle",
+          playlistUrl: null,
+          egressId: null,
+          error: null,
+        });
+      }
+    }
 
     // Phase 3 spec: return flat shape so clients can
     // poll for playlistUrl without re-starting HLS
@@ -318,9 +390,10 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
 
     await setHlsIdle(roomRef);
 
-    if (durationMinutes > 0) {
+    const usageUid = (room as any).ownerId || uid;
+    if (durationMinutes > 0 && usageUid) {
       try {
-        await incrementHlsUsageMinutes(uid, durationMinutes);
+        await incrementHlsUsageMinutes(usageUid, durationMinutes);
       } catch (e) {
         console.error("[hls] failed to increment HLS usage", e);
       }
@@ -328,11 +401,13 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
 
     const updated = {
       status: "idle" as const,
-      playlistUrl: hls.playlistUrl || null,
-      egressId: hls.egressId || null,
+      playlistUrl: null,
+      egressId: null,
       error: null,
-      runId: hls.runId || null,
-      startedAt: hls.startedAt || null,
+      runId: null,
+      startedAt: null,
+      stopAt: null,
+      capMinutes: null,
       updatedAt: new Date().toISOString(),
     };
 

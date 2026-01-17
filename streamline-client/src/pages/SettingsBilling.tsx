@@ -10,6 +10,7 @@ import SettingsDestinations from "./SettingsDestinations";
 import { apiFetch } from "../lib/api";
 import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
+import SettingsHlsSetup from "./settings/SettingsHlsSetup";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -150,7 +151,8 @@ interface Entitlements {
   recording: boolean;
   dualRecording: boolean;
   rtmpMultistream: boolean;
-   canHls?: boolean;
+  canHls?: boolean;
+  hlsCustomizationEnabled?: boolean;
   maxGuests: number;
   maxDestinations: number;
   participantMinutes: number;
@@ -288,6 +290,8 @@ export default function SettingsBilling() {
     recording: false,
     dualRecording: false,
     rtmpMultistream: false,
+    canHls: false,
+    hlsCustomizationEnabled: false,
     maxGuests: 1,
     maxDestinations: 1,
     participantMinutes: 60,
@@ -309,6 +313,8 @@ export default function SettingsBilling() {
   const [usage, setUsage] = useState<UsageData>(DEFAULT_USAGE);
   const [showLifetimeDetails, setShowLifetimeDetails] = useState(false);
   const [entitlements, setEntitlements] = useState<Entitlements>(DEFAULT_ENTITLEMENTS);
+  const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
+  const [platformHlsSettingsTabEnabled, setPlatformHlsSettingsTabEnabled] = useState<boolean | null>(null);
   const [mediaPrefs, setMediaPrefs] = useState<MediaPrefs>(DEFAULT_MEDIA_PREFS);
   const [advancedPermissions, setAdvancedPermissions] = useState<AdvancedPermissionsState>({ enabled: false, plan: false, override: false, globalLock: false, lockReason: null, effectivePermissionsMode: "simple", permissionsModeLockReason: null });
   const [serverDefaultRoleProfiles, setServerDefaultRoleProfiles] = useState<ServerDefaultRoleProfile[] | null>(null);
@@ -321,7 +327,7 @@ export default function SettingsBilling() {
   const [actionLoading, setActionLoading] = useState<ActionLoading>(null);
   const [error, setError] = useState<string | null>(null);
   const [showManagePicker, setShowManagePicker] = useState(false);
-  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "defaults" | "roles">("plan");
+  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles">("plan");
   const [cohostProfile, setCohostProfile] = useState({
     label: "Co-Host",
     canStream: false,
@@ -353,20 +359,28 @@ export default function SettingsBilling() {
   const [testModeSummary, setTestModeSummary] = useState<string | null>(null);
   const [checkoutTosAccepted, setCheckoutTosAccepted] = useState(false);
   const [checkoutTosError, setCheckoutTosError] = useState<string | null>(null);
+  const [checkoutTosSubmitting, setCheckoutTosSubmitting] = useState(false);
   const effectivePermissionsMode = advancedPermissions.effectivePermissionsMode || ((advancedPermissions.enabled && (mediaPrefs.permissionsMode ?? "simple") === "advanced") ? "advanced" : "simple");
   const simpleMode = effectivePermissionsMode === "simple";
   useEffect(() => {
     loadAllData();
   }, []);
 
-  // Sync tab from URL query (?tab=destinations|plan|usage) so deep links open the correct view
+  // Sync tab from URL query (?tab=destinations|plan|usage|hls) so deep links open the correct view
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const tabParam = params.get("tab");
-    if (tabParam === "plan" || tabParam === "usage" || tabParam === "destinations" || tabParam === "defaults" || tabParam === "roles") {
+    if (tabParam === "plan" || tabParam === "usage" || tabParam === "destinations" || tabParam === "hls" || tabParam === "defaults" || tabParam === "roles") {
       setActiveTab(tabParam as any);
     }
   }, [location.search]);
+
+  // If the HLS settings tab is disabled platform-wide, never allow the active tab to remain on it.
+  useEffect(() => {
+    if (platformHlsSettingsTabEnabled === false && activeTab === "hls") {
+      setActiveTab("plan");
+    }
+  }, [platformHlsSettingsTabEnabled, activeTab]);
 
   // Safe pending cleanup: only clear under safe conditions
   useEffect(() => {
@@ -401,8 +415,6 @@ export default function SettingsBilling() {
     const onVis = () => {
       if (document.visibilityState === "visible") {
         setActionLoading(null);
-        // Refresh data to clear any stale pendingPlan
-        loadAllData();
       }
     };
     const onPageShow = () => {
@@ -469,6 +481,28 @@ export default function SettingsBilling() {
       }
       const data = await res.json();
 
+      try {
+        const platformFlags = (data as any)?.platformFlags || {};
+        if (typeof platformFlags.hlsEnabled === "boolean") {
+          setPlatformHlsEnabled(platformFlags.hlsEnabled);
+        } else {
+          setPlatformHlsEnabled(true);
+        }
+
+        // Settings gate: default to visible unless explicitly disabled.
+        // Prefer platformFlags.hlsSettingsTab, fall back to platformFlags.hlsEnabled.
+        const hlsTabFlag =
+          typeof platformFlags.hlsSettingsTab === "boolean"
+            ? platformFlags.hlsSettingsTab
+            : typeof platformFlags.hlsEnabled === "boolean"
+              ? platformFlags.hlsEnabled
+              : true;
+        setPlatformHlsSettingsTabEnabled(hlsTabFlag);
+      } catch {
+        setPlatformHlsEnabled(true);
+        setPlatformHlsSettingsTabEnabled(true);
+      }
+
       // Capture Terms of Service metadata for display and gating.
       setUser((prev) =>
         prev
@@ -486,13 +520,24 @@ export default function SettingsBilling() {
       if (eff && typeof eff === "object") {
         const features = eff.features || {};
         const limits = eff.limits || {};
+
+        const canHls = Boolean((features as any).hls ?? (features as any).hlsEnabled ?? (features as any).canHls);
+        const hlsCustomizationEnabled = (() => {
+          const explicit = (features as any).hlsCustomizationEnabled;
+          if (typeof explicit === "boolean") return explicit;
+          const legacy = (features as any).canCustomizeHlsPage;
+          if (typeof legacy === "boolean") return legacy;
+          return canHls;
+        })();
+
         setEntitlements({
           planId: eff.planId || data.planId || "free",
           planName: eff.planName || data.planId || eff.planId || "Free",
           recording: !!features.recording,
           dualRecording: !!features.dualRecording,
           rtmpMultistream: !!features.rtmpMultistream,
-          canHls: (features as any).canHls === true,
+          canHls,
+          hlsCustomizationEnabled,
           maxGuests: Number(limits.maxGuests ?? 0),
           maxDestinations: Number(limits.maxDestinations ?? 0),
           participantMinutes: Number(limits.participantMinutes ?? 0),
@@ -512,6 +557,7 @@ export default function SettingsBilling() {
         dualRecording: !!legacy?.dualRecording,
         rtmpMultistream: !!legacy?.rtmpMultistream,
         canHls: !!legacy?.canHls,
+        hlsCustomizationEnabled: !!legacy?.canHls,
         maxGuests: Number(legacy?.maxGuests ?? 0),
         maxDestinations: Number(legacy?.maxDestinations ?? 0),
         participantMinutes: Number(legacy?.participantMinutes ?? 0),
@@ -520,6 +566,7 @@ export default function SettingsBilling() {
     } catch (err) {
       console.warn("loadEntitlements failed; using defaults", err);
       setEntitlements((prev) => prev || DEFAULT_ENTITLEMENTS);
+      setPlatformHlsEnabled(true);
     }
   };
 
@@ -1064,6 +1111,35 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     }
   };
 
+    const submitTosAcceptance = async () => {
+      if (!checkoutTosAccepted || checkoutTosSubmitting) return;
+      setCheckoutTosSubmitting(true);
+      setCheckoutTosError(null);
+      try {
+        const res = await apiFetch(`${API_BASE}/api/account/accept-tos`, {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.error || "Failed to record Terms acceptance.");
+        }
+        setUser((prev) =>
+          prev
+            ? {
+                ...prev,
+                tosVersion: data.tosVersion ?? prev.tosVersion ?? null,
+                tosAcceptedAt: data.tosAcceptedAt ?? prev.tosAcceptedAt ?? null,
+                currentTosVersion: data.tosVersion ?? prev.currentTosVersion ?? null,
+              }
+            : prev
+        );
+      } catch (err: any) {
+        setCheckoutTosError(err.message || "Failed to submit Terms acceptance. Please try again.");
+      } finally {
+        setCheckoutTosSubmitting(false);
+      }
+    };
+
   const openTestPlanModal = (planId: PlanId) => {
     setTestModeTargetPlan(planId);
     setTestModeSummary(null);
@@ -1133,6 +1209,14 @@ const userPlanId: PlanId = canonicalPlanId(user?.planId);
 const currentPlan = plans.find((p) => canonicalPlanId(p.id) === userPlanId);
 const status = user?.billingStatus;
 const hasStripeCustomer = !!(user?.billing?.customerId || (user as any)?.stripeCustomerId);
+
+const hasAcceptedCurrentTosForUi = Boolean(
+  user &&
+  user.tosVersion &&
+  user.currentTosVersion &&
+  user.tosVersion === user.currentTosVersion &&
+  user.tosAcceptedAt
+);
 
 // Canonical Test Mode detection prefers effectiveBillingEnabled, with legacy fallbacks
 // handled by the shared auth helper.
@@ -1305,6 +1389,15 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           >
             Stream Keys
           </button>
+          {platformHlsSettingsTabEnabled !== false && (
+            <button
+              type="button"
+              style={activeTab === "hls" ? { ...S.tab, ...S.tabActive } : S.tab}
+              onClick={() => setActiveTab("hls")}
+            >
+              HLS
+            </button>
+          )}
           <button
             type="button"
             style={activeTab === "defaults" ? { ...S.tab, ...S.tabActive } : S.tab}
@@ -1320,6 +1413,58 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             Mod/Guest Setup
           </button>
         </div>
+
+        {/* ================================================================ */}
+        {/* SECTION: HLS (Viewer page setup per room) */}
+        {/* ================================================================ */}
+        {platformHlsSettingsTabEnabled !== false && (
+          <div style={{
+            ...S.card,
+            opacity: isBlocked ? 0.6 : 1,
+            display: activeTab === "hls" ? "block" : "none",
+          }}>
+            <div style={S.cardHeader}>
+              <h2 style={S.cardTitle}>📺 HLS</h2>
+            </div>
+
+            {!platformHlsEnabled && (
+              <div style={{
+                marginBottom: 12,
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(245,158,11,0.35)",
+                background: "rgba(245,158,11,0.10)",
+                color: "#fde68a",
+                fontSize: 13,
+                fontWeight: 700,
+              }}>
+                HLS settings are currently disabled platform-wide.
+              </div>
+            )}
+
+            <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.5 }}>
+              Create saved viewer links (channels), copy viewer link/iframe code, and edit viewer branding. No roomId paste required.
+            </div>
+
+            <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#e5e7eb" }}>Plan access:</div>
+                <div style={{ fontSize: 12, color: entitlements.canHls ? "#22c55e" : "#f97316", fontWeight: 800 }}>
+                  Runtime: {entitlements.canHls ? "Enabled" : "Not included"}
+                </div>
+                <div style={{ fontSize: 12, color: entitlements.hlsCustomizationEnabled ? "#22c55e" : "#f97316", fontWeight: 800 }}>
+                  Setup: {entitlements.hlsCustomizationEnabled ? "Enabled" : "Upgrade required"}
+                </div>
+              </div>
+
+              <SettingsHlsSetup
+                platformEnabled={platformHlsEnabled}
+                canCustomize={!!entitlements.hlsCustomizationEnabled}
+                onUpgrade={() => setActiveTab("plan")}
+              />
+            </div>
+          </div>
+        )}
 
         {/* ================================================================ */}
         {/* SECTION 4: MOD/GUEST SETUP (Cohost profile) */}
@@ -1853,37 +1998,58 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </div>
               )}
 
-              {/* Terms of Service status + checkbox for checkout */}
-              <div style={{ marginTop: 16, padding: "10px 12px", borderRadius: 10, border: "1px solid #1f2937", background: "rgba(15,23,42,0.8)", display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ fontSize: 13, color: "#e5e7eb" }}>
-                  <strong>Legal</strong>
-                </div>
-                <div style={{ fontSize: 12, color: "#9ca3af" }}>
-                  {user?.tosVersion && user?.tosAcceptedAt ? (
-                    <>
-                      Last accepted Terms of Service: v{user.tosVersion} on {formatDate(user.tosAcceptedAt)}
-                    </>
-                  ) : (
-                    <>You have not yet accepted the latest Terms of Service.</>
+              {/* Terms of Service status + checkbox + explicit submit for checkout */}
+              {!hasAcceptedCurrentTosForUi && (
+                <div style={{ marginTop: 16, padding: "10px 12px", borderRadius: 10, border: "1px solid #1f2937", background: "rgba(15,23,42,0.8)", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontSize: 13, color: "#e5e7eb" }}>
+                    <strong>Legal</strong>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                    {user?.tosVersion && user?.tosAcceptedAt ? (
+                      <>
+                        Last accepted Terms of Service: v{user.tosVersion} on {formatDate(user.tosAcceptedAt)}
+                      </>
+                    ) : (
+                      <>You have not yet accepted the latest Terms of Service.</>
+                    )}
+                  </div>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#e5e7eb" }}>
+                    <input
+                      type="checkbox"
+                      checked={checkoutTosAccepted}
+                      onChange={(e) => {
+                        setCheckoutTosAccepted(e.target.checked);
+                        setCheckoutTosError(null);
+                      }}
+                    />
+                    <span>
+                      I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: "#60a5fa", textDecoration: "underline" }}>Terms of Service</a>
+                    </span>
+                  </label>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
+                    <button
+                      type="button"
+                      onClick={submitTosAcceptance}
+                      disabled={!checkoutTosAccepted || checkoutTosSubmitting}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        border: "1px solid rgba(96,165,250,0.3)",
+                        background: !checkoutTosAccepted || checkoutTosSubmitting ? "rgba(31,41,55,0.8)" : "rgba(37,99,235,0.9)",
+                        color: "#e5e7eb",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: !checkoutTosAccepted || checkoutTosSubmitting ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {checkoutTosSubmitting ? "Submitting..." : "Submit acceptance"}
+                    </button>
+                  </div>
+                  {checkoutTosError && (
+                    <div style={{ fontSize: 12, color: "#f97316" }}>{checkoutTosError}</div>
                   )}
                 </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#e5e7eb" }}>
-                  <input
-                    type="checkbox"
-                    checked={checkoutTosAccepted}
-                    onChange={(e) => {
-                      setCheckoutTosAccepted(e.target.checked);
-                      setCheckoutTosError(null);
-                    }}
-                  />
-                  <span>
-                    I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: "#60a5fa", textDecoration: "underline" }}>Terms of Service</a>
-                  </span>
-                </label>
-                {checkoutTosError && (
-                  <div style={{ fontSize: 12, color: "#f97316" }}>{checkoutTosError}</div>
-                )}
-              </div>
+              )}
 
               {/* Primary Actions */}
               <div style={S.actionButtons}>
@@ -2051,7 +2217,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         <FeatureRow label="Stream destinations" value={plan.limits.rtmpDestinationsMax} />
                         <FeatureRow label="Recording" value={plan.features.recording} />
                         <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
-                        <FeatureRow label="HLS Broadcast Page" value={(plan as any).features?.canHls} />
+                        {platformHlsEnabled ? <FeatureRow label="HLS Broadcast Page" value={(plan as any).features?.canHls} /> : null}
                         {advancedPermissions.lockReason !== "coming_soon" ? (
                           <FeatureRow
                             label="Advanced Permissions Mode"

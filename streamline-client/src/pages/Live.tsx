@@ -13,7 +13,8 @@ import {
   Signal,
   AlertCircle,
 } from "lucide-react";
-import logoUrl from "../assets/logosmaller.png"; 
+
+const DEFAULT_LOGO_URL = "/logosmaller.png";
 
 type RoomResolveResponse = {
   roomId?: string;
@@ -28,6 +29,21 @@ type PublicHlsResponse = {
 };
 
 type StreamStatus = "loading" | "live" | "starting" | "offline" | "error";
+
+type RoomHlsConfig = {
+  enabled: boolean;
+  title?: string;
+  subtitle?: string;
+  logoUrl?: string;
+  offlineMessage?: string;
+  theme?: "light" | "dark";
+  updatedAt?: string;
+};
+
+type PublicRoomHlsConfigResponse = {
+  roomId: string;
+  hlsConfig: RoomHlsConfig;
+};
 
 function looksLikeRoomName(value: string) {
   // Your “never treat roomName as roomId” invariant
@@ -53,6 +69,8 @@ export default function Live() {
   const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
+
+  const [viewerConfig, setViewerConfig] = useState<RoomHlsConfig | null>(null);
 
   // UI state
   const [status, setStatus] = useState<StreamStatus>("loading");
@@ -112,6 +130,45 @@ export default function Live() {
       cancelled = true;
     };
   }, [token]);
+
+  // Fetch public viewer configuration (title/subtitle/logo/theme/offline message)
+  useEffect(() => {
+    const currentRoomId = (roomId || routeRoomId || "").trim();
+    if (!currentRoomId) return;
+
+    if (looksLikeRoomName(currentRoomId)) {
+      setViewerConfig(null);
+      return;
+    }
+
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/public/rooms/${encodeURIComponent(currentRoomId)}/hls-config`, {
+          signal: ctrl.signal,
+        });
+
+        if (!res.ok) {
+          setViewerConfig(null);
+          return;
+        }
+
+        const data = (await res.json().catch(() => null)) as PublicRoomHlsConfigResponse | null;
+        if (!data?.hlsConfig) {
+          setViewerConfig(null);
+          return;
+        }
+
+        setViewerConfig(data.hlsConfig);
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      ctrl.abort();
+    };
+  }, [roomId, routeRoomId]);
 
   // Fetch HLS status + playlist URL by roomId using the public viewer-safe endpoint.
   const fetchHlsStatus = useCallback(async () => {
@@ -265,8 +322,13 @@ export default function Live() {
     );
   };
 
+  const displayTitle = (viewerConfig?.title || "").trim() || (roomName || "").trim() || "StreamLine";
+  const displaySubtitle = (viewerConfig?.subtitle || "").trim() || "Live Viewer";
+  const displayLogoUrl = (viewerConfig?.logoUrl || "").trim();
+  const isLightTheme = (viewerConfig?.theme || "dark") === "light";
+
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden">
+    <div className={["min-h-screen relative overflow-hidden", isLightTheme ? "bg-white" : "bg-black"].join(" ")}>
       {/* Background */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-gradient-to-br from-red-900/20 via-transparent to-transparent rounded-full blur-3xl animate-pulse" style={{ animationDuration: "8s" }} />
@@ -289,14 +351,25 @@ export default function Live() {
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center shadow-lg shadow-red-500/30">
-                  <Radio className="w-5 h-5 text-white" />
-                </div>
-                <div className="absolute -inset-1 bg-red-500/30 rounded-xl blur-md -z-10" />
+                {displayLogoUrl ? (
+                  <>
+                    <div className="w-10 h-10 rounded-xl bg-white/90 flex items-center justify-center shadow-lg shadow-red-500/20 border border-white/30 overflow-hidden">
+                      <img src={displayLogoUrl} alt="Logo" className="w-full h-full object-contain" />
+                    </div>
+                    <div className="absolute -inset-1 bg-red-500/20 rounded-xl blur-md -z-10" />
+                  </>
+                ) : (
+                  <>
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center shadow-lg shadow-red-500/30 overflow-hidden">
+                      <img src={DEFAULT_LOGO_URL} alt="Logo" className="w-7 h-7 object-contain" />
+                    </div>
+                    <div className="absolute -inset-1 bg-red-500/30 rounded-xl blur-md -z-10" />
+                  </>
+                )}
               </div>
               <div>
-                <div className="text-xl font-bold text-white tracking-tight">StreamLine</div>
-                <div className="text-xs text-neutral-500 font-medium">Live Viewer</div>
+                <div className={["text-xl font-bold tracking-tight", isLightTheme ? "text-neutral-900" : "text-white"].join(" ")}>{displayTitle}</div>
+                <div className={["text-xs font-medium", isLightTheme ? "text-neutral-600" : "text-neutral-500"].join(" ")}>{displaySubtitle}</div>
               </div>
             </div>
 
@@ -319,8 +392,8 @@ export default function Live() {
             {/* Info strip */}
             <div className="mb-4 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-white font-semibold">StreamLine Live</div>
-                <div className="text-xs text-neutral-500">
+                <div className={["font-semibold", isLightTheme ? "text-neutral-900" : "text-white"].join(" ")}>{displayTitle}</div>
+                <div className={["text-xs", isLightTheme ? "text-neutral-600" : "text-neutral-500"].join(" ")}>
                   {status === "live" ? "Watching live" : ended ? "Stream ended." : "Starting soon"}
                 </div>
               </div>
@@ -418,7 +491,10 @@ export default function Live() {
                     <div className="text-sm text-neutral-500 mb-6 max-w-md">
                       {status === "loading" && "Please wait while we establish a connection."}
                       {status === "starting" && "The broadcaster is preparing to go live."}
-                      {status === "offline" && (ended ? "This broadcast has ended." : "This stream isn’t live yet. Check back in a moment.")}
+                      {status === "offline" &&
+                        (ended
+                          ? "This broadcast has ended."
+                          : (viewerConfig?.offlineMessage || "").trim() || "This stream isn’t live yet. Check back in a moment.")}
                       {status === "error" && (error || "Unable to connect to the stream.")}
                     </div>
 

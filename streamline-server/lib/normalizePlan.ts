@@ -20,10 +20,19 @@ export type CanonicalPlan = {
     rtmp: boolean;
     multistream: boolean;
     advancedPermissions: boolean;
+    // hlsEnabled is the canonical runtime flag (can generate/play HLS)
+    hlsEnabled: boolean;
+    // hlsCustomizationEnabled controls whether the user can edit the HLS broadcast page
+    // (title/subtitle/logo/theme/offline message).
+    hlsCustomizationEnabled: boolean;
     // canHls is the canonical HLS-plan feature used by entitlements
     canHls: boolean;
     // hls mirrors canHls so callers can use either name
     hls: boolean;
+  };
+  caps: {
+    // null/missing = unlimited
+    hlsMaxMinutesPerSession: number | null;
   };
   // Raw fields that callers might still want for display/debug
   raw: any;
@@ -40,12 +49,20 @@ function toBool(value: any): boolean {
   return value === true || value === "true" || value === 1;
 }
 
+function toNullableNumber(value: any): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Accepts a plan Firestore document and returns a canonical, defensive shape.
 // Supports legacy keys such as maxHoursPerMonth, participantMinutes, maxDestinations, maxStorageBytes, etc.
 export function normalizePlan(id: string, doc: any | undefined | null): CanonicalPlan {
   const data = doc || {};
   const features = (data.features || {}) as any;
   const limits = (data.limits || {}) as any;
+  const caps = (data.caps || {}) as any;
 
   const rawMonthlyMinutes =
     limits.monthlyMinutesIncluded ??
@@ -138,6 +155,7 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
   let canHls = toBool(
     rawFeatures.canHls ??
       rawFeatures.hls ??
+      rawFeatures.hlsEnabled ??
       rawData.hlsEnabled ??
       rawData.hlsBroadcastEnabled
   );
@@ -158,6 +176,30 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
       canHls = true;
     }
   }
+
+  // Page customization flag (separate from runtime HLS) so plans can offer
+  // "HLS is free but customization is paid" without hacks.
+  // Defaults to canHls unless explicitly set.
+  const hlsCustomizationEnabled = (() => {
+    const explicit =
+      rawFeatures.hlsCustomizationEnabled ??
+      rawFeatures.canCustomizeHlsPage ??
+      rawData.hlsCustomizationEnabled ??
+      rawData.canCustomizeHlsPage;
+    if (explicit !== undefined) return toBool(explicit);
+    return canHls;
+  })();
+
+  const hlsMaxMinutesPerSession = (() => {
+    const explicit = caps.hlsMaxMinutesPerSession;
+    if (explicit !== undefined) return toNullableNumber(explicit);
+
+    // Legacy support: some older migrations stored HLS caps under plan.hls.*
+    const legacy = data?.hls?.maxSessionMinutes;
+    if (legacy !== undefined) return toNullableNumber(legacy);
+
+    return null;
+  })();
 
   return {
     id,
@@ -181,8 +223,13 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
       rtmp: toBool(features.rtmp ?? data.rtmpEnabled),
       multistream: toBool(features.multistream ?? data.multistreamEnabled),
       advancedPermissions: toBool(features.advancedPermissions ?? data.advancedPermissionsEnabled),
+      hlsEnabled: canHls,
+      hlsCustomizationEnabled,
       canHls,
       hls: canHls,
+    },
+    caps: {
+      hlsMaxMinutesPerSession,
     },
     raw: data,
   };

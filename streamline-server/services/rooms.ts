@@ -3,6 +3,27 @@ import { randomUUID } from "node:crypto";
 import { firestore as db } from "../firebaseAdmin";
 import type { HlsPresetId } from "./livekitEgress";
 
+export type RoomHlsConfig = {
+  enabled: boolean;
+  title?: string;
+  subtitle?: string;
+  logoUrl?: string;
+  offlineMessage?: string;
+  theme?: "light" | "dark";
+  updatedAt?: string; // ISO
+};
+
+// Shared defaults for viewer-facing HLS config (rooms/{roomId}.hlsConfig).
+// This is distinct from runtime HLS state (rooms/{roomId}.hls).
+export const DEFAULT_ROOM_HLS_CONFIG: RoomHlsConfig = {
+  enabled: false,
+  title: "",
+  subtitle: "",
+  logoUrl: "",
+  theme: "dark",
+  offlineMessage: "This stream is offline.",
+};
+
 export type RoomDoc = {
   ownerId: string;
   livekitRoomName?: string;
@@ -16,11 +37,14 @@ export type RoomDoc = {
     egressId?: string | null;
     playlistUrl?: string | null;
     error?: string | null;
+    stopAt?: string | null; // ISO
+    capMinutes?: number | null;
     presetId?: HlsPresetId;
     prefix?: string;
     startedAt?: FirebaseFirestore.Timestamp | null;
     updatedAt?: FirebaseFirestore.Timestamp | null;
   };
+  hlsConfig?: RoomHlsConfig;
   [key: string]: any;
 };
 
@@ -88,7 +112,7 @@ export async function getRoom(roomId: string): Promise<{
 
 export async function setHlsStarting(
   roomRef: FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData>,
-  params: { presetId: HlsPresetId; prefix: string }
+  params: { presetId: HlsPresetId; prefix: string; stopAt?: string | null; capMinutes?: number | null }
 ): Promise<void> {
   const runId = randomUUID();
   const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
@@ -98,6 +122,8 @@ export async function setHlsStarting(
     "hls.egressId": null,
     "hls.playlistUrl": null,
     "hls.error": null,
+    "hls.stopAt": params.stopAt ?? null,
+    "hls.capMinutes": params.capMinutes ?? null,
     "hls.presetId": params.presetId,
     "hls.prefix": params.prefix,
     "hls.runId": runId,
@@ -137,6 +163,13 @@ export async function setHlsIdle(
 ): Promise<void> {
   await roomRef.update({
     "hls.status": "idle",
+    "hls.egressId": null,
+    "hls.playlistUrl": null,
+    "hls.error": null,
+    "hls.runId": null,
+    "hls.startedAt": null,
+    "hls.stopAt": null,
+    "hls.capMinutes": null,
     "hls.updatedAt": admin.firestore.FieldValue.serverTimestamp(),
   });
 }

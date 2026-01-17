@@ -530,6 +530,7 @@ export default function Room() {
   const [planMultistreamEnabled, setPlanMultistreamEnabled] = useState<boolean>(false);
   const [planRecordingEnabled, setPlanRecordingEnabled] = useState<boolean>(true);
   const [planHlsEnabled, setPlanHlsEnabled] = useState<boolean>(false);
+  const [planHlsCustomizationEnabled, setPlanHlsCustomizationEnabled] = useState<boolean>(false);
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
   const [dualRecordingAllowed, setDualRecordingAllowed] = useState<boolean>(false);
   const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(false);
@@ -891,8 +892,20 @@ export default function Room() {
             if (typeof features.rtmpMultistream === "boolean") {
               setPlanMultistreamEnabled(features.rtmpMultistream);
             }
-            if (typeof (features as any).canHls === "boolean") {
-              setPlanHlsEnabled((features as any).canHls);
+            const runtimeHls = (features as any).hls ?? (features as any).hlsEnabled;
+            const legacyHls = (features as any).canHls;
+            if (typeof runtimeHls === "boolean") {
+              setPlanHlsEnabled(runtimeHls);
+            } else if (typeof legacyHls === "boolean") {
+              setPlanHlsEnabled(legacyHls);
+            }
+
+            const customizationHls = (features as any).hlsCustomizationEnabled;
+            if (typeof customizationHls === "boolean") {
+              setPlanHlsCustomizationEnabled(customizationHls);
+            } else {
+              // Default: customization follows runtime unless explicitly set.
+              setPlanHlsCustomizationEnabled(typeof runtimeHls === "boolean" ? runtimeHls : !!legacyHls);
             }
             if (typeof limits.maxGuests === "number") {
               setMaxGuestsAllowed(limits.maxGuests);
@@ -1765,10 +1778,10 @@ export default function Room() {
   }
 
   const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
-  const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • Multi:${planMultistreamEnabled ? "on" : "off"} • HLS:${planHlsEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
+  const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • Multi:${planMultistreamEnabled ? "on" : "off"} • HLS:${planHlsEnabled ? "on" : "off"} • HLS Setup:${planHlsCustomizationEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
   const recordingEnabled = planRecordingEnabled && can("canRecord");
   const canMultistream = planMultistreamEnabled && can("canDestinations");
-  const canHls = planHlsEnabled && isHost;
+  const canHls = planHlsEnabled && can("canStream");
 
   const handleUpgradeHls = () => {
     nav("/settings/billing");
@@ -2131,6 +2144,7 @@ export default function Room() {
           recordingEnabled={recordingEnabled}
           multistreamAllowed={canMultistream}
           hlsEnabled={canHls}
+          hlsCustomizationEnabled={planHlsCustomizationEnabled && (isHost || can("canLayout"))}
           showHlsSection={platformHlsEnabled}
           onUpgradeHls={handleUpgradeHls}
           dualRecordingAllowed={dualRecordingAllowed}

@@ -366,11 +366,21 @@ router.get("/me", async (req, res) => {
       );
 
       const canHls = Boolean(
-        (features as any).canHls ??
+        (features as any).hls ??
+          (features as any).hlsEnabled ??
+          (features as any).canHls ??
           rawFeatures.canHls ??
           rawFeatures.hls ??
           rawFeatures.hlsBroadcast
       );
+
+      const hlsCustomizationEnabled = (() => {
+        const explicit = (features as any).hlsCustomizationEnabled;
+        if (typeof explicit === "boolean") return explicit;
+        const legacy = rawFeatures.canCustomizeHlsPage;
+        if (typeof legacy === "boolean") return legacy;
+        return canHls;
+      })();
 
       effectiveEntitlements = {
         planId: entitlements.planId,
@@ -381,6 +391,11 @@ router.get("/me", async (req, res) => {
           dualRecording: !!(rawFeatures.dualRecording ?? rawFeatures.dual_recording),
           watermark: !!(rawFeatures.watermarkRecordings ?? rawFeatures.watermark),
           canHls,
+          // Canonical + compatibility fields for HLS
+          hls: canHls,
+          hlsEnabled: canHls,
+          hlsCustomizationEnabled,
+          canCustomizeHlsPage: hlsCustomizationEnabled,
         },
         limits: {
           maxDestinations: resolveMaxDestinations(limits),
@@ -389,6 +404,7 @@ router.get("/me", async (req, res) => {
           transcodeMinutes: Number(limits.transcodeMinutes || 0),
           maxRecordingMinutesPerClip: Number(limits.maxRecordingMinutesPerClip || 0),
         },
+        caps: entitlements.caps || {},
       };
     } catch (e) {
       console.error("[account/me] failed to compute effectiveEntitlements", e);
@@ -421,6 +437,7 @@ router.get("/me", async (req, res) => {
       currentTosVersion: CURRENT_TOS_VERSION,
       platformFlags: {
         hlsEnabled: hlsUi.enabled,
+        hlsSettingsTab: hlsUi.enabled,
       },
       planId: effectiveEntitlements?.planId ?? entitlements.planId,
       effectiveEntitlements,
@@ -495,6 +512,33 @@ router.patch("/media-prefs", async (req, res) => {
   } catch (err: any) {
     console.error("[account/media-prefs] error", err);
     return res.status(500).json({ error: "failed_to_update_media_prefs" });
+  }
+});
+
+// Explicit Terms of Service acceptance endpoint for Billing settings.
+// Allows users to acknowledge the CURRENT_TOS_VERSION without changing plans.
+router.post("/accept-tos", async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ error: "unauthorized" });
+
+    const userRef = firestore.collection("users").doc(uid);
+    const now = Date.now();
+
+    await userRef.set(
+      {
+        tosVersion: CURRENT_TOS_VERSION,
+        tosAcceptedAt: now,
+        tosAcceptedIp: req.ip || undefined,
+        tosUserAgent: req.get("user-agent") || undefined,
+      },
+      { merge: true }
+    );
+
+    return res.json({ success: true, tosVersion: CURRENT_TOS_VERSION, tosAcceptedAt: now });
+  } catch (err: any) {
+    console.error("[account/accept-tos] error", err);
+    return res.status(500).json({ error: "internal_error" });
   }
 });
 

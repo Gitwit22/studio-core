@@ -113,8 +113,15 @@ interface Plan {
     dualRecording?: boolean;
     rtmpMultistream?: boolean;
     canHls?: boolean;
+    // Canonical HLS runtime flag (requested)
+    hls?: boolean;
+    hlsEnabled?: boolean;
+    hlsCustomizationEnabled?: boolean;
     advancedPermissions?: boolean;
     watermarkRecordings: boolean;
+  };
+  caps?: {
+    hlsMaxMinutesPerSession?: number | null;
   };
   editing: {
     access: boolean;
@@ -399,7 +406,11 @@ export default function AdminDashboard() {
       if (tab === "users") await loadUsers();
       if (tab === "usage") await loadUsage();
       if (tab === "features") await loadFeatures();
-      if (tab === "plans") await loadPlans();
+      if (tab === "plans") {
+        // Plans UI also needs global feature flags (ex: HLS Settings Tab) so we can
+        // hide/show plan UI affordances based on sitewide toggles.
+        await Promise.all([loadPlans(), loadFeatures()]);
+      }
     } catch (err) {
       console.error("Failed to load data:", err);
       showToast("Failed to load admin data");
@@ -407,6 +418,11 @@ export default function AdminDashboard() {
       setTabLoading(false);
     }
   };
+
+  const platformHlsEnabled = useMemo(() => {
+    const flag = features.find((f) => f.name === "hlsSettingsTab");
+    return typeof flag?.enabled === "boolean" ? flag.enabled : true;
+  }, [features]);
 
   const loadStats = async () => {
     const res = await apiFetch("/api/admin/stats");
@@ -559,8 +575,8 @@ export default function AdminDashboard() {
   };
 
   const updatePlanField = (planId: string, path: string, value: any) => {
-    setPlans(
-      plans.map((p) => {
+    setPlans((prevPlans) =>
+      prevPlans.map((p) => {
         if (p.id !== planId) return p;
         const updated = JSON.parse(JSON.stringify(p)); // Deep clone
         const keys = path.split(".");
@@ -1218,6 +1234,7 @@ export default function AdminDashboard() {
                               }}
                             >
                               <button
+                                type="button"
                                 onClick={() => savePlan(plan)}
                                 disabled={isSaving}
                                 style={{ ...S.saveBtn, opacity: isSaving ? 0.7 : 1 }}
@@ -1310,15 +1327,63 @@ export default function AdminDashboard() {
                                 }}
                               />
                               <ToggleRow label="Stream Destinations (RTMP)" value={plan.features?.rtmp} onChange={(v) => updatePlanField(plan.id, "features.rtmp", v)} />
-                              <ToggleRow
-                                label="HLS Broadcast Page"
-                                value={plan.features?.canHls}
-                                onChange={(v) => {
-                                  // Write both canHls and hls for clear plan docs and backward compatibility
-                                  updatePlanField(plan.id, "features.canHls", v);
-                                  updatePlanField(plan.id, "features.hls", v);
-                                }}
-                              />
+                              {platformHlsEnabled && (
+                                <>
+                                  <ToggleRow
+                                    label="HLS (Runtime)"
+                                    value={Boolean((plan.features as any)?.hls ?? (plan.features as any)?.hlsEnabled ?? plan.features?.canHls)}
+                                    onChange={(v) => {
+                                      // Canonical write: features.hls
+                                      updatePlanField(plan.id, "features.hls", v);
+
+                                      // Backward compatibility: keep known aliases in sync
+                                      updatePlanField(plan.id, "features.hlsEnabled", v);
+                                      updatePlanField(plan.id, "features.canHls", v);
+                                    }}
+                                  />
+
+                                  <div style={S.editRow}>
+                                    <label style={{ ...S.editLabel, lineHeight: 1.2 }}>
+                                      <div>HLS max minutes per session</div>
+                                      <div style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600, marginTop: 4 }}>Leave blank for unlimited</div>
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={plan.caps?.hlsMaxMinutesPerSession ?? ""}
+                                      onChange={(e) => {
+                                        const raw = String(e.target.value || "").trim();
+                                        if (!raw) {
+                                          updatePlanField(plan.id, "caps.hlsMaxMinutesPerSession", null);
+                                          return;
+                                        }
+                                        const n = Number(raw);
+                                        if (!Number.isFinite(n)) return;
+                                        updatePlanField(plan.id, "caps.hlsMaxMinutesPerSession", n);
+                                      }}
+                                      style={{ ...S.editInput, width: 120 }}
+                                      placeholder="unlimited"
+                                    />
+                                  </div>
+
+                                  <ToggleRow
+                                    label="HLS Setup (Branding/Viewer Page)"
+                                    value={Boolean(
+                                      (plan.features as any)?.hlsCustomizationEnabled ??
+                                        (plan.features as any)?.canCustomizeHlsPage ??
+                                        (plan.features as any)?.hlsEnabled ??
+                                        plan.features?.canHls ??
+                                        (plan.features as any)?.hls
+                                    )}
+                                    onChange={(v) => {
+                                      // Canonical write: features.hlsCustomizationEnabled (new)
+                                      updatePlanField(plan.id, "features.hlsCustomizationEnabled", v);
+
+                                      // Compatibility alias
+                                      updatePlanField(plan.id, "features.canCustomizeHlsPage", v);
+                                    }}
+                                  />
+                                </>
+                              )}
                               <ToggleRow
                                 label="Advanced Permissions Mode"
                                 value={plan.features?.advancedPermissions}
@@ -1545,7 +1610,12 @@ function ToggleRow({ label, value, onChange }: { label: string; value?: boolean;
   return (
     <div style={S.editRow}>
       <label style={S.editLabel}>{label}</label>
-      <button onClick={() => onChange(!value)} style={{ ...S.toggleSmall, background: value ? "linear-gradient(135deg,#22c55e,#16a34a)" : "#374151" }}>
+      <button
+        type="button"
+        onClick={() => onChange(!value)}
+        style={{ ...S.toggleSmall, background: value ? "linear-gradient(135deg,#22c55e,#16a34a)" : "#374151" }}
+        aria-pressed={!!value}
+      >
         <div style={{ ...S.toggleKnobSmall, left: value ? 20 : 2 }} />
       </button>
     </div>

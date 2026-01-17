@@ -858,10 +858,29 @@ router.get("/features", async (req, res) => {
   try {
     const snapshot = await firestore.collection("featureFlags").get();
 
-    const features = snapshot.docs.map((doc) => ({
+    // Ensure important flags are visible in the Admin UI even before they have
+    // been explicitly created in Firestore.
+    const seededDefaults: Array<{ name: string; enabled: boolean }> = [
+      { name: "hlsSettingsTab", enabled: true },
+    ];
+
+    const byName = new Map<string, any>();
+    snapshot.docs.forEach((doc) => {
+      byName.set(doc.id, doc.data());
+    });
+
+    const features: any[] = snapshot.docs.map((doc) => ({
       name: doc.id,
       ...doc.data(),
     }));
+
+    for (const seed of seededDefaults) {
+      if (!byName.has(seed.name)) {
+        features.push({ name: seed.name, enabled: seed.enabled, seeded: true });
+      }
+    }
+
+    features.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
 
     res.json({ features });
   } catch (error: any) {
