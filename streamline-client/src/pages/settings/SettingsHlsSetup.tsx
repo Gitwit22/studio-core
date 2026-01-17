@@ -190,6 +190,30 @@ export default function SettingsHlsSetup({
     }
   };
 
+  const handleDelete = async (embedId: string) => {
+    const ok = window.confirm("Delete this embed? It will be removed from the list.");
+    if (!ok) return;
+
+    setListMessage(null);
+    setListError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embedId)}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: buildAuthHeaders(),
+        body: JSON.stringify({ archived: true }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || "Failed to delete");
+      }
+      setListMessage("Deleted");
+      await loadEmbeds({ keepSelection: false });
+    } catch (e: any) {
+      setListError(e?.message || "Failed to delete");
+    }
+  };
+
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     setCreateError(null);
@@ -438,7 +462,14 @@ export default function SettingsHlsSetup({
                     style={{ ...S.secondaryBtn, padding: "8px 12px", fontSize: 13, borderColor: "rgba(239,68,68,0.4)", color: "#fca5a5" }}
                     onClick={() => handleArchive(embed.embedId)}
                   >
-                    Archive
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...S.secondaryBtn, padding: "8px 12px", fontSize: 13, borderColor: "rgba(239,68,68,0.7)", color: "#fecaca" }}
+                    onClick={() => handleDelete(embed.embedId)}
+                  >
+                    Delete
                   </button>
                 </div>
               </div>

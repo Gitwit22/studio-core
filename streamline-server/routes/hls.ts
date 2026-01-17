@@ -97,10 +97,6 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     return res.status(401).json({ error: "room_token_required" });
   }
 
-  if (access.roomId !== roomId) {
-    return res.status(403).json({ error: "room_mismatch" });
-  }
-
   const presetId = (req.body?.presetId || "hls_720p") as HlsPresetId;
 
   try {
@@ -216,10 +212,6 @@ router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any,
     return res.status(401).json({ error: "room_token_required" });
   }
 
-  if (access.roomId !== roomId) {
-    return res.status(403).json({ error: "room_mismatch" });
-  }
-
   try {
     const uid = (req as any).user?.uid;
     if (!uid) {
@@ -326,10 +318,6 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
   const access = (req as any).roomAccess as RoomAccessClaims | undefined;
   if (!access || !access.roomId) {
     return res.status(401).json({ error: "room_token_required" });
-  }
-
-  if (access.roomId !== roomId) {
-    return res.status(403).json({ error: "room_mismatch" });
   }
 
   try {
