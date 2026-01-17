@@ -3,6 +3,7 @@ import admin from "firebase-admin";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
+import { isAdmin } from "../middleware/adminAuth";
 
 const router = Router();
 
@@ -66,13 +67,21 @@ router.put("/:roomId/active-embed", requireAuth as any, async (req: any, res) =>
   try {
     const ctx = await assertRoomPerm(req as any, roomId, "canStream");
 
-    const embedRef = db.collection("users").doc(uid).collection("savedEmbeds").doc(embedId);
+    const embedRef = db.collection("savedEmbeds").doc(embedId);
     const embedSnap = await embedRef.get();
     if (!embedSnap.exists) {
       return res.status(404).json({ error: "not_found" });
     }
 
     const embedData = (embedSnap.data() || {}) as any;
+    const ownerId = normalizeId(embedData.ownerId || embedData.createdBy);
+    if (ownerId && ownerId !== uid) {
+      const adminOk = await isAdmin(uid);
+      if (!adminOk) {
+        return res.status(403).json({ error: "forbidden" });
+      }
+    }
+
     const storedRoomId = normalizeId(embedData.roomId);
     if (!storedRoomId || storedRoomId !== embedRoomId) {
       return res.status(400).json({

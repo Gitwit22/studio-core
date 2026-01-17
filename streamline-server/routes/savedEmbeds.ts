@@ -5,6 +5,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { ensureRoomDoc, DEFAULT_ROOM_HLS_CONFIG, type RoomHlsConfig } from "../services/rooms";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { asOptionalBoolean, asOptionalEnum, asTrimmedString } from "../lib/inputValidation";
+import { isAdmin } from "../middleware/adminAuth";
 
 const router = Router();
 
@@ -20,6 +21,7 @@ type SavedEmbedDoc = {
   // New schema fields
   name: string;
   description?: string;
+  ownerId: string;
   createdBy: string;
   createdAt: FirebaseFirestore.FieldValue | FirebaseFirestore.Timestamp;
   updatedAt: FirebaseFirestore.FieldValue | FirebaseFirestore.Timestamp;
@@ -34,16 +36,13 @@ type SavedEmbedDoc = {
   // Legacy fields kept for backward compatibility with existing clients.
   // "label" mirrors "name" and may be removed once all callers migrate.
   label?: string;
+  // TODO: rename roomId -> homeRoomId (metadata/guard only; viewer follows activeRoomId).
   roomId: string;
   archived?: boolean;
 };
 
 function viewerPath(savedEmbedId: string): string {
   return `/live/${savedEmbedId}`;
-}
-
-function savedEmbedsCol(uid: string) {
-  return db.collection("users").doc(uid).collection("savedEmbeds");
 }
 
 function errorResponse(res: any, status: number, code: "invalid_input" | "not_found" | "server_error") {
@@ -125,7 +124,7 @@ router.post("/", requireAuth as any, async (req: any, res) => {
   const livekitRoomName = buildFriendlyLivekitRoomName(req, resolvedName, roomId);
 
   // Pre-create the embed document reference so we know its id up front.
-  const embedRef = savedEmbedsCol(uid).doc();
+  const embedRef = db.collection("savedEmbeds").doc();
   const savedEmbedId = embedRef.id;
 
   try {
@@ -154,6 +153,7 @@ router.post("/", requireAuth as any, async (req: any, res) => {
       savedEmbedId,
       embedId: savedEmbedId,
       name: resolvedName,
+      ownerId: uid,
       createdBy: uid,
       createdAt: serverTimestamp,
       updatedAt: serverTimestamp,
@@ -195,9 +195,11 @@ router.get("/", requireAuth as any, async (req: any, res) => {
   if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
   try {
-    // NOTE: We intentionally avoid Firestore composite index requirements here.
-    // Query by archived flag only, then sort in memory by updatedAt desc.
-    const snap = await savedEmbedsCol(uid)
+    // Query top-level collection by owner + archived flag, then sort in memory by updatedAt desc.
+    // NOTE: This may require a composite index on (ownerId, archived).
+    const snap = await db
+      .collection("savedEmbeds")
+      .where("ownerId", "==", uid)
       .where("archived", "==", false)
       .get();
 
@@ -252,17 +254,11 @@ router.get("/public/:savedEmbedId", async (req: any, res) => {
   }
 
   try {
-    const snap = await db
-      .collectionGroup("savedEmbeds")
-      .where("embedId", "==", savedEmbedId)
-      .limit(1)
-      .get();
-
-    if (snap.empty) {
+    const docSnap = await db.collection("savedEmbeds").doc(savedEmbedId).get();
+    if (!docSnap.exists) {
       return res.status(404).json({ error: "not_found" });
     }
 
-    const docSnap = snap.docs[0];
     const data = (docSnap.data() || {}) as Partial<SavedEmbedDoc>;
 
     // Treat soft-deleted/archived embeds as not found for public viewers
@@ -316,13 +312,20 @@ router.put("/:embedId", requireAuth as any, async (req: any, res) => {
   if (labelRes.value !== undefined && !labelRes.value) {
     return errorResponse(res, 400, "invalid_input");
   }
-
-  const ref = savedEmbedsCol(uid).doc(embedId);
-
   try {
+    const ref = db.collection("savedEmbeds").doc(embedId);
     const snap = await ref.get();
     if (!snap.exists) {
       return errorResponse(res, 404, "not_found");
+    }
+
+    const existing = (snap.data() || {}) as Partial<SavedEmbedDoc>;
+    const ownerId = String((existing.ownerId || (existing as any).createdBy || "").trim());
+    if (ownerId && ownerId !== uid) {
+      const adminOk = await isAdmin(uid);
+      if (!adminOk) {
+        return res.status(403).json({ error: "forbidden" });
+      }
     }
 
     const patch: any = {
