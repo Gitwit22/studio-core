@@ -183,7 +183,11 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
       // always resolves to the room that is actually streaming.
       const savedEmbedId = (room as any).savedEmbedId as string | undefined;
       const ownerId = (room as any).ownerId as string | undefined;
-      if (savedEmbedId && ownerId) {
+      if (!savedEmbedId) {
+        console.warn("[hls] start: room has no savedEmbedId; activeRoomId will not be synced", { roomId });
+      } else if (!ownerId) {
+        console.warn("[hls] start: room has savedEmbedId but no ownerId; activeRoomId will not be synced", { roomId, savedEmbedId });
+      } else {
         try {
           const embedRef = firestore.collection("users").doc(ownerId).collection("savedEmbeds").doc(savedEmbedId);
           await embedRef.set(

@@ -237,6 +237,27 @@ export default function StreamSetupModalV2({
     }
   }, [hlsRoomId]);
 
+  // Whenever the modal opens for a different room, clear any previous
+  // bound embed state so we never show a "ghost" connection while
+  // the new room's binding is being resolved.
+  useEffect(() => {
+    if (!open) {
+      setBoundEmbedId(null);
+      setBoundEmbedName("");
+      setBoundEmbedViewerPath("");
+      setBoundEmbedError(null);
+      setBoundEmbedLoading(false);
+      return;
+    }
+
+    // On open/room change, clear to a neutral state; the
+    // active-embed fetch will repopulate as needed.
+    setBoundEmbedId(null);
+    setBoundEmbedName("");
+    setBoundEmbedViewerPath("");
+    setBoundEmbedError(null);
+  }, [open, hlsRoomId]);
+
   const updateRoomUiSection = (section: RoomUiSectionKey, open: boolean) => {
     setRoomUiState((prev) => {
       const safePrev = prev || DEFAULT_ROOM_UI_STATE;
@@ -331,6 +352,13 @@ export default function StreamSetupModalV2({
   // Initial one-shot fetch of HLS status so we can show chip even when collapsed
   useEffect(() => {
     if (!open) return;
+    if (!hlsRoomReady) {
+      setHlsStatus("idle");
+      setHlsPlaylistUrl(null);
+      setHlsEgressId(null);
+      setHlsError(null);
+      return;
+    }
     if (!effectiveHlsRoomId) {
       setHlsStatus("idle");
       setHlsPlaylistUrl(null);
@@ -389,11 +417,12 @@ export default function StreamSetupModalV2({
     return () => {
       cancelled = true;
     };
-  }, [open, effectiveHlsRoomId, selectedEmbedReady]);
+  }, [open, effectiveHlsRoomId, hlsRoomReady, roomAccessToken]);
 
   // Poll while HLS section is open or status is starting
   useEffect(() => {
     if (!open) return;
+    if (!hlsRoomReady) return;
     if (!effectiveHlsRoomId) return;
 
     const shouldPoll = roomUiState.hls && (hlsStatus === "starting" || hlsStatus === "live");
@@ -576,7 +605,18 @@ export default function StreamSetupModalV2({
   const startDisabled = streamIsBusy || streamDisallowed || selectedPlatforms.length === 0 || missingKeySelected || warmupActive;
 
   const handleStartHls = async () => {
-    if (!effectiveHlsRoomId) return;
+    if (!hlsRoomReady || !effectiveHlsRoomId) {
+      // Defensive guard: HLS should never start without a canonical roomId.
+      // This should already be prevented by disabled state, but we guard here
+      // to avoid confusing failures if the UI logic ever regresses.
+      console.warn("[HLS] start requested without ready roomId", { hlsRoomReady, effectiveHlsRoomId });
+      return;
+    }
+    if (!boundEmbedId) {
+      // HLS must be bound to a Saved Embed so /live/:savedEmbedId resolves.
+      console.warn("[HLS] start requested without bound Saved Embed", { roomId: effectiveHlsRoomId });
+      return;
+    }
     if (hlsStatus === "starting" || hlsStatus === "live") return;
     setHlsBusy(true);
     setHlsError(null);

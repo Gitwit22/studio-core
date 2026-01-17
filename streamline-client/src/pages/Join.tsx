@@ -8,6 +8,7 @@ import { useNavigate, useSearchParams,} from "react-router-dom";
 type SavedEmbedSummary = {
   embedId: string;
   label: string;
+  activeRoomId?: string | null;
 };
 
 
@@ -129,6 +130,8 @@ export default function Join() {
   const [savedEmbedsError, setSavedEmbedsError] = useState<string | null>(null);
   const [selectedSavedEmbedId, setSelectedSavedEmbedId] = useState<string>("");
 
+  const [joinMode, setJoinMode] = useState<"new" | "saved">("new");
+
 // Use /api/auth/me for admin status
 const { user: authUser, loading: authLoading } = useAuthMe();
 const isAdmin = !!authUser?.isAdmin;
@@ -249,6 +252,7 @@ const adminLoading = authLoading;
           .map((e: any) => ({
             embedId: String(e?.embedId || "").trim(),
             label: String(e?.label || "").trim(),
+            activeRoomId: typeof e?.activeRoomId === "string" ? e.activeRoomId : null,
           }))
           .filter((e) => !!e.embedId);
         setSavedEmbeds(next);
@@ -328,13 +332,14 @@ const adminLoading = authLoading;
     e.preventDefault();
 
     const name = sanitizeDisplayName(displayName).trim();
-    const roomLabel = roomName.trim();
-    if (!name || !roomLabel) {
-      if (!name) {
-        alert(
-          "Please enter a valid name using letters, numbers, spaces, -, –, ', & only."
-        );
-      }
+    if (!name) {
+      alert("Please enter a valid name using letters, numbers, spaces, -, –, ', & only.");
+      return;
+    }
+
+    const isUsingSaved = !isParticipant && joinMode === "saved";
+    if (isUsingSaved && !selectedSavedEmbedId) {
+      alert("Select a Saved Room or switch to Create New Room.");
       return;
     }
 
@@ -343,6 +348,12 @@ const adminLoading = authLoading;
     // Host flow: create a Firestore room first, then navigate to /room/:roomId
     if (!isParticipant) {
       try {
+        const roomLabel = roomName.trim();
+        if (!roomLabel) {
+          alert("Please enter a room name.");
+          return;
+        }
+
         const res = await fetch(`${API_BASE}/api/rooms/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -350,7 +361,7 @@ const adminLoading = authLoading;
           body: JSON.stringify({
             livekitRoomName: roomLabel,
             roomType: "rtc",
-            savedEmbedId: selectedSavedEmbedId || undefined,
+            savedEmbedId: isUsingSaved ? selectedSavedEmbedId : undefined,
           }),
         });
 
@@ -908,8 +919,58 @@ const adminLoading = authLoading;
               </div>
             )}
 
-            {/* JOIN SAVED ROOM (host only) */}
+            {/* HOST JOIN MODE TOGGLE + FIELDS */}
             {!isParticipant && savedEmbeds.length > 0 && (
+              <div style={{ marginBottom: "20px" }}>
+                <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>Join mode</div>
+                <div
+                  style={{
+                    display: "inline-flex",
+                    padding: "3px",
+                    borderRadius: "999px",
+                    background: "rgba(15,23,42,0.85)",
+                    border: "1px solid rgba(55,65,81,0.9)",
+                    gap: "4px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setJoinMode("new")}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      border: "none",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      background: joinMode === "new" ? "#f97316" : "transparent",
+                      color: joinMode === "new" ? "#111827" : "#e5e7eb",
+                      fontWeight: joinMode === "new" ? 700 : 500,
+                    }}
+                  >
+                    Create New Room
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJoinMode("saved")}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      border: "none",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      background: joinMode === "saved" ? "#f97316" : "transparent",
+                      color: joinMode === "saved" ? "#111827" : "#e5e7eb",
+                      fontWeight: joinMode === "saved" ? 700 : 500,
+                    }}
+                  >
+                    Use Saved Room
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* HOST: Saved Room selector when using saved mode */}
+            {!isParticipant && savedEmbeds.length > 0 && joinMode === "saved" && (
               <div style={{ marginBottom: "24px" }}>
                 <label
                   style={{
@@ -920,7 +981,7 @@ const adminLoading = authLoading;
                     marginBottom: "8px",
                   }}
                 >
-                  Join Saved Room (optional)
+                  Saved Room
                 </label>
                 <select
                   value={selectedSavedEmbedId}
@@ -937,13 +998,19 @@ const adminLoading = authLoading;
                     outline: "none",
                   }}
                 >
-                  <option value="">Create a new show…</option>
+                  <option value="">Select a Saved Room…</option>
                   {savedEmbeds.map((embed) => (
                     <option key={embed.embedId} value={embed.embedId}>
                       {embed.label || embed.embedId}
+                      {embed.activeRoomId ? " (Active)" : ""}
                     </option>
                   ))}
                 </select>
+                {selectedSavedEmbedId && (
+                  <div style={{ marginTop: "6px", fontSize: "12px", color: "#9ca3af" }}>
+                    This will broadcast to: <span style={{ color: "#e5e7eb" }}>/live/{selectedSavedEmbedId}</span>
+                  </div>
+                )}
                 {savedEmbedsError && (
                   <div style={{ marginTop: "6px", fontSize: "12px", color: "#fecaca" }}>
                     {savedEmbedsError}

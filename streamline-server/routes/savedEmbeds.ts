@@ -256,6 +256,12 @@ router.get("/public/:savedEmbedId", async (req: any, res) => {
     const docSnap = snap.docs[0];
     const data = (docSnap.data() || {}) as Partial<SavedEmbedDoc>;
 
+    // Treat soft-deleted/archived embeds as not found for public viewers
+    // so the /live/:id page can show a clear "link removed" state.
+    if (data.isDeleted || data.archived) {
+      return res.status(404).json({ error: "embed_removed" });
+    }
+
     const name = String((data.name || data.label || "")).trim();
     const description = (data.description || "") as string | undefined;
     const activeRoomId = typeof data.activeRoomId === "string" ? data.activeRoomId : null;
