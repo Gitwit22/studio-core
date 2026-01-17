@@ -96,11 +96,24 @@ export default function Live() {
         const res = await fetch(`${API_BASE}/api/saved-embeds/public/${encodeURIComponent(savedEmbedId)}`);
 
         if (!res.ok) {
-          if (res.status === 404) {
-            setStatus("error");
+          // Try to read a structured error so we can distinguish
+          // between a removed embed vs other failures.
+          let errCode: string | undefined;
+          try {
+            const body = (await res.json().catch(() => null)) as { error?: string } | null;
+            if (body && typeof body.error === "string") {
+              errCode = body.error;
+            }
+          } catch {
+            // ignore JSON parse failure
+          }
+
+          setStatus("error");
+          if (res.status === 404 && errCode === "embed_removed") {
+            setError("This viewer link was removed by the host.");
+          } else if (res.status === 404) {
             setError("This viewer link is no longer valid.");
           } else {
-            setStatus("error");
             setError("Failed to load viewer page.");
           }
           return;

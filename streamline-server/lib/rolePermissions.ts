@@ -153,6 +153,14 @@ export async function assertRoomPerm(
   }
 
   const user = (req as any).user as { uid: string } | undefined;
+  // Normalize account to an object so downstream checks never need
+  // to guard against undefined. This mirrors how other routes use
+  // req.account when present and keeps the logic explicit.
+  const account = ((req as any).account || {}) as {
+    isAdmin?: boolean;
+    adminOverride?: boolean;
+    adminOverrideHls?: boolean;
+  };
   const invite = (req as any).invite as InviteClaims | undefined;
   const roomAccess = (req as any).roomAccess as RoomAccessClaims | undefined;
 
@@ -175,8 +183,20 @@ export async function assertRoomPerm(
   } else if (user) {
     uid = user.uid;
     actorType = "user";
-    if (roomData.ownerId && roomData.ownerId === uid) {
+    const isOwner = roomData.ownerId && roomData.ownerId === uid;
+    const hasAdminOverride =
+      !!account.isAdmin ||
+      !!account.adminOverride ||
+      !!account.adminOverrideHls;
+
+    if (isOwner) {
       role = "owner";
+      permissions = allTruePermissions();
+    } else if (hasAdminOverride) {
+      // Treat admins / override accounts as having full permissions for
+      // room-level operations such as starting/stopping HLS and managing
+      // recording or destinations.
+      role = "admin";
       permissions = allTruePermissions();
     } else {
       role = "participant";
@@ -193,7 +213,7 @@ export async function assertRoomPerm(
     }
   }
 
-  if (role === "owner") {
+  if (role === "owner" || role === "admin") {
     return {
       roomId: trimmedRoomId,
       room: roomData,
