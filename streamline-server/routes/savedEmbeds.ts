@@ -148,23 +148,42 @@ router.get("/", requireAuth as any, async (req: any, res) => {
   if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
   try {
+    // NOTE: We intentionally avoid Firestore composite index requirements here.
+    // Query by archived flag only, then sort in memory by updatedAt desc.
     const snap = await savedEmbedsCol(uid)
       .where("archived", "==", false)
-      .orderBy("updatedAt", "desc")
       .get();
 
-    const embeds = snap.docs.map((d) => {
-      const data = (d.data() || {}) as Partial<SavedEmbedDoc>;
-      const roomId = String(data.roomId || "");
-      const label = String(data.label || "");
+    const embeds = snap.docs
+      .map((d) => {
+        const data = (d.data() || {}) as Partial<SavedEmbedDoc>;
+        const roomId = String(data.roomId || "");
+        const label = String(data.label || "");
 
-      return {
-        embedId: d.id,
-        label,
-        roomId,
-        viewerPath: viewerPath(roomId),
-      };
-    });
+        // Firestore admin timestamps expose toMillis; fall back to 0 if missing.
+        const updatedAtRaw: any = data.updatedAt as any;
+        let updatedAtMs = 0;
+        try {
+          if (updatedAtRaw?.toMillis) {
+            updatedAtMs = updatedAtRaw.toMillis();
+          } else if (typeof updatedAtRaw === "string") {
+            const t = Date.parse(updatedAtRaw);
+            if (!Number.isNaN(t)) updatedAtMs = t;
+          }
+        } catch {
+          updatedAtMs = 0;
+        }
+
+        return {
+          embedId: d.id,
+          label,
+          roomId,
+          viewerPath: viewerPath(roomId),
+          _updatedAtMs: updatedAtMs,
+        };
+      })
+      .sort((a, b) => b._updatedAtMs - a._updatedAtMs)
+      .map(({ _updatedAtMs, ...rest }) => rest);
 
     return res.json({ embeds });
   } catch (err) {
