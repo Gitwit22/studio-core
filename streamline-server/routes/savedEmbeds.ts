@@ -9,15 +9,33 @@ import { asOptionalBoolean, asOptionalEnum, asTrimmedString } from "../lib/input
 const router = Router();
 
 type SavedEmbedDoc = {
-  label: string;
-  roomId: string;
+  // Stable identifier for the viewer page / saved embed.
+  // This always matches the Firestore document id.
+  savedEmbedId?: string;
+
+  // New schema fields
+  name: string;
+  description?: string;
+  createdBy: string;
   createdAt: FirebaseFirestore.FieldValue | FirebaseFirestore.Timestamp;
   updatedAt: FirebaseFirestore.FieldValue | FirebaseFirestore.Timestamp;
-  archived: boolean;
+
+  // Soft-delete semantics
+  isDeleted: boolean;
+  deletedAt?: FirebaseFirestore.FieldValue | FirebaseFirestore.Timestamp;
+
+  // Currently active host room for this viewer page (if any)
+  activeRoomId?: string;
+
+  // Legacy fields kept for backward compatibility with existing clients.
+  // "label" mirrors "name" and may be removed once all callers migrate.
+  label?: string;
+  roomId: string;
+  archived?: boolean;
 };
 
-function viewerPath(roomId: string): string {
-  return `/live/${roomId}`;
+function viewerPath(savedEmbedId: string): string {
+  return `/live/${savedEmbedId}`;
 }
 
 function savedEmbedsCol(uid: string) {
@@ -79,8 +97,17 @@ router.post("/", requireAuth as any, async (req: any, res) => {
   const uid = req.user?.uid;
   if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
-  const labelRes = asTrimmedString(req.body?.label, { required: true, maxLen: 60 });
-  if (!labelRes.ok || !labelRes.value) {
+  // Accept either the new "name" field or legacy "label".
+  const nameRes = asTrimmedString(req.body?.name, { required: false, maxLen: 60 });
+  const labelRes = asTrimmedString(req.body?.label, { required: false, maxLen: 60 });
+  const descriptionRes = asTrimmedString(req.body?.description, { required: false, maxLen: 200 });
+
+  if (!nameRes.ok || !labelRes.ok || !descriptionRes.ok) {
+    return errorResponse(res, 400, "invalid_input");
+  }
+
+  const resolvedName = (nameRes.value || labelRes.value || "").trim();
+  if (!resolvedName) {
     return errorResponse(res, 400, "invalid_input");
   }
 
@@ -89,11 +116,13 @@ router.post("/", requireAuth as any, async (req: any, res) => {
     return errorResponse(res, 400, "invalid_input");
   }
 
-  const label = labelRes.value;
-
   // Create a NEW Firestore roomId (canonical), and create a friendly LiveKit room name.
   const roomId = db.collection("rooms").doc().id;
-  const livekitRoomName = buildFriendlyLivekitRoomName(req, label, roomId);
+  const livekitRoomName = buildFriendlyLivekitRoomName(req, resolvedName, roomId);
+
+  // Pre-create the embed document reference so we know its id up front.
+  const embedRef = savedEmbedsCol(uid).doc();
+  const savedEmbedId = embedRef.id;
 
   try {
     await ensureRoomDoc({
@@ -102,6 +131,7 @@ router.post("/", requireAuth as any, async (req: any, res) => {
       livekitRoomName,
       roomType: "rtc",
       initialStatus: "idle",
+      savedEmbedId,
     });
 
     // Initialize rooms/{roomId}.hlsConfig via merge update.
@@ -115,13 +145,21 @@ router.post("/", requireAuth as any, async (req: any, res) => {
     await db.collection("rooms").doc(roomId).set({ hlsConfig: nextHlsConfig }, { merge: true });
 
     const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
-    const embedRef = savedEmbedsCol(uid).doc();
 
     const doc: SavedEmbedDoc = {
-      label,
-      roomId,
+      savedEmbedId,
+      name: resolvedName,
+      description: descriptionRes.value || undefined,
+      createdBy: uid,
       createdAt: serverTimestamp,
       updatedAt: serverTimestamp,
+      isDeleted: false,
+      deletedAt: undefined,
+      activeRoomId: null as any, // stored as null until a host room links this embed
+
+      // Legacy fields
+      label: resolvedName,
+      roomId,
       archived: false,
     };
 
@@ -131,9 +169,9 @@ router.post("/", requireAuth as any, async (req: any, res) => {
       success: true,
       embed: {
         embedId: embedRef.id,
-        label,
+        label: resolvedName,
         roomId,
-        viewerPath: viewerPath(roomId),
+        viewerPath: viewerPath(savedEmbedId),
       },
     });
   } catch (err) {
@@ -158,7 +196,9 @@ router.get("/", requireAuth as any, async (req: any, res) => {
       .map((d) => {
         const data = (d.data() || {}) as Partial<SavedEmbedDoc>;
         const roomId = String(data.roomId || "");
-        const label = String(data.label || "");
+        const label = String((data.name || data.label || ""));
+        const description = typeof data.description === "string" ? data.description : "";
+        const activeRoomId = typeof data.activeRoomId === "string" ? data.activeRoomId : null;
 
         // Firestore admin timestamps expose toMillis; fall back to 0 if missing.
         const updatedAtRaw: any = data.updatedAt as any;
@@ -178,7 +218,9 @@ router.get("/", requireAuth as any, async (req: any, res) => {
           embedId: d.id,
           label,
           roomId,
-          viewerPath: viewerPath(roomId),
+          viewerPath: viewerPath(d.id),
+          description,
+          activeRoomId,
           _updatedAtMs: updatedAtMs,
         };
       })
@@ -192,6 +234,45 @@ router.get("/", requireAuth as any, async (req: any, res) => {
   }
 });
 
+// Public resolver for viewer pages using /live/:savedEmbedId.
+// Does not require auth and looks up the embed across all users via a collection group query.
+router.get("/public/:savedEmbedId", async (req: any, res) => {
+  const savedEmbedId = String(req.params.savedEmbedId || "").trim();
+  if (!savedEmbedId) {
+    return res.status(400).json({ error: "invalid_input" });
+  }
+
+  try {
+    const snap = await db
+      .collectionGroup("savedEmbeds")
+      .where(admin.firestore.FieldPath.documentId(), "==", savedEmbedId)
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      return res.status(404).json({ error: "not_found" });
+    }
+
+    const docSnap = snap.docs[0];
+    const data = (docSnap.data() || {}) as Partial<SavedEmbedDoc>;
+
+    const name = String((data.name || data.label || "")).trim();
+    const description = (data.description || "") as string | undefined;
+    const activeRoomId = typeof data.activeRoomId === "string" ? data.activeRoomId : null;
+
+    return res.json({
+      savedEmbedId,
+      name,
+      description,
+      activeRoomId,
+      viewerPath: viewerPath(savedEmbedId),
+    });
+  } catch (err) {
+    console.error("GET /api/saved-embeds/public/:savedEmbedId error", err);
+    return errorResponse(res, 500, "server_error");
+  }
+});
+
 // PUT /api/saved-embeds/:embedId
 router.put("/:embedId", requireAuth as any, async (req: any, res) => {
   const uid = req.user?.uid;
@@ -200,18 +281,23 @@ router.put("/:embedId", requireAuth as any, async (req: any, res) => {
   const embedId = String(req.params.embedId || "").trim();
   if (!embedId) return errorResponse(res, 400, "invalid_input");
 
+  const nameRes = asTrimmedString(req.body?.name, { required: false, maxLen: 60 });
   const labelRes = asTrimmedString(req.body?.label, { required: false, maxLen: 60 });
-  if (!labelRes.ok) return errorResponse(res, 400, "invalid_input");
+  const descriptionRes = asTrimmedString(req.body?.description, { required: false, maxLen: 200 });
+  if (!nameRes.ok || !labelRes.ok || !descriptionRes.ok) return errorResponse(res, 400, "invalid_input");
 
-  const archivedRes = asOptionalBoolean(req.body?.archived);
+  const archivedRes = asOptionalBoolean(req.body?.archived ?? req.body?.isDeleted);
   if (!archivedRes.ok) return errorResponse(res, 400, "invalid_input");
 
   // Require at least one field.
-  if (labelRes.value === undefined && archivedRes.value === undefined) {
+  if (nameRes.value === undefined && labelRes.value === undefined && descriptionRes.value === undefined && archivedRes.value === undefined) {
     return errorResponse(res, 400, "invalid_input");
   }
 
   // If label is provided, it must not be empty after trimming.
+  if (nameRes.value !== undefined && !nameRes.value) {
+    return errorResponse(res, 400, "invalid_input");
+  }
   if (labelRes.value !== undefined && !labelRes.value) {
     return errorResponse(res, 400, "invalid_input");
   }
@@ -227,8 +313,20 @@ router.put("/:embedId", requireAuth as any, async (req: any, res) => {
     const patch: any = {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    if (labelRes.value !== undefined) patch.label = labelRes.value;
-    if (archivedRes.value !== undefined) patch.archived = archivedRes.value;
+
+    const resolvedNameUpdate = (nameRes.value || labelRes.value) ?? undefined;
+    if (resolvedNameUpdate !== undefined) {
+      patch.name = resolvedNameUpdate;
+      patch.label = resolvedNameUpdate; // keep legacy field in sync
+    }
+    if (descriptionRes.value !== undefined) {
+      patch.description = descriptionRes.value;
+    }
+    if (archivedRes.value !== undefined) {
+      patch.archived = archivedRes.value;
+      patch.isDeleted = archivedRes.value;
+      patch.deletedAt = archivedRes.value ? admin.firestore.FieldValue.serverTimestamp() : null;
+    }
 
     await ref.set(patch, { merge: true });
 
@@ -244,7 +342,7 @@ router.put("/:embedId", requireAuth as any, async (req: any, res) => {
         embedId,
         label,
         roomId,
-        viewerPath: viewerPath(roomId),
+        viewerPath: viewerPath(embedId),
       },
     });
   } catch (err) {

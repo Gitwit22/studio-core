@@ -6,12 +6,6 @@ import { APP_BASE } from "../lib/appBase";
 import { getHlsStatus, startHls, stopHls } from "../services/hls";
 import CollapsibleSection from "./CollapsibleSection";
 
-type SavedEmbedOption = {
-  embedId: string;
-  roomId: string;
-  label: string;
-};
-
 type PlatformKey = "youtube" | "facebook" | "twitch" | "custom";
 
 const PLATFORM_CONFIG: Record<PlatformKey, { label: string; accent: string }> = {
@@ -170,11 +164,11 @@ export default function StreamSetupModalV2({
   const [hlsEgressId, setHlsEgressId] = useState<string | null>(null);
   const [hlsError, setHlsError] = useState<string | null>(null);
   const [hlsBusy, setHlsBusy] = useState(false);
-
-  const [savedEmbeds, setSavedEmbeds] = useState<SavedEmbedOption[]>([]);
-  const [savedEmbedsLoading, setSavedEmbedsLoading] = useState(false);
-  const [savedEmbedsError, setSavedEmbedsError] = useState<string | null>(null);
-  const [selectedEmbedId, setSelectedEmbedId] = useState<string>("");
+  const [boundEmbedId, setBoundEmbedId] = useState<string | null>(null);
+  const [boundEmbedName, setBoundEmbedName] = useState<string>("");
+  const [boundEmbedViewerPath, setBoundEmbedViewerPath] = useState<string>("");
+  const [boundEmbedLoading, setBoundEmbedLoading] = useState(false);
+  const [boundEmbedError, setBoundEmbedError] = useState<string | null>(null);
   const [hlsAdvancedOpen, setHlsAdvancedOpen] = useState(false);
 
   const platformOrder: PlatformKey[] = ["youtube", "facebook", "twitch", "custom"];
@@ -193,19 +187,11 @@ export default function StreamSetupModalV2({
   // contract where everything is keyed by roomId.
   const hlsRoomReady = !!hlsRoomId && !looksLikeName;
 
-  const selectedEmbed = useMemo(() => {
-    if (!selectedEmbedId) return null;
-    return savedEmbeds.find((e) => e.embedId === selectedEmbedId) || null;
-  }, [savedEmbeds, selectedEmbedId]);
+  const effectiveHlsRoomId = hlsRoomId;
 
-  const selectedEmbedRoomId = (selectedEmbed?.roomId || "").trim();
-  const selectedEmbedReady = !!selectedEmbedRoomId && !/[ \u2013#]/.test(selectedEmbedRoomId);
-
-  const effectiveHlsRoomId = selectedEmbedRoomId;
-
-  const hlsViewerUrl = effectiveHlsRoomId
+  const hlsViewerUrl = boundEmbedId
     ? `${APP_BASE || (typeof window !== "undefined" ? window.location.origin : "")}/live/${encodeURIComponent(
-        effectiveHlsRoomId,
+        boundEmbedId,
       )}`
     : "";
 
@@ -265,55 +251,8 @@ export default function StreamSetupModalV2({
     });
   };
 
-  // Fetch Saved Embeds for the Embed Channel dropdown
-  useEffect(() => {
-    if (!open) return;
-    if (!showHlsSection && !hlsEnabled) return;
-
-    let cancelled = false;
-    (async () => {
-      setSavedEmbedsLoading(true);
-      setSavedEmbedsError(null);
-      try {
-        const res = await fetch(`${API_BASE}/api/saved-embeds`, {
-          credentials: "include",
-          cache: "no-store",
-          headers: {
-            ...authHeaders,
-          },
-        });
-        const payload = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error(payload?.error || "Failed to load saved embeds");
-        }
-        const embedsRaw = Array.isArray(payload?.embeds) ? payload.embeds : [];
-        const next: SavedEmbedOption[] = embedsRaw
-          .map((e: any) => ({
-            embedId: String(e?.embedId || "").trim(),
-            roomId: String(e?.roomId || "").trim(),
-            label: String(e?.label || "").trim(),
-          }))
-          .filter((e: SavedEmbedOption) => !!e.embedId && !!e.roomId);
-
-        if (!cancelled) {
-          setSavedEmbeds(next);
-        }
-      } catch (e: any) {
-        if (!cancelled) {
-          setSavedEmbeds([]);
-          setSavedEmbedsError(e?.message || "Failed to load saved embeds");
-        }
-      } finally {
-        if (!cancelled) setSavedEmbedsLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, showHlsSection, hlsEnabled, authHeaders]);
-
-  // Hydrate per-room persisted selection (preferred)
+  // Fetch which Saved Embed (if any) this room is bound to, then
+  // resolve basic embed metadata for the viewer link.
   useEffect(() => {
     if (!open) return;
     if (!hlsRoomReady) return;
@@ -332,9 +271,11 @@ export default function StreamSetupModalV2({
         if (!res.ok) {
           return;
         }
-        const embedId = String(payload?.activeEmbedId || "").trim();
+        const activeEmbedId = String(payload?.activeEmbedId || "").trim();
+        const savedEmbedId = String(payload?.savedEmbedId || "").trim();
+        const embedId = activeEmbedId || savedEmbedId;
         if (!cancelled && embedId) {
-          setSelectedEmbedId(embedId);
+          setBoundEmbedId(embedId);
         }
       } catch {
         // ignore
@@ -346,52 +287,51 @@ export default function StreamSetupModalV2({
     };
   }, [open, hlsRoomReady, hlsRoomId, authHeaders]);
 
-  // Ensure selected embed still exists after list loads; otherwise clear selection
+  // Resolve basic embed metadata for the bound embed so we can show
+  // a friendly connection label + viewer URL. This uses the public
+  // resolver so it stays in sync with the viewer page.
   useEffect(() => {
-    if (!selectedEmbedId) return;
-    if (!savedEmbeds.length) return;
-    const exists = savedEmbeds.some((e) => e.embedId === selectedEmbedId);
-    if (!exists) {
-      setSelectedEmbedId("");
+    if (!boundEmbedId) {
+      setBoundEmbedName("");
+      setBoundEmbedViewerPath("");
+      return;
     }
-  }, [savedEmbeds, selectedEmbedId]);
-
-  // Persist selection whenever it changes
-  useEffect(() => {
-    if (!open) return;
-    if (!hlsRoomReady) return;
-    if (!selectedEmbedId) return;
-    if (!selectedEmbedReady) return;
 
     let cancelled = false;
     (async () => {
+      setBoundEmbedLoading(true);
+      setBoundEmbedError(null);
       try {
-        await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(hlsRoomId)}/active-embed`, {
-          method: "PUT",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            ...authHeaders,
-          },
-          body: JSON.stringify({
-            embedId: selectedEmbedId,
-            embedRoomId: selectedEmbedRoomId,
-          }),
-        });
-      } catch {
-        // ignore
+        const res = await fetch(`${API_BASE}/api/saved-embeds/public/${encodeURIComponent(boundEmbedId)}`);
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(payload?.error || "Failed to load embed");
+        }
+        if (cancelled) return;
+        const name = String(payload?.name || payload?.label || "").trim();
+        const viewerPath = String(payload?.viewerPath || `/live/${boundEmbedId}`).trim();
+        setBoundEmbedName(name || boundEmbedId);
+        setBoundEmbedViewerPath(viewerPath);
+      } catch (e: any) {
+        if (!cancelled) {
+          setBoundEmbedError(e?.message || "Failed to load embed");
+          setBoundEmbedName("");
+          setBoundEmbedViewerPath("");
+        }
+      } finally {
+        if (!cancelled) setBoundEmbedLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [open, hlsRoomReady, hlsRoomId, selectedEmbedId, selectedEmbedReady, selectedEmbedRoomId, authHeaders]);
+  }, [boundEmbedId]);
 
   // Initial one-shot fetch of HLS status so we can show chip even when collapsed
   useEffect(() => {
     if (!open) return;
-    if (!selectedEmbedReady) {
+    if (!effectiveHlsRoomId) {
       setHlsStatus("idle");
       setHlsPlaylistUrl(null);
       setHlsEgressId(null);
@@ -419,6 +359,27 @@ export default function StreamSetupModalV2({
           setHlsError(null);
           return;
         }
+        if (msg.startsWith("status_failed_403")) {
+          let friendly = "You don't have permission to use HLS for this embed.";
+          const parts = msg.split(":", 2);
+          if (parts.length === 2) {
+            try {
+              const parsed = JSON.parse(parts[1] || "{}");
+              const code = String((parsed && (parsed.error || parsed.reason)) || "").trim();
+              if (code === "hls_not_in_plan") {
+                friendly = "HLS Broadcast Page is not included in this plan.";
+              } else if (code === "room_mismatch") {
+                friendly = "This embed is linked to a different show. Create a new embed for this room from Settings → HLS Setup.";
+              }
+            } catch {
+              // fall back to default friendly message
+            }
+          }
+          setHlsStatus("error");
+          setHlsError(friendly);
+          return;
+        }
+        setHlsStatus("error");
         setHlsError("Failed to fetch HLS status");
       }
     };
@@ -433,9 +394,9 @@ export default function StreamSetupModalV2({
   // Poll while HLS section is open or status is starting
   useEffect(() => {
     if (!open) return;
-    if (!selectedEmbedReady) return;
+    if (!effectiveHlsRoomId) return;
 
-    const shouldPoll = roomUiState.hls || hlsStatus === "starting";
+    const shouldPoll = roomUiState.hls && (hlsStatus === "starting" || hlsStatus === "live");
     if (!shouldPoll) return;
 
     let cancelled = false;
@@ -449,9 +410,32 @@ export default function StreamSetupModalV2({
         setHlsPlaylistUrl(data?.playlistUrl ?? null);
         setHlsEgressId(data?.egressId ?? null);
         setHlsError(data?.error ?? null);
-      } catch {
+      } catch (err: any) {
         if (!cancelled) {
-          // Soft failure; keep last known status
+          const msg = String(err?.message || "");
+          if (msg.startsWith("status_failed_403")) {
+            let friendly = "You don't have permission to use HLS for this embed.";
+            const parts = msg.split(":", 2);
+            if (parts.length === 2) {
+              try {
+                const parsed = JSON.parse(parts[1] || "{}");
+                const code = String((parsed && (parsed.error || parsed.reason)) || "").trim();
+                if (code === "hls_not_in_plan") {
+                  friendly = "HLS Broadcast Page is not included in this plan.";
+                } else if (code === "room_mismatch") {
+                  friendly = "This embed is linked to a different show. Create a new embed for this room from Settings → HLS Setup.";
+                }
+              } catch {
+                // fall back to default friendly message
+              }
+            }
+            setHlsStatus("error");
+            setHlsError(friendly);
+          } else {
+            // Soft failure; keep last known status but surface a generic error
+            setHlsStatus("error");
+            setHlsError("Failed to poll HLS status");
+          }
         }
       }
     };
@@ -462,7 +446,7 @@ export default function StreamSetupModalV2({
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [open, effectiveHlsRoomId, roomUiState.hls, hlsStatus, selectedEmbedReady]);
+  }, [open, effectiveHlsRoomId, roomUiState.hls, hlsStatus]);
 
   const mainByPlatform = useMemo(() => {
     const map: Partial<Record<PlatformKey, DestinationItem>> = {};
@@ -592,7 +576,7 @@ export default function StreamSetupModalV2({
   const startDisabled = streamIsBusy || streamDisallowed || selectedPlatforms.length === 0 || missingKeySelected || warmupActive;
 
   const handleStartHls = async () => {
-    if (!selectedEmbedReady) return;
+    if (!effectiveHlsRoomId) return;
     if (hlsStatus === "starting" || hlsStatus === "live") return;
     setHlsBusy(true);
     setHlsError(null);
@@ -613,7 +597,7 @@ export default function StreamSetupModalV2({
   };
 
   const handleStopHls = async () => {
-    if (!selectedEmbedReady) return;
+    if (!effectiveHlsRoomId) return;
     if (hlsStatus === "idle") return;
     setHlsBusy(true);
     try {
@@ -1470,61 +1454,40 @@ export default function StreamSetupModalV2({
               <div style={{ fontSize: '0.75rem', color: 'rgba(209, 213, 219, 0.9)', marginBottom: '0.65rem' }}>
                 {!hlsRoomReady
                   ? 'Loading room… HLS controls will unlock once the Firestore roomId is known.'
-                  : !selectedEmbedId
-                    ? 'Create an embed in Settings → HLS Setup first.'
-                    : !selectedEmbedReady
-                      ? 'Selected embed has an invalid roomId.'
-                      : 'Start HLS to begin broadcasting. Viewer link + embed code are available below.'}
+                  : !boundEmbedId
+                    ? 'This room is not connected to a Saved Embed yet. Create one in Settings → HLS Setup and join using that Saved Room to go live.'
+                    : 'Connected to your Saved Embed. Start HLS to begin broadcasting to its viewer link.'}
               </div>
-
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.35rem',
-                marginBottom: '0.75rem',
-              }}>
-                <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Embed Channel</div>
-                <select
-                  value={selectedEmbedId}
-                  onChange={(e) => {
-                    const next = String(e.target.value || '');
-                    setSelectedEmbedId(next);
-                    setHlsStatus('idle');
-                    setHlsError(null);
-                    setHlsPlaylistUrl(null);
-                    setHlsEgressId(null);
-                  }}
-                  disabled={!hlsRoomReady || savedEmbedsLoading}
-                  style={{
-                    width: '100%',
-                    padding: '0.5rem 0.55rem',
+              {boundEmbedId && (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.35rem',
+                  marginBottom: '0.75rem',
+                }}>
+                  <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Connected Saved Embed</div>
+                  <div style={{
+                    padding: '0.5rem 0.6rem',
                     borderRadius: '0.45rem',
                     border: '1px solid rgba(75,85,99,0.7)',
                     background: 'rgba(15,23,42,0.9)',
                     color: '#e5e7eb',
                     fontSize: '0.85rem',
-                    opacity: !hlsRoomReady ? 0.6 : 1,
-                    cursor: !hlsRoomReady ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  <option value="">Select an embed…</option>
-                  {savedEmbeds.map((e) => (
-                    <option key={e.embedId} value={e.embedId}>
-                      {e.label || e.embedId}
-                    </option>
-                  ))}
-                </select>
-
-                {savedEmbedsError && (
-                  <div style={{ fontSize: '0.75rem', color: '#fecaca' }}>❌ {savedEmbedsError}</div>
-                )}
-
-                {!savedEmbedsLoading && hlsRoomReady && savedEmbeds.length === 0 && (
-                  <div style={{ fontSize: '0.75rem', color: 'rgba(209, 213, 219, 0.85)' }}>
-                    Create an embed in Settings → HLS Setup first.
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.5rem',
+                  }}>
+                    <span>{boundEmbedName || boundEmbedId}</span>
+                    {boundEmbedLoading && (
+                      <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>Loading…</span>
+                    )}
                   </div>
-                )}
-              </div>
+                  {boundEmbedError && (
+                    <div style={{ fontSize: '0.75rem', color: '#fecaca' }}>❌ {boundEmbedError}</div>
+                  )}
+                </div>
+              )}
 
               {!hlsAllowed && (
                 <div
@@ -1587,23 +1550,23 @@ export default function StreamSetupModalV2({
                 <button
                   type="button"
                   onClick={handleStartHls}
-                  disabled={!hlsAllowed || !hlsRoomReady || !selectedEmbedReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
+                  disabled={!hlsAllowed || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
                   style={{
                     flex: 1,
                     padding: '0.6rem 0.7rem',
                     borderRadius: '0.45rem',
                     border: 'none',
                     background:
-                      !hlsAllowed || !hlsRoomReady || !selectedEmbedReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
+                      !hlsAllowed || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
                         ? 'rgba(37,99,235,0.4)'
                         : 'linear-gradient(135deg, #22c55e, #16a34a)',
                     color: '#ffffff',
                     fontSize: '0.8rem',
                     fontWeight: 600,
                     cursor:
-                      !hlsAllowed || !hlsRoomReady || !selectedEmbedReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
+                      !hlsAllowed || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
                     opacity:
-                      !hlsAllowed || !hlsRoomReady || !selectedEmbedReady || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
+                      !hlsAllowed || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
                   }}
                 >
                   {hlsBusy && (hlsStatus === 'starting' || hlsStatus === 'idle')
@@ -1613,23 +1576,23 @@ export default function StreamSetupModalV2({
                 <button
                   type="button"
                   onClick={handleStopHls}
-                  disabled={!selectedEmbedReady || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')}
+                  disabled={!boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')}
                   style={{
                     flex: 1,
                     padding: '0.6rem 0.7rem',
                     borderRadius: '0.45rem',
                     border: 'none',
                     background:
-                      !selectedEmbedReady || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')
+                      !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')
                         ? 'rgba(248,113,113,0.35)'
                         : 'linear-gradient(135deg, #dc2626, #b91c1c)',
                     color: '#ffffff',
                     fontSize: '0.8rem',
                     fontWeight: 600,
                     cursor:
-                      !selectedEmbedReady || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 'not-allowed' : 'pointer',
+                      !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 'not-allowed' : 'pointer',
                     opacity:
-                      !selectedEmbedReady || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 0.6 : 1,
+                      !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 0.6 : 1,
                   }}
                 >
                   {hlsBusy && (hlsStatus === 'live' || hlsStatus === 'starting')
@@ -1638,7 +1601,7 @@ export default function StreamSetupModalV2({
                 </button>
               </div>
 
-              {selectedEmbedReady && (
+              {boundEmbedId && (
                 <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                     <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Viewer link</span>

@@ -21,6 +21,12 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
   const rawNameInput = String(req.body?.livekitRoomName || req.body?.roomName || "");
   const rawName = sanitizeDisplayName(rawNameInput).trim();
 
+  // Optional: bind this room to an existing Saved Embed so HLS can
+  // automatically keep viewer pages in sync. This is set from the Join
+  // page when a host chooses "Join Saved Room".
+  const savedEmbedIdRaw = req.body?.savedEmbedId;
+  const savedEmbedId = typeof savedEmbedIdRaw === "string" ? savedEmbedIdRaw.trim() : "";
+
   // Generate a new Firestore document id for the room.
   const roomId = db.collection("rooms").doc().id;
 
@@ -33,6 +39,7 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
       livekitRoomName,
       roomType,
       initialStatus: "idle",
+      savedEmbedId: savedEmbedId || undefined,
     });
 
     return res.status(201).json({

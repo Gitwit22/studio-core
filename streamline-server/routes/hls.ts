@@ -1,4 +1,5 @@
 import { Router } from "express";
+import admin from "firebase-admin";
 import { getRoom, setHlsError, setHlsIdle, setHlsLive, setHlsStarting } from "../services/rooms";
 import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
 import { requireAuth } from "../middleware/requireAuth";
@@ -164,25 +165,46 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     await setHlsStarting(roomRef, { presetId, prefix, stopAt, capMinutes });
 
     try {
-    // 2) Start egress
-    const { egressId } = await startHlsEgress({
-      roomName: lkRoomName,
-      layout: "speaker",
-      prefix,
-      playlistName,
-      segmentDurationSec: 6,
-      presetId,
-    });
+      // 2) Start egress
+      const { egressId } = await startHlsEgress({
+        roomName: lkRoomName,
+        layout: "speaker",
+        prefix,
+        playlistName,
+        segmentDurationSec: 6,
+        presetId,
+      });
 
-    // 3) Mark live + store URLs
-    await setHlsLive(roomRef, { egressId, playlistUrl });
+      // 3) Mark live + store URLs
+      await setHlsLive(roomRef, { egressId, playlistUrl });
 
-    return res.json({
-      roomId,
-      status: "live",
-      egressId,
-      playlistUrl,
-    });
+      // 4) If this room is bound to a Saved Embed, keep the
+      // embed's activeRoomId in sync so /live/:savedEmbedId
+      // always resolves to the room that is actually streaming.
+      const savedEmbedId = (room as any).savedEmbedId as string | undefined;
+      const ownerId = (room as any).ownerId as string | undefined;
+      if (savedEmbedId && ownerId) {
+        try {
+          const embedRef = firestore.collection("users").doc(ownerId).collection("savedEmbeds").doc(savedEmbedId);
+          await embedRef.set(
+            {
+              activeRoomId: roomId,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } catch (err) {
+          // Do not fail HLS start if this bookkeeping write fails.
+          console.error("[hls] failed to sync activeRoomId on Saved Embed", err);
+        }
+      }
+
+      return res.json({
+        roomId,
+        status: "live",
+        egressId,
+        playlistUrl,
+      });
     } catch (e: any) {
       await setHlsError(roomRef, e?.message || "Failed to start HLS egress");
       return res.status(500).json({ error: "Failed to start HLS egress", details: e?.message });

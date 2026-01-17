@@ -27,6 +27,8 @@ export const DEFAULT_ROOM_HLS_CONFIG: RoomHlsConfig = {
 export type RoomDoc = {
   ownerId: string;
   livekitRoomName?: string;
+  // Optional link to a saved embed / viewer page
+  savedEmbedId?: string;
   roomType?: string;
   status?: "idle" | "live" | "ended" | "scheduled" | string;
   createdAt?: FirebaseFirestore.Timestamp | admin.firestore.FieldValue | number | null;
@@ -54,11 +56,13 @@ export async function ensureRoomDoc(params: {
   livekitRoomName: string;
   roomType?: string;
   initialStatus?: string;
+  // When provided, bind this room to a specific saved embed.
+  savedEmbedId?: string;
 }): Promise<{
   ref: FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData>;
   data: RoomDoc;
 }> {
-  const { roomId, ownerId, livekitRoomName, roomType, initialStatus } = params;
+  const { roomId, ownerId, livekitRoomName, roomType, initialStatus, savedEmbedId } = params;
   const ref = db.collection("rooms").doc(roomId);
   const snap = await ref.get();
   const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
@@ -68,6 +72,7 @@ export async function ensureRoomDoc(params: {
       ownerId,
       roomType: roomType || "rtc",
       livekitRoomName,
+      ...(savedEmbedId ? { savedEmbedId } : {}),
       createdAt: serverTimestamp,
       updatedAt: serverTimestamp,
       status: initialStatus || "live",
@@ -82,6 +87,7 @@ export async function ensureRoomDoc(params: {
     if (!existing.ownerId) patch.ownerId = ownerId;
     if (!existing.roomType) patch.roomType = roomType || "rtc";
     if (!existing.livekitRoomName) patch.livekitRoomName = livekitRoomName;
+    if (savedEmbedId && !existing.savedEmbedId) patch.savedEmbedId = savedEmbedId;
     if (!("createdAt" in existing)) patch.createdAt = serverTimestamp;
     patch.updatedAt = serverTimestamp;
     if (!existing.status) patch.status = initialStatus || "live";

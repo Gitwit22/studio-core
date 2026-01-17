@@ -1,4 +1,5 @@
 import { Router } from "express";
+import admin from "firebase-admin";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
@@ -13,7 +14,7 @@ function looksLikeRoomName(value: string): boolean {
   return /[ \u2013#]/.test(value);
 }
 
-// GET /api/rooms/:roomId/active-embed -> { roomId, activeEmbedId, activeEmbedRoomId }
+// GET /api/rooms/:roomId/active-embed -> { roomId, activeEmbedId, activeEmbedRoomId, savedEmbedId }
 router.get("/:roomId/active-embed", requireAuth as any, async (req: any, res) => {
   const roomId = normalizeId(req.params.roomId);
   if (!roomId) {
@@ -28,6 +29,7 @@ router.get("/:roomId/active-embed", requireAuth as any, async (req: any, res) =>
       activeEmbedId: typeof (ctx.room as any).activeEmbedId === "string" ? (ctx.room as any).activeEmbedId : null,
       activeEmbedRoomId:
         typeof (ctx.room as any).activeEmbedRoomId === "string" ? (ctx.room as any).activeEmbedRoomId : null,
+      savedEmbedId: typeof (ctx.room as any).savedEmbedId === "string" ? (ctx.room as any).savedEmbedId : null,
     });
   } catch (err: any) {
     if (err instanceof RoomPermissionError) {
@@ -79,17 +81,29 @@ router.put("/:roomId/active-embed", requireAuth as any, async (req: any, res) =>
       });
     }
 
+    const nowIso = new Date().toISOString();
+
+    // Bind the host room to this saved embed and track the latest active room
     await db
       .collection("rooms")
       .doc(ctx.roomId)
       .set(
         {
+          savedEmbedId: embedId,
           activeEmbedId: embedId,
           activeEmbedRoomId: embedRoomId,
-          activeEmbedUpdatedAt: new Date().toISOString(),
+          activeEmbedUpdatedAt: nowIso,
         },
         { merge: true },
       );
+
+    await embedRef.set(
+      {
+        activeRoomId: ctx.roomId,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
 
     return res.json({
       success: true,

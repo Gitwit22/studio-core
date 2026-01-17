@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import Hls from "hls.js";
 import { API_BASE } from "../lib/apiBase";
 import { getPublicHls } from "../services/hls";
@@ -15,12 +15,6 @@ import {
 } from "lucide-react";
 
 const DEFAULT_LOGO_URL = "/logosmaller.png";
-
-type RoomResolveResponse = {
-  roomId?: string;
-  roomName?: string;
-  role?: string;
-};
 
 type PublicHlsResponse = {
   status?: "idle" | "starting" | "live" | "error";
@@ -45,6 +39,14 @@ type PublicRoomHlsConfigResponse = {
   hlsConfig: RoomHlsConfig;
 };
 
+type PublicSavedEmbedResponse = {
+  savedEmbedId: string;
+  name: string;
+  description?: string;
+  activeRoomId: string | null;
+  viewerPath: string;
+};
+
 function looksLikeRoomName(value: string) {
   // Your “never treat roomName as roomId” invariant
   return value.includes(" ") || value.includes("–") || value.includes("#");
@@ -55,15 +57,12 @@ function canNativeHls(video: HTMLVideoElement) {
 }
 
 export default function Live() {
-  const params = useParams<{ roomId?: string }>();
-  const [searchParams] = useSearchParams();
+  const params = useParams<{ savedEmbedId?: string }>();
 
-  const token = (searchParams.get("t") || "").trim();
-  const routeRoomId = (params.roomId || "").trim();
+  const savedEmbedId = (params.savedEmbedId || "").trim();
 
-  const [roomId, setRoomId] = useState<string>(routeRoomId);
+  const [roomId, setRoomId] = useState<string>("");
   const [roomName, setRoomName] = useState<string>("");
-  const [role, setRole] = useState<string>("");
 
   const [hlsStatus, setHlsStatus] = useState<PublicHlsResponse["status"]>("idle");
   const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
@@ -71,6 +70,8 @@ export default function Live() {
   const [ended, setEnded] = useState(false);
 
   const [viewerConfig, setViewerConfig] = useState<RoomHlsConfig | null>(null);
+
+  const [savedEmbedMeta, setSavedEmbedMeta] = useState<PublicSavedEmbedResponse | null>(null);
 
   // UI state
   const [status, setStatus] = useState<StreamStatus>("loading");
@@ -82,12 +83,7 @@ export default function Live() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // keep local roomId in sync with route
-  useEffect(() => {
-    setRoomId(routeRoomId);
-  }, [routeRoomId]);
-
-  // Resolve token -> canonical roomId/roomName (preferred)
+  // Resolve savedEmbedId -> activeRoomId and basic viewer metadata
   useEffect(() => {
     let cancelled = false;
 
@@ -95,45 +91,41 @@ export default function Live() {
       try {
         setError(null);
 
-        if (!token) {
-          return;
-        }
+        if (!savedEmbedId) return;
 
-        const res = await fetch(`${API_BASE}/api/rooms/resolve`, {
-          credentials: "include",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const res = await fetch(`${API_BASE}/api/saved-embeds/public/${encodeURIComponent(savedEmbedId)}`);
 
         if (!res.ok) {
-          setError("Invalid or expired link");
+          if (res.status === 404) {
+            setStatus("error");
+            setError("This viewer link is no longer valid.");
+          } else {
+            setStatus("error");
+            setError("Failed to load viewer page.");
+          }
           return;
         }
 
-        const data = (await res.json().catch(() => null)) as RoomResolveResponse | null;
+        const data = (await res.json().catch(() => null)) as PublicSavedEmbedResponse | null;
         if (!data || cancelled) return;
 
-        const nextRoomId = String(data.roomId || "").trim();
-        const nextRoomName = String(data.roomName || "").trim();
-        const nextRole = String(data.role || "").trim();
-
+        const nextRoomId = String(data.activeRoomId || "").trim();
+        setSavedEmbedMeta(data);
         if (nextRoomId) setRoomId(nextRoomId);
-        if (nextRoomName) setRoomName(nextRoomName);
-        if (nextRole) setRole(nextRole);
       } catch {
-        setError("Failed to resolve link");
+        setStatus("error");
+        setError("Failed to load viewer page.");
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [savedEmbedId]);
 
   // Fetch public viewer configuration (title/subtitle/logo/theme/offline message)
   useEffect(() => {
-    const currentRoomId = (roomId || routeRoomId || "").trim();
+    const currentRoomId = (roomId || "").trim();
     if (!currentRoomId) return;
 
     if (looksLikeRoomName(currentRoomId)) {
@@ -168,11 +160,11 @@ export default function Live() {
     return () => {
       ctrl.abort();
     };
-  }, [roomId, routeRoomId]);
+  }, [roomId]);
 
   // Fetch HLS status + playlist URL by roomId using the public viewer-safe endpoint.
   const fetchHlsStatus = useCallback(async () => {
-    const currentRoomId = (roomId || routeRoomId || "").trim();
+    const currentRoomId = (roomId || "").trim();
     if (!currentRoomId) return;
 
     if (looksLikeRoomName(currentRoomId)) {
@@ -208,11 +200,11 @@ export default function Live() {
     } finally {
       setIsRetrying(false);
     }
-  }, [roomId, routeRoomId, token, playlistUrl]);
+  }, [roomId, playlistUrl]);
 
   // Poll loop
   useEffect(() => {
-    const currentRoomId = (roomId || routeRoomId || "").trim();
+    const currentRoomId = (roomId || "").trim();
     if (!currentRoomId) return;
 
     if (looksLikeRoomName(currentRoomId)) {
@@ -224,7 +216,7 @@ export default function Live() {
     fetchHlsStatus();
     const t = window.setInterval(fetchHlsStatus, 3000);
     return () => window.clearInterval(t);
-  }, [roomId, routeRoomId, fetchHlsStatus]);
+  }, [roomId, fetchHlsStatus]);
 
   // Attach HLS playback:
   // - Safari/iOS: native HLS via video.src
@@ -322,8 +314,8 @@ export default function Live() {
     );
   };
 
-  const displayTitle = (viewerConfig?.title || "").trim() || (roomName || "").trim() || "StreamLine";
-  const displaySubtitle = (viewerConfig?.subtitle || "").trim() || "Live Viewer";
+  const displayTitle = (viewerConfig?.title || "").trim() || (savedEmbedMeta?.name || roomName || "").trim() || "StreamLine";
+  const displaySubtitle = (viewerConfig?.subtitle || "").trim() || (savedEmbedMeta?.description || "Live Viewer");
   const displayLogoUrl = (viewerConfig?.logoUrl || "").trim();
   const isLightTheme = (viewerConfig?.theme || "dark") === "light";
 

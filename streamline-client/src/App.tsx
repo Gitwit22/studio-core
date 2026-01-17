@@ -65,7 +65,8 @@ function App() {
       <Route path="/room" element={<Room />} />
       <Route path="/room/:roomName" element={<Room />} />
       <Route path="/live" element={<Live />} />
-      <Route path="/live/:roomId" element={<Live />} />
+      {/* New stable viewer URL: /live/:savedEmbedId */}
+      <Route path="/live/:savedEmbedId" element={<Live />} />
       <Route path="/settings/destinations" element={<SettingsDestinations />} />
       <Route path="/room-exit/:recordingId" element={<RoomExitPage />} />
 

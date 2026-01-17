@@ -5,6 +5,11 @@ import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useSearchParams,} from "react-router-dom";
 
+type SavedEmbedSummary = {
+  embedId: string;
+  label: string;
+};
+
 
 type UsageData = {
   streamingMinutes: number;
@@ -118,6 +123,12 @@ export default function Join() {
   const legacyInviteRoomParam = searchParams.get("room");
   const isParticipant = !!inviteTokenParam || legacyInviteRoomParam !== null;
 
+  // Saved Embeds (for hosts joining a Saved Room)
+  const [savedEmbeds, setSavedEmbeds] = useState<SavedEmbedSummary[]>([]);
+  const [savedEmbedsLoading, setSavedEmbedsLoading] = useState(false);
+  const [savedEmbedsError, setSavedEmbedsError] = useState<string | null>(null);
+  const [selectedSavedEmbedId, setSelectedSavedEmbedId] = useState<string>("");
+
 // Use /api/auth/me for admin status
 const { user: authUser, loading: authLoading } = useAuthMe();
 const isAdmin = !!authUser?.isAdmin;
@@ -213,6 +224,49 @@ const adminLoading = authLoading;
     }
   }, []);
 
+  // Load Saved Embeds for host flow so they can optionally
+  // bind the room to a Saved Embed at creation time.
+  useEffect(() => {
+    if (isParticipant) return;
+
+    let cancelled = false;
+    (async () => {
+      setSavedEmbedsLoading(true);
+      setSavedEmbedsError(null);
+      try {
+        const res = await fetch(`${API_BASE}/api/saved-embeds`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(payload?.error || "Failed to load Saved Rooms");
+        }
+        if (cancelled) return;
+        const list = Array.isArray(payload?.embeds) ? payload.embeds : [];
+        const next: SavedEmbedSummary[] = list
+          .map((e: any) => ({
+            embedId: String(e?.embedId || "").trim(),
+            label: String(e?.label || "").trim(),
+          }))
+          .filter((e) => !!e.embedId);
+        setSavedEmbeds(next);
+      } catch (e: any) {
+        if (!cancelled) {
+          setSavedEmbedsError(e?.message || "Failed to load Saved Rooms");
+          setSavedEmbeds([]);
+        }
+      } finally {
+        if (!cancelled) setSavedEmbedsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isParticipant]);
+
   useEffect(() => {
     if (isParticipant) return; // never override invite room
     if (roomName.trim()) return; // respect user edits
@@ -293,7 +347,11 @@ const adminLoading = authLoading;
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ livekitRoomName: roomLabel, roomType: "rtc" }),
+          body: JSON.stringify({
+            livekitRoomName: roomLabel,
+            roomType: "rtc",
+            savedEmbedId: selectedSavedEmbedId || undefined,
+          }),
         });
 
         if (!res.ok) {
@@ -847,6 +905,50 @@ const adminLoading = authLoading;
                     outline: "none",
                   }}
                 />
+              </div>
+            )}
+
+            {/* JOIN SAVED ROOM (host only) */}
+            {!isParticipant && savedEmbeds.length > 0 && (
+              <div style={{ marginBottom: "24px" }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                    color: "#9ca3af",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Join Saved Room (optional)
+                </label>
+                <select
+                  value={selectedSavedEmbedId}
+                  onChange={(e) => setSelectedSavedEmbedId(e.target.value)}
+                  disabled={savedEmbedsLoading}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    background: "rgba(0, 0, 0, 0.4)",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    borderRadius: "12px",
+                    color: "#ffffff",
+                    fontSize: "14px",
+                    outline: "none",
+                  }}
+                >
+                  <option value="">Create a new show…</option>
+                  {savedEmbeds.map((embed) => (
+                    <option key={embed.embedId} value={embed.embedId}>
+                      {embed.label || embed.embedId}
+                    </option>
+                  ))}
+                </select>
+                {savedEmbedsError && (
+                  <div style={{ marginTop: "6px", fontSize: "12px", color: "#fecaca" }}>
+                    {savedEmbedsError}
+                  </div>
+                )}
               </div>
             )}
 

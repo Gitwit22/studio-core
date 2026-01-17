@@ -6,10 +6,18 @@ type SavedEmbed = {
   embedId: string;
   label: string;
   roomId: string;
+  // Viewer path provided by the API, e.g. /live/:savedEmbedId
   viewerPath: string;
+  // Optional description (if present in the API response)
+  description?: string;
+  // Optional: current active room bound to this embed
+  activeRoomId?: string | null;
 };
 
 type HlsCreateDraft = {
+  // Back-compat: label may exist from older localStorage drafts.
+  name?: string;
+  description?: string;
   label?: string;
 };
 
@@ -56,9 +64,12 @@ function buildAuthHeaders(extra?: Record<string, string>): Record<string, string
   return headers;
 }
 
-function absoluteViewerUrl(roomId: string): string {
+function absoluteViewerUrlFromPath(viewerPath: string, fallbackId?: string): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  return `${origin.replace(/\/$/, "")}/live/${encodeURIComponent(roomId)}`;
+  const base = origin.replace(/\/$/, "");
+  const rawPath = viewerPath || (fallbackId ? `/live/${encodeURIComponent(fallbackId)}` : "/live");
+  const normalizedPath = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+  return `${base}${normalizedPath}`;
 }
 
 function iframeCode(viewerUrl: string): string {
@@ -90,6 +101,13 @@ export default function SettingsHlsSetup({
   const [listError, setListError] = useState<string | null>(null);
   const [listMessage, setListMessage] = useState<string | null>(null);
 
+  // Edit modal state
+  const [editingEmbed, setEditingEmbed] = useState<SavedEmbed | null>(null);
+  const [editName, setEditName] = useState<string>("");
+  const [editDescription, setEditDescription] = useState<string>("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+
   const [selectedEmbedId, setSelectedEmbedId] = useState<string | null>(() => {
     try {
       if (typeof window === "undefined") return null;
@@ -115,20 +133,32 @@ export default function SettingsHlsSetup({
   const selectedEmbed = useMemo(() => embeds.find((e) => e.embedId === selectedEmbedId) || null, [embeds, selectedEmbedId]);
 
   // Create form
-  const [createLabel, setCreateLabel] = useState(() => {
+  const [createName, setCreateName] = useState(() => {
     const draft = loadCreateDraft();
-    return draft?.label ?? "";
+    return draft?.name ?? draft?.label ?? "";
+  });
+  const [createDescription, setCreateDescription] = useState(() => {
+    const draft = loadCreateDraft();
+    return draft?.description ?? "";
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createMessage, setCreateMessage] = useState<string | null>(null);
 
+  const trimmedCreateName = (createName || "").trim();
+  const trimmedCreateDescription = (createDescription || "").trim();
+  const isCreateNameEmpty = trimmedCreateName.length === 0;
+  const isCreateNameTooLong = trimmedCreateName.length > 60;
+  const isCreateDescriptionTooLong = trimmedCreateDescription.length > 200;
+  const isCreateInvalid = isCreateNameEmpty || isCreateNameTooLong || isCreateDescriptionTooLong;
+
   useEffect(() => {
     const draft: HlsCreateDraft = {
-      label: createLabel,
+      name: createName,
+      description: createDescription,
     };
     persistCreateDraft(draft);
-  }, [createLabel]);
+  }, [createName, createDescription]);
 
   const loadEmbeds = async (opts?: { keepSelection?: boolean }) => {
     setLoadingList(true);
@@ -190,14 +220,23 @@ export default function SettingsHlsSetup({
     }
   };
 
-  const handleDelete = async (embedId: string) => {
-    const ok = window.confirm("Delete this embed? It will be removed from the list.");
+  const handleDelete = async (embed: SavedEmbed) => {
+    const message = embed.activeRoomId
+      ? "This embed is currently active. Deleting will break the viewer link anywhere it’s posted and disconnect your active show."
+      : "Deleting will break the viewer link anywhere it’s posted. You’ll need to replace the embed code on your site.";
+
+    const ok = window.confirm(message);
     if (!ok) return;
+
+    if (!embed || !embed.embedId) {
+      setListError("Missing embed id");
+      return;
+    }
 
     setListMessage(null);
     setListError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embedId)}`, {
+      const res = await fetch(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embed.embedId)}`, {
         method: "PUT",
         credentials: "include",
         headers: buildAuthHeaders(),
@@ -214,14 +253,96 @@ export default function SettingsHlsSetup({
     }
   };
 
+  const openEditModal = (embed: SavedEmbed) => {
+    setEditingEmbed(embed);
+    setEditName(embed.label || "");
+    setEditDescription(embed.description || "");
+    setEditError(null);
+  };
+
+  const originalEditName = (editingEmbed?.label || "").trim();
+  const originalEditDescription = (editingEmbed?.description || "").trim();
+  const trimmedEditName = (editName || "").trim();
+  const trimmedEditDescription = (editDescription || "").trim();
+  const isEditUnchanged = !editingEmbed || (originalEditName === trimmedEditName && originalEditDescription === trimmedEditDescription);
+
+  const handleEditSave = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingEmbed) return;
+
+    setEditError(null);
+
+    const name = String(editName || "").trim();
+    const description = String(editDescription || "").trim();
+
+    if (originalEditName === name && originalEditDescription === description) {
+      setEditError("No changes to save");
+      return;
+    }
+
+    if (!name) {
+      setEditError("Name is required");
+      return;
+    }
+    if (name.length > 60) {
+      setEditError("Name must be 60 characters or less");
+      return;
+    }
+    if (description.length > 200) {
+      setEditError("Description must be 200 characters or less");
+      return;
+    }
+
+    if (!editingEmbed.embedId) {
+      setEditError("Missing embed id");
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/saved-embeds/${encodeURIComponent(editingEmbed.embedId)}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: buildAuthHeaders(),
+        body: JSON.stringify({
+          name,
+          description: description || "",
+        }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || "Failed to update embed");
+      }
+
+      setListMessage("Updated");
+      setEditingEmbed(null);
+      setEditName("");
+      setEditDescription("");
+      await loadEmbeds({ keepSelection: true });
+    } catch (err: any) {
+      setEditError(err?.message || "Failed to update embed");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     setCreateError(null);
     setCreateMessage(null);
 
-    const label = String(createLabel || "").trim();
-    if (!label) {
-      setCreateError("Label is required");
+    const name = String(createName || "").trim();
+    const description = String(createDescription || "").trim();
+    if (!name) {
+      setCreateError("Name is required");
+      return;
+    }
+    if (name.length > 60) {
+      setCreateError("Name must be 60 characters or less");
+      return;
+    }
+    if (description.length > 200) {
+      setCreateError("Description must be 200 characters or less");
       return;
     }
 
@@ -232,7 +353,8 @@ export default function SettingsHlsSetup({
         credentials: "include",
         headers: buildAuthHeaders(),
         body: JSON.stringify({
-          label,
+          name,
+          description: description || undefined,
         }),
       });
       const payload = await res.json().catch(() => null);
@@ -247,6 +369,8 @@ export default function SettingsHlsSetup({
 
       if (created?.embedId) {
         setSelectedEmbedId(created.embedId);
+        setCreateName("");
+        setCreateDescription("");
       }
     } catch (e: any) {
       setCreateError(e?.message || "Failed to create embed");
@@ -286,12 +410,12 @@ export default function SettingsHlsSetup({
 
           <form onSubmit={handleCreate} style={{ marginTop: 12, display: "grid", gap: 10 }}>
             <div style={{ display: "grid", gap: 6 }}>
-              <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 800 }}>Label</label>
+              <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 800 }}>Name</label>
               <input
                 type="text"
-                value={createLabel}
-                onChange={(e) => setCreateLabel(e.target.value)}
-                placeholder="e.g. My Weekly Show"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="e.g. Weekly Live Show"
                 maxLength={60}
                 style={{
                   width: "100%",
@@ -304,13 +428,36 @@ export default function SettingsHlsSetup({
                 }}
               />
             </div>
+            <div style={{ display: "grid", gap: 6 }}>
+              <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 800 }}>Description (optional)</label>
+              <textarea
+                value={createDescription}
+                onChange={(e) => setCreateDescription(e.target.value)}
+                placeholder="Short description for this viewer page"
+                maxLength={200}
+                rows={2}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(63,63,70,0.6)",
+                  background: "rgba(0,0,0,0.25)",
+                  color: "#e5e7eb",
+                  fontSize: 13,
+                  resize: "vertical",
+                }}
+              />
+            </div>
             <div style={{ fontSize: 12, color: "#9ca3af" }}>
               Branding (title, logo, colors, offline message) is coming soon.
               For now, each embed uses a default viewer page you can share.
             </div>
+            <div style={{ fontSize: 11, color: "#6b7280" }}>
+              <span>{60 - createName.length}</span> name characters left  b7 <span>{200 - createDescription.length}</span> description characters left
+            </div>
 
-            <button type="submit" disabled={creating} style={{ ...S.primaryBtn, padding: "12px 16px", fontSize: 14 }}>
-              {creating ? "Creating…" : "Create Embed"}
+            <button type="submit" disabled={creating || isCreateInvalid} style={{ ...S.primaryBtn, padding: "12px 16px", fontSize: 14 }}>
+              {creating ? "Creating" : "Create Embed"}
             </button>
           </form>
 
@@ -340,7 +487,7 @@ export default function SettingsHlsSetup({
               </div>
 
               <div style={{ fontSize: 12, color: "#9ca3af" }}>
-                Embed page URL: <span style={{ color: "#e5e7eb" }}>{absoluteViewerUrl(selectedEmbed.roomId)}</span>
+                Embed page URL: <span style={{ color: "#e5e7eb" }}>{absoluteViewerUrlFromPath(selectedEmbed.viewerPath, selectedEmbed.embedId)}</span>
               </div>
 
               <div
@@ -393,7 +540,7 @@ export default function SettingsHlsSetup({
           )}
 
           {embeds.map((embed) => {
-            const viewerUrl = absoluteViewerUrl(embed.roomId);
+            const viewerUrl = absoluteViewerUrlFromPath(embed.viewerPath, embed.embedId);
             const selected = embed.embedId === selectedEmbedId;
             return (
               <div
@@ -407,15 +554,50 @@ export default function SettingsHlsSetup({
                   gap: 10,
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                  <div style={{ fontWeight: 700 }}>{embed.label}</div>
-                  <button
-                    type="button"
-                    style={{ ...S.secondaryBtn, padding: "8px 10px", fontSize: 12 }}
-                    onClick={() => setSelectedEmbedIdAndPersist(embed.embedId)}
-                  >
-                    {selected ? "Selected" : "Select"}
-                  </button>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: "#e5e7eb" }}>{embed.label}</div>
+                    {embed.description && (
+                      <div
+                        style={{
+                          marginTop: 2,
+                          fontSize: 12,
+                          color: "#9ca3af",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical" as any,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {embed.description}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                    {embed.activeRoomId && (
+                      <div
+                        title="Currently connected to an active room."
+                        style={{
+                          padding: "2px 8px",
+                          borderRadius: 999,
+                          border: "1px solid rgba(34,197,94,0.6)",
+                          background: "rgba(22,163,74,0.16)",
+                          color: "#bbf7d0",
+                          fontSize: 11,
+                          fontWeight: 800,
+                        }}
+                      >
+                        Active
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      style={{ ...S.secondaryBtn, padding: "8px 10px", fontSize: 12 }}
+                      onClick={() => setSelectedEmbedIdAndPersist(embed.embedId)}
+                    >
+                      {selected ? "Selected" : "Select"}
+                    </button>
+                  </div>
                 </div>
 
                 <div style={{ display: "grid", gap: 6 }}>
@@ -440,6 +622,13 @@ export default function SettingsHlsSetup({
                   <button
                     type="button"
                     style={{ ...S.secondaryBtn, padding: "8px 12px", fontSize: 13 }}
+                    onClick={() => openEditModal(embed)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...S.secondaryBtn, padding: "8px 12px", fontSize: 13 }}
                     onClick={async () => {
                       const ok = await safeCopy(viewerUrl);
                       setListMessage(ok ? "Viewer link copied" : "Copy failed");
@@ -459,15 +648,43 @@ export default function SettingsHlsSetup({
                   </button>
                   <button
                     type="button"
-                    style={{ ...S.secondaryBtn, padding: "8px 12px", fontSize: 13, borderColor: "rgba(239,68,68,0.4)", color: "#fca5a5" }}
-                    onClick={() => handleArchive(embed.embedId)}
+                    style={{ ...S.secondaryBtn, padding: "8px 12px", fontSize: 13 }}
+                    onClick={() => {
+                      const name = embed.label || "this embed";
+                      const ok = window.confirm(
+                        `Duplicate ${name}? This will create a new viewer link with the same name and description.`,
+                      );
+                      if (!ok) return;
+                      (async () => {
+                        setListMessage(null);
+                        setListError(null);
+                        try {
+                          const res = await fetch(`${API_BASE}/api/saved-embeds`, {
+                            method: "POST",
+                            credentials: "include",
+                            headers: buildAuthHeaders(),
+                            body: JSON.stringify({
+                              name: `${embed.label} (Copy)`,
+                            }),
+                          });
+                          const payload = await res.json().catch(() => null);
+                          if (!res.ok) {
+                            throw new Error(payload?.error || "Failed to duplicate embed");
+                          }
+                          setListMessage("Duplicated");
+                          await loadEmbeds({ keepSelection: true });
+                        } catch (e: any) {
+                          setListError(e?.message || "Failed to duplicate embed");
+                        }
+                      })();
+                    }}
                   >
-                    Delete
+                    Duplicate
                   </button>
                   <button
                     type="button"
                     style={{ ...S.secondaryBtn, padding: "8px 12px", fontSize: 13, borderColor: "rgba(239,68,68,0.7)", color: "#fecaca" }}
-                    onClick={() => handleDelete(embed.embedId)}
+                    onClick={() => handleDelete(embed)}
                   >
                     Delete
                   </button>
@@ -477,6 +694,144 @@ export default function SettingsHlsSetup({
           })}
         </div>
       </div>
+
+      {/* Edit Saved Embed Modal */}
+      {editingEmbed && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backdropFilter: "blur(8px)",
+          }}
+          onClick={() => {
+            if (!editSaving) {
+              setEditingEmbed(null);
+            }
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              background: "rgba(15,15,15,0.95)",
+              borderRadius: 16,
+              padding: 20,
+              border: "1px solid rgba(148,163,184,0.5)",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.6)",
+              color: "#e5e7eb",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>Edit Saved Embed</div>
+              <button
+                type="button"
+                onClick={() => !editSaving && setEditingEmbed(null)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#9ca3af",
+                  cursor: editSaving ? "not-allowed" : "pointer",
+                  fontSize: 18,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {editError && (
+              <div
+                style={{
+                  marginBottom: 10,
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  background: "rgba(239,68,68,0.12)",
+                  border: "1px solid rgba(239,68,68,0.35)",
+                  color: "#fca5a5",
+                  fontSize: 13,
+                }}
+              >
+                {editError}
+              </div>
+            )}
+
+            <form onSubmit={handleEditSave} style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 800 }}>Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  maxLength={60}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(63,63,70,0.6)",
+                    background: "rgba(0,0,0,0.25)",
+                    color: "#e5e7eb",
+                    fontSize: 13,
+                  }}
+                />
+              </div>
+              <div style={{ display: "grid", gap: 6 }}>
+                <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 800 }}>Description (optional)</label>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  maxLength={200}
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(63,63,70,0.6)",
+                    background: "rgba(0,0,0,0.25)",
+                    color: "#e5e7eb",
+                    fontSize: 13,
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: "#6b7280" }}>
+                  <span>{60 - editName.length}</span> name characters left · <span>{200 - editDescription.length}</span> description characters left
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => !editSaving && setEditingEmbed(null)}
+                  style={{
+                    ...S.secondaryBtn,
+                    padding: "8px 14px",
+                    fontSize: 13,
+                  }}
+                  disabled={editSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                    disabled={editSaving || isEditUnchanged}
+                  style={{
+                    ...S.primaryBtn,
+                    padding: "8px 16px",
+                    fontSize: 13,
+                  }}
+                >
+                  {editSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
