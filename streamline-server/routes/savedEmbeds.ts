@@ -13,6 +13,10 @@ type SavedEmbedDoc = {
   // This always matches the Firestore document id.
   savedEmbedId?: string;
 
+  // Explicitly stored embed id so collection group queries can
+  // match on a regular field instead of documentId.
+  embedId?: string;
+
   // New schema fields
   name: string;
   description?: string;
@@ -148,6 +152,7 @@ router.post("/", requireAuth as any, async (req: any, res) => {
 
     const doc: SavedEmbedDoc = {
       savedEmbedId,
+      embedId: savedEmbedId,
       name: resolvedName,
       description: descriptionRes.value || undefined,
       createdBy: uid,
@@ -245,7 +250,7 @@ router.get("/public/:savedEmbedId", async (req: any, res) => {
   try {
     const snap = await db
       .collectionGroup("savedEmbeds")
-      .where(admin.firestore.FieldPath.documentId(), "==", savedEmbedId)
+      .where("embedId", "==", savedEmbedId)
       .limit(1)
       .get();
 
