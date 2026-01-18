@@ -659,9 +659,9 @@ export default function Room() {
     // Role used to mint the LiveKit token + roomAccessToken.
     // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
     const requestedRole = isHost ? "host" : userRole;
-    const role = requestedRole === "cohost" || requestedRole === "moderator" ? "guest" : requestedRole;
+    const role = requestedRole;
     const isGuest = role === "guest";
-    const roleNeedsAuth = false;
+    const roleNeedsAuth = role === "cohost" || role === "moderator";
 
     const fetchToken = async () => {
       try {
@@ -678,7 +678,10 @@ export default function Room() {
             payload.roomName = effectiveRoomName;
           }
 
-          if (inviteToken) {
+          // Hosts should never rely on invite tokens for room access.
+          // Using a stale invite for a different room can cause
+          // invite_room_mismatch 403 errors when minting host tokens.
+          if (inviteToken && !isHost) {
             payload.inviteToken = inviteToken;
           }
 
@@ -1578,9 +1581,9 @@ export default function Room() {
         const res = await fetch(`${API_BASE}/api/account/roles`, { credentials: "include" });
         if (!res.ok) throw new Error("roles failed");
         const data = await res.json();
-        // Invite links are currently guest/participant-only.
-        if (Array.isArray(data?.roles)) setRoleProfiles(data.roles.filter((r: any) => r?.id === "participant"));
-        if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds.filter((id: any) => id === "participant"));
+        // Show participant, cohost, moderator (exclude viewer)
+        if (Array.isArray(data?.roles)) setRoleProfiles(data.roles.filter((r: any) => ["participant","cohost","moderator"].includes(r?.id)));
+        if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds.filter((id: any) => ["participant","cohost","moderator"].includes(id)));
       } catch (err) {
         console.warn("roles load failed, using defaults", err);
         setRoleProfiles([{ id: "participant", label: "Participant" }]);
@@ -1600,8 +1603,7 @@ export default function Room() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          // Invites are currently guest/participant-only.
-          body: JSON.stringify({ roomId: roomId || undefined, roomName: effectiveRoomName || undefined, role: "guest" }),
+          body: JSON.stringify({ roomId: roomId || undefined, roomName: effectiveRoomName || undefined, role: _role }),
         });
 
         const data = await res.json().catch(() => ({}));

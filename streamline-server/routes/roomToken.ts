@@ -402,14 +402,14 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     // created the invite; otherwise we fall back to the authenticated user.
     const entitlementsUid = (invite as any)?.createdByUid || uid;
 
-    // Invites are currently guest/participant-only.
-    // Prefer role from invite claims when present; map "guest" to participant and
-    // downgrade any elevated roles.
+    // Prefer role from invite claims when present; allow cohost/moderator if present.
     let requestedRole = rawRole;
     const inviteRoleRaw = (invite as any)?.role as string | undefined;
     if (inviteRoleRaw) {
       const v = String(inviteRoleRaw).toLowerCase();
       if (v === "guest" || v === "participant") requestedRole = "participant";
+      else if (v === "cohost") requestedRole = "cohost";
+      else if (v === "moderator") requestedRole = "moderator";
       else requestedRole = "participant";
     }
 

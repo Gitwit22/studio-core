@@ -182,8 +182,8 @@ const adminLoading = authLoading;
 
           const decodedRoomId = String(data.roomId || "");
           const decodedRoom = String(data.roomName || "");
-          // Invites are currently guest/participant-only.
-          const resolvedRole = "guest";
+          // Use the resolved role from the server
+          const resolvedRole = String(data.role || "guest");
           if (decodedRoomId) setInviteRoomId(decodedRoomId);
           if (decodedRoom) setRoomName(decodedRoom);
 
@@ -921,8 +921,8 @@ const adminLoading = authLoading;
               />
             </div>
 
-            {/* ROOM NAME */}
-            {!searchParams.get("room") && (
+            {/* ROOM NAME (hosts only; participants never edit this) */}
+            {!isParticipant && !searchParams.get("room") && (
               <div style={{ marginBottom: "24px" }}>
                 <label
                   style={{

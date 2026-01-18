@@ -24,9 +24,9 @@ function requiresAuthForRole(role: InviteRole): boolean {
 
 function normalizeRole(raw: unknown): InviteRole | null {
   const v = String(raw || "").toLowerCase();
-  // Invites are currently guest/participant-only.
   if (v === "guest" || v === "participant") return "guest";
-  if (v === "cohost" || v === "moderator") return null;
+  if (v === "cohost") return "cohost";
+  if (v === "moderator") return "moderator";
   return null;
 }
 

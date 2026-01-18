@@ -61,8 +61,8 @@ export default function InviteLanding() {
         try {
           sessionStorage.removeItem("sl_pending_invite");
           localStorage.setItem("sl_invite_token", inviteToken);
-          // Invites are currently participant-only in the UI.
-          localStorage.setItem("sl_current_role", "guest");
+          // Use the resolved role from the server
+          localStorage.setItem("sl_current_role", String(resolved.role || "guest"));
         } catch {
           // ignore storage errors
         }

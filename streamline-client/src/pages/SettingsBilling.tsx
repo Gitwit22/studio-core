@@ -434,7 +434,17 @@ export default function SettingsBilling() {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([loadUser(), loadPlans(), loadUsage(), loadEntitlements(), loadMediaPrefs(), loadCohostProfile(), loadRoles()]);
+      // Ensure we have a baseline user object before applying entitlements/TOS metadata
+      await loadUser();
+
+      await Promise.all([
+        loadPlans(),
+        loadUsage(),
+        loadEntitlements(),
+        loadMediaPrefs(),
+        loadCohostProfile(),
+        loadRoles(),
+      ]);
     } catch (err: any) {
       setError(err?.message || "Failed to load data");
     } finally {
@@ -2388,14 +2398,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       requiredPlan="Starter"
                     />
                   )}
-                  {!currentPlan.editing?.access && (
-                    <LockedFeature
-                      icon="🎬"
-                      title="Editing Suite"
-                      description="Edit your recordings with our built-in editor"
-                      requiredPlan="Starter"
-                    />
-                  )}
+                  {/* Editing Suite is not yet available; hide from locked features for now. */}
                   {currentPlan.limits.maxGuests < 10 && (
                     <LockedFeature
                       icon="👥"
