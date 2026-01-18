@@ -41,6 +41,17 @@ export const LoginPage = () => {
     }
   }, [location.search]);
 
+  const inviteRoleHint = useMemo(() => {
+    try {
+      const sp = new URLSearchParams(location.search || "");
+      const role = (sp.get("inviteRole") || "").toLowerCase();
+      if (role === "cohost" || role === "moderator") return role;
+      return null;
+    } catch {
+      return null;
+    }
+  }, [location.search]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -200,6 +211,25 @@ export const LoginPage = () => {
             marginBottom: '24px'
           }}
         >
+          {inviteRoleHint && (
+            <div
+              style={{
+                padding: '10px 12px',
+                marginBottom: '16px',
+                borderRadius: '10px',
+                background: 'rgba(34,197,94,0.12)',
+                border: '1px solid rgba(34,197,94,0.4)',
+                fontSize: '13px',
+                color: '#bbf7d0',
+              }}
+            >
+              <strong style={{ color: '#4ade80' }}>Heads up:</strong>{' '}
+              To join as a {inviteRoleHint === 'cohost' ? 'co-host' : 'moderator'}, you’ll need to sign in
+              or create a free StreamLine account. Once you’re in, we’ll
+              drop you straight into the live room.
+            </div>
+          )}
+
           <form onSubmit={handleSubmit}>
             {/* EMAIL INPUT */}
             <div style={{ marginBottom: '20px' }}>

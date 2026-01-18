@@ -735,7 +735,10 @@ export default function Room() {
         if (!attempt.res.ok && !isGuest && (attempt.res.status === 401 || attempt.res.status === 403)) {
           if (roleNeedsAuth) {
             const next = `${window.location.pathname}${window.location.search}`;
-            nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
+            const params = new URLSearchParams();
+            params.set("next", next);
+            params.set("inviteRole", role);
+            nav(`/login?${params.toString()}`, { replace: true });
             return;
           }
           console.warn("[Room] auth roomToken denied; falling back to guest token", attempt.res.status);
