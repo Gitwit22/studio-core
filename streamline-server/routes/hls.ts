@@ -140,8 +140,10 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     // Build stable paths
     const prefix = `hls/${roomId}/`;
     const playlistName = `room.m3u8`;
+    const livePlaylistName = `live.m3u8`;
     const publicBase = getHlsPublicBaseUrl();
-    const playlistUrl = `${publicBase}/${roomId}/${playlistName}`;
+    // For best viewer UX, point clients at the live sliding playlist.
+    const playlistUrl = `${publicBase}/${roomId}/${livePlaylistName}`;
 
     const lkRoomName = room.livekitRoomName || roomId;
 
@@ -171,6 +173,7 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
         layout: "speaker",
         prefix,
         playlistName,
+        livePlaylistName,
         segmentDurationSec: 6,
         presetId,
       });

@@ -25,6 +25,7 @@ export async function startHlsEgress(params: {
   layout: "speaker" | "grid";
   prefix: string; // e.g. "hls/<roomId>/"
   playlistName: string; // e.g. "room.m3u8"
+  livePlaylistName?: string; // e.g. "live.m3u8" (sliding live playlist)
   segmentDurationSec: number;
   presetId: HlsPresetId;
 }) {
@@ -45,6 +46,7 @@ export async function startHlsEgress(params: {
   const output = new SegmentedFileOutput({
     filenamePrefix: `${params.prefix}seg-`, // => hls/<roomId>/seg-00001.ts etc
     playlistName: params.playlistName, // => hls/<roomId>/room.m3u8
+    livePlaylistName: params.livePlaylistName, // => hls/<roomId>/live.m3u8 (sliding live playlist)
     segmentDuration: params.segmentDurationSec,
     protocol: SegmentedFileProtocol.HLS_PROTOCOL,
     output: {

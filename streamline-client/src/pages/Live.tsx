@@ -56,6 +56,27 @@ function canNativeHls(video: HTMLVideoElement) {
   return video.canPlayType("application/vnd.apple.mpegurl") !== "";
 }
 
+function clampVolume(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+function snapToLiveEdge(video: HTMLVideoElement) {
+  try {
+    const s = video.seekable;
+    if (s && s.length) {
+      const end = s.end(s.length - 1);
+      video.currentTime = Math.max(0, end - 0.5);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export default function Live() {
   const params = useParams<{ savedEmbedId?: string }>();
 
@@ -138,7 +159,7 @@ export default function Live() {
   }, [savedEmbedId]);
 
   // Fetch public viewer configuration (title/subtitle/logo/theme/offline message)
-  useEffect(() => {
+  const reloadViewerConfig = useCallback(async () => {
     const currentRoomId = (roomId || "").trim();
     if (!currentRoomId) return;
 
@@ -147,34 +168,29 @@ export default function Live() {
       return;
     }
 
-    const ctrl = new AbortController();
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/public/rooms/${encodeURIComponent(currentRoomId)}/hls-config`, {
-          signal: ctrl.signal,
-        });
+    try {
+      const res = await fetch(`${API_BASE}/api/public/rooms/${encodeURIComponent(currentRoomId)}/hls-config`);
 
-        if (!res.ok) {
-          setViewerConfig(null);
-          return;
-        }
-
-        const data = (await res.json().catch(() => null)) as PublicRoomHlsConfigResponse | null;
-        if (!data?.hlsConfig) {
-          setViewerConfig(null);
-          return;
-        }
-
-        setViewerConfig(data.hlsConfig);
-      } catch {
-        // ignore
+      if (!res.ok) {
+        setViewerConfig(null);
+        return;
       }
-    })();
 
-    return () => {
-      ctrl.abort();
-    };
+      const data = (await res.json().catch(() => null)) as PublicRoomHlsConfigResponse | null;
+      if (!data?.hlsConfig) {
+        setViewerConfig(null);
+        return;
+      }
+
+      setViewerConfig(data.hlsConfig);
+    } catch {
+      // ignore
+    }
   }, [roomId]);
+
+  useEffect(() => {
+    void reloadViewerConfig();
+  }, [reloadViewerConfig]);
 
   // Fetch HLS status + playlist URL by roomId using the public viewer-safe endpoint.
   const fetchHlsStatus = useCallback(async () => {
@@ -232,6 +248,19 @@ export default function Live() {
     return () => window.clearInterval(t);
   }, [roomId, fetchHlsStatus]);
 
+  const handleRefreshGoLive = useCallback(() => {
+    void reloadViewerConfig();
+    void fetchHlsStatus();
+
+    const v = videoRef.current;
+    if (v) {
+      snapToLiveEdge(v);
+      if (v.paused) {
+        void v.play().catch(() => {});
+      }
+    }
+  }, [reloadViewerConfig, fetchHlsStatus]);
+
   // Attach HLS playback (source + player wiring) once per playlist URL.
   // Mute/volume are applied in a separate effect so toggling audio does
   // NOT recreate the player or reset the stream.
@@ -247,15 +276,24 @@ export default function Live() {
     if (canNativeHls(video)) {
       video.src = playlistUrl;
       video.muted = isMuted;
-      video.volume = Math.min(1, Math.max(0, volume));
-      void video.play().catch(() => {
-        // autoplay might be blocked until user interacts
-      });
+      video.volume = clampVolume(volume);
+
+      const onMeta = () => {
+        snapToLiveEdge(video);
+        void video.play().catch(() => {
+          // autoplay might be blocked until user interacts
+        });
+      };
+
+      video.addEventListener("loadedmetadata", onMeta, { once: true });
       return;
     }
 
     if (Hls.isSupported()) {
       const hls = new Hls({
+        // Keep playback near the live edge
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 10,
         enableWorker: true,
         lowLatencyMode: true,
       });
@@ -265,13 +303,25 @@ export default function Live() {
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.muted = isMuted;
-        video.volume = Math.min(1, Math.max(0, volume));
-        void video.play().catch(() => {
-          // autoplay blocked until user interacts
-        });
+        video.volume = clampVolume(volume);
+
+        const onMeta = () => {
+          snapToLiveEdge(video);
+          void video.play().catch(() => {
+            // autoplay blocked until user interacts
+          });
+        };
+
+        video.addEventListener("loadedmetadata", onMeta, { once: true });
       });
 
       hls.on(Hls.Events.ERROR, (_evt, data) => {
+        // On stalls or recoverable errors, try snapping back to live.
+        if (data && !data.fatal && video.readyState >= 1) {
+          snapToLiveEdge(video);
+          void video.play().catch(() => {});
+        }
+
         if (data?.fatal) {
           setStatus("error");
           setError("Stream playback error");
@@ -469,13 +519,23 @@ export default function Live() {
                           )}
                         </div>
 
-                        <button
-                          onClick={toggleFullscreen}
-                          className="p-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50"
-                          aria-label="Fullscreen"
-                        >
-                          <Maximize className="w-5 h-5 text-white" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleRefreshGoLive}
+                            className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50 text-xs font-medium text-white"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Go Live</span>
+                          </button>
+
+                          <button
+                            onClick={toggleFullscreen}
+                            className="p-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50"
+                            aria-label="Fullscreen"
+                          >
+                            <Maximize className="w-5 h-5 text-white" />
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -532,7 +592,11 @@ export default function Live() {
                     </div>
 
                     <button
-                      onClick={fetchHlsStatus}
+                      onClick={() => {
+                        void fetchHlsStatus();
+                        const v = videoRef.current;
+                        if (v) snapToLiveEdge(v);
+                      }}
                       disabled={isRetrying}
                       className="group flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-medium text-sm transition-all duration-300 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 disabled:opacity-50 disabled:cursor-not-allowed border border-red-500/30"
                     >
