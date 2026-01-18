@@ -76,6 +76,7 @@ export async function getPublicHls(roomId: string) {
   return (await res.json()) as {
     status?: "idle" | "starting" | "live" | "error" | string;
     playlistUrl?: string | null;
+    viewerCount?: number;
     error?: string | null;
   };
 }

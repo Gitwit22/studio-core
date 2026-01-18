@@ -132,6 +132,9 @@ export default function Join() {
 
   const [joinMode, setJoinMode] = useState<"new" | "saved">("new");
 
+  // Platform-level HLS flag (controls visibility of Saved Room join when HLS is disabled)
+  const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
+
 // Use /api/auth/me for admin status
 const { user: authUser, loading: authLoading } = useAuthMe();
 const isAdmin = !!authUser?.isAdmin;
@@ -212,6 +215,37 @@ const adminLoading = authLoading;
       cancelled = true;
     };
   }, [inviteTokenParam, legacyInviteRoomParam]);
+
+  // Load platform-level flags to know if HLS (and Saved Rooms join) should be available.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/account/me`, { credentials: "include" });
+        if (!res.ok) {
+          if (!cancelled) setPlatformHlsEnabled(true);
+          return;
+        }
+        const me = await res.json().catch(() => null);
+        if (cancelled || !me) {
+          return;
+        }
+        const platformFlags = (me as any)?.platformFlags || {};
+        if (typeof platformFlags.hlsEnabled === "boolean") {
+          setPlatformHlsEnabled(platformFlags.hlsEnabled);
+        } else {
+          setPlatformHlsEnabled(true);
+        }
+      } catch {
+        if (!cancelled) setPlatformHlsEnabled(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const lastRoom = useMemo(() => {
     try {
@@ -919,8 +953,8 @@ const adminLoading = authLoading;
               </div>
             )}
 
-            {/* HOST JOIN MODE TOGGLE + FIELDS */}
-            {!isParticipant && savedEmbeds.length > 0 && (
+            {/* HOST JOIN MODE TOGGLE + FIELDS (only when platform HLS is enabled) */}
+            {!isParticipant && platformHlsEnabled && savedEmbeds.length > 0 && (
               <div style={{ marginBottom: "20px" }}>
                 <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>Join mode</div>
                 <div
@@ -969,8 +1003,8 @@ const adminLoading = authLoading;
               </div>
             )}
 
-            {/* HOST: Saved Room selector when using saved mode */}
-            {!isParticipant && savedEmbeds.length > 0 && joinMode === "saved" && (
+            {/* HOST: Saved Room selector when using saved mode (only when platform HLS is enabled) */}
+            {!isParticipant && platformHlsEnabled && savedEmbeds.length > 0 && joinMode === "saved" && (
               <div style={{ marginBottom: "24px" }}>
                 <label
                   style={{

@@ -19,6 +19,7 @@ const DEFAULT_LOGO_URL = "/logosmaller.png";
 type PublicHlsResponse = {
   status?: "idle" | "starting" | "live" | "error";
   playlistUrl?: string | null;
+  viewerCount?: number;
   error?: string | null;
 };
 
@@ -99,9 +100,7 @@ export default function Live() {
   const [isMuted, setIsMuted] = useState(true);
   const [volume, setVolume] = useState(0.6);
   const [isRetrying, setIsRetrying] = useState(false);
-
-  // NOTE: viewerCount is a placeholder until you wire a real metric
-  const viewerCount = 0;
+  const [viewerCount, setViewerCount] = useState<number>(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -211,6 +210,7 @@ export default function Live() {
       const nextStatus = (data.status || "idle") as PublicHlsResponse["status"];
       setHlsStatus(nextStatus);
       setPlaylistUrl(data.playlistUrl ?? null);
+      setViewerCount(typeof data.viewerCount === "number" && Number.isFinite(data.viewerCount) ? data.viewerCount : 0);
 
       if (nextStatus === "live") {
         setStatus("live");
@@ -291,9 +291,22 @@ export default function Live() {
 
     if (Hls.isSupported()) {
       const hls = new Hls({
-        // Keep playback near the live edge
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 10,
+        // Keep playback near the live edge with a slightly larger safety buffer.
+        // This helps hide small delivery jitters.
+        liveSyncDurationCount: 6,
+        liveMaxLatencyDurationCount: 12,
+
+        // Increase forward buffer so brief network blips don't immediately stall playback.
+        maxBufferLength: 30,
+
+        // Avoid aggressive flushing of already-played content.
+        backBufferLength: 30,
+
+        // Make fragment loading a bit more tolerant of transient failures.
+        fragLoadingRetryDelay: 1000,
+        fragLoadingMaxRetry: 6,
+        levelLoadingMaxRetry: 6,
+
         enableWorker: true,
         lowLatencyMode: true,
       });
@@ -315,7 +328,24 @@ export default function Live() {
         video.addEventListener("loadedmetadata", onMeta, { once: true });
       });
 
-      hls.on(Hls.Events.ERROR, (_evt, data) => {
+      hls.on(Hls.Events.ERROR, (evt, data) => {
+        // Basic diagnostics to understand "choppy" behavior buckets.
+        try {
+          const currentTime = video.currentTime;
+          const bufferedEnd = video.buffered && video.buffered.length ? video.buffered.end(video.buffered.length - 1) : currentTime;
+          const bufferHealth = bufferedEnd - currentTime;
+          // eslint-disable-next-line no-console
+          console.warn("[hls] ERROR", {
+            event: evt,
+            details: data?.details,
+            fatal: data?.fatal,
+            reason: data?.reason,
+            bufferHealth,
+          });
+        } catch {
+          // ignore diagnostics errors
+        }
+
         // On stalls or recoverable errors, try snapping back to live.
         if (data && !data.fatal && video.readyState >= 1) {
           snapToLiveEdge(video);
@@ -330,6 +360,29 @@ export default function Live() {
           } catch {
             // ignore
           }
+        }
+      });
+
+      // Fragment-level diagnostics: track buffer health as segments are appended.
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        try {
+          const currentTime = video.currentTime;
+          const bufferedEnd = video.buffered && video.buffered.length ? video.buffered.end(video.buffered.length - 1) : currentTime;
+          const bufferHealth = bufferedEnd - currentTime;
+          // eslint-disable-next-line no-console
+          console.debug("[hls] FRAG_BUFFERED", { bufferHealth });
+        } catch {
+          // ignore
+        }
+      });
+
+      // Level switch diagnostics (if ABR is active in the future).
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => {
+        try {
+          // eslint-disable-next-line no-console
+          console.info("[hls] LEVEL_SWITCHED", { level: data?.level });
+        } catch {
+          // ignore
         }
       });
 
@@ -525,7 +578,7 @@ export default function Live() {
                             className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50 text-xs font-medium text-white"
                           >
                             <RefreshCw className="w-3 h-3" />
-                            <span>Go Live</span>
+                            <span>Live View</span>
                           </button>
 
                           <button

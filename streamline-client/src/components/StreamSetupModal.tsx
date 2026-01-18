@@ -1429,8 +1429,9 @@ export default function StreamSetupModalV2({
           </CollapsibleSection>
           )}
 
-          {/* HLS Broadcast section (runtime start/stop). */}
-          {(hlsEnabled || showHlsSection) && (
+            {/* HLS Broadcast section (runtime start/stop).
+              Gated by platform-level flag via showHlsSection. */}
+            {showHlsSection && (
             <CollapsibleSection
               id="hls"
               title="HLS Broadcast"
