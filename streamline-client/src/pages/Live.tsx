@@ -76,6 +76,7 @@ export default function Live() {
   // UI state
   const [status, setStatus] = useState<StreamStatus>("loading");
   const [isMuted, setIsMuted] = useState(true);
+  const [volume, setVolume] = useState(0.6);
   const [isRetrying, setIsRetrying] = useState(false);
 
   // NOTE: viewerCount is a placeholder until you wire a real metric
@@ -231,7 +232,9 @@ export default function Live() {
     return () => window.clearInterval(t);
   }, [roomId, fetchHlsStatus]);
 
-  // Attach HLS playback:
+  // Attach HLS playback (source + player wiring) once per playlist URL.
+  // Mute/volume are applied in a separate effect so toggling audio does
+  // NOT recreate the player or reset the stream.
   // - Safari/iOS: native HLS via video.src
   // - Chrome/Firefox/Edge: hls.js
   useEffect(() => {
@@ -244,6 +247,7 @@ export default function Live() {
     if (canNativeHls(video)) {
       video.src = playlistUrl;
       video.muted = isMuted;
+      video.volume = Math.min(1, Math.max(0, volume));
       void video.play().catch(() => {
         // autoplay might be blocked until user interacts
       });
@@ -261,6 +265,7 @@ export default function Live() {
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.muted = isMuted;
+        video.volume = Math.min(1, Math.max(0, volume));
         void video.play().catch(() => {
           // autoplay blocked until user interacts
         });
@@ -289,13 +294,19 @@ export default function Live() {
       setStatus("error");
       setError("HLS not supported in this browser.");
     }
-  }, [playlistUrl, isMuted]);
+  }, [playlistUrl]);
 
-  const toggleMute = () => {
+  // Apply audio settings ONLY (no src/hls work here). This ensures mute/volume
+  // changes never recreate the player or reload the stream.
+  useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    v.muted = !isMuted;
-    setIsMuted(!isMuted);
+    v.muted = isMuted;
+    v.volume = Math.min(1, Math.max(0, volume));
+  }, [isMuted, volume]);
+
+  const toggleMute = () => {
+    setIsMuted((prev) => !prev);
   };
 
   const toggleFullscreen = () => {
@@ -433,6 +444,23 @@ export default function Live() {
                           >
                             {isMuted ? <VolumeX className="w-5 h-5 text-white" /> : <Volume2 className="w-5 h-5 text-white" />}
                           </button>
+
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={isMuted ? 0 : volume}
+                            onChange={(e) => {
+                              const raw = Number(e.target.value);
+                              const next = Math.min(1, Math.max(0, Number.isFinite(raw) ? raw : 0));
+                              setVolume(next);
+                              if (next > 0) setIsMuted(false);
+                              if (next === 0) setIsMuted(true);
+                            }}
+                            className="w-32 h-1 rounded-full bg-neutral-700 accent-red-500 cursor-pointer"
+                            aria-label="Volume"
+                          />
 
                           {isMuted && (
                             <span className="text-xs text-neutral-300 bg-black/60 px-2 py-1 rounded border border-neutral-700/50">
