@@ -2244,7 +2244,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
                         <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
                         <FeatureRow label="Stream destinations" value={plan.limits.rtmpDestinationsMax} />
-                        <FeatureRow label="Recording" value={plan.features.recording} />
+                        {entitlements.recording && (
+                          <FeatureRow label="Recording" value={plan.features.recording} />
+                        )}
                         <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
                         {platformHlsEnabled ? <FeatureRow label="HLS Broadcast Page" value={(plan as any).features?.canHls} /> : null}
                         {advancedPermissions.lockReason !== "coming_soon" ? (
@@ -2370,7 +2372,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </p>
                 
                 <div style={S.lockedGrid}>
-                  {!currentPlan.features.recording && (
+                  {(!entitlements.recording || !currentPlan.features.recording) && (
                     <LockedFeature
                       icon="🎥"
                       title="Recording"

@@ -133,7 +133,9 @@ export default function Join() {
   const [joinMode, setJoinMode] = useState<"new" | "saved">("new");
 
   // Platform-level HLS flag (controls visibility of Saved Room join when HLS is disabled)
-  const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
+  // Default to false so HLS-only UI never flashes on for users
+  // who don't have HLS enabled while account flags are loading.
+  const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(false);
 
 // Use /api/auth/me for admin status
 const { user: authUser, loading: authLoading } = useAuthMe();

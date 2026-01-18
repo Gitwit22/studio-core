@@ -583,7 +583,9 @@ export default function StreamSetupModalV2({
   const hlsAllowed = hlsEnabled !== false;
 
   const badgeItems = [
-    { label: "Recording", value: recordingEnabled ? "On" : "Off", ok: recordingEnabled },
+    recordingEnabled
+      ? { label: "Recording", value: "On", ok: true }
+      : null,
     { label: "Dual", value: dualRecordingAllowed ? "On" : "Off", ok: dualRecordingAllowed },
     { label: "Multistream", value: multistreamAllowed ? "On" : "Off", ok: multistreamAllowed },
     typeof maxGuests === "number"
