@@ -672,7 +672,8 @@ export default function Room() {
 
   useEffect(() => {
     if (!hostCheckReady) return;
-    if (!effectiveRoomName || !displayName) return;
+    if (!displayName) return;
+    if (!roomId && !effectiveRoomName) return;
     // Role used to mint the LiveKit token + roomAccessToken.
     // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
     const requestedRole = isHost ? "host" : userRole;
