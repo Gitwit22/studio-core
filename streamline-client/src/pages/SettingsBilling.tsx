@@ -315,6 +315,7 @@ export default function SettingsBilling() {
   const [entitlements, setEntitlements] = useState<Entitlements>(DEFAULT_ENTITLEMENTS);
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
   const [platformHlsSettingsTabEnabled, setPlatformHlsSettingsTabEnabled] = useState<boolean | null>(null);
+  const [platformTranscodeEnabled, setPlatformTranscodeEnabled] = useState<boolean>(true);
   const [mediaPrefs, setMediaPrefs] = useState<MediaPrefs>(DEFAULT_MEDIA_PREFS);
   const [advancedPermissions, setAdvancedPermissions] = useState<AdvancedPermissionsState>({ enabled: false, plan: false, override: false, globalLock: false, lockReason: null, effectivePermissionsMode: "simple", permissionsModeLockReason: null });
   const [serverDefaultRoleProfiles, setServerDefaultRoleProfiles] = useState<ServerDefaultRoleProfile[] | null>(null);
@@ -489,6 +490,12 @@ export default function SettingsBilling() {
           setPlatformHlsEnabled(true);
         }
 
+        if (typeof platformFlags.transcodeEnabled === "boolean") {
+          setPlatformTranscodeEnabled(platformFlags.transcodeEnabled);
+        } else {
+          setPlatformTranscodeEnabled(true);
+        }
+
         // Settings gate: default to visible unless explicitly disabled.
         // Prefer platformFlags.hlsSettingsTab, fall back to platformFlags.hlsEnabled.
         const hlsTabFlag =
@@ -501,6 +508,7 @@ export default function SettingsBilling() {
       } catch {
         setPlatformHlsEnabled(true);
         setPlatformHlsSettingsTabEnabled(true);
+        setPlatformTranscodeEnabled(true);
       }
 
       // Capture Terms of Service metadata for display and gating.
@@ -567,6 +575,7 @@ export default function SettingsBilling() {
       console.warn("loadEntitlements failed; using defaults", err);
       setEntitlements((prev) => prev || DEFAULT_ENTITLEMENTS);
       setPlatformHlsEnabled(true);
+      setPlatformTranscodeEnabled(true);
     }
   };
 
@@ -2048,6 +2057,26 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                   {checkoutTosError && (
                     <div style={{ fontSize: 12, color: "#f97316" }}>{checkoutTosError}</div>
                   )}
+                </div>
+              )}
+
+              {!platformTranscodeEnabled && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(248,113,113,0.45)",
+                    background: "rgba(30,64,175,0.45)",
+                    color: "#fee2e2",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  <div style={{ marginBottom: 4 }}>Transcoding: Temporarily Disabled (Beta)</div>
+                  <div style={{ fontSize: 12, color: "#fecaca", fontWeight: 400 }}>
+                    Recordings are still available, but export/transcode features are paused while we stabilize the pipeline.
+                  </div>
                 </div>
               )}
 

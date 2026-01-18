@@ -12,6 +12,7 @@ import {
   DEFAULT_ROLE_PROFILES_BY_ID,
   type RolePermissionMap,
 } from "../lib/permissions/defaultRoleProfiles";
+import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
 
 const router = Router();
 
@@ -413,6 +414,8 @@ router.get("/me", async (req, res) => {
       console.error("[account/me] failed to compute effectiveEntitlements", e);
     }
 
+    const platformTranscodeEnabled = getPlatformTranscodeEnabled();
+
     return res.json({
       id: uid,
       email: data.email || null,
@@ -441,6 +444,7 @@ router.get("/me", async (req, res) => {
       platformFlags: {
         hlsEnabled: hlsUi.enabled,
         hlsSettingsTab: hlsUi.enabled,
+        transcodeEnabled: platformTranscodeEnabled,
       },
       planId: effectiveEntitlements?.planId ?? entitlements.planId,
       effectiveEntitlements,
