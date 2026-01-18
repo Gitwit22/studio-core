@@ -480,6 +480,7 @@ export default function Room() {
   const [showStreamEndedModal, setShowStreamEndedModal] = useState(false);
   const currentUserId = getOrCreateUid();
   const [isHost, setIsHost] = useState(false);
+  const [hostCheckReady, setHostCheckReady] = useState(false);
   const [userRole, setUserRole] = useState<string>(() => {
     try {
       return localStorage.getItem("sl_current_role") || "guest";
@@ -559,6 +560,7 @@ export default function Room() {
   const effectiveRoomName = roomName;
 
   useEffect(() => {
+    setHostCheckReady(true);
     const candidateKey = roomId;
     if (!candidateKey) return;
     const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
@@ -605,8 +607,22 @@ export default function Room() {
         const resolvedRole = rawResolvedRole === "cohost" || rawResolvedRole === "moderator" ? "guest" : rawResolvedRole;
         const expectedId = roomId || "";
         const expectedName = effectiveRoomName || "";
-        if (expectedId && resolvedId && resolvedId !== expectedId) return;
-        if (!expectedId && expectedName && resolvedName && resolvedName !== expectedName) return;
+        const clearStaleInvite = () => {
+          setInviteToken(null);
+          try {
+            localStorage.removeItem("sl_invite_token");
+          } catch {
+            // ignore
+          }
+        };
+        if (expectedId && resolvedId && resolvedId !== expectedId) {
+          clearStaleInvite();
+          return;
+        }
+        if (!expectedId && expectedName && resolvedName && resolvedName !== expectedName) {
+          clearStaleInvite();
+          return;
+        }
 
         // Only override when we're not host and our role is low-trust.
         if (!isHost && (userRole === "guest" || userRole === "participant")) {
@@ -655,6 +671,7 @@ export default function Room() {
   };
 
   useEffect(() => {
+    if (!hostCheckReady) return;
     if (!effectiveRoomName || !displayName) return;
     // Role used to mint the LiveKit token + roomAccessToken.
     // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
@@ -819,7 +836,7 @@ export default function Room() {
     };
 
     fetchToken();
-  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole]);
+  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady]);
 
   
 
