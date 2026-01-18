@@ -26,7 +26,17 @@ async function getParticipantCount(livekitRoomName: string | undefined | null): 
     const participants = await client.listParticipants(roomName);
     return participants?.length ?? 0;
   } catch (err) {
-    console.warn("[publicHls] participant count failed", (err as any)?.message || err);
+    const anyErr = err as any;
+    const message: string = typeof anyErr?.message === "string" ? anyErr.message : String(anyErr ?? "");
+    const statusCode = (typeof anyErr?.status === "number" && anyErr.status) || (typeof anyErr?.code === "number" && anyErr.code) || undefined;
+
+    // LiveKit returns 404 when a room does not exist yet or has already ended.
+    // Treat that as "no viewers" without spamming logs.
+    if (statusCode === 404 || message.includes("404")) {
+      return null;
+    }
+
+    console.warn("[publicHls] participant count failed", message || anyErr);
     return null;
   }
 }
@@ -42,11 +52,13 @@ router.get("/:roomId", async (req: any, res) => {
     const isLive = hls.status === "live" && !!(hls.playlistUrl && String(hls.playlistUrl).trim());
 
     let viewerCount: number | null = null;
-    try {
-      // Use the LiveKit room name when available; fall back to roomId.
-      viewerCount = await getParticipantCount((room as any).livekitRoomName || roomId);
-    } catch {
-      viewerCount = null;
+    if (isLive) {
+      try {
+        // Use the LiveKit room name when available; fall back to roomId.
+        viewerCount = await getParticipantCount((room as any).livekitRoomName || roomId);
+      } catch {
+        viewerCount = null;
+      }
     }
 
     return res.json({
