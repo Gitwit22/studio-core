@@ -548,6 +548,15 @@ router.post("/accept-tos", async (req, res) => {
     if (!uid) return res.status(401).json({ error: "unauthorized" });
 
     const userRef = firestore.collection("users").doc(uid);
+    const existing = await userRef.get();
+
+    // Do not create "ghost" user documents that only contain TOS fields.
+    // If a user doc does not already exist, require a real signup/onboarding
+    // flow to create it instead of implicitly creating it here.
+    if (!existing.exists) {
+      return res.status(404).json({ error: "user_not_found" });
+    }
+
     const now = Date.now();
 
     await userRef.set(
