@@ -136,6 +136,18 @@ async function getHlsUiFlag() {
   };
 }
 
+// Global recording UI/feature flag.
+// When missing, we default to enabled so recording behaves according to the plan.
+async function getRecordingUiFlag() {
+  const snap = await firestore.collection("featureFlags").doc("recording").get();
+  const data = snap.exists ? (snap.data() as any) || {} : {};
+  const enabled = data.enabled === undefined ? true : !!data.enabled;
+  return {
+    enabled,
+    reason: typeof data.reason === "string" ? data.reason : undefined,
+  };
+}
+
 async function getAdvancedPermissionsEnabled(uid: string) {
   const userSnap = await firestore.collection("users").doc(uid).get();
   const userData = userSnap.exists ? userSnap.data() || {} : {};
@@ -353,6 +365,9 @@ router.get("/me", async (req, res) => {
 
     // Canonical effective entitlements payload (features + limits) for client gating
     let effectiveEntitlements: any = null;
+    // Global feature/UI flags that can further constrain plan-based entitlements.
+    const recordingUi = await getRecordingUiFlag();
+
     try {
       const plan = entitlements.plan;
       const limits = entitlements.limits;
@@ -390,7 +405,9 @@ router.get("/me", async (req, res) => {
         planId: entitlements.planId,
         planName: plan.name || entitlements.planId,
         features: {
-          recording: !!features.recording,
+          // Recording is available only when the plan includes it AND the
+          // global recording feature flag is enabled.
+          recording: !!features.recording && recordingUi.enabled,
           rtmpMultistream: rtmpMultistreamEnabled,
           dualRecording: !!(rawFeatures.dualRecording ?? rawFeatures.dual_recording),
           watermark: !!(rawFeatures.watermarkRecordings ?? rawFeatures.watermark),
@@ -445,6 +462,7 @@ router.get("/me", async (req, res) => {
         hlsEnabled: hlsUi.enabled,
         hlsSettingsTab: hlsUi.enabled,
         transcodeEnabled: platformTranscodeEnabled,
+        recordingEnabled: recordingUi.enabled,
       },
       planId: effectiveEntitlements?.planId ?? entitlements.planId,
       effectiveEntitlements,

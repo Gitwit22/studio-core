@@ -257,10 +257,22 @@ router.get("/entitlements", requireAuth, async (req, res) => {
   const entitlements = await getEffectiveEntitlements(uid);
   const plan = entitlements.plan;
 
+   // Global recording feature flag: when disabled, recording should be treated
+   // as unavailable even if the plan normally includes it. Default to enabled
+   // if the flag doc is missing so plans behave as defined out of the box.
+   let recordingEnabledFlag = true;
+   try {
+     const snap = await firestore.collection("featureFlags").doc("recording").get();
+     const data = snap.exists ? (snap.data() as any) || {} : {};
+     recordingEnabledFlag = data.enabled === undefined ? true : !!data.enabled;
+   } catch {
+     recordingEnabledFlag = true;
+   }
+
   const payload = {
     planId: entitlements.planId,
     planName: plan.name || entitlements.planId,
-    recording: !!entitlements.features.recording,
+    recording: !!entitlements.features.recording && recordingEnabledFlag,
     rtmpMultistream: !!entitlements.features.multistream,
     dualRecording: !!(plan.raw?.features?.dualRecording || plan.raw?.features?.dual_recording),
     watermark: !!(plan.raw?.features?.watermarkRecordings || plan.raw?.features?.watermark),
