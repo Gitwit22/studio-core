@@ -551,6 +551,7 @@ export default function Room() {
   const [defaultRecordingModePref, setDefaultRecordingModePref] = useState<"cloud" | "dual">("cloud");
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
+  const [authStatus, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
   const [roomName, setRoomName] = useState<string>(() => {
     const fromState = (location.state as any)?.livekitRoomName;
@@ -559,6 +560,33 @@ export default function Room() {
     return cached || "";
   });
   const effectiveRoomName = roomName;
+
+  // Lightweight auth probe so we know whether privileged roles (host/cohost/moderator)
+  // are allowed to request room tokens. This is separate from presets/entitlements
+  // and should run even if we never open streaming UI.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/account/me`, { credentials: "include" });
+        if (cancelled) return;
+        if (res.ok) {
+          setAuthStatus("authed");
+        } else if (res.status === 401) {
+          setAuthStatus("guest");
+        } else {
+          setAuthStatus("guest");
+        }
+      } catch {
+        if (!cancelled) setAuthStatus("guest");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE]);
 
   useEffect(() => {
     setHostCheckReady(true);
@@ -740,7 +768,23 @@ export default function Room() {
     const requestedRole = isHost ? "host" : userRole;
     const role = requestedRole;
     const isGuest = role === "guest";
-    const roleNeedsAuth = role === "cohost" || role === "moderator";
+    const roleNeedsAuth = role === "cohost" || role === "moderator" || role === "host";
+
+    // Hard guard: do not attempt privileged room tokens until auth status is known.
+    if (roleNeedsAuth) {
+      if (authStatus === "guest") {
+        const next = `${window.location.pathname}${window.location.search}`;
+        const params = new URLSearchParams();
+        params.set("next", next);
+        params.set("inviteRole", role);
+        nav(`/login?${params.toString()}`, { replace: true });
+        return;
+      }
+      if (authStatus === "unknown") {
+        // Wait for /api/account/me to resolve before minting any privileged token.
+        return;
+      }
+    }
 
     const fetchToken = async () => {
       try {
@@ -801,6 +845,9 @@ export default function Room() {
         // If denied due to auth, we only fall back to guest for low-trust roles.
         let attempt = await tryFetch(isGuest ? "guest" : "auth");
         if (!attempt.res.ok && !isGuest && (attempt.res.status === 401 || attempt.res.status === 403)) {
+          // For privileged roles this path should normally be unreachable because
+          // we gate on authStatus above. If we do reach it for a non-guest role,
+          // do not auto-fallback to a guest token; require explicit login.
           if (roleNeedsAuth) {
             const next = `${window.location.pathname}${window.location.search}`;
             const params = new URLSearchParams();
@@ -916,7 +963,7 @@ export default function Room() {
     };
 
     fetchToken();
-  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady]);
+  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady, authStatus, roomAccessToken]);
 
   
 
