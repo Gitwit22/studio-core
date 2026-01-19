@@ -51,13 +51,20 @@ export async function intersectPermissionsWithEntitlements(
     }
 
     if (Object.prototype.hasOwnProperty.call(next, "canDestinations")) {
-      const rtmpEnabled = Boolean(
+      // RTMP / Stream Destinations are effectively enabled when the plan
+      // allows at least one destination. We still honor legacy feature
+      // flags as a fallback so older plans behave sensibly, but the
+      // numeric cap is the primary source of truth.
+      const maxFromLimits = Number(ent.limits?.rtmpDestinationsMax ?? 0) || 0;
+      const rtmpEnabledByLimit = maxFromLimits > 0;
+      const rtmpEnabledByFlags = Boolean(
         planFeatures.multistream ||
         planFeatures.rtmp ||
         rawFeatures.rtmpMultistream ||
         rawFeatures.multistream ||
         (ent.plan.raw as any)?.multistreamEnabled
       );
+      const rtmpEnabled = rtmpEnabledByLimit || rtmpEnabledByFlags;
       next.canDestinations = !!next.canDestinations && rtmpEnabled;
     }
 

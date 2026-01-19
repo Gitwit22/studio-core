@@ -101,6 +101,9 @@ interface Props {
   dualRecordingAllowed?: boolean;
   maxGuests?: number;
   multistreamAllowed?: boolean;
+  // Numeric RTMP destinations cap from plan/entitlements. 0 = disabled,
+  // 1 = single destination, >1 = multistream up to this number.
+  rtmpDestinationsMax?: number;
   hlsEnabled?: boolean;
   hlsCustomizationEnabled?: boolean;
   onUpgradeHls?: () => void;
@@ -135,6 +138,7 @@ export default function StreamSetupModalV2({
   dualRecordingAllowed = false,
   maxGuests,
   multistreamAllowed = true,
+  rtmpDestinationsMax,
   hlsEnabled = true,
   hlsCustomizationEnabled = false,
   onUpgradeHls,
@@ -568,9 +572,11 @@ export default function StreamSetupModalV2({
 
   const streamIsLive = streamStatus === "live";
   const streamIsBusy = streamStatus === "starting" || streamStatus === "stopping";
+  const rtmpCap = typeof rtmpDestinationsMax === "number" ? rtmpDestinationsMax : 0;
   // When multistreamAllowed is false, the caller has already determined that
   // this user lacks in-room permissions (roomPermissions) to manage streaming.
-  const streamDisallowed = !multistreamAllowed;
+  // Additionally, a plan-level cap of 0 fully disables RTMP destinations.
+  const streamDisallowed = !multistreamAllowed || rtmpCap <= 0;
   
   const recordingIsActive = recordingStatus === "recording";
   const recordingIsBusy = recordingStatus === "stopping";
@@ -587,7 +593,18 @@ export default function StreamSetupModalV2({
       ? { label: "Recording", value: "On", ok: true }
       : null,
     { label: "Dual", value: dualRecordingAllowed ? "On" : "Off", ok: dualRecordingAllowed },
-    { label: "Multistream", value: multistreamAllowed ? "On" : "Off", ok: multistreamAllowed },
+    // RTMP badge reflects the numeric destination cap. 0 = off,
+    // 1 = single destination, >1 = multistream up to N.
+    {
+      label: rtmpCap > 1 ? "Multistream" : "RTMP",
+      value:
+        rtmpCap <= 0
+          ? "Off"
+          : rtmpCap === 1
+          ? "1 destination"
+          : `up to ${rtmpCap}`,
+      ok: rtmpCap > 0,
+    },
     typeof maxGuests === "number"
       ? {
           label: "Guests",
@@ -928,7 +945,11 @@ export default function StreamSetupModalV2({
             padding: '0.75rem'
           }}>
             <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#3b82f6', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
-              📡 Stream Destinations
+              {rtmpCap <= 0
+                ? '📡 Stream Destinations'
+                : rtmpCap === 1
+                ? '📡 RTMP (1 destination)'
+                : `📡 Multistream (up to ${rtmpCap})`}
             </div>
 
             {streamDisallowed && (

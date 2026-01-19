@@ -12,6 +12,7 @@ type UsageSummary = {
   resetDate: string | null;
   maxGuests: number;
   multistreamEnabled: boolean;
+  rtmpDestinationsMax: number;
 };
 
 export default function UsageBanner() {
@@ -34,7 +35,12 @@ export default function UsageBanner() {
         const ytdMinutes = Number(json?.usageMonthly?.ytd?.participantMinutes ?? 0);
         const ytdHours = Math.round((ytdMinutes / 60) * 10) / 10;
         const resetDate = json?.resetDate || null;
-        const multistreamEnabled = !!json?.plan?.features?.rtmpMultistream;
+        const rtmpDestinationsMax = Number(
+          json?.plan?.limits?.rtmpDestinationsMax ??
+            json?.plan?.limits?.maxDestinations ??
+            0
+        );
+        const multistreamEnabled = rtmpDestinationsMax > 1;
         const maxGuests = Number(json?.plan?.limits?.maxGuests ?? (planId === "pro" ? 10 : planId === "starter" ? 2 : 1));
 
         setData({
@@ -46,6 +52,7 @@ export default function UsageBanner() {
           resetDate,
           maxGuests,
           multistreamEnabled,
+          rtmpDestinationsMax,
         });
       } catch (err) {
         console.error("usage banner error", err);
@@ -83,6 +90,7 @@ export default function UsageBanner() {
     resetDate,
     maxGuests,
     multistreamEnabled,
+    rtmpDestinationsMax,
   } = data;
 
   const resetText = resetDate
@@ -115,9 +123,13 @@ export default function UsageBanner() {
             <span className="font-semibold text-zinc-100">
               {maxGuests}
             </span>{" "}
-            guests • Multistream{" "}
+            guests • Stream Destinations{" "}
             <span className="font-semibold text-zinc-100">
-              {multistreamEnabled ? "ON" : "OFF"}
+              {rtmpDestinationsMax <= 0
+                ? "OFF"
+                : rtmpDestinationsMax === 1
+                ? "1 destination"
+                : `up to ${rtmpDestinationsMax}`}
             </span>
           </div>
         </div>

@@ -539,6 +539,15 @@ export default function SettingsBilling() {
         const features = eff.features || {};
         const limits = eff.limits || {};
 
+        // Canonical RTMP destinations cap comes from rtmpDestinationsMax
+        // on the normalized plan limits; fall back to any legacy
+        // maxDestinations field if present.
+        const maxDestinations = Number(
+          (limits as any).rtmpDestinationsMax ??
+            (limits as any).maxDestinations ??
+            0
+        );
+
         const canHls = Boolean((features as any).hls ?? (features as any).hlsEnabled ?? (features as any).canHls);
         const hlsCustomizationEnabled = (() => {
           const explicit = (features as any).hlsCustomizationEnabled;
@@ -553,12 +562,14 @@ export default function SettingsBilling() {
           planName: eff.planName || data.planId || eff.planId || "Free",
           recording: !!features.recording,
           dualRecording: !!features.dualRecording,
-          rtmpMultistream: !!features.rtmpMultistream,
+          // Treat "multistream" as "more than 1 RTMP destination" so
+          // a cap of 1 is a valid single-destination plan.
+          rtmpMultistream: maxDestinations > 1,
           canHls,
           hlsCustomizationEnabled,
           maxGuests: Number(limits.maxGuests ?? 0),
-          maxDestinations: Number(limits.maxDestinations ?? 0),
-          participantMinutes: Number(limits.participantMinutes ?? 0),
+          maxDestinations,
+          participantMinutes: Number((limits as any).participantMinutes ?? 0),
           transcodeMinutes: Number(limits.transcodeMinutes ?? 0),
         });
         return;

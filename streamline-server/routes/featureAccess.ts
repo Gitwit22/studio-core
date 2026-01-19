@@ -1,4 +1,5 @@
 import { firestore as db } from "../firebaseAdmin";
+import { resolveMaxDestinations } from "../lib/planLimits";
 import { getUserAccount, UserAccount } from "../lib/userAccount";
 
 type AccessResult = {
@@ -140,7 +141,7 @@ export async function canAccessFeature(
 
   const plan = planSnap.data() as any;
 
-  // 4) Feature flag check (with aliases for multistream)
+  // 4) Feature flag / limits check
   let enabled = Boolean(plan?.features?.[featureKey]);
   if (process.env.DEBUG_FEATURE_ACCESS === "1") {
     console.log(
@@ -150,12 +151,23 @@ export async function canAccessFeature(
 
   if (!enabled) {
     if (featureKey === "multistream") {
-      enabled = Boolean(
-        plan?.features?.multistream ||
-        plan?.features?.rtmp ||
-        plan?.features?.rtmpMultistream ||
-        plan?.multistreamEnabled
-      );
+      // Primary: numeric cap on RTMP destinations. This makes
+      // rtmpDestinationsMax/maxDestinations the source of truth for
+      // whether Stream Destinations are available at all.
+      const limits = (plan?.limits || {}) as any;
+      const maxDestinations = resolveMaxDestinations(limits);
+      enabled = maxDestinations > 0;
+
+      // Legacy fallback: if limits are missing but old feature flags
+      // are present, still honor them so existing plans keep working.
+      if (!enabled) {
+        enabled = Boolean(
+          plan?.features?.multistream ||
+          plan?.features?.rtmp ||
+          plan?.features?.rtmpMultistream ||
+          plan?.multistreamEnabled
+        );
+      }
       if (process.env.DEBUG_FEATURE_ACCESS === "1") {
         console.log(
           `[featureAccess] alias check result enabled=${enabled} via multistream|rtmp|rtmpMultistream|multistreamEnabled`

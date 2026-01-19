@@ -529,6 +529,7 @@ export default function Room() {
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);
   // Plan/entitlement flags are informational only; in-room gating is driven by roomPermissions.
   const [planMultistreamEnabled, setPlanMultistreamEnabled] = useState<boolean>(false);
+  const [planRtmpDestinationsMax, setPlanRtmpDestinationsMax] = useState<number | null>(null);
   const [planRecordingEnabled, setPlanRecordingEnabled] = useState<boolean>(true);
   const [planHlsEnabled, setPlanHlsEnabled] = useState<boolean>(false);
   const [planHlsCustomizationEnabled, setPlanHlsCustomizationEnabled] = useState<boolean>(false);
@@ -644,19 +645,79 @@ export default function Room() {
   }, [API_BASE, roomId, effectiveRoomName, inviteToken, isHost, userRole]);
 
   // Token-only routing support: /room?t=<token>
+  // Prefer treating `t` as a room access/share token and resolving it via
+  // /api/rooms/resolve using Authorization headers. If resolution fails,
+  // fall back to treating it as an invite token for older links.
   useEffect(() => {
     const t = String(searchParams.get("t") || "").trim();
     if (!t) return;
-    try {
-      setRoomAccessToken(t);
-      // For backward compatibility, treat `t` as the inviteToken as well.
-      // If it's a roomAccessToken instead, /api/roomToken will ignore it.
-      setInviteToken(t);
-      localStorage.setItem("sl_invite_token", t);
-    } catch {
-      // ignore
-    }
-  }, [searchParams]);
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/rooms/resolve`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${t}`,
+          },
+          credentials: "include",
+        });
+
+        if (cancelled) return;
+
+        if (res.ok) {
+          const data = await res.json().catch(() => null as any);
+          if (!data || cancelled) return;
+
+          const resolvedRoomId = String(data.roomId || "").trim();
+          const resolvedRoomName = String(data.roomName || "").trim();
+          const resolvedRole = String(data.role || "").trim();
+
+          if (resolvedRoomId) setFirestoreRoomId(resolvedRoomId);
+          if (resolvedRoomName) setRoomName(resolvedRoomName);
+
+          if (resolvedRole && !isHost) {
+            setUserRole(resolvedRole);
+            try {
+              localStorage.setItem("sl_current_role", resolvedRole);
+            } catch {
+              // ignore
+            }
+          }
+
+          // Treat the incoming token as a roomAccessToken for downstream
+          // APIs (HLS, status, etc.). /api/roomToken will return a refreshed
+          // token which will overwrite this state when available.
+          setRoomAccessToken(t);
+          return;
+        }
+
+        // If resolve fails (legacy tokens, pure invites, etc.), fall back to
+        // the previous behavior of treating `t` as an invite token only.
+        console.warn("[Room] /api/rooms/resolve failed for token route", res.status);
+        setInviteToken(t);
+        try {
+          localStorage.setItem("sl_invite_token", t);
+        } catch {
+          // ignore
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.warn("[Room] /api/rooms/resolve error; treating t as invite", err);
+        setInviteToken(t);
+        try {
+          localStorage.setItem("sl_invite_token", t);
+        } catch {
+          // ignore
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE, searchParams, isHost]);
 
   const presetLabelFor = (id?: string | null) => {
     if (!id) return "Standard 720p30";
@@ -718,11 +779,18 @@ export default function Room() {
           return { endpoint, payload };
         };
 
-        const tryFetch = async (mode: "auth" | "guest") => {
+        const tryFetch = async (mode: "auth" | "guest", opts?: { omitInvite?: boolean }) => {
           const { endpoint, payload } = buildRoomTokenRequest(mode);
+          if (opts?.omitInvite) {
+            delete (payload as any).inviteToken;
+          }
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (roomAccessToken) {
+            headers["Authorization"] = `Bearer ${roomAccessToken}`;
+          }
           const res = await fetch(endpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(payload),
             credentials: "include",
           });
@@ -743,6 +811,14 @@ export default function Room() {
           }
           console.warn("[Room] auth roomToken denied; falling back to guest token", attempt.res.status);
           attempt = await tryFetch("guest");
+        }
+
+        // If a guest token request fails with 403 (e.g. stale or mismatched invite),
+        // retry once without the invite token so a valid participant link doesn't leave
+        // the user stuck without video.
+        if (isGuest && !attempt.res.ok && attempt.res.status === 403) {
+          console.warn("[Room] guest roomToken denied; retrying without invite token", attempt.res.status);
+          attempt = await tryFetch("guest", { omitInvite: true });
         }
 
         const res = attempt.res;
@@ -913,8 +989,22 @@ export default function Room() {
             if (typeof features.watermark === "boolean") {
               setWatermarkEnabled(features.watermark);
             }
+            // Derive multistream/RTMP capability from the numeric
+            // destination cap first, so a plan with 1+ destinations
+            // but multistream=false still enables RTMP.
+            const maxRtmpFromLimits =
+              typeof limits.rtmpDestinationsMax === "number"
+                ? limits.rtmpDestinationsMax
+                : typeof (limits as any).maxDestinations === "number"
+                ? (limits as any).maxDestinations
+                : 0;
+            setPlanRtmpDestinationsMax(maxRtmpFromLimits);
             if (typeof features.rtmpMultistream === "boolean") {
+              // Keep legacy flag for display, but don't rely on it
+              // as the sole capability toggle.
               setPlanMultistreamEnabled(features.rtmpMultistream);
+            } else {
+              setPlanMultistreamEnabled(maxRtmpFromLimits > 1);
             }
             const runtimeHls = (features as any).hls ?? (features as any).hlsEnabled;
             const legacyHls = (features as any).canHls;
@@ -1597,21 +1687,63 @@ export default function Room() {
   const [quickRoleIds, setQuickRoleIds] = useState<string[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
+      // For guests (no authenticated account), skip hitting /api/account/roles
+      // entirely and use simple-mode defaults for the invite modal.
+      let isAuthed = false;
+      try {
+        const raw = localStorage.getItem("sl_user");
+        if (raw && raw !== "undefined") {
+          const parsed = JSON.parse(raw);
+          if (parsed && (parsed.id || parsed.uid || parsed.email)) {
+            isAuthed = true;
+          }
+        }
+      } catch {
+        // ignore parse errors and treat as guest
+      }
+
+      if (!isAuthed) {
+        if (cancelled) return;
+        setRoleProfiles([
+          { id: "participant", label: "Participant" },
+          { id: "cohost", label: "Co-host" },
+          { id: "moderator", label: "Moderator" },
+        ]);
+        setQuickRoleIds(["participant", "cohost", "moderator"]);
+        return;
+      }
+
       try {
         const res = await fetch(`${API_BASE}/api/account/roles`, { credentials: "include" });
         if (!res.ok) throw new Error("roles failed");
         const data = await res.json();
+        if (cancelled) return;
         // Show participant, cohost, moderator (exclude viewer)
-        if (Array.isArray(data?.roles)) setRoleProfiles(data.roles.filter((r: any) => ["participant","cohost","moderator"].includes(r?.id)));
-        if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds.filter((id: any) => ["participant","cohost","moderator"].includes(id)));
+        if (Array.isArray(data?.roles)) {
+          setRoleProfiles(data.roles.filter((r: any) => ["participant", "cohost", "moderator"].includes(r?.id)));
+        }
+        if (Array.isArray(data?.quickRoleIds)) {
+          setQuickRoleIds(data.quickRoleIds.filter((id: any) => ["participant", "cohost", "moderator"].includes(id)));
+        }
       } catch (err) {
         console.warn("roles load failed, using defaults", err);
-        setRoleProfiles([{ id: "participant", label: "Participant" }]);
-        setQuickRoleIds(["participant"]);
+        if (cancelled) return;
+        setRoleProfiles([
+          { id: "participant", label: "Participant" },
+          { id: "cohost", label: "Co-host" },
+          { id: "moderator", label: "Moderator" },
+        ]);
+        setQuickRoleIds(["participant", "cohost", "moderator"]);
       }
     })();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE]);
 
   const copyInviteLink = (_role: string, label: string) => {
     (async () => {
@@ -1801,9 +1933,10 @@ export default function Room() {
   }
 
   const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
-  const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • Multi:${planMultistreamEnabled ? "on" : "off"} • HLS:${planHlsEnabled ? "on" : "off"} • HLS Setup:${planHlsCustomizationEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
+  const rtmpCap = planRtmpDestinationsMax ?? 0;
+  const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • RTMP:${rtmpCap === 0 ? "off" : rtmpCap === 1 ? "1" : `up to ${rtmpCap}`} • HLS:${planHlsEnabled ? "on" : "off"} • HLS Setup:${planHlsCustomizationEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
   const recordingEnabled = planRecordingEnabled && can("canRecord");
-  const canMultistream = planMultistreamEnabled && can("canDestinations");
+  const canMultistream = (rtmpCap > 0) && can("canDestinations");
   const canHls = planHlsEnabled && can("canStream");
 
   const handleUpgradeHls = () => {

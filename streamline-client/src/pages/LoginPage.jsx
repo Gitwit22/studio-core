@@ -83,27 +83,28 @@ export const LoginPage = () => {
       }
 
       // ✅ LOGIN SUCCEEDED — cookie is now set
-      // Hydrate user from /me
-      const meRes = await fetch(`${API_BASE}/api/auth/me`, {
-        credentials: "include",
-      });
+      // Best-effort hydrate user from /me, but do not block navigation if it fails.
+      try {
+        const meRes = await fetch(`${API_BASE}/api/auth/me`, {
+          credentials: "include",
+        });
 
-      if (!meRes.ok) {
-        setError("Logged in, but failed to load profile");
-        setLoading(false);
-        return;
+        if (meRes.ok) {
+          const ctMe = meRes.headers.get("content-type") || "";
+          if (ctMe.includes("application/json")) {
+            const me = await meRes.json();
+            try {
+              localStorage.setItem("sl_user", JSON.stringify(me));
+            } catch {}
+          } else {
+            console.warn("[Login] /auth/me returned non-JSON; continuing without caching profile");
+          }
+        } else {
+          console.warn("[Login] /auth/me failed after login status=", meRes.status);
+        }
+      } catch (e) {
+        console.warn("[Login] /auth/me error after login", e);
       }
-
-      const ctMe = meRes.headers.get("content-type") || "";
-      if (!ctMe.includes("application/json")) {
-        setError("Profile load returned non-JSON. Verify backend URL and CORS.");
-        setLoading(false);
-        return;
-      }
-      const me = await meRes.json();
-
-      // Optional: store user for UI convenience
-      localStorage.setItem("sl_user", JSON.stringify(me));
 
       setLoading(false);
       if (typeof document !== "undefined") {
