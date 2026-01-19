@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "check:no-loginpage-jsx": "node scripts/check-no-loginpage-jsx.cjs",
+    "predev": "npm run check:no-loginpage-jsx",
     "dev": "vite",
+    "prebuild": "npm run check:no-loginpage-jsx",
     "build": "vite build",
     "preview": "vite preview",
     "server": "tsx server/index.ts"

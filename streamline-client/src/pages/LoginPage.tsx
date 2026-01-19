@@ -71,6 +71,9 @@ export const LoginPage: React.FC = () => {
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          clearAuthStorage();
+        }
         const ct = res.headers.get("content-type") || "";
         const err = ct.includes("application/json")
           ? await res.json().catch(() => ({}))
@@ -325,6 +328,28 @@ export const LoginPage: React.FC = () => {
                 {error}
               </div>
             )}
+
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    clearAuthStorage();
+                    window.location.replace("/login");
+                  }}
+                  style={{
+                    width: "100%",
+                    marginBottom: "12px",
+                    padding: "12px",
+                    background: "rgba(255, 255, 255, 0.06)",
+                    color: "#9ca3af",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    borderRadius: "12px",
+                    fontSize: "13px",
+                    cursor: loading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Reset login
+                </button>
 
             <button
               type="submit"

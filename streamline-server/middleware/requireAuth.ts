@@ -43,21 +43,75 @@ export function tryGetAuthUser(req: Request): AuthUser | null {
       : undefined;
   const cookieToken = (req as any).cookies?.token;
 
-  const rawToken = headerToken || cookieToken;
+  // Track auth decisions for downstream middleware/routes.
+  // This enables the server to tell the client when a stale header
+  // token was ignored and the cookie session was used instead.
+  (req as any)._authUsed = undefined;
+  (req as any)._authHeaderInvalid = false;
 
-  if (!rawToken) return null;
-
-  const decoded = jwt.verify(rawToken, getJwtSecret()) as { uid: string };
-  if (shouldLogAuthDebug(req)) {
-    console.log("[auth-debug] Verified JWT for uid", decoded?.uid || "unknown");
+  // Prefer Authorization header, but only if it verifies.
+  // If a client accidentally sends a stale/invalid header token,
+  // fall back to the cookie token so valid sessions don't get rejected.
+  if (headerToken) {
+    try {
+      const decoded = jwt.verify(headerToken, getJwtSecret()) as any;
+      const uid = typeof decoded?.uid === "string" ? decoded.uid : "";
+      if (uid) {
+        if (shouldLogAuthDebug(req)) {
+          console.log("[auth-debug] Verified header JWT for uid", uid);
+        }
+        (req as any)._authUsed = "header";
+        return { uid };
+      }
+      if (shouldLogAuthDebug(req)) {
+        console.warn("[auth-debug] Header JWT verified but missing uid; falling back to cookie");
+      }
+      (req as any)._authHeaderInvalid = true;
+    } catch (err: any) {
+      if (shouldLogAuthDebug(req)) {
+        console.warn("[auth-debug] Header JWT invalid, falling back to cookie:", err?.message || err);
+      }
+      (req as any)._authHeaderInvalid = true;
+    }
   }
-  return { uid: decoded.uid };
+
+  if (cookieToken) {
+    try {
+      const decoded = jwt.verify(cookieToken, getJwtSecret()) as any;
+      const uid = typeof decoded?.uid === "string" ? decoded.uid : "";
+      if (uid) {
+        if (shouldLogAuthDebug(req)) {
+          console.log("[auth-debug] Verified cookie JWT for uid", uid);
+        }
+        (req as any)._authUsed = "cookie";
+        return { uid };
+      }
+      if (shouldLogAuthDebug(req)) {
+        console.warn("[auth-debug] Cookie JWT verified but missing uid");
+      }
+    } catch (err: any) {
+      if (shouldLogAuthDebug(req)) {
+        console.warn("[auth-debug] Cookie JWT invalid:", err?.message || err);
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const user = tryGetAuthUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    // If the request included a bad/stale Authorization header but a valid
+    // cookie session exists, tell the client so it can clear its cached token.
+    // Note: this header must be exposed via CORS for cross-origin clients.
+    if ((req as any)._authUsed === "cookie" && (req as any)._authHeaderInvalid) {
+      res.setHeader("x-sl-auth-fallback", "cookie");
+      res.setHeader("x-sl-auth-header-invalid", "1");
+    }
+
     if (shouldLogAuthDebug(req)) {
       console.log("[auth-debug] requireAuth ok", { uid: user.uid, path: req.path, method: req.method });
     }

@@ -71,6 +71,7 @@ app.use(cors({
   credentials: true,
   methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
   allowedHeaders: ["Content-Type","Authorization","Cache-Control"],
+  exposedHeaders: ["x-sl-auth-fallback", "x-sl-auth-header-invalid"],
 }));
 
 

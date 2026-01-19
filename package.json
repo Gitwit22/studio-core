@@ -1,4 +1,8 @@
 {
+  "scripts": {
+    "hooks:install": "git config core.hooksPath .githooks",
+    "hooks:check": "node streamline-client/scripts/check-no-loginpage-jsx.cjs"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.946.0",
     "@types/react": "^19.0.0",

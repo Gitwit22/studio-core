@@ -361,34 +361,6 @@ const Welcome = () => {
 
       </div>
 
-      {/* DEV BYPASS - BOTTOM RIGHT */}
-      <button
-        onClick={() => nav("/join")}
-        style={{
-          position: 'absolute',
-          bottom: '24px',
-          right: '24px',
-          color: 'rgba(248, 113, 113, 0.5)',
-          fontSize: '12px',
-          background: 'rgba(0, 0, 0, 0.2)',
-          backdropFilter: 'blur(10px)',
-          padding: '6px 12px',
-          borderRadius: '8px',
-          border: '1px solid rgba(220, 38, 38, 0.2)',
-          cursor: 'pointer',
-          transition: 'all 0.3s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.color = 'rgba(248, 113, 113, 1)';
-          e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.4)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.color = 'rgba(248, 113, 113, 0.5)';
-          e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.2)';
-        }}
-      >
-        dev bypass →
-      </button>
       {/* FOOTER LINKS - BOTTOM LEFT */}
       <div 
         style={{
