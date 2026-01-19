@@ -36,9 +36,14 @@ function shouldLogAuthDebug(req: Request): boolean {
 }
 
 export function tryGetAuthUser(req: Request): AuthUser | null {
-  const rawToken =
-    (req as any).cookies?.token ||
-    req.headers.authorization?.replace("Bearer ", "");
+  const headerAuth = req.headers.authorization;
+  const headerToken =
+    typeof headerAuth === "string"
+      ? headerAuth.replace(/^Bearer\s+/i, "")
+      : undefined;
+  const cookieToken = (req as any).cookies?.token;
+
+  const rawToken = headerToken || cookieToken;
 
   if (!rawToken) return null;
 

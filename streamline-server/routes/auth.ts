@@ -12,11 +12,14 @@ const router = Router();
 
 // --- helpers ---
 function cookieOptions() {
-  const isProd = process.env.NODE_ENV === "production";
   return {
     httpOnly: true,
-    secure: isProd, // true on https (Render), false on localhost/http
-    sameSite: (isProd ? "none" : "lax") as "none" | "lax",
+    // On Render, both the web and API apps live on *.onrender.com, so
+    // SameSite=Lax is sufficient for authenticated XHR/fetch calls while
+    // keeping cross-site protections. If/when we truly embed cross-site,
+    // this can be revisited to use SameSite=None; Secure.
+    secure: process.env.NODE_ENV === "production", // true on https (Render), false on localhost/http
+    sameSite: "lax" as "none" | "lax",
     path: "/",
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   };
@@ -124,11 +127,13 @@ router.post("/login", async (req, res) => {
     // Token payload must match what requireAuth expects
     const token = jwt.sign({ uid }, JWT_SECRET, { expiresIn: "7d" });
 
-    // Set cookie
+    // Set cookie for httpOnly auth (legacy/secondary) and return token
+    // in the JSON body so the frontend can use Authorization headers.
     res.cookie("token", token, cookieOptions());
 
     return res.json({
       user: { id: uid, ...stripSensitiveUserFields(user) },
+      token,
     });
   } catch (err: any) {
     console.error("POST /api/auth/login failed:", err?.message || err);
@@ -191,9 +196,11 @@ router.post("/signup", async (req, res) => {
     const JWT_SECRET = mustGetEnv("JWT_SECRET");
     const token = jwt.sign({ uid }, JWT_SECRET, { expiresIn: "7d" });
 
+    // Set cookie for httpOnly auth (legacy/secondary) and return token
+    // in the JSON body so the frontend can use Authorization headers.
     res.cookie("token", token, cookieOptions());
 
-    return res.json({ user: { id: uid, ...stripSensitiveUserFields(userData) } });
+    return res.json({ user: { id: uid, ...stripSensitiveUserFields(userData) }, token });
   } catch (err: any) {
     console.error("POST /api/auth/signup failed:", err?.message || err);
     return res.status(500).json({

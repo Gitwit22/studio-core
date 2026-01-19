@@ -681,64 +681,10 @@ console.log("✅ User document created:", uid);
 });
 
 // Login
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { email, password } = req.body as {
-      email?: string;
-      password?: string;
-    };
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "email and password are required" });
-    }
-
-    const snap = await db
-      .collection("users")
-      .where("email", "==", email)
-      .limit(1)
-      .get();
-
-    if (snap.empty) {
-      return res.status(401).json({ error: "invalid email or password" });
-    }
-
-    const doc = snap.docs[0];
-    const data = doc.data() as any;
-
-    const ok = await bcrypt.compare(password, data.passwordHash || "");
-    if (!ok) {
-      return res.status(401).json({ error: "invalid email or password" });
-    }
-
-    const user = {
-      id: doc.id,
-      email: data.email,
-      displayName: data.displayName || "",
-      plan: data.plan || "free",
-      timeZone: data.timeZone || null,
-      onboardingCompleted: data.onboardingCompleted ?? false,
-      defaultResolution: data.defaultResolution || null,
-      defaultDestinations: data.defaultDestinations || null,
-      defaultPrivacy: data.defaultPrivacy || null,
-      youtubeConnected: data.youtubeConnected || false,
-      facebookConnected: data.facebookConnected || false,
-    };
-
-    const token = jwt.sign(user, JWT_SECRET, { expiresIn: "7d" });
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-    // Also return token in response for frontend fallback (non-httpOnly)
-    return res.json({ user, token });
-  } catch (err) {
-    console.error("login error", err);
-    return res.status(500).json({ error: "internal server error" });
-  }
-});
+// NOTE: /api/auth/login and /api/auth/signup are now handled exclusively by
+// routes/auth.ts via app.use("/api/auth", authRoutes). The legacy inline
+// implementations that signed different JWT payloads have been removed to
+// ensure a single, consistent auth flow.
 
 // =============================================================================
 // USAGE TRACKING
