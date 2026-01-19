@@ -12,14 +12,28 @@ const router = Router();
 
 // --- helpers ---
 function cookieOptions() {
+  // On Render we always serve over HTTPS, but local dev runs on http://localhost.
+  // Derive a simple "isLocal" flag from CLIENT_URL so cookies stay usable in
+  // local dev while remaining Secure in hosted environments.
+  const clientUrl = process.env.CLIENT_URL || process.env.CLIENT_URL_2 || "";
+  const isLocal = clientUrl.startsWith("http://localhost") || clientUrl.startsWith("http://127.0.0.1");
+
+  // In hosted environments the API is typically on a different subdomain
+  // than the web app (e.g. api.onrender.com vs app.onrender.com). For the
+  // httpOnly auth cookie to be sent on cross-site XHR/fetch requests from
+  // the web origin, it must explicitly opt out of SameSite protections.
+  //
+  // - Local dev (localhost ↔ localhost) is same-site, so SameSite=Lax is
+  //   sufficient and avoids third-party-cookie semantics.
+  // - Hosted envs must use SameSite=None; Secure so that the browser will
+  //   attach the cookie on cross-site API calls made with credentials: 'include'.
+  const secure = !isLocal;
+  const sameSite: "none" | "lax" = secure ? "none" : "lax";
+
   return {
     httpOnly: true,
-    // On Render, both the web and API apps live on *.onrender.com, so
-    // SameSite=Lax is sufficient for authenticated XHR/fetch calls while
-    // keeping cross-site protections. If/when we truly embed cross-site,
-    // this can be revisited to use SameSite=None; Secure.
-    secure: process.env.NODE_ENV === "production", // true on https (Render), false on localhost/http
-    sameSite: "lax" as "none" | "lax",
+    secure,
+    sameSite,
     path: "/",
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   };

@@ -127,11 +127,13 @@ router.post("/resolve", async (req, res) => {
     const resolved = await resolveRoomIdentity({ roomId, roomName });
     if (!resolved) return res.status(400).json({ error: "invite_room_missing" });
 
+    const requiresAuth = role === "cohost" || role === "moderator";
+
     return res.json({
       roomId: resolved.roomId,
       roomName: resolved.roomName,
       role,
-      requiresAuth: false,
+      requiresAuth,
     });
   } catch (err: any) {
     console.error("/api/invites/resolve error", err?.message || err);
@@ -177,11 +179,13 @@ router.post("/accept", async (req, res) => {
       );
     }
 
+    const requiresAuth = role === "cohost" || role === "moderator";
+
     return res.json({
       roomId: resolved.roomId,
       roomName: resolved.roomName,
       role,
-      requiresAuth: false,
+      requiresAuth,
     });
   } catch (err: any) {
     console.error("/api/invites/accept error", err?.message || err);

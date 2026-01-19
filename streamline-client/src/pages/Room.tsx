@@ -763,6 +763,11 @@ export default function Room() {
     if (!hostCheckReady) return;
     if (!displayName) return;
     if (!roomId && !effectiveRoomName) return;
+    // If we already have a valid token+serverUrl for this mount, avoid
+    // refetching room tokens on every minor state change. This prevents
+    // duplicate /api/roomToken calls that can cause spurious 401s and
+    // disconnects, while still allowing a fresh token on initial join.
+    if (token && serverUrl) return;
     // Role used to mint the LiveKit token + roomAccessToken.
     // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
     const requestedRole = isHost ? "host" : userRole;
@@ -828,13 +833,9 @@ export default function Room() {
           if (opts?.omitInvite) {
             delete (payload as any).inviteToken;
           }
-          const headers: Record<string, string> = { "Content-Type": "application/json" };
-          if (roomAccessToken) {
-            headers["Authorization"] = `Bearer ${roomAccessToken}`;
-          }
           const res = await fetch(endpoint, {
             method: "POST",
-            headers,
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
             credentials: "include",
           });
@@ -963,7 +964,7 @@ export default function Room() {
     };
 
     fetchToken();
-  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady, authStatus, roomAccessToken]);
+  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady, authStatus, token, serverUrl]);
 
   
 
