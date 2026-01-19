@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { API_BASE } from "../lib/apiBase";
+import { apiFetch, clearAuthStorage } from "../lib/api";
 
 export interface AuthUser {
   id?: string;
@@ -36,22 +36,17 @@ async function fetchAuthMeFresh(): Promise<AuthUser | null> {
 
   inFlight = (async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
-        credentials: "include",
-      });
-
-      if (res.status === 401) {
-        cachedUser = null;
-        return null;
-      }
-
-      if (!res.ok) {
-        throw new Error(`auth/me failed: ${res.status}`);
-      }
-
+      const res = await apiFetch("/api/account/me");
       const data = (await res.json()) as AuthUser;
       cachedUser = data;
       return data;
+    } catch (err: any) {
+      if (err?.status === 401 || err?.status === 403) {
+        clearAuthStorage();
+        cachedUser = null;
+        return null;
+      }
+      throw err;
     } finally {
       inFlight = null;
     }

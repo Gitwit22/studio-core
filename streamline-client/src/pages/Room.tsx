@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { apiStartRecording, apiStopRecording } from "../lib/api";
+import { apiStartRecording, apiStopRecording, apiFetch, getAuthToken, clearAuthStorage } from "../lib/api";
 import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
@@ -569,17 +569,17 @@ export default function Room() {
 
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/account/me`, { credentials: "include" });
-        if (cancelled) return;
-        if (res.ok) {
+        await apiFetch("/api/account/me");
+        if (!cancelled) {
           setAuthStatus("authed");
-        } else if (res.status === 401) {
-          setAuthStatus("guest");
-        } else {
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          if (err?.status === 401 || err?.status === 403) {
+            clearAuthStorage();
+          }
           setAuthStatus("guest");
         }
-      } catch {
-        if (!cancelled) setAuthStatus("guest");
       }
     })();
 
@@ -791,7 +791,7 @@ export default function Room() {
       }
     }
 
-    const fetchToken = async () => {
+        const fetchToken = async () => {
       try {
         console.log(`[Room] Fetching room token (role=${role || "host"})...`);
         const buildRoomTokenRequest = (mode: "auth" | "guest") => {
@@ -833,12 +833,12 @@ export default function Room() {
           if (opts?.omitInvite) {
             delete (payload as any).inviteToken;
           }
-          const res = await fetch(endpoint, {
+          // endpoint is a relative path (e.g. "/api/roomToken"); apiFetch
+          // will prepend API_BASE and attach Authorization and cookies.
+          const res = await apiFetch(endpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
-            credentials: "include",
-          });
+          }, { allowNonOk: true });
           return { res, mode };
         };
 
@@ -974,18 +974,19 @@ export default function Room() {
     }
   }, [isViewer, showStreamSetup]);
 
-  // Load effective entitlements + media presets (hosts only)
+  // Load effective entitlements + media presets (hosts only, when authed)
   useEffect(() => {
     const role = localStorage.getItem("sl_current_role") || userRole;
     if (role === "guest") return;
+    if (authStatus !== "authed") return;
 
     let cancelled = false;
 
     (async () => {
       try {
         const [presetsRes, meRes] = await Promise.all([
-          fetch(`${API_BASE}/api/account/presets`, { credentials: "include" }),
-          fetch(`${API_BASE}/api/account/me`, { credentials: "include" }),
+          apiFetch("/api/account/presets"),
+          apiFetch("/api/account/me"),
         ]);
 
         if (!cancelled && presetsRes.ok) {
@@ -1097,7 +1098,7 @@ export default function Room() {
     return () => {
       cancelled = true;
     };
-  }, [API_BASE, userRole]);
+  }, [API_BASE, userRole, authStatus]);
 
   useEffect(() => {
     if (
@@ -1765,7 +1766,7 @@ export default function Room() {
       }
 
       try {
-        const res = await fetch(`${API_BASE}/api/account/roles`, { credentials: "include" });
+        const res = await apiFetch("/api/account/roles");
         if (!res.ok) throw new Error("roles failed");
         const data = await res.json();
         if (cancelled) return;

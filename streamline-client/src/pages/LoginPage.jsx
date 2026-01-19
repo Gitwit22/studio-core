@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { apiFetch, clearAuthStorage } from "../lib/api";
 
 
 // Email validation function
@@ -82,28 +83,41 @@ export const LoginPage = () => {
         return;
       }
 
-      // ✅ LOGIN SUCCEEDED — cookie is now set
-      // Best-effort hydrate user from /me, but do not block navigation if it fails.
+      // ✅ LOGIN SUCCEEDED — cookie is now set. Also capture the
+      // JWT from the response body so we can fall back to header-
+      // based auth when cookies are blocked (incognito/webviews).
+      let loginBody: any = null;
       try {
-        const meRes = await fetch(`${API_BASE}/api/auth/me`, {
-          credentials: "include",
-        });
-
-        if (meRes.ok) {
-          const ctMe = meRes.headers.get("content-type") || "";
-          if (ctMe.includes("application/json")) {
-            const me = await meRes.json();
-            try {
-              localStorage.setItem("sl_user", JSON.stringify(me));
-            } catch {}
-          } else {
-            console.warn("[Login] /auth/me returned non-JSON; continuing without caching profile");
-          }
-        } else {
-          console.warn("[Login] /auth/me failed after login status=", meRes.status);
+        const ctLogin = res.headers.get("content-type") || "";
+        if (ctLogin.includes("application/json")) {
+          loginBody = await res.json().catch(() => null);
         }
+      } catch {
+        loginBody = null;
+      }
+
+      const token = loginBody && typeof loginBody.token === "string" ? loginBody.token : null;
+      if (token) {
+        try {
+          localStorage.setItem("sl_token", token);
+        } catch {}
+      }
+
+      // Hydrate user from canonical /api/account/me. If this fails,
+      // treat it as a hard error instead of redirecting into a
+      // half-authed state that causes room join "blink".
+      try {
+        const meRes = await apiFetch("/api/account/me");
+        const me = await meRes.json();
+        try {
+          localStorage.setItem("sl_user", JSON.stringify(me));
+        } catch {}
       } catch (e) {
-        console.warn("[Login] /auth/me error after login", e);
+        console.warn("[Login] /account/me after login failed", e);
+        clearAuthStorage();
+        setError("Login succeeded, but we couldn't load your account. Please try again.");
+        setLoading(false);
+        return;
       }
 
       setLoading(false);

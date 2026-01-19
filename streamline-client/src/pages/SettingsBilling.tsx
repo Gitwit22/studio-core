@@ -7,7 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
 import SettingsDestinations from "./SettingsDestinations";
-import { apiFetch } from "../lib/api";
+import { apiFetch, clearAuthStorage } from "../lib/api";
 import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
@@ -388,14 +388,14 @@ export default function SettingsBilling() {
     (async () => {
       if (!user?.pendingPlan) return;
       try {
-        const res = await apiFetch(`${API_BASE}/api/billing/pending-change`);
+        const res = await apiFetch("/api/billing/pending-change");
         const info = await res.json();
         const isFreeNoSub = user.planId === "free" && !info?.hasSubscription && !info?.billingActive;
         const noScheduled = info?.scheduledChange === false;
         const completed = user.billingStatus === "active" || user.billingStatus === "trialing";
         if (isFreeNoSub || noScheduled || completed) {
           try {
-            await apiFetch(`${API_BASE}/api/billing/clear-pending`, { method: "POST" });
+            await apiFetch("/api/billing/clear-pending", { method: "POST" });
           } catch {}
           setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
         }
@@ -453,15 +453,23 @@ export default function SettingsBilling() {
   };
 
   const loadUser = async () => {
-    const res = await apiFetch(`${API_BASE}/api/auth/me`);
-    const data = await res.json();
-    setUser(data);
     try {
-      window.localStorage.setItem("sl_user", JSON.stringify(data));
-      if ((data as any)?.id || (data as any)?.uid) {
-        window.localStorage.setItem("sl_userId", String((data as any).id || (data as any).uid));
+      const res = await apiFetch("/api/account/me");
+      const data = await res.json();
+      setUser(data);
+      try {
+        window.localStorage.setItem("sl_user", JSON.stringify(data));
+        if ((data as any)?.id || (data as any)?.uid) {
+          window.localStorage.setItem("sl_userId", String((data as any).id || (data as any).uid));
+        }
+      } catch {}
+    } catch (err: any) {
+      if (err?.status === 401 || err?.status === 403) {
+        clearAuthStorage();
+        setUser(null);
       }
-    } catch {}
+      throw err;
+    }
   };
 
   const loadPlans = async () => {
@@ -486,10 +494,7 @@ export default function SettingsBilling() {
   const loadEntitlements = async () => {
     try {
       // Prefer canonical effectiveEntitlements from /api/account/me
-      const res = await apiFetch(`${API_BASE}/api/account/me`);
-      if (!res.ok) {
-        throw new Error("account/me failed");
-      }
+      const res = await apiFetch("/api/account/me");
       const data = await res.json();
 
       try {
@@ -576,7 +581,7 @@ export default function SettingsBilling() {
       }
 
       // Fallback: legacy usage entitlements endpoint
-      const legacyRes = await apiFetch(`${API_BASE}/api/usage/entitlements`);
+      const legacyRes = await apiFetch("/api/usage/entitlements");
       if (!legacyRes.ok) throw new Error("usage/entitlements failed");
       const legacy = await legacyRes.json();
       setEntitlements({
@@ -603,7 +608,7 @@ export default function SettingsBilling() {
  
   const loadUsage = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/usage/me`);
+      const res = await apiFetch("/api/usage/me");
       const data = await res.json();
       const limits = data?.plan?.limits || {};
 
@@ -1087,7 +1092,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   const requestId = `${plan}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
   try {
-    const res = await apiFetch(`${API_BASE}/api/billing/checkout`, {
+    const res = await apiFetch("/api/billing/checkout", {
       method: "POST",
       body: JSON.stringify({ plan, requestId, tosAccepted: true }),
     });
@@ -1129,7 +1134,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
         setActionLoading(null);
         return;
       }
-      const res = await apiFetch(`${API_BASE}/api/billing/portal`, {
+      const res = await apiFetch("/api/billing/portal", {
         method: "POST",
       });
       const data = await res.json();
@@ -1146,7 +1151,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setCheckoutTosSubmitting(true);
       setCheckoutTosError(null);
       try {
-        const res = await apiFetch(`${API_BASE}/api/account/accept-tos`, {
+        const res = await apiFetch("/api/account/accept-tos", {
           method: "POST",
         });
         const data = await res.json();
@@ -1187,7 +1192,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     setTestModeLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(`${API_BASE}/api/billing/test/change-plan`, {
+      const res = await apiFetch("/api/billing/test/change-plan", {
         method: "POST",
         body: JSON.stringify({ newPlanId: testModeTargetPlan }),
       });
