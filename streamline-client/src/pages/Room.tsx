@@ -499,6 +499,11 @@ export default function Room() {
   const [roomPermissions, setRoomPermissions] = useState<RoomPermissions | null>(null);
   const [needsReauth, setNeedsReauth] = useState(false);
   const roomTokenMintInFlightRef = useRef(false);
+  const [controlsPanelOpen, setControlsPanelOpen] = useState(false);
+  const [effectiveControls, setEffectiveControls] = useState<{ canPublishAudio: boolean; tileVisible: boolean }>(() => ({
+    canPublishAudio: true,
+    tileVisible: true,
+  }));
   const [recordingCountdown, setRecordingCountdown] = useState<string | null>(null);
   const [isRecordingCountdown, setIsRecordingCountdown] = useState(false);
   const recordingCountdownTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -514,6 +519,10 @@ export default function Room() {
     !needsReauth &&
     !isViewer &&
     (isHost || can("canStream") || can("canRecord") || can("canDestinations"));
+
+  const subjectToControls = !isHost && !isViewer;
+  const controlsAllowPublishAudio = !subjectToControls || effectiveControls.canPublishAudio !== false;
+  const controlsTileVisible = !subjectToControls || effectiveControls.tileVisible !== false;
 
   const openReauthInNewTab = () => {
     try {
@@ -541,6 +550,44 @@ export default function Room() {
     } catch (err: any) {
       if (err?.status === 401 || err?.status === 403) {
         setAuthStatus("guest");
+        setNeedsReauth(true);
+      }
+    }
+  };
+
+  const updateRoomControls = async (patch: Partial<{ canPublishAudio: boolean; tileVisible: boolean }>) => {
+    if (!roomId || !roomAccessToken) return;
+    if (needsReauth) {
+      setNeedsReauth(true);
+      return;
+    }
+
+    try {
+      const qs = new URLSearchParams();
+      qs.set("t", roomAccessToken);
+      const res = await apiFetch(
+        `/api/rooms/${encodeURIComponent(roomId)}/controls?${qs.toString()}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        },
+        { allowNonOk: true },
+      );
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const c = data?.controls;
+        if (c && typeof c === "object") {
+          setEffectiveControls({
+            canPublishAudio: typeof c.canPublishAudio === "boolean" ? c.canPublishAudio : true,
+            tileVisible: typeof c.tileVisible === "boolean" ? c.tileVisible : true,
+          });
+        }
+      } else if (res.status === 401 || res.status === 403) {
+        setNeedsReauth(true);
+      }
+    } catch (err: any) {
+      if (err?.status === 401 || err?.status === 403) {
         setNeedsReauth(true);
       }
     }
@@ -621,6 +668,47 @@ export default function Room() {
     }
     console.log("🏠 Host Check:", { roomKey: candidateKey, roomId, createdRooms, isHost: willBeHost, role: nextRole });
   }, [currentUserId, roomId]);
+
+  // Realtime controls subscription (SSE over the roomAccessToken).
+  // This must NOT trigger LiveKit token refresh/reconnect.
+  useEffect(() => {
+    if (!roomId || !roomAccessToken) return;
+
+    const base = API_BASE || "";
+
+    const qs = new URLSearchParams();
+    qs.set("t", roomAccessToken);
+    const url = `${base}/api/rooms/${encodeURIComponent(roomId)}/controls/stream?${qs.toString()}`;
+
+    let closed = false;
+    const es = new EventSource(url, { withCredentials: true } as any);
+
+    es.onmessage = (ev) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse(ev.data);
+        setEffectiveControls({
+          canPublishAudio: typeof data?.canPublishAudio === "boolean" ? data.canPublishAudio : true,
+          tileVisible: typeof data?.tileVisible === "boolean" ? data.tileVisible : true,
+        });
+      } catch {
+        // ignore
+      }
+    };
+
+    es.onerror = () => {
+      // Keep last-known controls; EventSource will retry.
+    };
+
+    return () => {
+      closed = true;
+      try {
+        es.close();
+      } catch {
+        // ignore
+      }
+    };
+  }, [API_BASE, roomId, roomAccessToken]);
 
   // If we have an inviteToken but the role isn't set (or got reset), resolve it here
   // so we mint the correct room token (cohost/mod) and permissions.
@@ -2053,6 +2141,69 @@ export default function Room() {
           </div>
         </div>
       )}
+
+      {canManageStream && roomId && roomAccessToken && (
+        <div style={{ position: "fixed", top: 72, right: 16, zIndex: 1200 }}>
+          <button
+            onClick={() => setControlsPanelOpen((v) => !v)}
+            style={{
+              padding: "0.4rem 0.6rem",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.25)",
+              background: "rgba(0,0,0,0.4)",
+              color: "#fff",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+            title="Realtime guest controls"
+          >
+            Guest controls
+          </button>
+
+          {controlsPanelOpen && (
+            <div
+              style={{
+                marginTop: 8,
+                width: 220,
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(15, 23, 42, 0.92)",
+                color: "#e5e7eb",
+                boxShadow: "0 18px 50px rgba(0,0,0,0.55)",
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#fff" }}>
+                Room controls (live)
+              </div>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={effectiveControls.canPublishAudio}
+                  onChange={(e) => updateRoomControls({ canPublishAudio: e.target.checked })}
+                />
+                Guests can publish audio
+              </label>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={effectiveControls.tileVisible}
+                  onChange={(e) => updateRoomControls({ tileVisible: e.target.checked })}
+                />
+                Guest tile visible
+              </label>
+
+              {needsReauth && (
+                <div style={{ marginTop: 10, fontSize: 11, color: "#fecaca" }}>
+                  Session expired — re-auth to edit.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {recordingCountdown && (
         <div
           style={{
@@ -2229,7 +2380,7 @@ export default function Room() {
       {token && serverUrl && (
         <LiveKitRoom
           data-lk-theme="default"
-          className={`sl-layout${isViewer ? " sl-viewer" : ""}`}
+          className={`sl-layout${isViewer ? " sl-viewer" : ""}${subjectToControls && !controlsAllowPublishAudio ? " sl-controls-no-audio" : ""}${subjectToControls && !controlsTileVisible ? " sl-controls-hide-self" : ""}`}
           token={token}
           serverUrl={serverUrl}
           connect={true}
@@ -2488,6 +2639,23 @@ export default function Room() {
           display: none !important;
         }
         ` : ""}
+
+        /* Realtime room controls (Phase 1): disable guest mic UI */
+        .sl-layout.sl-controls-no-audio .lk-control-bar .lk-button-microphone,
+        .sl-layout.sl-controls-no-audio .lk-control-bar [data-lk-button="toggle_mic"],
+        .sl-layout.sl-controls-no-audio .lk-control-bar button[aria-label*="Microphone"] {
+          pointer-events: none !important;
+          opacity: 0.35 !important;
+          filter: grayscale(1);
+        }
+
+        /* Best-effort self-tile fade (LiveKit DOM varies by version) */
+        .sl-layout.sl-controls-hide-self [data-lk-local-participant="true"],
+        .sl-layout.sl-controls-hide-self [data-lk-participant-tile][data-lk-local-participant="true"],
+        .sl-layout.sl-controls-hide-self .lk-participant-tile[data-lk-local-participant="true"] {
+          opacity: 0.08 !important;
+          pointer-events: none !important;
+        }
       `}</style>
     </>
   );

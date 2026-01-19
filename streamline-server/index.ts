@@ -19,6 +19,7 @@ import multistreamRoutes from "./routes/multistream";
 import roomsResolveRoutes from "./routes/roomsResolve";
 import roomsHlsConfigRoutes from "./routes/roomsHlsConfig";
 import roomsActiveEmbedRoutes from "./routes/roomsActiveEmbed";
+import roomControlsRoutes from "./routes/roomControls";
 import destinationsRoutes from "./routes/destinations";
 import liveRoutes from "./routes/live";
 import statsRoutes from "./routes/stats";
@@ -139,6 +140,8 @@ app.use("/api/invites", invitesRoutes);
 app.use("/api/multistream", multistreamRoutes);
 // Room resolve endpoint (/api/rooms/resolve)
 app.use("/api/rooms", roomsResolveRoutes);
+// Realtime in-room controls (host/cohost writes; all participants read via roomAccessToken)
+app.use("/api/rooms", roomControlsRoutes);
 // Room-level persistent HLS config (NOT runtime HLS state)
 app.use("/api/rooms", roomsHlsConfigRoutes);
 // Room-level selection of which Saved Embed to use for HLS control
