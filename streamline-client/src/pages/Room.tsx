@@ -497,6 +497,8 @@ export default function Room() {
   });
   const [isViewer, setIsViewer] = useState(false);
   const [roomPermissions, setRoomPermissions] = useState<RoomPermissions | null>(null);
+  const [needsReauth, setNeedsReauth] = useState(false);
+  const roomTokenMintInFlightRef = useRef(false);
   const [recordingCountdown, setRecordingCountdown] = useState<string | null>(null);
   const [isRecordingCountdown, setIsRecordingCountdown] = useState(false);
   const recordingCountdownTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -506,9 +508,43 @@ export default function Room() {
 
   const currentRole = userRole;
   const isGuestRole = currentRole === "guest";
-  const can = (key: keyof RoomPermissions) => isHost || !!roomPermissions?.[key];
-  const canInviteLinks = !isViewer && (isHost || can("canInvite"));
-  const canManageStream = !isViewer && (isHost || can("canStream") || can("canRecord") || can("canDestinations"));
+  const can = (key: keyof RoomPermissions) => !needsReauth && (isHost || !!roomPermissions?.[key]);
+  const canInviteLinks = !needsReauth && !isViewer && (isHost || can("canInvite"));
+  const canManageStream =
+    !needsReauth &&
+    !isViewer &&
+    (isHost || can("canStream") || can("canRecord") || can("canDestinations"));
+
+  const openReauthInNewTab = () => {
+    try {
+      const next = `${window.location.pathname}${window.location.search}`;
+      const params = new URLSearchParams();
+      params.set("next", next);
+      window.open(`/login?${params.toString()}`, "_blank", "noopener,noreferrer");
+    } catch {
+      window.open("/login", "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const confirmReauthed = async () => {
+    try {
+      const res = await apiFetch("/api/account/me", undefined, { allowNonOk: true });
+      if (res.ok) {
+        setAuthStatus("authed");
+        setNeedsReauth(false);
+        return;
+      }
+      if (res.status === 401 || res.status === 403) {
+        setAuthStatus("guest");
+        setNeedsReauth(true);
+      }
+    } catch (err: any) {
+      if (err?.status === 401 || err?.status === 403) {
+        setAuthStatus("guest");
+        setNeedsReauth(true);
+      }
+    }
+  };
 
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>("idle");
@@ -551,7 +587,7 @@ export default function Room() {
   const [defaultRecordingModePref, setDefaultRecordingModePref] = useState<"cloud" | "dual">("cloud");
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
-  const [authStatus, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
+  const [, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
   const [roomName, setRoomName] = useState<string>(() => {
     const fromState = (location.state as any)?.livekitRoomName;
@@ -560,33 +596,6 @@ export default function Room() {
     return cached || "";
   });
   const effectiveRoomName = roomName;
-
-  // Lightweight auth probe so we know whether privileged roles (host/cohost/moderator)
-  // are allowed to request room tokens. This is separate from presets/entitlements
-  // and should run even if we never open streaming UI.
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        await apiFetch("/api/account/me");
-        if (!cancelled) {
-          setAuthStatus("authed");
-        }
-      } catch (err: any) {
-        if (!cancelled) {
-          if (err?.status === 401 || err?.status === 403) {
-            clearAuthStorage();
-          }
-          setAuthStatus("guest");
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [API_BASE]);
 
   useEffect(() => {
     setHostCheckReady(true);
@@ -768,31 +777,17 @@ export default function Room() {
     // duplicate /api/roomToken calls that can cause spurious 401s and
     // disconnects, while still allowing a fresh token on initial join.
     if (token && serverUrl) return;
+    if (roomTokenMintInFlightRef.current) return;
     // Role used to mint the LiveKit token + roomAccessToken.
     // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
     const requestedRole = isHost ? "host" : userRole;
+    const roleNeedsAuth = requestedRole === "cohost" || requestedRole === "moderator" || requestedRole === "host";
     const role = requestedRole;
     const isGuest = role === "guest";
-    const roleNeedsAuth = role === "cohost" || role === "moderator" || role === "host";
 
-    // Hard guard: do not attempt privileged room tokens until auth status is known.
-    if (roleNeedsAuth) {
-      if (authStatus === "guest") {
-        const next = `${window.location.pathname}${window.location.search}`;
-        const params = new URLSearchParams();
-        params.set("next", next);
-        params.set("inviteRole", role);
-        nav(`/login?${params.toString()}`, { replace: true });
-        return;
-      }
-      if (authStatus === "unknown") {
-        // Wait for /api/account/me to resolve before minting any privileged token.
-        return;
-      }
-    }
-
-        const fetchToken = async () => {
+    const fetchToken = async () => {
       try {
+        roomTokenMintInFlightRef.current = true;
         console.log(`[Room] Fetching room token (role=${role || "host"})...`);
         const buildRoomTokenRequest = (mode: "auth" | "guest") => {
           const endpoint = mode === "guest" ? `${API_BASE}/api/roomToken/guest` : `${API_BASE}/api/roomToken`;
@@ -846,16 +841,10 @@ export default function Room() {
         // If denied due to auth, we only fall back to guest for low-trust roles.
         let attempt = await tryFetch(isGuest ? "guest" : "auth");
         if (!attempt.res.ok && !isGuest && (attempt.res.status === 401 || attempt.res.status === 403)) {
-          // For privileged roles this path should normally be unreachable because
-          // we gate on authStatus above. If we do reach it for a non-guest role,
-          // do not auto-fallback to a guest token; require explicit login.
+          // For privileged roles: degrade gracefully to a guest token and surface re-auth banner.
           if (roleNeedsAuth) {
-            const next = `${window.location.pathname}${window.location.search}`;
-            const params = new URLSearchParams();
-            params.set("next", next);
-            params.set("inviteRole", role);
-            nav(`/login?${params.toString()}`, { replace: true });
-            return;
+            setNeedsReauth(true);
+            setAuthStatus("guest");
           }
           console.warn("[Room] auth roomToken denied; falling back to guest token", attempt.res.status);
           attempt = await tryFetch("guest");
@@ -871,6 +860,12 @@ export default function Room() {
 
         const res = attempt.res;
         console.log("[Room] roomToken status:", res.status, "mode:", attempt.mode);
+
+        // If an authenticated mint succeeds, we can clear the banner without probing /me in the background.
+        if (res.ok && attempt.mode === "auth") {
+          setAuthStatus("authed");
+          setNeedsReauth(false);
+        }
 
         let data: any = null;
         let rawText: string | null = null;
@@ -960,11 +955,13 @@ export default function Room() {
         }
       } catch (err) {
         console.error("[Room] fetchToken error:", err);
+      } finally {
+        roomTokenMintInFlightRef.current = false;
       }
     };
 
     fetchToken();
-  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady, authStatus, token, serverUrl]);
+  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady, token, serverUrl]);
 
   
 
@@ -974,11 +971,14 @@ export default function Room() {
     }
   }, [isViewer, showStreamSetup]);
 
-  // Load effective entitlements + media presets (hosts only, when authed)
+  // Load effective entitlements + media presets only when the user explicitly opens host tools.
+  // (Nuclear option 2: avoid background /me calls after connect.)
   useEffect(() => {
     const role = localStorage.getItem("sl_current_role") || userRole;
     if (role === "guest") return;
-    if (authStatus !== "authed") return;
+    if (!showStreamSetup && !(dashboardOpen && canManageStream)) return;
+    if (needsReauth) return;
+    if (!canManageStream) return;
 
     let cancelled = false;
 
@@ -1002,7 +1002,14 @@ export default function Room() {
           }
         }
 
+        if (!cancelled && (meRes.status === 401 || meRes.status === 403)) {
+          setAuthStatus("guest");
+          setNeedsReauth(true);
+          return;
+        }
+
         if (!cancelled && meRes.ok) {
+          setAuthStatus("authed");
           const me = await meRes.json();
           const prefs = me?.mediaPrefs || {};
           if (prefs.defaultLayout === "grid" || prefs.defaultLayout === "speaker") {
@@ -1098,7 +1105,7 @@ export default function Room() {
     return () => {
       cancelled = true;
     };
-  }, [API_BASE, userRole, authStatus]);
+  }, [API_BASE, userRole, showStreamSetup, dashboardOpen, canManageStream, needsReauth]);
 
   useEffect(() => {
     if (
@@ -1181,10 +1188,13 @@ export default function Room() {
     }
   }, [recordingElapsed, recordingStatus, maxRecordingMinutesPerClip, recordingPlanId]);
 
-  // Load destinations (soft gate) - hosts only
+  // Load destinations only when the user explicitly opens host tools.
   useEffect(() => {
     const role = localStorage.getItem("sl_current_role") || userRole;
     if (role === "guest") return;
+    if (!showStreamSetup && !(dashboardOpen && canManageStream)) return;
+    if (needsReauth) return;
+    if (!canManageStream) return;
 
     const loadDestinations = async () => {
       try {
@@ -1202,11 +1212,16 @@ export default function Room() {
       }
     };
     loadDestinations();
-  }, [userRole]);
+  }, [userRole, showStreamSetup, dashboardOpen, canManageStream, needsReauth]);
 
   async function refreshDestinations() {
     const role = localStorage.getItem("sl_current_role") || userRole;
     if (role === "guest") return;
+    if (needsReauth) {
+      setNeedsReauth(true);
+      return;
+    }
+    if (!canManageStream) return;
     try {
       const res = await fetchDestinations({ includeDisabled: false });
       const items = res.items || [];
@@ -1340,6 +1355,10 @@ export default function Room() {
       console.warn("startRecording blocked for viewer role");
       return;
     }
+    if (needsReauth) {
+      setNeedsReauth(true);
+      return;
+    }
     if (isGuestRole) {
       alert("Recording requires an account. Please sign in.");
       return;
@@ -1424,6 +1443,10 @@ export default function Room() {
       console.warn("stopRecording blocked for viewer role");
       return;
     }
+    if (needsReauth) {
+      setNeedsReauth(true);
+      return;
+    }
     if (isGuestRole) {
       alert("Recording requires an account. Please sign in.");
       return;
@@ -1499,6 +1522,10 @@ export default function Room() {
   }) => {
     if (isViewer) {
       alert("View-only mode: publishing controls are disabled.");
+      return;
+    }
+    if (needsReauth) {
+      setNeedsReauth(true);
       return;
     }
     if (isGuestRole) {
@@ -1669,6 +1696,10 @@ export default function Room() {
   const handleStopMultistream = async () => {
     if (isViewer) {
       alert("View-only mode: publishing controls are disabled.");
+      return;
+    }
+    if (needsReauth) {
+      setNeedsReauth(true);
       return;
     }
     if (isGuestRole) {
@@ -1997,6 +2028,29 @@ export default function Room() {
       {isViewer && (
         <div className="w-full bg-amber-500 text-black text-sm font-semibold px-4 py-2 flex items-center gap-2">
           👀 View-only mode — publishing controls are disabled.
+        </div>
+      )}
+      {!isViewer && needsReauth && (
+        <div className="w-full bg-red-600 text-white text-sm font-semibold px-4 py-2 flex items-center justify-between gap-3">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span>Session expired — re-auth to enable host tools.</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={openReauthInNewTab}
+              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded text-sm font-semibold"
+              title="Opens login in a new tab"
+            >
+              Re-auth
+            </button>
+            <button
+              onClick={confirmReauthed}
+              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded text-sm font-semibold"
+              title="Checks auth once, without reconnecting"
+            >
+              Enable tools
+            </button>
+          </div>
         </div>
       )}
       {recordingCountdown && (
