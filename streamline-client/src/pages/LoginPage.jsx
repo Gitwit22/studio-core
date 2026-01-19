@@ -86,17 +86,15 @@ export const LoginPage = () => {
       // ✅ LOGIN SUCCEEDED — cookie is now set. Also capture the
       // JWT from the response body so we can fall back to header-
       // based auth when cookies are blocked (incognito/webviews).
-      let loginBody: any = null;
+      let loginBody = null;
       try {
         const ctLogin = res.headers.get("content-type") || "";
-        if (ctLogin.includes("application/json")) {
-          loginBody = await res.json().catch(() => null);
-        }
+        loginBody = ctLogin.includes("application/json") ? await res.json() : null;
       } catch {
         loginBody = null;
       }
 
-      const token = loginBody && typeof loginBody.token === "string" ? loginBody.token : null;
+      const token = loginBody && loginBody.token;
       if (token) {
         try {
           localStorage.setItem("sl_token", token);
