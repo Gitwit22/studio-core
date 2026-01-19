@@ -563,12 +563,11 @@ export default function Room() {
     }
 
     try {
-      const qs = new URLSearchParams();
-      qs.set("t", roomAccessToken);
       const res = await apiFetch(
-        `/api/rooms/${encodeURIComponent(roomId)}/controls?${qs.toString()}`,
+        `/api/rooms/${encodeURIComponent(roomId)}/controls`,
         {
           method: "PATCH",
+          headers: { "x-room-access-token": roomAccessToken },
           body: JSON.stringify(patch),
         },
         { allowNonOk: true },
@@ -634,6 +633,7 @@ export default function Room() {
   const [defaultRecordingModePref, setDefaultRecordingModePref] = useState<"cloud" | "dual">("cloud");
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
+  const [participantIdentity, setParticipantIdentity] = useState<string | null>(null);
   const [, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
   const [roomName, setRoomName] = useState<string>(() => {
@@ -678,6 +678,7 @@ export default function Room() {
 
     const qs = new URLSearchParams();
     qs.set("t", roomAccessToken);
+    if (participantIdentity) qs.set("identity", participantIdentity);
     const url = `${base}/api/rooms/${encodeURIComponent(roomId)}/controls/stream?${qs.toString()}`;
 
     let closed = false;
@@ -708,7 +709,7 @@ export default function Room() {
         // ignore
       }
     };
-  }, [API_BASE, roomId, roomAccessToken]);
+  }, [API_BASE, roomId, roomAccessToken, participantIdentity]);
 
   // If we have an inviteToken but the role isn't set (or got reset), resolve it here
   // so we mint the correct room token (cohost/mod) and permissions.
@@ -1008,7 +1009,7 @@ export default function Room() {
         } else {
           setRoomPermissions(null);
         }
-        const { token, serverUrl, roomId: returnedRoomId, roomAccessToken: roomAccessTokenRaw } = data as any;
+        const { token, serverUrl, roomId: returnedRoomId, roomAccessToken: roomAccessTokenRaw, participantIdentity: participantIdentityRaw } = data as any;
         if (typeof returnedRoomId === "string" && returnedRoomId.trim()) {
           setFirestoreRoomId(returnedRoomId.trim());
         } else {
@@ -1019,6 +1020,11 @@ export default function Room() {
           setRoomAccessToken(roomAccessTokenRaw.trim());
         } else {
           setRoomAccessToken(null);
+        }
+        if (typeof participantIdentityRaw === "string" && participantIdentityRaw.trim()) {
+          setParticipantIdentity(participantIdentityRaw.trim());
+        } else {
+          setParticipantIdentity(null);
         }
         const finalServerUrl = serverUrl || import.meta.env.VITE_LIVEKIT_URL;
         console.log("[Room] token received:", !!token, "serverUrl:", finalServerUrl);
@@ -2415,6 +2421,8 @@ export default function Room() {
             onClose={() => setDashboardOpen(false)}
             role={isHost ? "host" : "participant"}
             roomName={roomName || ''}
+            roomId={roomId || ""}
+            roomAccessToken={roomAccessToken || ""}
           />
         </LiveKitRoom>
       )}

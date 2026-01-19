@@ -40,6 +40,70 @@ const DEFAULT_COHOST_PROFILE = {
   maxUses: 1,
 };
 
+type RolePresetId = "participant" | "cohost" | "moderator";
+type RolePresetDoc = {
+  role: RolePresetId;
+  canPublishAudio: boolean;
+  canPublishVideo: boolean;
+  canScreenShare: boolean;
+  tileVisible: boolean;
+  updatedAt?: number;
+};
+
+const DEFAULT_ROLE_PRESETS: Record<RolePresetId, RolePresetDoc> = {
+  participant: {
+    role: "participant",
+    canPublishAudio: true,
+    canPublishVideo: true,
+    canScreenShare: false,
+    tileVisible: true,
+  },
+  moderator: {
+    role: "moderator",
+    canPublishAudio: true,
+    canPublishVideo: true,
+    canScreenShare: false,
+    tileVisible: true,
+  },
+  cohost: {
+    role: "cohost",
+    canPublishAudio: true,
+    canPublishVideo: true,
+    canScreenShare: true,
+    tileVisible: true,
+  },
+};
+
+function parseRolePresetId(raw: any): RolePresetId | null {
+  const v = String(raw || "").toLowerCase();
+  if (v === "participant" || v === "cohost" || v === "moderator") return v;
+  return null;
+}
+
+function pickBoolean(v: any): boolean | undefined {
+  if (typeof v === "boolean") return v;
+  return undefined;
+}
+
+async function readRolePreset(uid: string, presetId: RolePresetId): Promise<RolePresetDoc> {
+  const base = DEFAULT_ROLE_PRESETS[presetId];
+  try {
+    const snap = await firestore.collection("users").doc(uid).collection("rolePresets").doc(presetId).get();
+    const data = snap.exists ? (snap.data() as any) : {};
+    return {
+      ...base,
+      role: presetId,
+      canPublishAudio: pickBoolean(data.canPublishAudio) ?? base.canPublishAudio,
+      canPublishVideo: pickBoolean(data.canPublishVideo) ?? base.canPublishVideo,
+      canScreenShare: pickBoolean(data.canScreenShare) ?? base.canScreenShare,
+      tileVisible: pickBoolean(data.tileVisible) ?? base.tileVisible,
+      updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : undefined,
+    };
+  } catch {
+    return base;
+  }
+}
+
 type PermissionSet = RolePermissionMap;
 
 type RoleProfile = {
@@ -601,6 +665,73 @@ router.get("/cohost-profile", async (req, res) => {
   } catch (err: any) {
     console.error("[account/cohost-profile] error", err);
     return res.status(500).json({ error: "failed_to_load_cohost_profile" });
+  }
+});
+
+// Role presets used for in-room controls (applied to rooms/{roomId}/controls/{identity}).
+router.get("/role-presets", requireAuth, async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ error: "unauthorized" });
+
+    const [participant, cohost, moderator] = await Promise.all([
+      readRolePreset(uid, "participant"),
+      readRolePreset(uid, "cohost"),
+      readRolePreset(uid, "moderator"),
+    ]);
+
+    return res.json({
+      presets: {
+        participant,
+        cohost,
+        moderator,
+      },
+      defaults: DEFAULT_ROLE_PRESETS,
+    });
+  } catch (err: any) {
+    console.error("[account/role-presets] error", err);
+    return res.status(500).json({ error: "failed_to_load_role_presets" });
+  }
+});
+
+router.patch("/role-presets/:presetId", requireAuth, async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ error: "unauthorized" });
+
+    const presetId = parseRolePresetId(req.params.presetId);
+    if (!presetId) return res.status(400).json({ error: "invalid_presetId" });
+
+    const body = (req.body || {}) as any;
+    const patch: Partial<RolePresetDoc> = {
+      canPublishAudio: pickBoolean(body.canPublishAudio),
+      canPublishVideo: pickBoolean(body.canPublishVideo),
+      canScreenShare: pickBoolean(body.canScreenShare),
+      tileVisible: pickBoolean(body.tileVisible),
+    };
+
+    const cleaned: any = {};
+    (Object.keys(patch) as Array<keyof RolePresetDoc>).forEach((k) => {
+      const val = (patch as any)[k];
+      if (typeof val === "boolean") cleaned[k] = val;
+    });
+
+    if (Object.keys(cleaned).length === 0) {
+      return res.status(400).json({ error: "no_valid_fields" });
+    }
+
+    await firestore
+      .collection("users")
+      .doc(uid)
+      .collection("rolePresets")
+      .doc(presetId)
+      .set({ ...cleaned, role: presetId, updatedAt: Date.now() }, { merge: true });
+
+    const preset = await readRolePreset(uid, presetId);
+    return res.json({ ok: true, preset });
+  } catch (err: any) {
+    console.error("[account/role-presets patch] error", err);
+    return res.status(500).json({ error: "failed_to_update_role_preset" });
   }
 });
 

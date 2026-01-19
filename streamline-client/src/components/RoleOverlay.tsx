@@ -11,11 +11,15 @@ export default function RoleOverlay({
   onClose,
   role,
   roomName,
+  roomId,
+  roomAccessToken,
 }: {
   open: boolean;
   onClose: () => void;
   role: Role;
   roomName: string;
+  roomId: string;
+  roomAccessToken: string;
 }) {
   if (!open) return null;
 
@@ -99,7 +103,7 @@ export default function RoleOverlay({
           flexDirection: 'column',
           gap: '0.75rem'
         }}>
-          {role === "host" && <HostPanel roomName={roomName} />}
+          {role === "host" && <HostPanel roomName={roomName} roomId={roomId} roomAccessToken={roomAccessToken} />}
           {role === "moderator" && <ModeratorPanel roomName={roomName} />}
           {role === "participant" && <ParticipantPanel roomName={roomName} />}
         </div>
@@ -109,11 +113,12 @@ export default function RoleOverlay({
 
 }
 
-function HostPanel({ roomName }: { roomName: string }) {
+function HostPanel({ roomName, roomId, roomAccessToken }: { roomName: string; roomId: string; roomAccessToken: string }) {
   const parts = useParticipants();
   const { localParticipant } = useLocalParticipant();
   const [muteLock, setMuteLock] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [presetBusyId, setPresetBusyId] = React.useState<string | null>(null);
 
   // Load initial muteLock state for this room
   React.useEffect(() => {
@@ -166,6 +171,22 @@ function HostPanel({ roomName }: { roomName: string }) {
       alert("Failed to update mute lock");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const applyPreset = async (identity: string, presetId: "moderator" | "cohost" | "participant") => {
+    if (!roomId || !roomAccessToken) {
+      alert("Room not ready yet");
+      return;
+    }
+    setPresetBusyId(identity);
+    try {
+      await apiApplyPreset(roomId, roomAccessToken, identity, presetId);
+    } catch (e) {
+      console.error("apply-preset failed", e);
+      alert("Failed to apply preset");
+    } finally {
+      setPresetBusyId(null);
     }
   };
   return (
@@ -221,6 +242,9 @@ function HostPanel({ roomName }: { roomName: string }) {
           onMute={(id, muted) => apiMute(roomName, id, muted)}
           canModerate
           muteLock={muteLock}
+          localIdentity={localParticipant?.identity || null}
+          onApplyPreset={applyPreset}
+          presetBusyIdentity={presetBusyId}
         />
 
         {muteLock && (
@@ -358,12 +382,18 @@ function ParticipantList({
   onRemove,
   onMute,
   muteLock,
+  localIdentity,
+  onApplyPreset,
+  presetBusyIdentity,
 }: {
   participants: ReturnType<typeof useParticipants>;
   canModerate?: boolean;
   onRemove?: (identity: string) => void;
   onMute?: (identity: string, muted: boolean) => void;
   muteLock?: boolean;
+  localIdentity?: string | null;
+  onApplyPreset?: (identity: string, presetId: "moderator" | "cohost" | "participant") => void;
+  presetBusyIdentity?: string | null;
 }) {
   if (!participants?.length) {
     return <p style={{ fontSize: '0.875rem', opacity: 0.7, color: 'rgba(255, 255, 255, 0.7)' }}>No one here yet.</p>;
@@ -393,6 +423,67 @@ function ParticipantList({
           </div>
           {canModerate && (
             <div style={{ display: 'flex', gap: '0.25rem' }}>
+              {onApplyPreset && (
+                <div style={{ display: 'flex', gap: '0.25rem', marginRight: '0.25rem' }}>
+                  <button
+                    disabled={presetBusyIdentity === p.identity || p.identity === localIdentity}
+                    style={{
+                      borderRadius: '0.25rem',
+                      border: '1px solid rgba(59, 130, 246, 0.5)',
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      background: 'rgba(59, 130, 246, 0.12)',
+                      color: '#bfdbfe',
+                      cursor: presetBusyIdentity === p.identity || p.identity === localIdentity ? 'not-allowed' : 'pointer',
+                      fontWeight: '600',
+                      opacity: presetBusyIdentity === p.identity || p.identity === localIdentity ? 0.6 : 1,
+                      whiteSpace: 'nowrap'
+                    }}
+                    onClick={() => onApplyPreset(p.identity, 'moderator')}
+                    title="Apply moderator preset"
+                  >
+                    Mod
+                  </button>
+                  <button
+                    disabled={presetBusyIdentity === p.identity || p.identity === localIdentity}
+                    style={{
+                      borderRadius: '0.25rem',
+                      border: '1px solid rgba(34, 197, 94, 0.5)',
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      background: 'rgba(34, 197, 94, 0.10)',
+                      color: '#bbf7d0',
+                      cursor: presetBusyIdentity === p.identity || p.identity === localIdentity ? 'not-allowed' : 'pointer',
+                      fontWeight: '600',
+                      opacity: presetBusyIdentity === p.identity || p.identity === localIdentity ? 0.6 : 1,
+                      whiteSpace: 'nowrap'
+                    }}
+                    onClick={() => onApplyPreset(p.identity, 'cohost')}
+                    title="Apply cohost preset"
+                  >
+                    Cohost
+                  </button>
+                  <button
+                    disabled={presetBusyIdentity === p.identity || p.identity === localIdentity}
+                    style={{
+                      borderRadius: '0.25rem',
+                      border: '1px solid rgba(148, 163, 184, 0.6)',
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      background: 'rgba(31, 41, 55, 0.9)',
+                      color: '#e5e7eb',
+                      cursor: presetBusyIdentity === p.identity || p.identity === localIdentity ? 'not-allowed' : 'pointer',
+                      fontWeight: '600',
+                      opacity: presetBusyIdentity === p.identity || p.identity === localIdentity ? 0.6 : 1,
+                      whiteSpace: 'nowrap'
+                    }}
+                    onClick={() => onApplyPreset(p.identity, 'participant')}
+                    title="Revert to participant preset"
+                  >
+                    Participant
+                  </button>
+                </div>
+              )}
               {(() => {
                 const micEnabled = (p as any).isMicrophoneEnabled as boolean | undefined;
                 const isMuted = micEnabled === false;
@@ -454,6 +545,30 @@ function ParticipantList({
       ))}
     </div>
   );
+}
+
+async function apiApplyPreset(
+  roomId: string,
+  roomAccessToken: string,
+  identity: string,
+  presetId: "moderator" | "cohost" | "participant",
+) {
+  const base = API_BASE || "";
+  const url = `${base}/api/rooms/${encodeURIComponent(roomId)}/controls/${encodeURIComponent(identity)}/apply-preset`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-room-access-token": roomAccessToken },
+    credentials: "include",
+    body: JSON.stringify({ presetId }),
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok || (data && data.error)) {
+    console.error("apply-preset failed", { status: res.status, data });
+    throw new Error((data && data.error) || `Apply preset failed (HTTP ${res.status})`);
+  }
+  return data;
 }
 
 
