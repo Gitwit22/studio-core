@@ -10,6 +10,15 @@ type RoomControls = {
   canPublishVideo?: boolean;
   canScreenShare?: boolean;
   tileVisible?: boolean;
+  // Access scopes / capabilities (used for in-room UI gating; set via presets).
+  canMuteGuests?: boolean;
+  canInviteLinks?: boolean;
+  canManageDestinations?: boolean;
+  canStartStopStream?: boolean;
+  canStartStopRecording?: boolean;
+  // Optional future scopes.
+  canViewAnalytics?: boolean;
+  canChangeLayoutScene?: boolean;
   forcedMute?: boolean;
   forcedVideoOff?: boolean;
   role?: string;
@@ -37,7 +46,21 @@ type PresetId = "moderator" | "cohost" | "participant";
 
 const SYSTEM_ROLE_PRESETS: Record<
   PresetId,
-  Required<Pick<RoomControls, "role" | "canPublishAudio" | "canPublishVideo" | "canScreenShare" | "tileVisible">>
+  Required<
+    Pick<
+      RoomControls,
+      | "role"
+      | "canPublishAudio"
+      | "canPublishVideo"
+      | "canScreenShare"
+      | "tileVisible"
+      | "canMuteGuests"
+      | "canInviteLinks"
+      | "canManageDestinations"
+      | "canStartStopStream"
+      | "canStartStopRecording"
+    >
+  >
 > = {
   participant: {
     role: "participant",
@@ -45,6 +68,11 @@ const SYSTEM_ROLE_PRESETS: Record<
     canPublishVideo: true,
     canScreenShare: false,
     tileVisible: true,
+    canMuteGuests: false,
+    canInviteLinks: false,
+    canManageDestinations: false,
+    canStartStopStream: false,
+    canStartStopRecording: false,
   },
   moderator: {
     role: "moderator",
@@ -52,6 +80,11 @@ const SYSTEM_ROLE_PRESETS: Record<
     canPublishVideo: true,
     canScreenShare: false,
     tileVisible: true,
+    canMuteGuests: true,
+    canInviteLinks: true,
+    canManageDestinations: false,
+    canStartStopStream: false,
+    canStartStopRecording: false,
   },
   cohost: {
     role: "cohost",
@@ -59,6 +92,11 @@ const SYSTEM_ROLE_PRESETS: Record<
     canPublishVideo: true,
     canScreenShare: true,
     tileVisible: true,
+    canMuteGuests: true,
+    canInviteLinks: true,
+    canManageDestinations: true,
+    canStartStopStream: true,
+    canStartStopRecording: true,
   },
 };
 
@@ -78,13 +116,28 @@ async function loadPresetForUser(uid: string, presetId: PresetId): Promise<RoomC
     const snap = await presetDocRef(uid, presetId).get();
     if (snap.exists) {
       const data = (snap.data() || {}) as any;
-      return {
+      const merged: RoomControls = {
         role: typeof data.role === "string" ? data.role : presetId,
         canPublishAudio: pickBoolean(data.canPublishAudio),
         canPublishVideo: pickBoolean(data.canPublishVideo),
         canScreenShare: pickBoolean(data.canScreenShare),
         tileVisible: pickBoolean(data.tileVisible),
+        canMuteGuests: pickBoolean(data.canMuteGuests),
+        canInviteLinks: pickBoolean(data.canInviteLinks),
+        canManageDestinations: pickBoolean(data.canManageDestinations),
+        canStartStopStream: pickBoolean(data.canStartStopStream),
+        canStartStopRecording: pickBoolean(data.canStartStopRecording),
+        canViewAnalytics: pickBoolean(data.canViewAnalytics),
+        canChangeLayoutScene: pickBoolean(data.canChangeLayoutScene),
       };
+
+      // Hard guarantees for moderator.
+      if (presetId === "moderator") {
+        merged.canViewAnalytics = false;
+        merged.canChangeLayoutScene = false;
+      }
+
+      return merged;
     }
   } catch {
     // ignore and fall back to system preset
@@ -143,6 +196,11 @@ router.patch("/:roomId/controls", requireAuth as any, requireRoomAccessToken as 
     canPublishVideo: pickBoolean(body.canPublishVideo),
     canScreenShare: pickBoolean(body.canScreenShare),
     tileVisible: pickBoolean(body.tileVisible),
+    canMuteGuests: pickBoolean(body.canMuteGuests),
+    canInviteLinks: pickBoolean(body.canInviteLinks),
+    canManageDestinations: pickBoolean(body.canManageDestinations),
+    canStartStopStream: pickBoolean(body.canStartStopStream),
+    canStartStopRecording: pickBoolean(body.canStartStopRecording),
     forcedMute: pickBoolean(body.forcedMute),
     forcedVideoOff: pickBoolean(body.forcedVideoOff),
   };
@@ -197,6 +255,11 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
     canPublishVideo: pickBoolean(body.canPublishVideo),
     canScreenShare: pickBoolean(body.canScreenShare),
     tileVisible: pickBoolean(body.tileVisible),
+    canMuteGuests: pickBoolean(body.canMuteGuests),
+    canInviteLinks: pickBoolean(body.canInviteLinks),
+    canManageDestinations: pickBoolean(body.canManageDestinations),
+    canStartStopStream: pickBoolean(body.canStartStopStream),
+    canStartStopRecording: pickBoolean(body.canStartStopRecording),
     forcedMute: pickBoolean(body.forcedMute),
     forcedVideoOff: pickBoolean(body.forcedVideoOff),
   };
@@ -253,7 +316,20 @@ router.post("/:roomId/controls/:identity/apply-preset", requireAuth as any, requ
     canPublishVideo: pickBoolean(preset.canPublishVideo),
     canScreenShare: pickBoolean(preset.canScreenShare),
     tileVisible: pickBoolean(preset.tileVisible),
+    canMuteGuests: pickBoolean(preset.canMuteGuests),
+    canInviteLinks: pickBoolean(preset.canInviteLinks),
+    canManageDestinations: pickBoolean(preset.canManageDestinations),
+    canStartStopStream: pickBoolean(preset.canStartStopStream),
+    canStartStopRecording: pickBoolean(preset.canStartStopRecording),
+    canViewAnalytics: pickBoolean(preset.canViewAnalytics),
+    canChangeLayoutScene: pickBoolean(preset.canChangeLayoutScene),
   };
+
+  // Hard guarantees for moderator.
+  if (presetId === "moderator") {
+    cleaned.canViewAnalytics = false;
+    cleaned.canChangeLayoutScene = false;
+  }
 
   const ref = controlsDocRef(roomId, identityDocId);
   await ref.set(

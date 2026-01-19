@@ -13,6 +13,7 @@ export default function RoleOverlay({
   roomName,
   roomId,
   roomAccessToken,
+  canMuteGuests,
 }: {
   open: boolean;
   onClose: () => void;
@@ -20,6 +21,7 @@ export default function RoleOverlay({
   roomName: string;
   roomId: string;
   roomAccessToken: string;
+  canMuteGuests?: boolean;
 }) {
   if (!open) return null;
 
@@ -103,8 +105,15 @@ export default function RoleOverlay({
           flexDirection: 'column',
           gap: '0.75rem'
         }}>
-          {role === "host" && <HostPanel roomName={roomName} roomId={roomId} roomAccessToken={roomAccessToken} />}
-          {role === "moderator" && <ModeratorPanel roomName={roomName} />}
+          {role === "host" && (
+            <HostPanel
+              roomName={roomName}
+              roomId={roomId}
+              roomAccessToken={roomAccessToken}
+              canMuteGuests={canMuteGuests}
+            />
+          )}
+          {role === "moderator" && <ModeratorPanel roomName={roomName} canMuteGuests={canMuteGuests} />}
           {role === "participant" && <ParticipantPanel roomName={roomName} />}
         </div>
       </div>
@@ -113,7 +122,17 @@ export default function RoleOverlay({
 
 }
 
-function HostPanel({ roomName, roomId, roomAccessToken }: { roomName: string; roomId: string; roomAccessToken: string }) {
+function HostPanel({
+  roomName,
+  roomId,
+  roomAccessToken,
+  canMuteGuests,
+}: {
+  roomName: string;
+  roomId: string;
+  roomAccessToken: string;
+  canMuteGuests?: boolean;
+}) {
   const parts = useParticipants();
   const { localParticipant } = useLocalParticipant();
   const [muteLock, setMuteLock] = React.useState(false);
@@ -245,6 +264,7 @@ function HostPanel({ roomName, roomId, roomAccessToken }: { roomName: string; ro
           localIdentity={localParticipant?.identity || null}
           onApplyPreset={applyPreset}
           presetBusyIdentity={presetBusyId}
+          canMuteGuests={canMuteGuests}
         />
 
         {muteLock && (
@@ -320,7 +340,7 @@ function HostPanel({ roomName, roomId, roomAccessToken }: { roomName: string; ro
   );
 }
 
-function ModeratorPanel({ roomName }: { roomName: string }) {
+function ModeratorPanel({ roomName, canMuteGuests }: { roomName: string; canMuteGuests?: boolean }) {
   const parts = useParticipants();
   return (
     <>
@@ -335,6 +355,7 @@ function ModeratorPanel({ roomName }: { roomName: string }) {
           onRemove={(id) => apiRemove(roomName, id)}
           onMute={(id, muted) => apiMute(roomName, id, muted)}
           canModerate
+          canMuteGuests={canMuteGuests}
         />
       </Section>
     </>
@@ -385,6 +406,7 @@ function ParticipantList({
   localIdentity,
   onApplyPreset,
   presetBusyIdentity,
+  canMuteGuests,
 }: {
   participants: ReturnType<typeof useParticipants>;
   canModerate?: boolean;
@@ -394,6 +416,7 @@ function ParticipantList({
   localIdentity?: string | null;
   onApplyPreset?: (identity: string, presetId: "moderator" | "cohost" | "participant") => void;
   presetBusyIdentity?: string | null;
+  canMuteGuests?: boolean;
 }) {
   if (!participants?.length) {
     return <p style={{ fontSize: '0.875rem', opacity: 0.7, color: 'rgba(255, 255, 255, 0.7)' }}>No one here yet.</p>;
@@ -484,33 +507,33 @@ function ParticipantList({
                   </button>
                 </div>
               )}
-              {(() => {
+              {canMuteGuests !== false && (() => {
                 const micEnabled = (p as any).isMicrophoneEnabled as boolean | undefined;
                 const isMuted = micEnabled === false;
                 const nextMuted = !isMuted; // true to mute, false to unmute
 
                 return (
-              <button
-                style={{
-                  borderRadius: '0.25rem',
-                  border: '1px solid rgba(148, 163, 184, 0.6)',
-                  padding: '0.25rem 0.5rem',
-                  fontSize: '0.7rem',
-                  background: muteLock ? 'rgba(55, 65, 81, 0.6)' : 'rgba(31, 41, 55, 0.9)',
-                  color: '#e5e7eb',
-                  cursor: muteLock ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s ease',
-                  fontWeight: '600',
-                  opacity: muteLock ? 0.6 : 1
-                }}
-                disabled={muteLock}
-                onClick={() => {
-                  if (muteLock) return;
-                  onMute?.(p.identity, nextMuted);
-                }}
-              >
-                {isMuted ? 'Unmute' : 'Mute'}
-              </button>
+                  <button
+                    style={{
+                      borderRadius: '0.25rem',
+                      border: '1px solid rgba(148, 163, 184, 0.6)',
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      background: muteLock ? 'rgba(55, 65, 81, 0.6)' : 'rgba(31, 41, 55, 0.9)',
+                      color: '#e5e7eb',
+                      cursor: muteLock ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.3s ease',
+                      fontWeight: '600',
+                      opacity: muteLock ? 0.6 : 1
+                    }}
+                    disabled={muteLock}
+                    onClick={() => {
+                      if (muteLock) return;
+                      onMute?.(p.identity, nextMuted);
+                    }}
+                  >
+                    {isMuted ? 'Unmute' : 'Mute'}
+                  </button>
                 );
               })()}
               <button

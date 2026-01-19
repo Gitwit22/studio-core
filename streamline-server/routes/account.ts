@@ -47,6 +47,14 @@ type RolePresetDoc = {
   canPublishVideo: boolean;
   canScreenShare: boolean;
   tileVisible: boolean;
+  canMuteGuests: boolean;
+  canInviteLinks: boolean;
+  canManageDestinations: boolean;
+  canStartStopStream: boolean;
+  canStartStopRecording: boolean;
+  // Optional future scopes. Moderator must never have these enabled.
+  canViewAnalytics?: boolean;
+  canChangeLayoutScene?: boolean;
   updatedAt?: number;
 };
 
@@ -57,6 +65,11 @@ const DEFAULT_ROLE_PRESETS: Record<RolePresetId, RolePresetDoc> = {
     canPublishVideo: true,
     canScreenShare: false,
     tileVisible: true,
+    canMuteGuests: false,
+    canInviteLinks: false,
+    canManageDestinations: false,
+    canStartStopStream: false,
+    canStartStopRecording: false,
   },
   moderator: {
     role: "moderator",
@@ -64,6 +77,13 @@ const DEFAULT_ROLE_PRESETS: Record<RolePresetId, RolePresetDoc> = {
     canPublishVideo: true,
     canScreenShare: false,
     tileVisible: true,
+    canMuteGuests: true,
+    canInviteLinks: true,
+    canManageDestinations: false,
+    canStartStopStream: false,
+    canStartStopRecording: false,
+    canViewAnalytics: false,
+    canChangeLayoutScene: false,
   },
   cohost: {
     role: "cohost",
@@ -71,6 +91,11 @@ const DEFAULT_ROLE_PRESETS: Record<RolePresetId, RolePresetDoc> = {
     canPublishVideo: true,
     canScreenShare: true,
     tileVisible: true,
+    canMuteGuests: true,
+    canInviteLinks: true,
+    canManageDestinations: true,
+    canStartStopStream: true,
+    canStartStopRecording: true,
   },
 };
 
@@ -90,15 +115,30 @@ async function readRolePreset(uid: string, presetId: RolePresetId): Promise<Role
   try {
     const snap = await firestore.collection("users").doc(uid).collection("rolePresets").doc(presetId).get();
     const data = snap.exists ? (snap.data() as any) : {};
-    return {
+    const merged: RolePresetDoc = {
       ...base,
       role: presetId,
       canPublishAudio: pickBoolean(data.canPublishAudio) ?? base.canPublishAudio,
       canPublishVideo: pickBoolean(data.canPublishVideo) ?? base.canPublishVideo,
       canScreenShare: pickBoolean(data.canScreenShare) ?? base.canScreenShare,
       tileVisible: pickBoolean(data.tileVisible) ?? base.tileVisible,
+      canMuteGuests: pickBoolean(data.canMuteGuests) ?? base.canMuteGuests,
+      canInviteLinks: pickBoolean(data.canInviteLinks) ?? base.canInviteLinks,
+      canManageDestinations: pickBoolean(data.canManageDestinations) ?? base.canManageDestinations,
+      canStartStopStream: pickBoolean(data.canStartStopStream) ?? base.canStartStopStream,
+      canStartStopRecording: pickBoolean(data.canStartStopRecording) ?? base.canStartStopRecording,
+      canViewAnalytics: pickBoolean(data.canViewAnalytics) ?? base.canViewAnalytics,
+      canChangeLayoutScene: pickBoolean(data.canChangeLayoutScene) ?? base.canChangeLayoutScene,
       updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : undefined,
     };
+
+    // Hard guarantees: moderator must never have these enabled.
+    if (presetId === "moderator") {
+      merged.canViewAnalytics = false;
+      merged.canChangeLayoutScene = false;
+    }
+
+    return merged;
   } catch {
     return base;
   }
@@ -708,6 +748,13 @@ router.patch("/role-presets/:presetId", requireAuth, async (req, res) => {
       canPublishVideo: pickBoolean(body.canPublishVideo),
       canScreenShare: pickBoolean(body.canScreenShare),
       tileVisible: pickBoolean(body.tileVisible),
+      canMuteGuests: pickBoolean(body.canMuteGuests),
+      canInviteLinks: pickBoolean(body.canInviteLinks),
+      canManageDestinations: pickBoolean(body.canManageDestinations),
+      canStartStopStream: pickBoolean(body.canStartStopStream),
+      canStartStopRecording: pickBoolean(body.canStartStopRecording),
+      canViewAnalytics: pickBoolean(body.canViewAnalytics),
+      canChangeLayoutScene: pickBoolean(body.canChangeLayoutScene),
     };
 
     const cleaned: any = {};
@@ -718,6 +765,12 @@ router.patch("/role-presets/:presetId", requireAuth, async (req, res) => {
 
     if (Object.keys(cleaned).length === 0) {
       return res.status(400).json({ error: "no_valid_fields" });
+    }
+
+    // Hard guarantees: moderator cannot enable these.
+    if (presetId === "moderator") {
+      if ("canViewAnalytics" in cleaned) delete cleaned.canViewAnalytics;
+      if ("canChangeLayoutScene" in cleaned) delete cleaned.canChangeLayoutScene;
     }
 
     await firestore

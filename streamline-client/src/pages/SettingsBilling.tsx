@@ -14,6 +14,60 @@ import SettingsHlsSetup from "./settings/SettingsHlsSetup";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
+type RolePresetId = "participant" | "cohost" | "moderator";
+
+type RolePresetDoc = {
+  role: RolePresetId;
+  // Publishing / presence controls
+  canPublishAudio: boolean;
+  canPublishVideo: boolean;
+  canScreenShare: boolean;
+  tileVisible: boolean;
+  // Access scopes (in-room gated UI)
+  canMuteGuests: boolean;
+  canInviteLinks: boolean;
+  canManageDestinations: boolean;
+  canStartStopStream: boolean;
+  canStartStopRecording: boolean;
+  // Optional future scopes (not used in UI right now)
+  canViewAnalytics?: boolean;
+  canChangeLayoutScene?: boolean;
+  updatedAt?: number;
+};
+
+type RolePresetToggleKey = Exclude<
+  keyof RolePresetDoc,
+  "role" | "updatedAt" | "canViewAnalytics" | "canChangeLayoutScene"
+>;
+
+const ROLE_PRESET_LABELS: Record<RolePresetId, string> = {
+  participant: "Participant",
+  cohost: "Cohost",
+  moderator: "Moderator",
+};
+
+const ROLE_PRESET_GROUPS: Array<{ title: string; keys: Array<{ key: RolePresetToggleKey; label: string }> }> = [
+  {
+    title: "Access scopes",
+    keys: [
+      { key: "canMuteGuests", label: "Mute/Kick Guests" },
+      { key: "canInviteLinks", label: "Invite/Generate Links" },
+      { key: "canManageDestinations", label: "Manage Destinations" },
+      { key: "canStartStopStream", label: "Start/Stop Stream" },
+      { key: "canStartStopRecording", label: "Start/Stop Recording" },
+    ],
+  },
+  {
+    title: "Publishing",
+    keys: [
+      { key: "canPublishAudio", label: "Publish Audio" },
+      { key: "canPublishVideo", label: "Publish Video" },
+      { key: "canScreenShare", label: "Share Screen" },
+      { key: "tileVisible", label: "Show Tile" },
+    ],
+  },
+];
+
 const EMPTY_PERMISSIONS = {
   canStream: false,
   canRecord: false,
@@ -75,325 +129,120 @@ const SIMPLE_ROLE_DEFAULTS = {
     expiresHours: 24,
     maxUses: 1,
   },
-};
+        {/* ================================================================ */}
+        {/* SECTION 4: ROLE PRESETS (Realtime in-room gating) */}
+        {/* ================================================================ */}
+        {activeTab === "roles" && (
+          <div style={{ ...S.card, opacity: isBlocked ? 0.6 : 1 }}>
+            <div style={S.cardHeader}>
+              <h2 style={S.cardTitle}>🛡️ Role Presets</h2>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  onClick={loadRolePresets}
+                  style={S.secondaryBtn}
+                  disabled={rolePresetsLoading}
+                  title="Reload presets"
+                >
+                  {rolePresetsLoading ? "Loading…" : "Refresh"}
+                </button>
+              </div>
+            </div>
 
-// ============================================================================
-// TYPES
-// ============================================================================
+            <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.5 }}>
+              These presets control what the in-room Dashboard applies when you click Cohost/Mod for a participant.
+              Updates take effect immediately in-room (no reconnect).
+            </div>
 
-interface BillingInfo {
-  provider?: string;
-  customerId?: string;
-  subscriptionId?: string;
-  priceId?: string;
-  cancelAtPeriodEnd?: boolean;
-  currentPeriodEnd?: number;
-  updatedAt?: number;
-  hasHadTrial?: boolean;
-}
+            {rolePresetsError && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(248,113,113,0.45)",
+                  background: "rgba(248,113,113,0.10)",
+                  color: "#fecaca",
+                  fontSize: 13,
+                  fontWeight: 700,
+                }}
+              >
+                {rolePresetsError}
+              </div>
+            )}
 
-interface UserData {
-  id: string;
-  email?: string;
-  displayName?: string;
-  planId: string;
-  pendingPlan?: string | null;
-  billingStatus?: string;
-  billingActive?: boolean;
-  billing?: BillingInfo;
-  hasHadTrial?: boolean;
-  billingEnabled?: boolean;
-  platformBillingEnabled?: boolean;
-  effectiveBillingEnabled?: boolean;
-  billingMode?: "test" | "live";
-  tosVersion?: string | null;
-  tosAcceptedAt?: number | null;
-  currentTosVersion?: string | null;
-}
+            {rolePresetsLoading && !rolePresets ? (
+              <div style={{ marginTop: 12, color: "#94a3b8" }}>Loading presets…</div>
+            ) : rolePresets ? (
+              <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+                {(["participant", "cohost", "moderator"] as RolePresetId[]).map((presetId) => {
+                  const preset = rolePresets[presetId];
+                  if (!preset) return null;
+                  return (
+                    <div
+                      key={presetId}
+                      style={{
+                        border: "1px solid #1f2937",
+                        borderRadius: 12,
+                        padding: "12px 12px",
+                        background: "rgba(255,255,255,0.02)",
+                        display: "grid",
+                        gap: 10,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <div style={{ fontWeight: 800, color: "#e5e7eb" }}>{ROLE_PRESET_LABELS[presetId]}</div>
+                          <div style={{ color: "#94a3b8", fontSize: 12 }}>Applies to participant overrides</div>
+                        </div>
+                      </div>
 
-interface PlanDefinition {
-  id: string;
-  name: string;
-  price: number;
-  description?: string;
-  limits: {
-    monthlyMinutesIncluded: number;
-    maxGuests: number;
-    rtmpDestinationsMax: number;
-    maxSessionMinutes: number;
-    maxHoursPerMonth: number;
-  };
-  features: {
-    recording: boolean;
-    rtmp: boolean;
-    multistream?: boolean;
-    advancedPermissions?: boolean;
-    canHls?: boolean;
-  };
-  editing?: {
-    access: boolean;
-    maxProjects: number;
-    maxStorageGB: number;
-  };
-}
+                      {ROLE_PRESET_GROUPS.map((group) => (
+                        <div key={group.title} style={{ display: "grid", gap: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 800, color: "#cbd5e1" }}>{group.title}</div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            {group.keys.map((item) => {
+                              const enabled = !!(preset as any)[item.key];
+                              const saving = rolePresetsSaving?.presetId === presetId && rolePresetsSaving?.key === item.key;
+                              return (
+                                <button
+                                  key={item.key}
+                                  onClick={() => patchRolePreset(presetId, item.key, !enabled)}
+                                  disabled={saving || rolePresetsLoading}
+                                  style={{
+                                    padding: "7px 10px",
+                                    borderRadius: 999,
+                                    border: enabled ? "1px solid rgba(34,197,94,0.6)" : "1px solid #1f2937",
+                                    background: enabled ? "rgba(34,197,94,0.14)" : "rgba(255,255,255,0.04)",
+                                    color: enabled ? "#22c55e" : "#94a3b8",
+                                    fontSize: 12,
+                                    fontWeight: 800,
+                                    cursor: saving ? "not-allowed" : "pointer",
+                                    opacity: saving ? 0.65 : 1,
+                                  }}
+                                  title={enabled ? "Click to disable" : "Click to enable"}
+                                >
+                                  {saving ? "Saving…" : item.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
 
-interface UsageData {
-  streamingMinutes: { used: number; limit: number; lifetime?: number };
-  recordingMinutes: { used: number; lifetime: number };
-  rtmpDestinations: { used: number; limit: number };
-  storage: { used: number; limit: number };
-  projects: { used: number; limit: number };
-}
-
-interface Entitlements {
-  planId: string;
-  planName?: string;
-  recording: boolean;
-  dualRecording: boolean;
-  rtmpMultistream: boolean;
-  canHls?: boolean;
-  hlsCustomizationEnabled?: boolean;
-  maxGuests: number;
-  maxDestinations: number;
-  participantMinutes: number;
-  transcodeMinutes: number;
-}
-
-interface MediaPrefs {
-  defaultLayout: "speaker" | "grid";
-  defaultRecordingMode: "cloud" | "dual";
-  defaultPresetId: string;
-  warnOnHighQuality: boolean;
-  destinationsDefaultMode: "last_used" | "pick_each_time";
-  autoClamp?: boolean;
-  permissionsMode?: "simple" | "advanced";
-}
-
-interface AdvancedPermissionsState {
-  enabled: boolean;
-  plan: boolean;
-  override: boolean;
-  globalLock?: boolean;
-  lockReason?: string | null;
-  effectivePermissionsMode?: "simple" | "advanced";
-  permissionsModeLockReason?: string | null;
-}
-
-type ServerDefaultRoleProfile = {
-  id: string;
-  name: string;
-  permissions: typeof EMPTY_PERMISSIONS;
-  lockedName?: boolean;
-  isSystemDefault?: boolean;
-};
-
-// Plans are loaded from the API; no hardcoded defaults to keep the DB/admin as source of truth.
-
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-function formatDate(timestamp: number | undefined): string {
-  if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function getDaysUntil(timestamp: number | undefined): number {
-  if (!timestamp) return 0;
-  const now = Date.now();
-  const diff = timestamp - now;
-  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
-}
-
-function getStatusBadge(status: string | undefined, cancelAtPeriodEnd?: boolean): { text: string; color: string; bg: string; icon: string } {
-  if (cancelAtPeriodEnd && (status === "active" || status === "trialing")) {
-    return { text: "Canceling", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", icon: "⏳" };
-  }
-  switch (status) {
-    case "active":
-      return { text: "Active", color: "#22c55e", bg: "rgba(34,197,94,0.15)", icon: "✓" };
-    case "trialing":
-      return { text: "Trial", color: "#3b82f6", bg: "rgba(59,130,246,0.15)", icon: "🧪" };
-    case "past_due":
-      return { text: "Past Due", color: "#ef4444", bg: "rgba(239,68,68,0.15)", icon: "⚠️" };
-    case "unpaid":
-      return { text: "Unpaid", color: "#ef4444", bg: "rgba(239,68,68,0.15)", icon: "⛔" };
-    case "canceled":
-      return { text: "Canceled", color: "#6b7280", bg: "rgba(107,114,128,0.15)", icon: "✕" };
-    default:
-      return { text: "Free", color: "#6b7280", bg: "rgba(107,114,128,0.15)", icon: "○" };
-  }
-}
-// Button label logic (frontend-only)
-function getPlanActionLabel(
-  currentPlan: string,
-  targetPlan: "free" | "starter" | "basic" |"pro",
-  isProcessing: boolean
-) {
-  // Normalize variants to canonical plan ids
-  const plan =
-    currentPlan === "starter_paid" || currentPlan === "starter_trial"
-      ? "starter"
-      : currentPlan;
-
-  // Current plan label
-  if (plan === targetPlan) return "Current";
-
-  // Moving to Free is managed in portal; keep label readable
-  if ((plan === "pro" || plan === "starter") && targetPlan === "free") return "Manage";
-
-  // For all other non-current targets, prefer a simple CTA
-  return "Choose Plan";
-}
-
-
-// Map canonical plan id to checkout variant for resubscribe
-type CheckoutPlanVariant = "starter_paid" | "starter_trial" | "pro" | "basic";
-
-// Loading state key for actions like checkout and portal
-type ActionLoading = CheckoutPlanVariant | "portal" | null;
-
-function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
-  const p = (user?.planId as string | undefined) || "free"; // expected: "free" | "starter" | "pro" | ...
-  if (p === "pro" || p === "internal_unlimited") return "pro";
-  // default resubscribe goes to paid Starter
-  return "starter_paid";
-}
-
-
-// ============================================================================
-// MAIN COMPONENT
-// ============================================================================
-
-export default function SettingsBilling() {
-  const nav = useNavigate();
-  const location = useLocation();
-  const { refresh: refreshAuth } = useAuthMe();
-
-  
-  const DEFAULT_USAGE: UsageData = {
-    streamingMinutes: { used: 0, limit: 60, lifetime: 0 },
-    recordingMinutes: { used: 0, lifetime: 0 },
-    rtmpDestinations: { used: 0, limit: 1 },
-    storage: { used: 0, limit: 5 },
-    projects: { used: 0, limit: 1 },
-  };
-
-  const DEFAULT_ENTITLEMENTS: Entitlements = {
-    planId: "free",
-    planName: "Free",
-    recording: false,
-    dualRecording: false,
-    rtmpMultistream: false,
-    canHls: false,
-    hlsCustomizationEnabled: false,
-    maxGuests: 1,
-    maxDestinations: 1,
-    participantMinutes: 60,
-    transcodeMinutes: 0,
-  };
-
-  const DEFAULT_MEDIA_PREFS: MediaPrefs = {
-    defaultLayout: "speaker",
-    defaultRecordingMode: "cloud",
-    defaultPresetId: "standard_720p30",
-    warnOnHighQuality: true,
-    destinationsDefaultMode: "last_used",
-    autoClamp: true,
-    permissionsMode: "simple",
-  };
-
-  const [user, setUser] = useState<UserData | null>(null);
-  const [plans, setPlans] = useState<PlanDefinition[]>([]);
-  const [usage, setUsage] = useState<UsageData>(DEFAULT_USAGE);
-  const [showLifetimeDetails, setShowLifetimeDetails] = useState(false);
-  const [entitlements, setEntitlements] = useState<Entitlements>(DEFAULT_ENTITLEMENTS);
-  const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
-  const [platformHlsSettingsTabEnabled, setPlatformHlsSettingsTabEnabled] = useState<boolean | null>(null);
-  const [platformTranscodeEnabled, setPlatformTranscodeEnabled] = useState<boolean>(true);
-  const [mediaPrefs, setMediaPrefs] = useState<MediaPrefs>(DEFAULT_MEDIA_PREFS);
-  const [advancedPermissions, setAdvancedPermissions] = useState<AdvancedPermissionsState>({ enabled: false, plan: false, override: false, globalLock: false, lockReason: null, effectivePermissionsMode: "simple", permissionsModeLockReason: null });
-  const [serverDefaultRoleProfiles, setServerDefaultRoleProfiles] = useState<ServerDefaultRoleProfile[] | null>(null);
-  const [presetOptions, setPresetOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const [mediaPrefsSaving, setMediaPrefsSaving] = useState(false);
-  const [mediaPrefsMessage, setMediaPrefsMessage] = useState<string | null>(null);
-  const [mediaPrefsError, setMediaPrefsError] = useState<string | null>(null);
-
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<ActionLoading>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showManagePicker, setShowManagePicker] = useState(false);
-  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles">("plan");
-  const [cohostProfile, setCohostProfile] = useState({
-    label: "Co-Host",
-    canStream: false,
-    canRecord: false,
-    canDestinations: false,
-    canModerate: false,
-    canLayout: false,
-    canScreenShare: false,
-    canInvite: false,
-    canAnalytics: false,
-    expiresHours: 24,
-    maxUses: 1,
-  });
-  const [roleProfiles, setRoleProfiles] = useState<any[]>([]);
-  const [quickRoleIds, setQuickRoleIds] = useState<string[]>([]);
-  const [roleLabelInput, setRoleLabelInput] = useState("");
-  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
-  const [editingDraft, setEditingDraft] = useState<any | null>(null);
-  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
-  const [roleMessage, setRoleMessage] = useState<string | null>(null);
-  const [cohostSaving, setCohostSaving] = useState(false);
-  const [cohostMessage, setCohostMessage] = useState<string | null>(null);
-  const [emergencyLoading, setEmergencyLoading] = useState(false);
-  const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  const [testModeTargetPlan, setTestModeTargetPlan] = useState<PlanId | null>(null);
-  const [testModeModalOpen, setTestModeModalOpen] = useState(false);
-  const [testModeLoading, setTestModeLoading] = useState(false);
-  const [testModeSummary, setTestModeSummary] = useState<string | null>(null);
-  const [checkoutTosAccepted, setCheckoutTosAccepted] = useState(false);
-  const [checkoutTosError, setCheckoutTosError] = useState<string | null>(null);
-  const [checkoutTosSubmitting, setCheckoutTosSubmitting] = useState(false);
-  const effectivePermissionsMode = advancedPermissions.effectivePermissionsMode || ((advancedPermissions.enabled && (mediaPrefs.permissionsMode ?? "simple") === "advanced") ? "advanced" : "simple");
-  const simpleMode = effectivePermissionsMode === "simple";
-  useEffect(() => {
-    loadAllData();
-  }, []);
-
-  // Sync tab from URL query (?tab=destinations|plan|usage|hls) so deep links open the correct view
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const tabParam = params.get("tab");
-    if (tabParam === "plan" || tabParam === "usage" || tabParam === "destinations" || tabParam === "hls" || tabParam === "defaults" || tabParam === "roles") {
-      setActiveTab(tabParam as any);
-    }
-  }, [location.search]);
-
-  // If the HLS settings tab is disabled platform-wide, never allow the active tab to remain on it.
-  useEffect(() => {
-    if (platformHlsSettingsTabEnabled === false && activeTab === "hls") {
-      setActiveTab("plan");
-    }
-  }, [platformHlsSettingsTabEnabled, activeTab]);
-
-  // Safe pending cleanup: only clear under safe conditions
-  useEffect(() => {
-    (async () => {
-      if (!user?.pendingPlan) return;
-      try {
-        const res = await apiFetch("/api/billing/pending-change");
-        const info = await res.json();
-        const isFreeNoSub = user.planId === "free" && !info?.hasSubscription && !info?.billingActive;
-        const noScheduled = info?.scheduledChange === false;
-        const completed = user.billingStatus === "active" || user.billingStatus === "trialing";
-        if (isFreeNoSub || noScheduled || completed) {
+                      {presetId === "moderator" && (
+                        <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.4 }}>
+                          Moderator presets intentionally exclude Analytics and Layout/Scene.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ marginTop: 12, color: "#94a3b8" }}>No presets loaded.</div>
+            )}
+          </div>
+        )}
           try {
             await apiFetch("/api/billing/clear-pending", { method: "POST" });
           } catch {}
@@ -1521,6 +1370,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                   const fallback = SIMPLE_ROLE_DEFAULTS[roleKey];
                   const roleLabel = fromServer?.name || fallback.label;
                   const perms = fromServer?.permissions || fallback.permissions;
+                  const visibleItems = key === "moderator"
+                    ? PERMISSION_ITEMS.filter((item) => item.key !== "canLayout" && item.key !== "canAnalytics")
+                    : PERMISSION_ITEMS;
                   return (
                     <div key={roleKey} style={{
                       border: "1px solid #1f2937",
@@ -1546,7 +1398,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         <span style={{ color: "#9ca3af", fontSize: 12 }}>Standard access</span>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {PERMISSION_ITEMS.map((item) => {
+                        {visibleItems.map((item) => {
                           const enabled = !!(perms as any)[item.key];
                           return (
                             <span key={item.key} style={{

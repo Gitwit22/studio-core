@@ -12,6 +12,8 @@ import { HostAVControls } from "../components/HostAVControls";
 import { API_BASE } from "../lib/apiBase";
 import { APP_BASE } from "../lib/appBase";
 
+const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
+
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 type RecordingStatus = "idle" | "recording" | "stopping" | "stopped" | "error";
@@ -500,9 +502,31 @@ export default function Room() {
   const [needsReauth, setNeedsReauth] = useState(false);
   const roomTokenMintInFlightRef = useRef(false);
   const [controlsPanelOpen, setControlsPanelOpen] = useState(false);
-  const [effectiveControls, setEffectiveControls] = useState<{ canPublishAudio: boolean; tileVisible: boolean }>(() => ({
+  type EffectiveControls = {
+    // Media/presence controls
+    canPublishAudio: boolean;
+    tileVisible: boolean;
+    canPublishVideo?: boolean;
+    canScreenShare?: boolean;
+
+    // In-room capability scopes
+    canMuteGuests?: boolean;
+    canInviteLinks?: boolean;
+    canManageDestinations?: boolean;
+    canStartStopStream?: boolean;
+    canStartStopRecording?: boolean;
+  };
+
+  const [effectiveControls, setEffectiveControls] = useState<EffectiveControls>(() => ({
     canPublishAudio: true,
     tileVisible: true,
+    canPublishVideo: true,
+    canScreenShare: false,
+    canMuteGuests: false,
+    canInviteLinks: false,
+    canManageDestinations: false,
+    canStartStopStream: false,
+    canStartStopRecording: false,
   }));
   const [recordingCountdown, setRecordingCountdown] = useState<string | null>(null);
   const [isRecordingCountdown, setIsRecordingCountdown] = useState(false);
@@ -514,11 +538,22 @@ export default function Room() {
   const currentRole = userRole;
   const isGuestRole = currentRole === "guest";
   const can = (key: keyof RoomPermissions) => !needsReauth && (isHost || !!roomPermissions?.[key]);
-  const canInviteLinks = !needsReauth && !isViewer && (isHost || can("canInvite"));
+  const canInviteLinks = !needsReauth && !isViewer && (isHost || !!effectiveControls.canInviteLinks || can("canInvite"));
   const canManageStream =
     !needsReauth &&
     !isViewer &&
-    (isHost || can("canStream") || can("canRecord") || can("canDestinations"));
+    (isHost ||
+      !!effectiveControls.canStartStopStream ||
+      !!effectiveControls.canStartStopRecording ||
+      !!effectiveControls.canManageDestinations ||
+      can("canStream") ||
+      can("canRecord") ||
+      can("canDestinations"));
+
+  const canMuteGuests =
+    !needsReauth &&
+    !isViewer &&
+    (isHost || !!effectiveControls.canMuteGuests);
 
   const subjectToControls = !isHost && !isViewer;
   const controlsAllowPublishAudio = !subjectToControls || effectiveControls.canPublishAudio !== false;
@@ -555,7 +590,7 @@ export default function Room() {
     }
   };
 
-  const updateRoomControls = async (patch: Partial<{ canPublishAudio: boolean; tileVisible: boolean }>) => {
+  const updateRoomControls = async (patch: Partial<EffectiveControls>) => {
     if (!roomId || !roomAccessToken) return;
     if (needsReauth) {
       setNeedsReauth(true);
@@ -580,6 +615,13 @@ export default function Room() {
           setEffectiveControls({
             canPublishAudio: typeof c.canPublishAudio === "boolean" ? c.canPublishAudio : true,
             tileVisible: typeof c.tileVisible === "boolean" ? c.tileVisible : true,
+            canPublishVideo: typeof c.canPublishVideo === "boolean" ? c.canPublishVideo : true,
+            canScreenShare: typeof c.canScreenShare === "boolean" ? c.canScreenShare : false,
+            canMuteGuests: typeof c.canMuteGuests === "boolean" ? c.canMuteGuests : false,
+            canInviteLinks: typeof c.canInviteLinks === "boolean" ? c.canInviteLinks : false,
+            canManageDestinations: typeof c.canManageDestinations === "boolean" ? c.canManageDestinations : false,
+            canStartStopStream: typeof c.canStartStopStream === "boolean" ? c.canStartStopStream : false,
+            canStartStopRecording: typeof c.canStartStopRecording === "boolean" ? c.canStartStopRecording : false,
           });
         }
       } else if (res.status === 401 || res.status === 403) {
@@ -691,6 +733,13 @@ export default function Room() {
         setEffectiveControls({
           canPublishAudio: typeof data?.canPublishAudio === "boolean" ? data.canPublishAudio : true,
           tileVisible: typeof data?.tileVisible === "boolean" ? data.tileVisible : true,
+          canPublishVideo: typeof data?.canPublishVideo === "boolean" ? data.canPublishVideo : true,
+          canScreenShare: typeof data?.canScreenShare === "boolean" ? data.canScreenShare : false,
+          canMuteGuests: typeof data?.canMuteGuests === "boolean" ? data.canMuteGuests : false,
+          canInviteLinks: typeof data?.canInviteLinks === "boolean" ? data.canInviteLinks : false,
+          canManageDestinations: typeof data?.canManageDestinations === "boolean" ? data.canManageDestinations : false,
+          canStartStopStream: typeof data?.canStartStopStream === "boolean" ? data.canStartStopStream : false,
+          canStartStopRecording: typeof data?.canStartStopRecording === "boolean" ? data.canStartStopRecording : false,
         });
       } catch {
         // ignore
@@ -712,7 +761,7 @@ export default function Room() {
   }, [API_BASE, roomId, roomAccessToken, participantIdentity]);
 
   // If we have an inviteToken but the role isn't set (or got reset), resolve it here
-  // so we mint the correct room token (cohost/mod) and permissions.
+  // so we mint the correct room token and permissions.
   useEffect(() => {
     if (!inviteToken) return;
     let cancelled = false;
@@ -1857,69 +1906,7 @@ export default function Room() {
     }
   };
 
-  const [roleProfiles, setRoleProfiles] = useState<Array<{ id: string; label: string }>>([]);
-  const [quickRoleIds, setQuickRoleIds] = useState<string[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      // For guests (no authenticated account), skip hitting /api/account/roles
-      // entirely and use simple-mode defaults for the invite modal.
-      let isAuthed = false;
-      try {
-        const raw = localStorage.getItem("sl_user");
-        if (raw && raw !== "undefined") {
-          const parsed = JSON.parse(raw);
-          if (parsed && (parsed.id || parsed.uid || parsed.email)) {
-            isAuthed = true;
-          }
-        }
-      } catch {
-        // ignore parse errors and treat as guest
-      }
-
-      if (!isAuthed) {
-        if (cancelled) return;
-        setRoleProfiles([
-          { id: "participant", label: "Participant" },
-          { id: "cohost", label: "Co-host" },
-          { id: "moderator", label: "Moderator" },
-        ]);
-        setQuickRoleIds(["participant", "cohost", "moderator"]);
-        return;
-      }
-
-      try {
-        const res = await apiFetch("/api/account/roles");
-        if (!res.ok) throw new Error("roles failed");
-        const data = await res.json();
-        if (cancelled) return;
-        // Show participant, cohost, moderator (exclude viewer)
-        if (Array.isArray(data?.roles)) {
-          setRoleProfiles(data.roles.filter((r: any) => ["participant", "cohost", "moderator"].includes(r?.id)));
-        }
-        if (Array.isArray(data?.quickRoleIds)) {
-          setQuickRoleIds(data.quickRoleIds.filter((id: any) => ["participant", "cohost", "moderator"].includes(id)));
-        }
-      } catch (err) {
-        console.warn("roles load failed, using defaults", err);
-        if (cancelled) return;
-        setRoleProfiles([
-          { id: "participant", label: "Participant" },
-          { id: "cohost", label: "Co-host" },
-          { id: "moderator", label: "Moderator" },
-        ]);
-        setQuickRoleIds(["participant", "cohost", "moderator"]);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [API_BASE]);
-
-  const copyInviteLink = (_role: string, label: string) => {
+  const copyInviteLink = (_role: "participant", label: string) => {
     (async () => {
       try {
         if (!roomId && !effectiveRoomName) {
@@ -1951,6 +1938,22 @@ export default function Room() {
         alert("Failed to create invite link");
       }
     })();
+  };
+
+  const copyViewerLink = async () => {
+    if (!roomId) {
+      alert("Viewer link is unavailable until roomId is known");
+      return;
+    }
+    const base = APP_BASE || window.location.origin;
+    const url = `${base}/live/${encodeURIComponent(roomId)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      alert(`Viewer link copied!\n${url}`);
+    } catch (err) {
+      console.error("copy viewer link failed", err);
+      alert("Copy failed");
+    }
   };
 
   // ==================== RENDER ====================
@@ -2109,9 +2112,9 @@ export default function Room() {
   const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
   const rtmpCap = planRtmpDestinationsMax ?? 0;
   const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • RTMP:${rtmpCap === 0 ? "off" : rtmpCap === 1 ? "1" : `up to ${rtmpCap}`} • HLS:${planHlsEnabled ? "on" : "off"} • HLS Setup:${planHlsCustomizationEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
-  const recordingEnabled = planRecordingEnabled && can("canRecord");
-  const canMultistream = (rtmpCap > 0) && can("canDestinations");
-  const canHls = planHlsEnabled && can("canStream");
+  const recordingEnabled = planRecordingEnabled && !needsReauth && !isViewer && (isHost || can("canRecord") || !!effectiveControls.canStartStopRecording);
+  const canMultistream = (rtmpCap > 0) && !needsReauth && !isViewer && (isHost || can("canDestinations") || !!effectiveControls.canManageDestinations);
+  const canHls = planHlsEnabled && !needsReauth && !isViewer && (isHost || can("canStream") || !!effectiveControls.canStartStopStream);
 
   const handleUpgradeHls = () => {
     nav("/settings/billing");
@@ -2148,7 +2151,7 @@ export default function Room() {
         </div>
       )}
 
-      {canManageStream && roomId && roomAccessToken && (
+      {DEV_CONTROLS && canManageStream && roomId && roomAccessToken && (
         <div style={{ position: "fixed", top: 72, right: 16, zIndex: 1200 }}>
           <button
             onClick={() => setControlsPanelOpen((v) => !v)}
@@ -2423,6 +2426,7 @@ export default function Room() {
             roomName={roomName || ''}
             roomId={roomId || ""}
             roomAccessToken={roomAccessToken || ""}
+            canMuteGuests={canMuteGuests}
           />
         </LiveKitRoom>
       )}
@@ -2470,47 +2474,75 @@ export default function Room() {
             </div>
 
             <p style={{ marginTop: 0, marginBottom: 14, color: "#94a3b8", fontSize: 13 }}>
-              Copy a link to invite participants.
+              Copy a viewer link for your audience, or a participant link to invite someone on stage.
             </p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {(quickRoleIds.length ? quickRoleIds : ["participant"]).map((roleId) => {
-                const roleLabel = roleProfiles.find((r) => r.id === roleId)?.label || roleId;
-                return { role: roleId, label: roleLabel };
-              }).map((item) => (
-                <div
-                  key={item.role}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #1f2937",
+                  background: "rgba(255,255,255,0.02)",
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>Viewer</span>
+                  <span style={{ fontSize: 12, color: "#9ca3af" }}>/live viewer link</span>
+                </div>
+                <button
+                  onClick={copyViewerLink}
+                  disabled={!roomId}
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #1f2937",
-                    background: "rgba(255,255,255,0.02)",
+                    fontSize: 12,
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(34, 197, 94, 0.4)",
+                    background: "rgba(34, 197, 94, 0.08)",
+                    color: "#22c55e",
+                    cursor: roomId ? "pointer" : "not-allowed",
+                    fontWeight: 600,
+                    opacity: roomId ? 1 : 0.6,
                   }}
                 >
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{item.label}</span>
-                    <span style={{ fontSize: 12, color: "#9ca3af" }}>Standard guest join</span>
-                  </div>
-                  <button
-                    onClick={() => copyInviteLink(item.role, item.label)}
-                    style={{
-                      fontSize: 12,
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(34, 197, 94, 0.4)",
-                      background: "rgba(34, 197, 94, 0.08)",
-                      color: "#22c55e",
-                      cursor: "pointer",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Copy link
-                  </button>
+                  Copy link
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #1f2937",
+                  background: "rgba(255,255,255,0.02)",
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>Participant</span>
+                  <span style={{ fontSize: 12, color: "#9ca3af" }}>Join the room on stage</span>
                 </div>
-              ))}
+                <button
+                  onClick={() => copyInviteLink("participant", "Participant")}
+                  style={{
+                    fontSize: 12,
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(34, 197, 94, 0.4)",
+                    background: "rgba(34, 197, 94, 0.08)",
+                    color: "#22c55e",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  Copy link
+                </button>
+              </div>
             </div>
           </div>
         </div>
