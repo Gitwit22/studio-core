@@ -140,9 +140,9 @@ export default function Join() {
   // Use /api/auth/me for admin/test-mode status
   const { user: authUser, loading: authLoading } = useAuthMe();
   const isAdmin = !!authUser?.isAdmin;
-  const isTestMode = isAuthUserInTestMode(authUser);
-  const isInternalPlan = authUser?.planId === "internal_unlimited";
-  const showAdminUi = !authLoading && (isAdmin || isTestMode || isInternalPlan);
+  // Only show Admin UI for true admins. Test-mode or internal plans alone
+  // are no longer sufficient to expose admin tools.
+  const showAdminUi = !authLoading && isAdmin;
   const adminLoading = authLoading;
 
   // Auto-populate the name field from authenticated profile (test env often lacks sl_user localStorage)

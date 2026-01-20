@@ -223,7 +223,7 @@ function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
 
 export default function SettingsBilling() {
   const nav = useNavigate();
-  const { refresh: refreshAuth } = useAuthMe();
+  const { user: authUser, refresh: refreshAuth } = useAuthMe();
 
   const [user, setUser] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -1158,9 +1158,9 @@ const hasAcceptedCurrentTosForUi = Boolean(
   user.tosAcceptedAt
 );
 
-// Canonical Test Mode detection prefers effectiveBillingEnabled, with legacy fallbacks
-// handled by the shared auth helper.
-const isTestMode = isAuthUserInTestMode(user as any);
+// Canonical Test Mode detection prefers the auth user payload from /api/auth/me,
+// with a fallback to the local /api/account/me user shape.
+const isTestMode = isAuthUserInTestMode(authUser || (user as any));
 
 const targetPlanForModal = testModeTargetPlan
   ? plans.find((p) => canonicalPlanId(p.id) === testModeTargetPlan)
