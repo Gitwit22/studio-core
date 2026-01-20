@@ -472,6 +472,7 @@ type LiveKitShellProps = {
   effectivePermissionsMode: "simple" | "advanced";
   dashboardGreenroomEnabled: boolean;
   dashboardOverlaysEnabled: boolean;
+  dashboardRole: "host" | "moderator" | "participant";
   onDisconnected: () => void;
 };
 
@@ -493,6 +494,7 @@ function LiveKitShell({
   effectivePermissionsMode,
   dashboardGreenroomEnabled,
   dashboardOverlaysEnabled,
+  dashboardRole,
   onDisconnected,
 }: LiveKitShellProps) {
   const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
@@ -554,25 +556,33 @@ function LiveKitShell({
       }}
     >
       <div style={{ width: "100%", height: "100%", position: "relative" }}>
-        {isHost && !isViewer && <HostAVControls guestStatus={guestStatus ?? undefined} />}
-        {guestStatus === "viewing_join" && (
-          <div
-            style={{
-              position: "absolute",
-              top: 10,
-              left: "50%",
-              transform: "translateX(-50%)",
-              padding: "6px 12px",
-              borderRadius: 999,
-              background: "rgba(15,23,42,0.9)",
-              border: "1px solid rgba(59,130,246,0.7)",
-              fontSize: 12,
-              color: "#bfdbfe",
-              zIndex: 20,
-            }}
-          >
-            Guest is viewing the join page.
-          </div>
+        {isHost && !isViewer && (
+          <>
+            <HostAVControls guestStatus={guestStatus ?? undefined} />
+            <div
+              style={{
+                position: "absolute",
+                top: 10,
+                left: "50%",
+                transform:
+                  guestStatus === "viewing_join"
+                    ? "translateX(-50%) translateY(0)"
+                    : "translateX(-50%) translateY(-6px)",
+                padding: "6px 12px",
+                borderRadius: 999,
+                background: "rgba(15,23,42,0.9)",
+                border: "1px solid rgba(59,130,246,0.7)",
+                fontSize: 12,
+                color: "#bfdbfe",
+                zIndex: 20,
+                opacity: guestStatus === "viewing_join" ? 1 : 0,
+                pointerEvents: "none",
+                transition: "opacity 0.35s ease-in-out, transform 0.35s ease-in-out",
+              }}
+            >
+              Guest is viewing the join page.
+            </div>
+          </>
         )}
         <VideoConference />
         {watermarkEnabled && (
@@ -593,7 +603,7 @@ function LiveKitShell({
       <RoleOverlay
         open={dashboardOpen}
         onClose={onCloseDashboard}
-        role={isHost ? "host" : "participant"}
+        role={dashboardRole}
         roomName={roomName || ""}
         roomId={roomId || ""}
         roomAccessToken={roomAccessToken || ""}
@@ -2655,6 +2665,15 @@ export default function Room() {
           effectivePermissionsMode={effectivePermissionsMode}
           dashboardGreenroomEnabled={dashboardGreenroomEnabled}
           dashboardOverlaysEnabled={dashboardOverlaysEnabled}
+          dashboardRole={
+            isHost
+              ? "host"
+              : effectiveControls.rolePresetId === "cohost" || userRole === "cohost"
+              ? "host"
+              : effectiveControls.rolePresetId === "moderator" || userRole === "moderator"
+              ? "moderator"
+              : "participant"
+          }
           onDisconnected={handleLeftRoom}
         />
       )}

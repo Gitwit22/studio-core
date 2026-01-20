@@ -1699,7 +1699,26 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </div>
 
                 <div style={{ marginTop: 12 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Current saved defaults</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ fontWeight: 700 }}>Current saved defaults</div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!window.confirm("Delete saved co-host defaults and reset to system defaults?")) return;
+                        const resetProfile = {
+                          label: SIMPLE_ROLE_DEFAULTS.cohost.label,
+                          expiresHours: SIMPLE_ROLE_DEFAULTS.cohost.expiresHours || 24,
+                          maxUses: SIMPLE_ROLE_DEFAULTS.cohost.maxUses || 1,
+                          ...SIMPLE_ROLE_DEFAULTS.cohost.permissions,
+                        };
+                        setCohostProfile(resetProfile);
+                        await saveCohostProfileWith(resetProfile);
+                      }}
+                      style={S.dangerGhostBtn}
+                    >
+                      Delete defaults
+                    </button>
+                  </div>
                   <div style={{
                     border: "1px solid #1f2937",
                     borderRadius: 10,
