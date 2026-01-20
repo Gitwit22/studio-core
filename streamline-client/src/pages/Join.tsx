@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useAuthMe } from "../hooks/useAuthMe";
+import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
@@ -137,10 +137,11 @@ export default function Join() {
   // who don't have HLS enabled while account flags are loading.
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(false);
 
-// Use /api/auth/me for admin status
-const { user: authUser, loading: authLoading } = useAuthMe();
-const isAdmin = !!authUser?.isAdmin;
-const adminLoading = authLoading;
+  // Use /api/auth/me for admin/test-mode status
+  const { user: authUser, loading: authLoading } = useAuthMe();
+  const isAdmin = !!authUser?.isAdmin;
+  const isTestMode = isAuthUserInTestMode(authUser);
+  const adminLoading = authLoading;
 
   // Auto-populate the name field from authenticated profile (test env often lacks sl_user localStorage)
   // Do not override if user has typed.
@@ -753,8 +754,8 @@ const adminLoading = authLoading;
     ⚙️ Settings & Billing
   </button>
 
-  {/* Admin Dashboard button (admin only) */}
-  {!adminLoading && isAdmin === true && (
+  {/* Admin Dashboard button (admin or test-mode) */}
+  {!adminLoading && (isAdmin || isTestMode) && (
     <button
       onClick={() => nav("/admin/dashboard")}
       style={{
