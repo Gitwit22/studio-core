@@ -141,6 +141,8 @@ export default function Join() {
   const { user: authUser, loading: authLoading } = useAuthMe();
   const isAdmin = !!authUser?.isAdmin;
   const isTestMode = isAuthUserInTestMode(authUser);
+  const isInternalPlan = authUser?.planId === "internal_unlimited";
+  const showAdminUi = !authLoading && (isAdmin || isTestMode || isInternalPlan);
   const adminLoading = authLoading;
 
   // Auto-populate the name field from authenticated profile (test env often lacks sl_user localStorage)
@@ -754,8 +756,8 @@ export default function Join() {
     ⚙️ Settings & Billing
   </button>
 
-  {/* Admin Dashboard button (admin or test-mode) */}
-  {!adminLoading && (isAdmin || isTestMode) && (
+  {/* Admin Dashboard button (admin, internal, or test-mode) */}
+  {showAdminUi && (
     <button
       onClick={() => nav("/admin/dashboard")}
       style={{
