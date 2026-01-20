@@ -137,7 +137,6 @@ function HostPanel({
   const { localParticipant } = useLocalParticipant();
   const [muteLock, setMuteLock] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const [presetBusyId, setPresetBusyId] = React.useState<string | null>(null);
 
   // Load initial muteLock state for this room
   React.useEffect(() => {
@@ -190,22 +189,6 @@ function HostPanel({
       alert("Failed to update mute lock");
     } finally {
       setBusy(false);
-    }
-  };
-
-  const applyPreset = async (identity: string, presetId: "moderator" | "cohost" | "participant") => {
-    if (!roomId || !roomAccessToken) {
-      alert("Room not ready yet");
-      return;
-    }
-    setPresetBusyId(identity);
-    try {
-      await apiApplyPreset(roomId, roomAccessToken, identity, presetId);
-    } catch (e) {
-      console.error("apply-preset failed", e);
-      alert("Failed to apply preset");
-    } finally {
-      setPresetBusyId(null);
     }
   };
   return (
@@ -262,8 +245,6 @@ function HostPanel({
           canModerate
           muteLock={muteLock}
           localIdentity={localParticipant?.identity || null}
-          onApplyPreset={applyPreset}
-          presetBusyIdentity={presetBusyId}
           canMuteGuests={canMuteGuests}
         />
 
@@ -404,8 +385,6 @@ function ParticipantList({
   onMute,
   muteLock,
   localIdentity,
-  onApplyPreset,
-  presetBusyIdentity,
   canMuteGuests,
 }: {
   participants: ReturnType<typeof useParticipants>;
@@ -414,8 +393,6 @@ function ParticipantList({
   onMute?: (identity: string, muted: boolean) => void;
   muteLock?: boolean;
   localIdentity?: string | null;
-  onApplyPreset?: (identity: string, presetId: "moderator" | "cohost" | "participant") => void;
-  presetBusyIdentity?: string | null;
   canMuteGuests?: boolean;
 }) {
   if (!participants?.length) {
@@ -445,123 +422,72 @@ function ParticipantList({
             </div>
           </div>
           {canModerate && (
-            <div style={{ display: 'flex', gap: '0.25rem' }}>
-              {onApplyPreset && (
-                <div style={{ display: 'flex', gap: '0.25rem', marginRight: '0.25rem' }}>
-                  <button
-                    disabled={presetBusyIdentity === p.identity || p.identity === localIdentity}
-                    style={{
-                      borderRadius: '0.25rem',
-                      border: '1px solid rgba(59, 130, 246, 0.5)',
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.7rem',
-                      background: 'rgba(59, 130, 246, 0.12)',
-                      color: '#bfdbfe',
-                      cursor: presetBusyIdentity === p.identity || p.identity === localIdentity ? 'not-allowed' : 'pointer',
-                      fontWeight: '600',
-                      opacity: presetBusyIdentity === p.identity || p.identity === localIdentity ? 0.6 : 1,
-                      whiteSpace: 'nowrap'
-                    }}
-                    onClick={() => onApplyPreset(p.identity, 'moderator')}
-                    title="Apply moderator preset"
-                  >
-                    Mod
-                  </button>
-                  <button
-                    disabled={presetBusyIdentity === p.identity || p.identity === localIdentity}
-                    style={{
-                      borderRadius: '0.25rem',
-                      border: '1px solid rgba(34, 197, 94, 0.5)',
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.7rem',
-                      background: 'rgba(34, 197, 94, 0.10)',
-                      color: '#bbf7d0',
-                      cursor: presetBusyIdentity === p.identity || p.identity === localIdentity ? 'not-allowed' : 'pointer',
-                      fontWeight: '600',
-                      opacity: presetBusyIdentity === p.identity || p.identity === localIdentity ? 0.6 : 1,
-                      whiteSpace: 'nowrap'
-                    }}
-                    onClick={() => onApplyPreset(p.identity, 'cohost')}
-                    title="Apply cohost preset"
-                  >
-                    Cohost
-                  </button>
-                  <button
-                    disabled={presetBusyIdentity === p.identity || p.identity === localIdentity}
-                    style={{
-                      borderRadius: '0.25rem',
-                      border: '1px solid rgba(148, 163, 184, 0.6)',
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.7rem',
-                      background: 'rgba(31, 41, 55, 0.9)',
-                      color: '#e5e7eb',
-                      cursor: presetBusyIdentity === p.identity || p.identity === localIdentity ? 'not-allowed' : 'pointer',
-                      fontWeight: '600',
-                      opacity: presetBusyIdentity === p.identity || p.identity === localIdentity ? 0.6 : 1,
-                      whiteSpace: 'nowrap'
-                    }}
-                    onClick={() => onApplyPreset(p.identity, 'participant')}
-                    title="Revert to participant preset"
-                  >
-                    Participant
-                  </button>
-                </div>
-              )}
-              {canMuteGuests !== false && (() => {
-                const micEnabled = (p as any).isMicrophoneEnabled as boolean | undefined;
-                const isMuted = micEnabled === false;
-                const nextMuted = !isMuted; // true to mute, false to unmute
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.25rem',
+                alignItems: 'flex-end',
+                justifyContent: 'center',
+              }}
+            >
+              <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
+                {canMuteGuests !== false && (() => {
+                  const micEnabled = (p as any).isMicrophoneEnabled as boolean | undefined;
+                  const isMuted = micEnabled === false;
+                  const nextMuted = !isMuted; // true to mute, false to unmute
 
-                return (
-                  <button
-                    style={{
-                      borderRadius: '0.25rem',
-                      border: '1px solid rgba(148, 163, 184, 0.6)',
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.7rem',
-                      background: muteLock ? 'rgba(55, 65, 81, 0.6)' : 'rgba(31, 41, 55, 0.9)',
-                      color: '#e5e7eb',
-                      cursor: muteLock ? 'not-allowed' : 'pointer',
-                      transition: 'all 0.3s ease',
-                      fontWeight: '600',
-                      opacity: muteLock ? 0.6 : 1
-                    }}
-                    disabled={muteLock}
-                    onClick={() => {
-                      if (muteLock) return;
-                      onMute?.(p.identity, nextMuted);
-                    }}
-                  >
-                    {isMuted ? 'Unmute' : 'Mute'}
-                  </button>
-                );
-              })()}
-              <button
-                style={{
-                  borderRadius: '0.25rem',
-                  border: '1px solid rgba(220, 38, 38, 0.5)',
-                  padding: '0.25rem 0.5rem',
-                  fontSize: '0.7rem',
-                  background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s ease',
-                  fontWeight: '600'
-                }}
-                onMouseEnter={(e) => {
-                  const target = e.target as HTMLButtonElement;
-                  target.style.background = 'linear-gradient(135deg, #b91c1c, #991b1b)';
-                  target.style.boxShadow = '0 0 8px rgba(220, 38, 38, 0.3)';
-                }}
-                onMouseLeave={(e) => {
-                  const target = e.target as HTMLButtonElement;
-                  target.style.background = 'linear-gradient(135deg, #dc2626, #b91c1c)';
-                  target.style.boxShadow = 'none';
-                }}
-                onClick={() => onRemove?.(p.identity)}
-              >
-                Remove
-              </button>
+                  return (
+                    <button
+                      style={{
+                        borderRadius: '0.25rem',
+                        border: '1px solid rgba(148, 163, 184, 0.6)',
+                        padding: '0.25rem 0.5rem',
+                        fontSize: '0.7rem',
+                        background: muteLock ? 'rgba(55, 65, 81, 0.6)' : 'rgba(31, 41, 55, 0.9)',
+                        color: '#e5e7eb',
+                        cursor: muteLock ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.3s ease',
+                        fontWeight: '600',
+                        opacity: muteLock ? 0.6 : 1
+                      }}
+                      disabled={muteLock}
+                      onClick={() => {
+                        if (muteLock) return;
+                        onMute?.(p.identity, nextMuted);
+                      }}
+                    >
+                      {isMuted ? 'Unmute' : 'Mute'}
+                    </button>
+                  );
+                })()}
+                <button
+                  style={{
+                    borderRadius: '0.25rem',
+                    border: '1px solid rgba(220, 38, 38, 0.5)',
+                    padding: '0.25rem 0.5rem',
+                    fontSize: '0.7rem',
+                    background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    fontWeight: '600'
+                  }}
+                  onMouseEnter={(e) => {
+                    const target = e.target as HTMLButtonElement;
+                    target.style.background = 'linear-gradient(135deg, #b91c1c, #991b1b)';
+                    target.style.boxShadow = '0 0 8px rgba(220, 38, 38, 0.3)';
+                  }}
+                  onMouseLeave={(e) => {
+                    const target = e.target as HTMLButtonElement;
+                    target.style.background = 'linear-gradient(135deg, #dc2626, #b91c1c)';
+                    target.style.boxShadow = 'none';
+                  }}
+                  onClick={() => onRemove?.(p.identity)}
+                >
+                  Remove
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -569,32 +495,6 @@ function ParticipantList({
     </div>
   );
 }
-
-async function apiApplyPreset(
-  roomId: string,
-  roomAccessToken: string,
-  identity: string,
-  presetId: "moderator" | "cohost" | "participant",
-) {
-  const base = API_BASE || "";
-  const url = `${base}/api/rooms/${encodeURIComponent(roomId)}/controls/${encodeURIComponent(identity)}/apply-preset`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-room-access-token": roomAccessToken },
-    credentials: "include",
-    body: JSON.stringify({ presetId }),
-  });
-
-  const data = await res.json().catch(() => null);
-  if (!res.ok || (data && data.error)) {
-    console.error("apply-preset failed", { status: res.status, data });
-    throw new Error((data && data.error) || `Apply preset failed (HTTP ${res.status})`);
-  }
-  return data;
-}
-
-
 
 async function apiRemove(room: string, identity: string) {
   try {

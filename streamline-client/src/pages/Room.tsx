@@ -2474,44 +2474,10 @@ export default function Room() {
             </div>
 
             <p style={{ marginTop: 0, marginBottom: 14, color: "#94a3b8", fontSize: 13 }}>
-              Copy a viewer link for your audience, or a participant link to invite someone on stage.
+              Copy a participant link to invite someone on stage.
             </p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #1f2937",
-                  background: "rgba(255,255,255,0.02)",
-                }}
-              >
-                <div style={{ display: "flex", flexDirection: "column" }}>
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>Viewer</span>
-                  <span style={{ fontSize: 12, color: "#9ca3af" }}>/live viewer link</span>
-                </div>
-                <button
-                  onClick={copyViewerLink}
-                  disabled={!roomId}
-                  style={{
-                    fontSize: 12,
-                    padding: "6px 10px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(34, 197, 94, 0.4)",
-                    background: "rgba(34, 197, 94, 0.08)",
-                    color: "#22c55e",
-                    cursor: roomId ? "pointer" : "not-allowed",
-                    fontWeight: 600,
-                    opacity: roomId ? 1 : 0.6,
-                  }}
-                >
-                  Copy link
-                </button>
-              </div>
-
               <div
                 style={{
                   display: "flex",
