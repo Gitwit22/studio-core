@@ -2,6 +2,7 @@ import { Router } from "express";
 import admin from "firebase-admin";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
+import { getLiveKitSdk } from "../lib/livekit";
 
 const router = Router();
 
@@ -173,6 +174,26 @@ function isHostOrCohost(role?: string): boolean {
   return r === "host" || r === "cohost";
 }
 
+function mapPresetToLivekitPermission(role: PresetId) {
+  const base = {
+    canSubscribe: true,
+    canPublish: true,
+    canPublishData: true,
+    canUpdateMetadata: false,
+    roomAdmin: false,
+  } as any;
+
+  if (role === "moderator") {
+    return {
+      ...base,
+      canUpdateMetadata: true,
+      roomAdmin: true,
+    };
+  }
+
+  return base;
+}
+
 // Host/cohost updates controls for the whole room.
 // PATCH /api/rooms/:roomId/controls
 // Auth: Firebase session cookie + Authorization: Bearer <roomAccessToken>
@@ -250,7 +271,10 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
   const uid = (req as any).user?.uid as string | undefined;
   if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
-  const identityDocId = normalizeControlsDocId(req.params.identity);
+  const rawIdentity = String(req.params.identity || "").trim();
+  if (!rawIdentity) return res.status(400).json({ error: "identity_required" });
+
+  const identityDocId = normalizeControlsDocId(rawIdentity);
   const body = (req.body || {}) as any;
 
   // If a role is provided, treat this as a role change and
@@ -289,6 +313,31 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
       },
       { merge: true },
     );
+
+    // Update LiveKit participant permissions to reflect the new role.
+    try {
+      const sdk = await getLiveKitSdk();
+      const RoomServiceClient = (sdk as any).RoomServiceClient as any;
+
+      if (RoomServiceClient && process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
+        const roomService = new RoomServiceClient(
+          process.env.LIVEKIT_URL,
+          process.env.LIVEKIT_API_KEY,
+          process.env.LIVEKIT_API_SECRET,
+        );
+
+        const permission = mapPresetToLivekitPermission(rolePresetId);
+
+        await roomService.updateParticipant(roomId, rawIdentity, {
+          permission,
+        });
+      } else {
+        console.warn("[roomControls] LiveKit RoomServiceClient not configured; skipping permission update");
+      }
+    } catch (err) {
+      console.error("[roomControls] livekit role update failed", err);
+      return res.status(500).json({ error: "livekit_role_update_failed" });
+    }
 
     const merged = await readControlsMerged(roomId, identityDocId);
     return res.json({ ok: true, controls: merged });

@@ -9,6 +9,7 @@ import StreamSetupModalV2 from "../components/StreamSetupModal";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import RoleOverlay from "../components/RoleOverlay";
 import { HostAVControls } from "../components/HostAVControls";
+import { RoleChangeToast } from "../components/RoleChangeToast";
 import { API_BASE } from "../lib/apiBase";
 import { APP_BASE } from "../lib/appBase";
 
@@ -17,6 +18,8 @@ const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
 type RecordingStatus = "idle" | "recording" | "stopping" | "stopped" | "error";
+
+type GuestStatus = "viewing_join" | "entered_room" | null;
 
 type RoomPermissions = {
   canStream: boolean;
@@ -529,6 +532,8 @@ export default function Room() {
     canStartStopStream: false,
     canStartStopRecording: false,
   }));
+  const [roleChangeMessage, setRoleChangeMessage] = useState<string | null>(null);
+  const roleToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [recordingCountdown, setRecordingCountdown] = useState<string | null>(null);
   const [isRecordingCountdown, setIsRecordingCountdown] = useState(false);
   const recordingCountdownTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -648,6 +653,8 @@ export default function Room() {
   const [recordingPlanId, setRecordingPlanId] = useState<string | null>(null);
   const [maxRecordingMinutesPerClip, setMaxRecordingMinutesPerClip] = useState<number | null>(null);
   const [recordingToast, setRecordingToast] = useState<string | null>(null);
+  const [copiedInviteLabel, setCopiedInviteLabel] = useState<string | null>(null);
+  const copiedInviteTimeoutRef = useRef<number | null>(null);
   const lastStopWasAutoRef = useRef<boolean>(false);
   const autoStopTriggeredRef = useRef(false);
   const [viewerCount] = useState<number>(0);
@@ -732,10 +739,44 @@ export default function Room() {
     let closed = false;
     const es = new EventSource(url, { withCredentials: true } as any);
 
+    let lastRole: "moderator" | "cohost" | "participant" | undefined = undefined;
+
     es.onmessage = (ev) => {
       if (closed) return;
       try {
         const data = JSON.parse(ev.data);
+
+        const nextRole: "moderator" | "cohost" | "participant" | undefined =
+          data?.role === "cohost" || data?.role === "moderator" || data?.role === "participant"
+            ? data.role
+            : undefined;
+
+        if (nextRole && lastRole && nextRole !== lastRole) {
+          const roleName =
+            nextRole === "cohost"
+              ? "Co-host"
+              : nextRole === "moderator"
+              ? "Moderator"
+              : "Participant";
+
+          const msg = `You're now a ${roleName}`;
+          setRoleChangeMessage(msg);
+
+          if (roleToastTimeoutRef.current) {
+            clearTimeout(roleToastTimeoutRef.current);
+          }
+          roleToastTimeoutRef.current = setTimeout(() => {
+            setRoleChangeMessage(null);
+            roleToastTimeoutRef.current = null;
+          }, 2800);
+        }
+
+        if (!lastRole && nextRole) {
+          lastRole = nextRole;
+        } else if (nextRole && nextRole !== lastRole) {
+          lastRole = nextRole;
+        }
+
         setEffectiveControls({
           canPublishAudio: typeof data?.canPublishAudio === "boolean" ? data.canPublishAudio : true,
           tileVisible: typeof data?.tileVisible === "boolean" ? data.tileVisible : true,
@@ -746,10 +787,7 @@ export default function Room() {
           canManageDestinations: typeof data?.canManageDestinations === "boolean" ? data.canManageDestinations : false,
           canStartStopStream: typeof data?.canStartStopStream === "boolean" ? data.canStartStopStream : false,
           canStartStopRecording: typeof data?.canStartStopRecording === "boolean" ? data.canStartStopRecording : false,
-          rolePresetId:
-            data?.role === "cohost" || data?.role === "moderator" || data?.role === "participant"
-              ? data.role
-              : undefined,
+          rolePresetId: nextRole,
         });
       } catch {
         // ignore
@@ -762,6 +800,10 @@ export default function Room() {
 
     return () => {
       closed = true;
+      if (roleToastTimeoutRef.current) {
+        clearTimeout(roleToastTimeoutRef.current);
+        roleToastTimeoutRef.current = null;
+      }
       try {
         es.close();
       } catch {
@@ -1487,6 +1529,24 @@ export default function Room() {
         localStorage.setItem("sl_current_role", "participant");
       }
     } catch {}
+
+    // When the host leaves, request that the server
+    // disconnect all remaining participants from this room.
+    if (isHost && effectiveRoomName) {
+      try {
+        fetch(`${API_BASE}/api/roomModeration/remove-all`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ room: effectiveRoomName }),
+        }).catch(() => {
+          // best-effort only
+        });
+      } catch {
+        // ignore network errors here; clients will still leave locally
+      }
+    }
+
     if (isHost) {
       nav('/join', { replace: true });
     } else {
@@ -1948,7 +2008,15 @@ export default function Room() {
           : `/room?t=${encodeURIComponent(data.inviteToken)}`;
         const url = `${base}${relativeUrl}`;
         await navigator.clipboard.writeText(url);
-        alert(`${label} link copied!\n${url}`);
+
+        setCopiedInviteLabel(label);
+        if (copiedInviteTimeoutRef.current) {
+          window.clearTimeout(copiedInviteTimeoutRef.current);
+        }
+        copiedInviteTimeoutRef.current = window.setTimeout(() => {
+          setCopiedInviteLabel(null);
+          copiedInviteTimeoutRef.current = null;
+        }, 4000);
       } catch (err) {
         console.error("invite create failed", err);
         alert("Failed to create invite link");
@@ -2138,6 +2206,7 @@ export default function Room() {
 
   return (
     <>
+      <RoleChangeToast message={roleChangeMessage} />
       {isViewer && (
         <div className="w-full bg-amber-500 text-black text-sm font-semibold px-4 py-2 flex items-center gap-2">
           👀 View-only mode — publishing controls are disabled.
@@ -2403,49 +2472,129 @@ export default function Room() {
       </div>
 
       {token && serverUrl && (
-        <LiveKitRoom
-          data-lk-theme="default"
-          className={`sl-layout${isViewer ? " sl-viewer" : ""}${subjectToControls && !controlsAllowPublishAudio ? " sl-controls-no-audio" : ""}${subjectToControls && !controlsTileVisible ? " sl-controls-hide-self" : ""}`}
-          token={token}
-          serverUrl={serverUrl}
-          connect={true}
-          connectOptions={isViewer ? { autoSubscribe: true } : undefined}
-          onDisconnected={handleLeftRoom}
-          style={{
-            width: "100%",
-            height: "calc(100vh - 60px)",
-            position: "relative",
-          }}
-        >
-          <div style={{ width: "100%", height: "100%", position: "relative" }}>
-            {isHost && !isViewer && <HostAVControls />}
-            <VideoConference />
-            {watermarkEnabled && (
-              <img
-                src="/logo.png"
-                alt="StreamLine watermark"
-                className="sl-watermark"
-                style={{
-                  top: "12px",
-                  right: "12px",
-                  width: "96px",
-                  opacity: 0.8,
-                }}
-              />
-            )}
-          </div>
+        // Host-only poll of invite landing status for small status messages
+        (() => {
+          const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
+          const statusRef = useRef<GuestStatus>(null);
 
-          <RoleOverlay
-            open={dashboardOpen}
-            onClose={() => setDashboardOpen(false)}
-            role={isHost ? "host" : "participant"}
-            roomName={roomName || ''}
-            roomId={roomId || ""}
-            roomAccessToken={roomAccessToken || ""}
-            canMuteGuests={canMuteGuests}
-            advancedRolesEnabled={effectivePermissionsMode === "advanced"}
-          />
-        </LiveKitRoom>
+          useEffect(() => {
+            if (!isHost || !roomId) return;
+
+            let cancelled = false;
+            const poll = async () => {
+              try {
+                const res = await fetch(`${API_BASE}/api/invites/room-status?roomId=${encodeURIComponent(roomId)}`, {
+                  credentials: "include",
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                let nextStatus: GuestStatus = null;
+                if (data?.hasEnteredRoom) {
+                  nextStatus = "entered_room";
+                } else if (data?.hasJoinPageView) {
+                  nextStatus = "viewing_join";
+                }
+                if (!cancelled && statusRef.current !== nextStatus) {
+                  statusRef.current = nextStatus;
+                  setGuestStatus(nextStatus);
+                }
+              } catch (e) {
+                // ignore
+              }
+            };
+
+            poll();
+            const id = setInterval(poll, 7000);
+            return () => {
+              cancelled = true;
+              clearInterval(id);
+            };
+          }, [isHost, roomId]);
+
+          return (
+            <LiveKitRoom
+              data-lk-theme="default"
+              className={`sl-layout${isViewer ? " sl-viewer" : ""}${subjectToControls && !controlsAllowPublishAudio ? " sl-controls-no-audio" : ""}${subjectToControls && !controlsTileVisible ? " sl-controls-hide-self" : ""}`}
+              token={token}
+              serverUrl={serverUrl}
+              connect={true}
+              connectOptions={isViewer ? { autoSubscribe: true } : undefined}
+              onDisconnected={handleLeftRoom}
+              style={{
+                width: "100%",
+                height: "calc(100vh - 60px)",
+                position: "relative",
+              }}
+            >
+              <div style={{ width: "100%", height: "100%", position: "relative" }}>
+                {isHost && !isViewer && <HostAVControls guestStatus={guestStatus ?? undefined} />}
+                {guestStatus === "viewing_join" && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 10,
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      background: "rgba(15,23,42,0.9)",
+                      border: "1px solid rgba(59,130,246,0.7)",
+                      fontSize: 12,
+                      color: "#bfdbfe",
+                      zIndex: 20,
+                    }}
+                  >
+                    Guest is viewing the join page.
+                  </div>
+                )}
+                {guestStatus === "entered_room" && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 10,
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      background: "rgba(22,163,74,0.2)",
+                      border: "1px solid rgba(34,197,94,0.8)",
+                      fontSize: 12,
+                      color: "#bbf7d0",
+                      zIndex: 20,
+                    }}
+                  >
+                    Guest clicked Enter Room.
+                  </div>
+                )}
+                <VideoConference />
+                {watermarkEnabled && (
+                  <img
+                    src="/logo.png"
+                    alt="StreamLine watermark"
+                    className="sl-watermark"
+                    style={{
+                      top: "12px",
+                      right: "12px",
+                      width: "96px",
+                      opacity: 0.8,
+                    }}
+                  />
+                )}
+              </div>
+
+              <RoleOverlay
+                open={dashboardOpen}
+                onClose={() => setDashboardOpen(false)}
+                role={isHost ? "host" : "participant"}
+                roomName={roomName || ''}
+                roomId={roomId || ""}
+                roomAccessToken={roomAccessToken || ""}
+                canMuteGuests={canMuteGuests}
+                advancedRolesEnabled={effectivePermissionsMode === "advanced"}
+              />
+            </LiveKitRoom>
+          );
+        })()
       )}
 
       {inviteModalOpen && canInviteLinks && (
@@ -2517,13 +2666,16 @@ export default function Room() {
                     padding: "6px 10px",
                     borderRadius: 6,
                     border: "1px solid rgba(34, 197, 94, 0.4)",
-                    background: "rgba(34, 197, 94, 0.08)",
-                    color: "#22c55e",
+                    background:
+                      copiedInviteLabel === "Participant"
+                        ? "rgba(34, 197, 94, 0.18)"
+                        : "rgba(34, 197, 94, 0.08)",
+                    color: copiedInviteLabel === "Participant" ? "#bbf7d0" : "#22c55e",
                     cursor: "pointer",
                     fontWeight: 600,
                   }}
                 >
-                  Copy link
+                  {copiedInviteLabel === "Participant" ? "Copied" : "Copy link"}
                 </button>
               </div>
             </div>

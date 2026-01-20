@@ -193,4 +193,85 @@ router.post("/accept", async (req, res) => {
   }
 });
 
+/**
+ * Lightweight tracking so hosts can see when a guest has opened
+ * the join page and when they've clicked "Enter Room".
+ *
+ * POST /api/invites/track-landing
+ * Body: { inviteToken, stage: "join_page" | "entered_room" }
+ */
+router.post("/track-landing", async (req, res) => {
+  try {
+    const inviteToken = String((req.body as any)?.inviteToken || "").trim();
+    const stageRaw = String((req.body as any)?.stage || "").trim();
+    if (!inviteToken) return res.status(400).json({ error: "inviteToken_required" });
+
+    const stage = stageRaw === "entered_room" ? "entered_room" : stageRaw === "join_page" ? "join_page" : null;
+    if (!stage) return res.status(400).json({ error: "stage_invalid" });
+
+    const claims = verifyInviteToken(inviteToken) as any;
+    const roomId = normalizeRoomId(claims?.roomId);
+    const roomName = normalizeRoomName(claims?.roomName || claims?.room);
+    const role = normalizeRole(claims?.role || "guest") || "guest";
+
+    if (!roomId && !roomName) return res.status(400).json({ error: "invite_room_missing" });
+
+    const resolved = await resolveRoomIdentity({ roomId, roomName });
+    if (!resolved) return res.status(400).json({ error: "invite_room_missing" });
+
+    const inviteHash = Buffer.from(inviteToken).toString("base64url").slice(0, 40);
+    const docId = `${resolved.roomId}_${inviteHash}`;
+
+    await firestore.collection("inviteLandings").doc(docId).set(
+      {
+        roomId: resolved.roomId,
+        roomName: resolved.roomName,
+        role,
+        stage,
+        lastSeenAt: new Date(),
+      },
+      { merge: true },
+    );
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("/api/invites/track-landing error", err?.message || err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+/**
+ * GET /api/invites/room-status?roomId=...
+ * Returns a coarse signal for hosts about recent invite activity.
+ * Response: { roomId, hasJoinPageView, hasEnteredRoom }
+ */
+router.get("/room-status", async (req, res) => {
+  try {
+    const roomId = normalizeRoomId((req.query as any)?.roomId);
+    if (!roomId) return res.status(400).json({ error: "roomId_required" });
+
+    const snap = await firestore
+      .collection("inviteLandings")
+      .where("roomId", "==", roomId)
+      .get();
+
+    const cutoff = Date.now() - 15 * 60 * 1000; // last 15 minutes
+    let hasJoinPageView = false;
+    let hasEnteredRoom = false;
+
+    snap.forEach((doc) => {
+      const data = doc.data() as any;
+      const ts = (data?.lastSeenAt as any)?.toMillis?.() ?? (data?.lastSeenAt instanceof Date ? data.lastSeenAt.getTime() : 0);
+      if (!ts || ts < cutoff) return;
+      if (data?.stage === "join_page") hasJoinPageView = true;
+      if (data?.stage === "entered_room") hasEnteredRoom = true;
+    });
+
+    return res.json({ roomId, hasJoinPageView, hasEnteredRoom });
+  } catch (err: any) {
+    console.error("/api/invites/room-status error", err?.message || err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
 export default router;

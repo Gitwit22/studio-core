@@ -1,6 +1,8 @@
 import { useLocalParticipant } from "@livekit/components-react";
 
-export function HostAVControls() {
+type GuestStatus = "viewing_join" | "entered_room" | null;
+
+export function HostAVControls({ guestStatus }: { guestStatus?: GuestStatus }) {
   const { localParticipant } = useLocalParticipant();
 
   if (!localParticipant) return null;
@@ -9,7 +11,8 @@ export function HostAVControls() {
   const camOn = localParticipant.isCameraEnabled;
 
   return (
-    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8 }}>
       <button
         onClick={() => localParticipant.setMicrophoneEnabled(!micOn)}
         style={{
@@ -40,6 +43,29 @@ export function HostAVControls() {
       >
         {camOn ? "Cam Off" : "Cam On"}
       </button>
+      </div>
+      {guestStatus === "viewing_join" && (
+        <div
+          style={{
+            fontSize: 12,
+            color: "#e5e7eb",
+            opacity: 0.9,
+          }}
+        >
+          Guest has opened the invite link and is on the join page.
+        </div>
+      )}
+      {guestStatus === "entered_room" && (
+        <div
+          style={{
+            fontSize: 12,
+            color: "#bbf7d0",
+            opacity: 0.95,
+          }}
+        >
+          Guest clicked Enter Room and is joining.
+        </div>
+      )}
     </div>
   );
 }

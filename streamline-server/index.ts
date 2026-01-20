@@ -460,6 +460,57 @@ app.post("/api/roomModeration/remove", requireAuth, async (req, res) => {
   }
 });
 
+// Remove/kick ALL participants in a room
+app.post("/api/roomModeration/remove-all", requireAuth, async (req, res) => {
+  try {
+    const { room } = req.body as { room?: string };
+
+    if (!room) {
+      return res.status(400).json({ ok: false, error: "room is required" });
+    }
+
+    try {
+      const resolved = await resolveRoomIdentity({ roomName: room });
+      if (!resolved || !resolved.roomId) {
+        return res.status(400).json({ ok: false, error: "invalid_room" });
+      }
+      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+    } catch (err) {
+      if (err instanceof RoomPermissionError) {
+        return res.status(err.status).json({ ok: false, error: err.code });
+      }
+      throw err;
+    }
+
+    const roomService = await getRoomService();
+    const participants = await roomService.listParticipants(room);
+
+    const results: Array<{ identity: string; removed: boolean; error?: string }> = [];
+
+    for (const p of participants) {
+      const identity = (p as any)?.identity;
+      if (!identity) continue;
+      try {
+        await roomService.removeParticipant(room, identity);
+        results.push({ identity, removed: true });
+      } catch (err: any) {
+        console.error("remove-all failed for participant", { room, identity, err });
+        results.push({
+          identity,
+          removed: false,
+          error: typeof err?.message === "string" ? err.message : "remove_participant_failed",
+        });
+      }
+    }
+
+    const removedCount = results.filter((r) => r.removed).length;
+    return res.json({ ok: true, removedCount, results });
+  } catch (e: any) {
+    console.error("remove-all error", e);
+    return res.status(500).json({ ok: false, error: e?.message || "remove_all_error" });
+  }
+});
+
 
 // =============================================================================
 // AUTH ENDPOINTS

@@ -196,6 +196,18 @@ export default function Join() {
           } catch {
             // ignore
           }
+
+          // Let the host know that someone has opened the invite link
+          // and is viewing the join page.
+          try {
+            await fetch(`${API_BASE}/api/invites/track-landing`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ inviteToken: inviteTokenParam, stage: "join_page" }),
+            });
+          } catch {
+            // best-effort only
+          }
           return;
         } catch {
           return;
@@ -385,6 +397,19 @@ export default function Join() {
     }
 
     localStorage.setItem("sl_displayName", name);
+
+    // For invite-based joins, mark that the guest is proceeding into the room.
+    if (isParticipant && inviteTokenParam) {
+      try {
+        fetch(`${API_BASE}/api/invites/track-landing`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inviteToken: inviteTokenParam, stage: "entered_room" }),
+        }).catch(() => {});
+      } catch {
+        // best-effort only
+      }
+    }
 
     // Host flow: create a Firestore room first, then navigate to /room/:roomId
     if (!isParticipant) {
@@ -1030,17 +1055,26 @@ export default function Join() {
                   style={{
                     width: "100%",
                     padding: "12px 14px",
-                    background: "rgba(0, 0, 0, 0.4)",
+                    background: "#ffffff",
                     border: "1px solid rgba(255, 255, 255, 0.1)",
                     borderRadius: "12px",
-                    color: "#ffffff",
+                    color: "#000000",
                     fontSize: "14px",
                     outline: "none",
                   }}
                 >
-                  <option value="">Select a Saved Room…</option>
+                  <option
+                    value=""
+                    style={{ color: "#000000", backgroundColor: "#ffffff" }}
+                  >
+                    Select a Saved Room…
+                  </option>
                   {savedEmbeds.map((embed) => (
-                    <option key={embed.embedId} value={embed.embedId}>
+                    <option
+                      key={embed.embedId}
+                      value={embed.embedId}
+                      style={{ color: "#000000", backgroundColor: "#ffffff" }}
+                    >
                       {embed.label || embed.embedId}
                       {embed.activeRoomId ? " (Active)" : ""}
                     </option>
