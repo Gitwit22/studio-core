@@ -376,6 +376,8 @@ export default function Join() {
       return;
     }
 
+    const roomLabel = roomName.trim();
+
     const isUsingSaved = !isParticipant && joinMode === "saved";
     if (isUsingSaved && !selectedSavedEmbedId) {
       alert("Select a Saved Room or switch to Create New Room.");
@@ -387,7 +389,6 @@ export default function Join() {
     // Host flow: create a Firestore room first, then navigate to /room/:roomId
     if (!isParticipant) {
       try {
-        const roomLabel = roomName.trim();
         if (!roomLabel) {
           alert("Please enter a room name.");
           return;
