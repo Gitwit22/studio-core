@@ -5,6 +5,7 @@ import { useParticipants, useLocalParticipant } from "@livekit/components-react"
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
 type Role = "host" | "moderator" | "participant";
+type RolePresetId = "participant" | "cohost" | "moderator";
 
 export default function RoleOverlay({
   open,
@@ -14,6 +15,7 @@ export default function RoleOverlay({
   roomId,
   roomAccessToken,
   canMuteGuests,
+  advancedRolesEnabled,
 }: {
   open: boolean;
   onClose: () => void;
@@ -22,6 +24,7 @@ export default function RoleOverlay({
   roomId: string;
   roomAccessToken: string;
   canMuteGuests?: boolean;
+  advancedRolesEnabled?: boolean;
 }) {
   if (!open) return null;
 
@@ -111,6 +114,7 @@ export default function RoleOverlay({
               roomId={roomId}
               roomAccessToken={roomAccessToken}
               canMuteGuests={canMuteGuests}
+              advancedRolesEnabled={advancedRolesEnabled}
             />
           )}
           {role === "moderator" && <ModeratorPanel roomName={roomName} canMuteGuests={canMuteGuests} />}
@@ -127,11 +131,13 @@ function HostPanel({
   roomId,
   roomAccessToken,
   canMuteGuests,
+  advancedRolesEnabled,
 }: {
   roomName: string;
   roomId: string;
   roomAccessToken: string;
   canMuteGuests?: boolean;
+  advancedRolesEnabled?: boolean;
 }) {
   const parts = useParticipants();
   const { localParticipant } = useLocalParticipant();
@@ -246,6 +252,12 @@ function HostPanel({
           muteLock={muteLock}
           localIdentity={localParticipant?.identity || null}
           canMuteGuests={canMuteGuests}
+          canChangeRoles={!!advancedRolesEnabled && !!roomId && !!roomAccessToken}
+          onChangeRole={
+            roomId && roomAccessToken
+              ? (identity, presetId) => apiApplyPreset(roomId, roomAccessToken, identity, presetId)
+              : undefined
+          }
         />
 
         {muteLock && (
@@ -344,6 +356,18 @@ function ModeratorPanel({ roomName, canMuteGuests }: { roomName: string; canMute
 }
 
 function ParticipantPanel({ roomName }: { roomName: string }) {
+  const { localParticipant } = useLocalParticipant();
+  const roleLabel = (() => {
+    const name = (localParticipant as any)?.identityMetadata?.rolePresetId as
+      | "participant"
+      | "cohost"
+      | "moderator"
+      | undefined;
+    if (name === "cohost") return "You are a Co-host";
+    if (name === "moderator") return "You are a Moderator";
+    if (name === "participant") return "You are a Participant";
+    return null;
+  })();
   return (
     <>
       <Section title="Info">
@@ -351,6 +375,11 @@ function ParticipantPanel({ roomName }: { roomName: string }) {
           You're in <b>{roomName}</b>. Use the control bar to toggle mic/cam or
           share your screen.
         </p>
+        {roleLabel && (
+          <p style={{ marginTop: '0.35rem', fontSize: '0.8rem', color: 'rgba(248, 250, 252, 0.85)' }}>
+            {roleLabel}
+          </p>
+        )}
       </Section>
       <Section title="Tips">
         <ul style={{ listStyle: 'disc', paddingLeft: '1.25rem', fontSize: '0.875rem', opacity: 0.8, color: 'rgba(255, 255, 255, 0.8)', lineHeight: 1.6 }}>
@@ -386,6 +415,8 @@ function ParticipantList({
   muteLock,
   localIdentity,
   canMuteGuests,
+   canChangeRoles,
+   onChangeRole,
 }: {
   participants: ReturnType<typeof useParticipants>;
   canModerate?: boolean;
@@ -394,6 +425,8 @@ function ParticipantList({
   muteLock?: boolean;
   localIdentity?: string | null;
   canMuteGuests?: boolean;
+   canChangeRoles?: boolean;
+   onChangeRole?: (identity: string, presetId: RolePresetId) => void;
 }) {
   if (!participants?.length) {
     return <p style={{ fontSize: '0.875rem', opacity: 0.7, color: 'rgba(255, 255, 255, 0.7)' }}>No one here yet.</p>;
@@ -420,6 +453,15 @@ function ParticipantList({
             <div style={{ opacity: 0.6, fontSize: '0.75rem', wordBreak: 'break-all', color: 'rgba(255, 255, 255, 0.6)' }}>
               {p.identity}
             </div>
+            {canChangeRoles && (p as any)?.metadata?.rolePresetId && (
+              <div style={{ marginTop: '0.15rem', fontSize: '0.7rem', color: 'rgba(129, 140, 248, 0.9)' }}>
+                Role: {((p as any).metadata.rolePresetId === 'cohost'
+                  ? 'Co-host'
+                  : (p as any).metadata.rolePresetId === 'moderator'
+                  ? 'Moderator'
+                  : 'Participant')}
+              </div>
+            )}
           </div>
           {canModerate && (
             <div
@@ -431,6 +473,46 @@ function ParticipantList({
                 justifyContent: 'center',
               }}
             >
+              {canChangeRoles && onChangeRole && localIdentity && p.identity !== localIdentity && (
+                <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '0.15rem' }}>
+                  {(["participant", "cohost", "moderator"] as RolePresetId[]).map((roleId) => {
+                    const active = (p as any)?.metadata?.rolePresetId === roleId;
+                    return (
+                    <button
+                      key={roleId}
+                      style={{
+                        borderRadius: '9999px',
+                        border: active ? '1px solid rgba(251, 191, 36, 0.9)' : '1px solid rgba(148, 163, 184, 0.6)',
+                        padding: '0.15rem 0.45rem',
+                        fontSize: '0.65rem',
+                        background: active ? 'rgba(250, 204, 21, 0.15)' : 'rgba(31, 41, 55, 0.9)',
+                        color: active ? '#facc15' : '#e5e7eb',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        fontWeight: active ? 600 : 500,
+                      }}
+                      onMouseEnter={(e) => {
+                        const target = e.target as HTMLButtonElement;
+                        if (!active) {
+                          target.style.background = 'rgba(55, 65, 81, 0.9)';
+                          target.style.borderColor = 'rgba(148, 163, 184, 0.9)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        const target = e.target as HTMLButtonElement;
+                        if (!active) {
+                          target.style.background = 'rgba(31, 41, 55, 0.9)';
+                          target.style.borderColor = 'rgba(148, 163, 184, 0.6)';
+                        }
+                      }}
+                      onClick={() => onChangeRole(p.identity, roleId)}
+                    >
+                      {roleId === 'participant' ? 'Participant' : roleId === 'cohost' ? 'Co-host' : 'Moderator'}
+                    </button>
+                    );
+                  })}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
                 {canMuteGuests !== false && (() => {
                   const micEnabled = (p as any).isMicrophoneEnabled as boolean | undefined;
@@ -585,4 +667,36 @@ async function apiSetMuteLock(
     throw new Error(data.error || `Mute-lock failed (HTTP ${res.status})`);
   }
   return { muteLock: !!data.muteLock };
+}
+
+async function apiApplyPreset(
+  roomId: string,
+  roomAccessToken: string,
+  identity: string,
+  presetId: RolePresetId,
+) {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/controls/${encodeURIComponent(identity)}/apply-preset`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-room-access-token": roomAccessToken,
+        },
+        credentials: "include",
+        body: JSON.stringify({ presetId }),
+      },
+    );
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok || (data && data.error)) {
+      console.error("apply-preset failed", { status: res.status, data });
+      alert((data && data.error) || `Role change failed (HTTP ${res.status})`);
+      return;
+    }
+  } catch (e) {
+    console.error("apply-preset failed (network)", e);
+    alert("Role change failed (network error)");
+  }
 }

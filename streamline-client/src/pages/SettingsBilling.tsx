@@ -602,13 +602,16 @@ export default function SettingsBilling() {
           const me = await meRes.json();
           const prefs = me?.mediaPrefs ? { ...DEFAULT_MEDIA_PREFS, ...me.mediaPrefs } : DEFAULT_MEDIA_PREFS;
           const adv = me?.advancedPermissions || { enabled: false, plan: false, override: false, global: false, lockReason: me?.advancedPermissionsLockedReason };
+          const lockReason = adv.lockReason || me?.advancedPermissionsLockedReason || null;
+          // Treat "coming_soon" as a soft label only; do not block enabling Advanced mode.
+          const advEnabled = !!(adv.enabled || lockReason === "coming_soon");
           setAdvancedPermissions({
-            enabled: !!adv.enabled,
+            enabled: advEnabled,
             plan: !!adv.plan,
             override: !!adv.override,
             globalLock: !!adv.global,
-            lockReason: adv.lockReason || me?.advancedPermissionsLockedReason || null,
-            effectivePermissionsMode: me?.effectivePermissionsMode || (adv.enabled && prefs.permissionsMode === "advanced" ? "advanced" : "simple"),
+            lockReason,
+            effectivePermissionsMode: me?.effectivePermissionsMode || (advEnabled && prefs.permissionsMode === "advanced" ? "advanced" : "simple"),
             permissionsModeLockReason: me?.permissionsModeLockReason || null,
           });
 
@@ -1418,9 +1421,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             {simpleMode ? (
               <div style={{ display: "grid", gap: 12 }}>
                 <p style={{ color: "#94a3b8", marginBottom: 0 }}>
-                  Simple permissions keep Participant, Co-host, and Moderator fixed. Switch to Advanced to customize.
+                  Simple mode keeps a single Participant link with standard access. Switch to Advanced to unlock Co-host and Moderator roles.
                 </p>
-                {["participant", "cohost", "moderator"].map((key) => {
+                {["participant"].map((key) => {
                   const fromServer = serverDefaultRoleProfiles?.find((p) => p.id === key);
                   const roleKey = key as keyof typeof SIMPLE_ROLE_DEFAULTS;
                   const fallback = SIMPLE_ROLE_DEFAULTS[roleKey];
@@ -1477,13 +1480,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
                   <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                    {advancedPermissions.lockReason === "coming_soon"
-                      ? "Advanced Permissions is coming soon."
-                      : advancedPermissions.lockReason === "global_lock"
-                        ? "Advanced Permissions temporarily disabled during an upgrade. Check back soon."
-                        : advancedPermissions.enabled
-                          ? "Need custom roles and fine-grained permissions? Enable Advanced Permissions Mode."
-                          : "Advanced Permissions Mode is not included on this plan. Upgrade or ask an admin for an override."}
+                    {advancedPermissions.globalLock
+                      ? "Advanced Permissions temporarily disabled during an upgrade. Check back soon."
+                      : advancedPermissions.enabled
+                        ? "Need Co-host and Moderator links with custom permissions? Enable Advanced Permissions Mode."
+                        : "Advanced Permissions Mode is not included on this plan. Upgrade or ask an admin for an override."}
                   </span>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                     <button
@@ -1491,19 +1492,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       style={advancedPermissions.enabled && !advancedPermissions.globalLock ? S.primaryBtn : { ...S.primaryBtn, opacity: 0.5, cursor: "not-allowed" }}
                       disabled={!advancedPermissions.enabled || advancedPermissions.globalLock}
                     >
-                      {advancedPermissions.lockReason === "coming_soon"
-                        ? "Coming soon"
-                        : advancedPermissions.lockReason === "global_lock"
-                          ? "Temporarily disabled"
-                          : advancedPermissions.enabled
-                            ? "Enable Advanced Permissions Mode"
-                            : "Locked on current plan"}
+                      {advancedPermissions.globalLock
+                        ? "Temporarily disabled"
+                        : advancedPermissions.enabled
+                          ? "Enable Advanced Permissions Mode"
+                          : "Locked on current plan"}
                     </button>
-                    {advancedPermissions.lockReason === "coming_soon" ? (
-                      <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                        Coming soon.
-                      </span>
-                    ) : null}
                   </div>
                 </div>
               </div>

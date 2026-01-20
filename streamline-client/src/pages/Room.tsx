@@ -515,6 +515,7 @@ export default function Room() {
     canManageDestinations?: boolean;
     canStartStopStream?: boolean;
     canStartStopRecording?: boolean;
+    rolePresetId?: "participant" | "cohost" | "moderator";
   };
 
   const [effectiveControls, setEffectiveControls] = useState<EffectiveControls>(() => ({
@@ -622,6 +623,10 @@ export default function Room() {
             canManageDestinations: typeof c.canManageDestinations === "boolean" ? c.canManageDestinations : false,
             canStartStopStream: typeof c.canStartStopStream === "boolean" ? c.canStartStopStream : false,
             canStartStopRecording: typeof c.canStartStopRecording === "boolean" ? c.canStartStopRecording : false,
+            rolePresetId:
+              c.role === "cohost" || c.role === "moderator" || c.role === "participant"
+                ? c.role
+                : undefined,
           });
         }
       } else if (res.status === 401 || res.status === 403) {
@@ -677,6 +682,7 @@ export default function Room() {
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
   const [participantIdentity, setParticipantIdentity] = useState<string | null>(null);
   const [, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
+    const [effectivePermissionsMode, setEffectivePermissionsMode] = useState<"simple" | "advanced">("simple");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
   const [roomName, setRoomName] = useState<string>(() => {
     const fromState = (location.state as any)?.livekitRoomName;
@@ -740,6 +746,10 @@ export default function Room() {
           canManageDestinations: typeof data?.canManageDestinations === "boolean" ? data.canManageDestinations : false,
           canStartStopStream: typeof data?.canStartStopStream === "boolean" ? data.canStartStopStream : false,
           canStartStopRecording: typeof data?.canStartStopRecording === "boolean" ? data.canStartStopRecording : false,
+          rolePresetId:
+            data?.role === "cohost" || data?.role === "moderator" || data?.role === "participant"
+              ? data.role
+              : undefined,
         });
       } catch {
         // ignore
@@ -1167,6 +1177,12 @@ export default function Room() {
           }
 
           const eff = (me as any)?.effectiveEntitlements;
+          const effPermMode = (me as any)?.effectivePermissionsMode;
+          if (effPermMode === "advanced") {
+            setEffectivePermissionsMode("advanced");
+          } else {
+            setEffectivePermissionsMode("simple");
+          }
           const platformFlags = (me as any)?.platformFlags || {};
           if (typeof platformFlags.hlsEnabled === "boolean") {
             setPlatformHlsEnabled(platformFlags.hlsEnabled);
@@ -2427,6 +2443,7 @@ export default function Room() {
             roomId={roomId || ""}
             roomAccessToken={roomAccessToken || ""}
             canMuteGuests={canMuteGuests}
+            advancedRolesEnabled={effectivePermissionsMode === "advanced"}
           />
         </LiveKitRoom>
       )}

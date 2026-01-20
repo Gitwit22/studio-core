@@ -403,7 +403,10 @@ export default function AdminDashboard() {
     setTabLoading(true);
     try {
       if (tab === "overview") await loadStats();
-      if (tab === "users") await loadUsers();
+      if (tab === "users") {
+        // Users view needs plan names for the plan dropdown; fetch both.
+        await Promise.all([loadUsers(), loadPlans()]);
+      }
       if (tab === "usage") await loadUsage();
       if (tab === "features") await loadFeatures();
       if (tab === "plans") {
@@ -856,21 +859,21 @@ export default function AdminDashboard() {
 
                           <td style={S.td}>
                             <select
-  value={u.planId || "free"}
-  onChange={(e) => changePlan(u.uid, e.target.value)}
-  style={S.select}
+    value={u.planId || "free"}
+    onChange={(e) => changePlan(u.uid, e.target.value)}
+    style={S.select}
 >
-  {plans.length > 0
-    ? plans.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.name}
-        </option>
-      ))
-    : ["free", "starter", "pro", "enterprise", "internal_unlimited"].map((p) => (
-        <option key={p} value={p}>
-          {p === "internal_unlimited" ? "Internal Unlimited" : p}
-        </option>
-      ))}
+    {plans.length > 0
+      ? plans.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))
+      : ["free", "basic", "starter", "pro", "enterprise", "internal_unlimited"].map((p) => (
+          <option key={p} value={p}>
+            {p === "internal_unlimited" ? "Internal Unlimited" : p}
+          </option>
+        ))}
 </select>
                           </td>
 
