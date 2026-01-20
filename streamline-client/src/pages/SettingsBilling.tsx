@@ -129,136 +129,188 @@ const SIMPLE_ROLE_DEFAULTS = {
     expiresHours: 24,
     maxUses: 1,
   },
-        {/* ================================================================ */}
-        {/* SECTION 4: ROLE PRESETS (Realtime in-room gating) */}
-        {/* ================================================================ */}
-        {activeTab === "roles" && (
-          <div style={{ ...S.card, opacity: isBlocked ? 0.6 : 1 }}>
-            <div style={S.cardHeader}>
-              <h2 style={S.cardTitle}>🛡️ Role Presets</h2>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button
-                  onClick={loadRolePresets}
-                  style={S.secondaryBtn}
-                  disabled={rolePresetsLoading}
-                  title="Reload presets"
-                >
-                  {rolePresetsLoading ? "Loading…" : "Refresh"}
-                </button>
-              </div>
-            </div>
+};
 
-            <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.5 }}>
-              These presets control what the in-room Dashboard applies when you click Cohost/Mod for a participant.
-              Updates take effect immediately in-room (no reconnect).
-            </div>
+const DEFAULT_ENTITLEMENTS = {
+  planId: "free",
+  planName: "Free",
+  recording: false,
+  dualRecording: false,
+  rtmpMultistream: false,
+  canHls: false,
+  hlsCustomizationEnabled: false,
+  maxGuests: 0,
+  maxDestinations: 0,
+  participantMinutes: 0,
+  transcodeMinutes: 0,
+};
 
-            {rolePresetsError && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(248,113,113,0.45)",
-                  background: "rgba(248,113,113,0.10)",
-                  color: "#fecaca",
-                  fontSize: 13,
-                  fontWeight: 700,
-                }}
-              >
-                {rolePresetsError}
-              </div>
-            )}
+const DEFAULT_USAGE = {
+  streamingMinutes: { used: 0, limit: 0, lifetime: 0 },
+  recordingMinutes: { used: 0, lifetime: 0 },
+  rtmpDestinations: { used: 0, limit: 0 },
+  storage: { used: 0, limit: 0 },
+  projects: { used: 0, limit: 0 },
+};
 
-            {rolePresetsLoading && !rolePresets ? (
-              <div style={{ marginTop: 12, color: "#94a3b8" }}>Loading presets…</div>
-            ) : rolePresets ? (
-              <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-                {(["participant", "cohost", "moderator"] as RolePresetId[]).map((presetId) => {
-                  const preset = rolePresets[presetId];
-                  if (!preset) return null;
-                  return (
-                    <div
-                      key={presetId}
-                      style={{
-                        border: "1px solid #1f2937",
-                        borderRadius: 12,
-                        padding: "12px 12px",
-                        background: "rgba(255,255,255,0.02)",
-                        display: "grid",
-                        gap: 10,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          <div style={{ fontWeight: 800, color: "#e5e7eb" }}>{ROLE_PRESET_LABELS[presetId]}</div>
-                          <div style={{ color: "#94a3b8", fontSize: 12 }}>Applies to participant overrides</div>
-                        </div>
-                      </div>
+const DEFAULT_MEDIA_PREFS = {
+  defaultPresetId: "standard_720p30",
+  defaultLayout: "speaker" as "speaker" | "grid",
+  defaultRecordingMode: "cloud" as "cloud" | "dual",
+  destinationsDefaultMode: "last_used" as "last_used" | "pick_each_time",
+  warnOnHighQuality: true,
+  permissionsMode: "simple" as "simple" | "advanced",
+};
 
-                      {ROLE_PRESET_GROUPS.map((group) => (
-                        <div key={group.title} style={{ display: "grid", gap: 8 }}>
-                          <div style={{ fontSize: 12, fontWeight: 800, color: "#cbd5e1" }}>{group.title}</div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            {group.keys.map((item) => {
-                              const enabled = !!(preset as any)[item.key];
-                              const saving = rolePresetsSaving?.presetId === presetId && rolePresetsSaving?.key === item.key;
-                              return (
-                                <button
-                                  key={item.key}
-                                  onClick={() => patchRolePreset(presetId, item.key, !enabled)}
-                                  disabled={saving || rolePresetsLoading}
-                                  style={{
-                                    padding: "7px 10px",
-                                    borderRadius: 999,
-                                    border: enabled ? "1px solid rgba(34,197,94,0.6)" : "1px solid #1f2937",
-                                    background: enabled ? "rgba(34,197,94,0.14)" : "rgba(255,255,255,0.04)",
-                                    color: enabled ? "#22c55e" : "#94a3b8",
-                                    fontSize: 12,
-                                    fontWeight: 800,
-                                    cursor: saving ? "not-allowed" : "pointer",
-                                    opacity: saving ? 0.65 : 1,
-                                  }}
-                                  title={enabled ? "Click to disable" : "Click to enable"}
-                                >
-                                  {saving ? "Saving…" : item.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
+type CheckoutPlanVariant = "starter_trial" | "starter_paid" | "basic" | "pro";
 
-                      {presetId === "moderator" && (
-                        <div style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.4 }}>
-                          Moderator presets intentionally exclude Analytics and Layout/Scene.
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div style={{ marginTop: 12, color: "#94a3b8" }}>No presets loaded.</div>
-            )}
-          </div>
-        )}
-          try {
-            await apiFetch("/api/billing/clear-pending", { method: "POST" });
-          } catch {}
-          setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
-        }
-      } catch {}
-    })();
-  }, [user?.planId, user?.pendingPlan, user?.billingStatus]);
+function formatDate(input: any): string {
+  if (!input) return "—";
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function getDaysUntil(input: any): number {
+  if (!input) return 0;
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return 0;
+  const diffMs = d.getTime() - Date.now();
+  return Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+}
+
+function getStatusBadge(status: string | undefined, cancelAtPeriodEnd?: boolean) {
+  if (!status || status === "none") {
+    return { text: "Free", icon: "💸", color: "#6b7280", bg: "rgba(55,65,81,0.35)" };
+  }
+  if (status === "trialing") {
+    return { text: "Trialing", icon: "🧪", color: "#22c55e", bg: "rgba(34,197,94,0.16)" };
+  }
+  if (status === "active") {
+    if (cancelAtPeriodEnd) {
+      return { text: "Canceling", icon: "⏳", color: "#f97316", bg: "rgba(245,158,11,0.16)" };
+    }
+    return { text: "Active", icon: "✅", color: "#22c55e", bg: "rgba(34,197,94,0.16)" };
+  }
+  if (status === "past_due" || status === "unpaid") {
+    return { text: "Payment issue", icon: "⚠️", color: "#f97316", bg: "rgba(245,158,11,0.18)" };
+  }
+  if (status === "canceled") {
+    return { text: "Canceled", icon: "⏹️", color: "#f97316", bg: "rgba(245,158,11,0.18)" };
+  }
+  return { text: status, icon: "ℹ️", color: "#6b7280", bg: "rgba(55,65,81,0.35)" };
+}
+
+function getPlanActionLabel(current: PlanId, target: PlanId, isProcessing: boolean): string {
+  if (isProcessing) return "Pending change";
+  if (current === target) return "Current plan";
+  const order: PlanId[] = ["free", "basic", "starter", "pro"];
+  const curIdx = order.indexOf(current);
+  const tgtIdx = order.indexOf(target);
+  if (curIdx === -1 || tgtIdx === -1) return "Change plan";
+  if (tgtIdx > curIdx) return "Upgrade";
+  if (tgtIdx < curIdx) return "Downgrade";
+  return "Change plan";
+}
+
+function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
+  const canonical = (user && (user.planId as string)) || "starter";
+  if (canonical.includes("pro")) return "pro";
+  if (canonical.includes("basic")) return "basic";
+  if (canonical.includes("starter")) return "starter_paid";
+  return "starter_paid";
+}
+
+export default function SettingsBilling() {
+  const nav = useNavigate();
+  const { refresh: refreshAuth } = useAuthMe();
+
+  const [user, setUser] = useState<any | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [plans, setPlans] = useState<any[]>([]);
+  const [entitlements, setEntitlements] = useState<typeof DEFAULT_ENTITLEMENTS>(DEFAULT_ENTITLEMENTS);
+  const [usage, setUsage] = useState<typeof DEFAULT_USAGE | null>(null);
+
+  const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
+  const [platformTranscodeEnabled, setPlatformTranscodeEnabled] = useState<boolean>(true);
+  const [platformHlsSettingsTabEnabled, setPlatformHlsSettingsTabEnabled] = useState<boolean>(true);
+
+  const [mediaPrefs, setMediaPrefs] = useState<typeof DEFAULT_MEDIA_PREFS>(DEFAULT_MEDIA_PREFS);
+  const [presetOptions, setPresetOptions] = useState<Array<{ id: string; label: string }>>([]);
+
+  const [advancedPermissions, setAdvancedPermissions] = useState<{
+    enabled: boolean;
+    plan: boolean;
+    override: boolean;
+    globalLock: boolean;
+    lockReason: string | null;
+    effectivePermissionsMode: "simple" | "advanced";
+    permissionsModeLockReason: string | null;
+  }>(
+    {
+      enabled: false,
+      plan: false,
+      override: false,
+      globalLock: false,
+      lockReason: null,
+      effectivePermissionsMode: "simple",
+      permissionsModeLockReason: null,
+    }
+  );
+
+  const [cohostProfile, setCohostProfile] = useState<any>({
+    label: SIMPLE_ROLE_DEFAULTS.cohost.label,
+    expiresHours: SIMPLE_ROLE_DEFAULTS.cohost.expiresHours || 24,
+    maxUses: SIMPLE_ROLE_DEFAULTS.cohost.maxUses || 1,
+    ...SIMPLE_ROLE_DEFAULTS.cohost.permissions,
+  });
+  const [cohostSaving, setCohostSaving] = useState(false);
+  const [cohostMessage, setCohostMessage] = useState<string | null>(null);
+
+  const [serverDefaultRoleProfiles, setServerDefaultRoleProfiles] = useState<any[] | null>(null);
+  const [roleProfiles, setRoleProfiles] = useState<any[]>([]);
+  const [quickRoleIds, setQuickRoleIds] = useState<string[]>(["participant", "cohost", "moderator"]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
+  const [roleLabelInput, setRoleLabelInput] = useState("");
+  const [roleMessage, setRoleMessage] = useState<string | null>(null);
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState<any | null>(null);
+
+  const [mediaPrefsSaving, setMediaPrefsSaving] = useState(false);
+  const [mediaPrefsMessage, setMediaPrefsMessage] = useState<string | null>(null);
+  const [mediaPrefsError, setMediaPrefsError] = useState<string | null>(null);
+
+  const [toast, setToast] = useState<string | null>(null);
+  const [emergencyLoading, setEmergencyLoading] = useState(false);
+  const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
+
+  const [actionLoading, setActionLoading] = useState<CheckoutPlanVariant | "portal" | null>(null);
+
+  const [checkoutTosAccepted, setCheckoutTosAccepted] = useState(false);
+  const [checkoutTosError, setCheckoutTosError] = useState<string | null>(null);
+  const [checkoutTosSubmitting, setCheckoutTosSubmitting] = useState(false);
+
+  const [testModeTargetPlan, setTestModeTargetPlan] = useState<PlanId | null>(null);
+  const [testModeSummary, setTestModeSummary] = useState<string | null>(null);
+  const [testModeModalOpen, setTestModeModalOpen] = useState(false);
+  const [testModeLoading, setTestModeLoading] = useState(false);
+
+  const [showManagePicker, setShowManagePicker] = useState(false);
+  const [showLifetimeDetails, setShowLifetimeDetails] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles">("plan");
+
+  const simpleMode = advancedPermissions.effectivePermissionsMode !== "advanced";
 
   // If billing is active or trialing, ensure pendingPlan is cleared to avoid stuck UI
   useEffect(() => {
     if (!user) return;
     if ((user.billingStatus === "active" || user.billingStatus === "trialing") && user.pendingPlan) {
-      setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
+      setUser((prev: any) => (prev ? { ...prev, pendingPlan: null } : prev));
     }
-  }, [user?.billingStatus]);
+  }, [user?.billingStatus, user?.pendingPlan]);
 
   // Reset transient actionLoading when page regains visibility (e.g., returning from Stripe)
   useEffect(() => {
@@ -277,6 +329,10 @@ const SIMPLE_ROLE_DEFAULTS = {
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pageshow", onPageShow);
     };
+  }, []);
+
+  useEffect(() => {
+    loadAllData();
   }, []);
 
   const loadAllData = async () => {
