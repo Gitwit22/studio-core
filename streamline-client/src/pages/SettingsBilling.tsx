@@ -1588,7 +1588,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
                 <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ fontWeight: 700 }}>Roles & Presets</div>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>Roles & Presets</div>
+                      <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 2 }}>
+                        Click permission chips to toggle; changes auto-save.
+                      </div>
+                    </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <input
                         type="text"

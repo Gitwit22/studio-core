@@ -601,7 +601,11 @@ router.post("/guest", async (req, res) => {
     }
 
     const AccessToken = await getAccessTokenCtor();
-    const at = new AccessToken(apiKey, apiSecret, { identity });
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity,
+      // Use the provided display name for the LiveKit participant name
+      name: sanitizedDisplayName,
+    });
     at.addGrant({
       room: roomName,
       ...roleToGrant(resolved.result.grantRole),

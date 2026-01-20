@@ -25,6 +25,8 @@ export default function RoleOverlay({
   roomAccessToken: string;
   canMuteGuests?: boolean;
   advancedRolesEnabled?: boolean;
+  greenroomEnabled?: boolean;
+  overlaysEnabled?: boolean;
 }) {
   if (!open) return null;
 
@@ -115,6 +117,8 @@ export default function RoleOverlay({
               roomAccessToken={roomAccessToken}
               canMuteGuests={canMuteGuests}
               advancedRolesEnabled={advancedRolesEnabled}
+              greenroomEnabled={greenroomEnabled}
+              overlaysEnabled={overlaysEnabled}
             />
           )}
           {role === "moderator" && <ModeratorPanel roomName={roomName} canMuteGuests={canMuteGuests} />}
@@ -138,6 +142,8 @@ function HostPanel({
   roomAccessToken: string;
   canMuteGuests?: boolean;
   advancedRolesEnabled?: boolean;
+  greenroomEnabled?: boolean;
+  overlaysEnabled?: boolean;
 }) {
   const parts = useParticipants();
   const { localParticipant } = useLocalParticipant();
@@ -332,68 +338,72 @@ function HostPanel({
         </div>
       )}
 
-      <Section title="Greenroom (Coming Soon)">
-        <p style={{ fontSize: '0.875rem', opacity: 0.7, color: 'rgba(255, 255, 255, 0.7)', lineHeight: 1.5 }}>
-          Admit/Reject guests from a separate lobby room.
-        </p>
-      </Section>
+      {greenroomEnabled && (
+        <Section title="Greenroom (Coming Soon)">
+          <p style={{ fontSize: '0.875rem', opacity: 0.7, color: 'rgba(255, 255, 255, 0.7)', lineHeight: 1.5 }}>
+            Admit/Reject guests from a separate lobby room.
+          </p>
+        </Section>
+      )}
 
-      <Section title="Overlays (MVP)">
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button
-            style={{
-              borderRadius: '0.375rem',
-              border: '1px solid rgba(220, 38, 38, 0.5)',
-              padding: '0.375rem 0.75rem',
-              fontSize: '0.75rem',
-              background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
-              color: '#ffffff',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              fontWeight: '600'
-            }}
-            onMouseEnter={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'linear-gradient(135deg, #b91c1c, #991b1b)';
-              target.style.boxShadow = '0 0 10px rgba(220, 38, 38, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'linear-gradient(135deg, #dc2626, #b91c1c)';
-              target.style.boxShadow = 'none';
-            }}
-            onClick={() => alert("Show lower-third (stub)")}
-          >
-            Show Lower Third
-          </button>
-          <button
-            style={{
-              borderRadius: '0.375rem',
-              border: '1px solid rgba(75, 85, 99, 0.5)',
-              padding: '0.375rem 0.75rem',
-              fontSize: '0.75rem',
-              background: 'rgba(75, 85, 99, 0.2)',
-              color: '#ffffff',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              fontWeight: '600'
-            }}
-            onMouseEnter={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'rgba(75, 85, 99, 0.4)';
-              target.style.borderColor = 'rgba(75, 85, 99, 0.8)';
-            }}
-            onMouseLeave={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'rgba(75, 85, 99, 0.2)';
-              target.style.borderColor = 'rgba(75, 85, 99, 0.5)';
-            }}
-            onClick={() => alert("Hide lower-third (stub)")}
-          >
-            Hide
-          </button>
-        </div>
-      </Section>
+      {overlaysEnabled && (
+        <Section title="Overlays (MVP)">
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              style={{
+                borderRadius: '0.375rem',
+                border: '1px solid rgba(220, 38, 38, 0.5)',
+                padding: '0.375rem 0.75rem',
+                fontSize: '0.75rem',
+                background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                color: '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontWeight: '600'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #b91c1c, #991b1b)';
+                target.style.boxShadow = '0 0 10px rgba(220, 38, 38, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #dc2626, #b91c1c)';
+                target.style.boxShadow = 'none';
+              }}
+              onClick={() => alert("Show lower-third (stub)")}
+            >
+              Show Lower Third
+            </button>
+            <button
+              style={{
+                borderRadius: '0.375rem',
+                border: '1px solid rgba(75, 85, 99, 0.5)',
+                padding: '0.375rem 0.75rem',
+                fontSize: '0.75rem',
+                background: 'rgba(75, 85, 99, 0.2)',
+                color: '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontWeight: '600'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(75, 85, 99, 0.4)';
+                target.style.borderColor = 'rgba(75, 85, 99, 0.8)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(75, 85, 99, 0.2)';
+                target.style.borderColor = 'rgba(75, 85, 99, 0.5)';
+              }}
+              onClick={() => alert("Hide lower-third (stub)")}
+            >
+              Hide
+            </button>
+          </div>
+        </Section>
+      )}
     </>
   );
 }

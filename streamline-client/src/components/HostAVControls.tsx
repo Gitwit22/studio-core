@@ -55,17 +55,6 @@ export function HostAVControls({ guestStatus }: { guestStatus?: GuestStatus }) {
           Guest has opened the invite link and is on the join page.
         </div>
       )}
-      {guestStatus === "entered_room" && (
-        <div
-          style={{
-            fontSize: 12,
-            color: "#bbf7d0",
-            opacity: 0.95,
-          }}
-        >
-          Guest clicked Enter Room and is joining.
-        </div>
-      )}
     </div>
   );
 }

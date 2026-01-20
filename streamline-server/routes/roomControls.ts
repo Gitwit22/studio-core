@@ -3,6 +3,7 @@ import admin from "firebase-admin";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
 import { getLiveKitSdk } from "../lib/livekit";
+import { resolveRoomIdentity } from "../lib/roomIdentity";
 
 const router = Router();
 
@@ -282,7 +283,7 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
   const rolePresetId = parsePresetId(body.role);
   if (rolePresetId) {
     const preset = await loadPresetForUser(uid, rolePresetId);
-    const cleanedFromPreset: RoomControls = {
+    const presetPatch: RoomControls = {
       role: rolePresetId,
       canPublishAudio: pickBoolean(preset.canPublishAudio),
       canPublishVideo: pickBoolean(preset.canPublishVideo),
@@ -299,9 +300,20 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
 
     // Hard guarantees for moderator.
     if (rolePresetId === "moderator") {
-      cleanedFromPreset.canViewAnalytics = false;
-      cleanedFromPreset.canChangeLayoutScene = false;
+      presetPatch.canViewAnalytics = false;
+      presetPatch.canChangeLayoutScene = false;
     }
+
+    // Strip out any undefined booleans so Firestore never sees undefined fields.
+    const cleanedFromPreset: RoomControls = {};
+    (Object.keys(presetPatch) as Array<keyof RoomControls>).forEach((k) => {
+      const val = presetPatch[k];
+      if (k === "role") {
+        (cleanedFromPreset as any)[k] = val;
+      } else if (typeof val === "boolean") {
+        (cleanedFromPreset as any)[k] = val;
+      }
+    });
 
     const ref = controlsDocRef(roomId, identityDocId);
     await ref.set(
@@ -327,16 +339,33 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
         );
 
         const permission = mapPresetToLivekitPermission(rolePresetId);
+        const resolved = await resolveRoomIdentity({ roomId });
+        const livekitRoomName = resolved?.roomName || roomId;
 
-        await roomService.updateParticipant(roomId, rawIdentity, {
-          permission,
+        console.log("[roomControls] ROLE UPDATE", {
+          roomId,
+          livekitRoomName,
+          targetIdentity: rawIdentity,
+          newRoleId: rolePresetId,
         });
+
+        await roomService.updateParticipant(livekitRoomName, rawIdentity, { permission });
       } else {
         console.warn("[roomControls] LiveKit RoomServiceClient not configured; skipping permission update");
       }
     } catch (err) {
-      console.error("[roomControls] livekit role update failed", err);
-      return res.status(500).json({ error: "livekit_role_update_failed" });
+      const message = (err as any)?.message || String(err);
+      // If the room/participant no longer exists in LiveKit (404), treat as non-fatal.
+      if (message.includes("status 404")) {
+        console.warn("[roomControls] LiveKit role update 404 (room or participant missing)", {
+          roomId,
+          identity: rawIdentity,
+          rolePresetId,
+        });
+      } else {
+        console.error("[roomControls] livekit role update failed", err);
+        return res.status(500).json({ error: "livekit_role_update_failed" });
+      }
     }
 
     const merged = await readControlsMerged(roomId, identityDocId);

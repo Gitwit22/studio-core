@@ -470,6 +470,8 @@ type LiveKitShellProps = {
   roomAccessToken: string | null;
   canMuteGuests: boolean;
   effectivePermissionsMode: "simple" | "advanced";
+  dashboardGreenroomEnabled: boolean;
+  dashboardOverlaysEnabled: boolean;
   onDisconnected: () => void;
 };
 
@@ -489,6 +491,8 @@ function LiveKitShell({
   roomAccessToken,
   canMuteGuests,
   effectivePermissionsMode,
+  dashboardGreenroomEnabled,
+  dashboardOverlaysEnabled,
   onDisconnected,
 }: LiveKitShellProps) {
   const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
@@ -570,25 +574,6 @@ function LiveKitShell({
             Guest is viewing the join page.
           </div>
         )}
-        {guestStatus === "entered_room" && (
-          <div
-            style={{
-              position: "absolute",
-              top: 10,
-              left: "50%",
-              transform: "translateX(-50%)",
-              padding: "6px 12px",
-              borderRadius: 999,
-              background: "rgba(22,163,74,0.2)",
-              border: "1px solid rgba(34,197,94,0.8)",
-              fontSize: 12,
-              color: "#bbf7d0",
-              zIndex: 20,
-            }}
-          >
-            Guest clicked Enter Room.
-          </div>
-        )}
         <VideoConference />
         {watermarkEnabled && (
           <img
@@ -614,6 +599,8 @@ function LiveKitShell({
         roomAccessToken={roomAccessToken || ""}
         canMuteGuests={canMuteGuests}
         advancedRolesEnabled={effectivePermissionsMode === "advanced"}
+        greenroomEnabled={dashboardGreenroomEnabled}
+        overlaysEnabled={dashboardOverlaysEnabled}
       />
     </LiveKitRoom>
   );
@@ -834,6 +821,8 @@ export default function Room() {
   const [planHlsEnabled, setPlanHlsEnabled] = useState<boolean>(false);
   const [planHlsCustomizationEnabled, setPlanHlsCustomizationEnabled] = useState<boolean>(false);
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
+  const [dashboardGreenroomEnabled, setDashboardGreenroomEnabled] = useState<boolean>(false);
+  const [dashboardOverlaysEnabled, setDashboardOverlaysEnabled] = useState<boolean>(false);
   const [dualRecordingAllowed, setDualRecordingAllowed] = useState<boolean>(false);
   const [watermarkEnabled, setWatermarkEnabled] = useState<boolean>(false);
   const [maxGuestsAllowed, setMaxGuestsAllowed] = useState<number | null>(null);
@@ -1394,6 +1383,18 @@ export default function Room() {
             setPlatformHlsEnabled(platformFlags.hlsEnabled);
           } else {
             setPlatformHlsEnabled(true);
+          }
+
+          const dashboardGreenroomFlag =
+            (platformFlags as any).dashboardGreenroomEnabled ?? (platformFlags as any).greenroomDashboard;
+          if (typeof dashboardGreenroomFlag === "boolean") {
+            setDashboardGreenroomEnabled(dashboardGreenroomFlag);
+          }
+
+          const dashboardOverlaysFlag =
+            (platformFlags as any).dashboardOverlaysEnabled ?? (platformFlags as any).overlaysDashboard;
+          if (typeof dashboardOverlaysFlag === "boolean") {
+            setDashboardOverlaysEnabled(dashboardOverlaysFlag);
           }
           if (eff && typeof eff === "object") {
             const features = eff.features || {};
@@ -2652,6 +2653,8 @@ export default function Room() {
           roomAccessToken={roomAccessToken}
           canMuteGuests={canMuteGuests}
           effectivePermissionsMode={effectivePermissionsMode}
+          dashboardGreenroomEnabled={dashboardGreenroomEnabled}
+          dashboardOverlaysEnabled={dashboardOverlaysEnabled}
           onDisconnected={handleLeftRoom}
         />
       )}
