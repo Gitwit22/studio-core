@@ -1546,7 +1546,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           return next;
                         })
                       }
-                      style={{ ...S.input, color: "#000", background: "#fff" }}
+                      style={S.input}
                       placeholder="Co-Host"
                     />
                   </div>
@@ -1564,7 +1564,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           return next;
                         })
                       }
-                      style={{ ...S.input, color: "#000", background: "#fff" }}
+                      style={S.input}
                     />
                   </div>
                   <div style={{ display: "grid", gap: 6 }}>
@@ -1581,7 +1581,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           return next;
                         })
                       }
-                      style={{ ...S.input, color: "#000", background: "#fff" }}
+                      style={S.input}
                     />
                   </div>
                 </div>
@@ -1595,7 +1595,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         value={roleLabelInput}
                         onChange={(e) => setRoleLabelInput(e.target.value)}
                         placeholder="Add custom role"
-                        style={{ ...S.input, color: "#000", background: "#fff", width: 180 }}
+                        style={{ ...S.input, width: 180 }}
                       />
                       <button onClick={addRole} style={S.secondaryBtn}>Add</button>
                     </div>

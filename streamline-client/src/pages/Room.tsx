@@ -31,6 +31,21 @@ type RoomPermissions = {
   canInvite: boolean;
   canAnalytics: boolean;
 };
+type EffectiveControls = {
+  // Media/presence controls
+  canPublishAudio: boolean;
+  tileVisible: boolean;
+  canPublishVideo?: boolean;
+  canScreenShare?: boolean;
+
+  // In-room capability scopes
+  canMuteGuests?: boolean;
+  canInviteLinks?: boolean;
+  canManageDestinations?: boolean;
+  canStartStopStream?: boolean;
+  canStartStopRecording?: boolean;
+  rolePresetId?: "participant" | "cohost" | "moderator";
+};
 
 function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: boolean; onHome?: () => void }) {
   useEffect(() => {
@@ -438,6 +453,171 @@ function getOrCreateUid() {
   }
   return uid;
 }
+ 
+type LiveKitShellProps = {
+  token: string;
+  serverUrl: string;
+  isHost: boolean;
+  isViewer: boolean;
+  roomId: string | null;
+  subjectToControls: boolean;
+  controlsAllowPublishAudio: boolean;
+  controlsTileVisible: boolean;
+  watermarkEnabled: boolean;
+  dashboardOpen: boolean;
+  onCloseDashboard: () => void;
+  roomName: string;
+  roomAccessToken: string | null;
+  canMuteGuests: boolean;
+  effectivePermissionsMode: "simple" | "advanced";
+  onDisconnected: () => void;
+};
+
+function LiveKitShell({
+  token,
+  serverUrl,
+  isHost,
+  isViewer,
+  roomId,
+  subjectToControls,
+  controlsAllowPublishAudio,
+  controlsTileVisible,
+  watermarkEnabled,
+  dashboardOpen,
+  onCloseDashboard,
+  roomName,
+  roomAccessToken,
+  canMuteGuests,
+  effectivePermissionsMode,
+  onDisconnected,
+}: LiveKitShellProps) {
+  const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
+  const statusRef = useRef<GuestStatus>(null);
+
+  useEffect(() => {
+    if (!isHost || !roomId) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/invites/room-status?roomId=${encodeURIComponent(roomId)}`,
+          {
+            credentials: "include",
+          },
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        let nextStatus: GuestStatus = null;
+        if (data?.hasEnteredRoom) {
+          nextStatus = "entered_room";
+        } else if (data?.hasJoinPageView) {
+          nextStatus = "viewing_join";
+        }
+        if (!cancelled && statusRef.current !== nextStatus) {
+          statusRef.current = nextStatus;
+          setGuestStatus(nextStatus);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, 7000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [isHost, roomId]);
+
+  return (
+    <LiveKitRoom
+      data-lk-theme="default"
+      className={`sl-layout${isViewer ? " sl-viewer" : ""}${
+        subjectToControls && !controlsAllowPublishAudio ? " sl-controls-no-audio" : ""
+      }${subjectToControls && !controlsTileVisible ? " sl-controls-hide-self" : ""}`}
+      token={token}
+      serverUrl={serverUrl}
+      connect={true}
+      connectOptions={isViewer ? { autoSubscribe: true } : undefined}
+      onDisconnected={onDisconnected}
+      style={{
+        width: "100%",
+        height: "calc(100vh - 60px)",
+        position: "relative",
+      }}
+    >
+      <div style={{ width: "100%", height: "100%", position: "relative" }}>
+        {isHost && !isViewer && <HostAVControls guestStatus={guestStatus ?? undefined} />}
+        {guestStatus === "viewing_join" && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "6px 12px",
+              borderRadius: 999,
+              background: "rgba(15,23,42,0.9)",
+              border: "1px solid rgba(59,130,246,0.7)",
+              fontSize: 12,
+              color: "#bfdbfe",
+              zIndex: 20,
+            }}
+          >
+            Guest is viewing the join page.
+          </div>
+        )}
+        {guestStatus === "entered_room" && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "6px 12px",
+              borderRadius: 999,
+              background: "rgba(22,163,74,0.2)",
+              border: "1px solid rgba(34,197,94,0.8)",
+              fontSize: 12,
+              color: "#bbf7d0",
+              zIndex: 20,
+            }}
+          >
+            Guest clicked Enter Room.
+          </div>
+        )}
+        <VideoConference />
+        {watermarkEnabled && (
+          <img
+            src="/logo.png"
+            alt="StreamLine watermark"
+            className="sl-watermark"
+            style={{
+              top: "12px",
+              right: "12px",
+              width: "96px",
+              opacity: 0.8,
+            }}
+          />
+        )}
+      </div>
+
+      <RoleOverlay
+        open={dashboardOpen}
+        onClose={onCloseDashboard}
+        role={isHost ? "host" : "participant"}
+        roomName={roomName || ""}
+        roomId={roomId || ""}
+        roomAccessToken={roomAccessToken || ""}
+        canMuteGuests={canMuteGuests}
+        advancedRolesEnabled={effectivePermissionsMode === "advanced"}
+      />
+    </LiveKitRoom>
+  );
+}
 
 export default function Room() {
   useEffect(() => {
@@ -505,22 +685,6 @@ export default function Room() {
   const [needsReauth, setNeedsReauth] = useState(false);
   const roomTokenMintInFlightRef = useRef(false);
   const [controlsPanelOpen, setControlsPanelOpen] = useState(false);
-  type EffectiveControls = {
-    // Media/presence controls
-    canPublishAudio: boolean;
-    tileVisible: boolean;
-    canPublishVideo?: boolean;
-    canScreenShare?: boolean;
-
-    // In-room capability scopes
-    canMuteGuests?: boolean;
-    canInviteLinks?: boolean;
-    canManageDestinations?: boolean;
-    canStartStopStream?: boolean;
-    canStartStopRecording?: boolean;
-    rolePresetId?: "participant" | "cohost" | "moderator";
-  };
-
   const [effectiveControls, setEffectiveControls] = useState<EffectiveControls>(() => ({
     canPublishAudio: true,
     tileVisible: true,
@@ -2472,129 +2636,24 @@ export default function Room() {
       </div>
 
       {token && serverUrl && (
-        // Host-only poll of invite landing status for small status messages
-        (() => {
-          const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
-          const statusRef = useRef<GuestStatus>(null);
-
-          useEffect(() => {
-            if (!isHost || !roomId) return;
-
-            let cancelled = false;
-            const poll = async () => {
-              try {
-                const res = await fetch(`${API_BASE}/api/invites/room-status?roomId=${encodeURIComponent(roomId)}`, {
-                  credentials: "include",
-                });
-                if (!res.ok) return;
-                const data = await res.json();
-                let nextStatus: GuestStatus = null;
-                if (data?.hasEnteredRoom) {
-                  nextStatus = "entered_room";
-                } else if (data?.hasJoinPageView) {
-                  nextStatus = "viewing_join";
-                }
-                if (!cancelled && statusRef.current !== nextStatus) {
-                  statusRef.current = nextStatus;
-                  setGuestStatus(nextStatus);
-                }
-              } catch (e) {
-                // ignore
-              }
-            };
-
-            poll();
-            const id = setInterval(poll, 7000);
-            return () => {
-              cancelled = true;
-              clearInterval(id);
-            };
-          }, [isHost, roomId]);
-
-          return (
-            <LiveKitRoom
-              data-lk-theme="default"
-              className={`sl-layout${isViewer ? " sl-viewer" : ""}${subjectToControls && !controlsAllowPublishAudio ? " sl-controls-no-audio" : ""}${subjectToControls && !controlsTileVisible ? " sl-controls-hide-self" : ""}`}
-              token={token}
-              serverUrl={serverUrl}
-              connect={true}
-              connectOptions={isViewer ? { autoSubscribe: true } : undefined}
-              onDisconnected={handleLeftRoom}
-              style={{
-                width: "100%",
-                height: "calc(100vh - 60px)",
-                position: "relative",
-              }}
-            >
-              <div style={{ width: "100%", height: "100%", position: "relative" }}>
-                {isHost && !isViewer && <HostAVControls guestStatus={guestStatus ?? undefined} />}
-                {guestStatus === "viewing_join" && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 10,
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      background: "rgba(15,23,42,0.9)",
-                      border: "1px solid rgba(59,130,246,0.7)",
-                      fontSize: 12,
-                      color: "#bfdbfe",
-                      zIndex: 20,
-                    }}
-                  >
-                    Guest is viewing the join page.
-                  </div>
-                )}
-                {guestStatus === "entered_room" && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 10,
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      background: "rgba(22,163,74,0.2)",
-                      border: "1px solid rgba(34,197,94,0.8)",
-                      fontSize: 12,
-                      color: "#bbf7d0",
-                      zIndex: 20,
-                    }}
-                  >
-                    Guest clicked Enter Room.
-                  </div>
-                )}
-                <VideoConference />
-                {watermarkEnabled && (
-                  <img
-                    src="/logo.png"
-                    alt="StreamLine watermark"
-                    className="sl-watermark"
-                    style={{
-                      top: "12px",
-                      right: "12px",
-                      width: "96px",
-                      opacity: 0.8,
-                    }}
-                  />
-                )}
-              </div>
-
-              <RoleOverlay
-                open={dashboardOpen}
-                onClose={() => setDashboardOpen(false)}
-                role={isHost ? "host" : "participant"}
-                roomName={roomName || ''}
-                roomId={roomId || ""}
-                roomAccessToken={roomAccessToken || ""}
-                canMuteGuests={canMuteGuests}
-                advancedRolesEnabled={effectivePermissionsMode === "advanced"}
-              />
-            </LiveKitRoom>
-          );
-        })()
+        <LiveKitShell
+          token={token}
+          serverUrl={serverUrl}
+          isHost={isHost}
+          isViewer={isViewer}
+          roomId={roomId}
+          subjectToControls={subjectToControls}
+          controlsAllowPublishAudio={controlsAllowPublishAudio}
+          controlsTileVisible={controlsTileVisible}
+          watermarkEnabled={watermarkEnabled}
+          dashboardOpen={dashboardOpen}
+          onCloseDashboard={() => setDashboardOpen(false)}
+          roomName={roomName || ""}
+          roomAccessToken={roomAccessToken}
+          canMuteGuests={canMuteGuests}
+          effectivePermissionsMode={effectivePermissionsMode}
+          onDisconnected={handleLeftRoom}
+        />
       )}
 
       {inviteModalOpen && canInviteLinks && (
@@ -2707,6 +2766,23 @@ export default function Room() {
               Try closing this panel and reopening it. If it keeps happening, grab a screenshot of the browser console
               and send it to support.
             </div>
+            <button
+              type="button"
+              onClick={() => nav("/join", { replace: true })}
+              style={{
+                marginTop: "0.5rem",
+                padding: "0.4rem 0.9rem",
+                borderRadius: "999px",
+                border: "1px solid rgba(248,113,113,0.8)",
+                background: "rgba(127,29,29,0.7)",
+                color: "#fee2e2",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ⬅ Back to Join Room
+            </button>
           </div>
         }
       >
