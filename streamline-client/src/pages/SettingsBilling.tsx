@@ -1,7 +1,7 @@
 
 
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
@@ -272,11 +272,11 @@ export default function SettingsBilling() {
   const [serverDefaultRoleProfiles, setServerDefaultRoleProfiles] = useState<any[] | null>(null);
   const [roleProfiles, setRoleProfiles] = useState<any[]>([]);
   const [quickRoleIds, setQuickRoleIds] = useState<string[]>(["participant", "cohost", "moderator"]);
-  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [roleLabelInput, setRoleLabelInput] = useState("");
   const [roleMessage, setRoleMessage] = useState<string | null>(null);
-  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
-  const [editingDraft, setEditingDraft] = useState<any | null>(null);
+  const [roleSaveStatus, setRoleSaveStatus] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
+  const roleSaveTimersRef = useRef<Record<string, number | undefined>>({});
+  const cohostProfileSaveTimerRef = useRef<number | null>(null);
 
   const [mediaPrefsSaving, setMediaPrefsSaving] = useState(false);
   const [mediaPrefsMessage, setMediaPrefsMessage] = useState<string | null>(null);
@@ -711,14 +711,8 @@ export default function SettingsBilling() {
       }
       if (Array.isArray(data?.roles)) {
         setRoleProfiles(data.roles);
-        if (!selectedRoleId && data.roles.length) {
-          const preferred = data.roles.find((r: any) => r.id === "cohost" || r.slug === "cohost") || data.roles[0];
-          setSelectedRoleId(preferred?.id || null);
-        }
       }
       if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds);
-      const currentEdit = data?.roles?.find((r: any) => r.id === editingRoleId);
-      if (currentEdit) setEditingDraft({ ...(currentEdit.permissions || EMPTY_PERMISSIONS) });
     } catch (err) {
       console.warn("loadRoles failed", err);
     }
@@ -811,17 +805,6 @@ export default function SettingsBilling() {
     }
   };
 
-  useEffect(() => {
-    if (!editingRoleId) {
-      setEditingDraft(null);
-      return;
-    }
-    const role = roleProfiles.find((r) => r.id === editingRoleId);
-    if (role) {
-      setEditingDraft({ ...(role.permissions || EMPTY_PERMISSIONS) });
-    }
-  }, [editingRoleId, roleProfiles]);
-
   const deleteRole = async (roleId: string) => {
     try {
       await saveRoles(null, "DELETE", `roles/${roleId}`);
@@ -867,9 +850,6 @@ export default function SettingsBilling() {
       }
       setAdvancedPermissions((prev) => ({ ...prev, effectivePermissionsMode: mode }));
       if (mode === "simple") {
-        setEditingRoleId(null);
-        setEditingDraft(null);
-        setSelectedRoleId(null);
         const cohostFromServer = serverDefaultRoleProfiles?.find((p) => p.id === "cohost");
         const cohostPerms = cohostFromServer?.permissions ?? SIMPLE_ROLE_DEFAULTS.cohost.permissions;
         const cohostLabel = cohostFromServer?.name ?? SIMPLE_ROLE_DEFAULTS.cohost.label;
@@ -928,6 +908,52 @@ export default function SettingsBilling() {
   const showToast = (msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast(null), 3000);
+  };
+
+  const scheduleCohostProfileSave = (nextProfile: any) => {
+    if (cohostProfileSaveTimerRef.current) {
+      window.clearTimeout(cohostProfileSaveTimerRef.current);
+    }
+    setCohostSaving(true);
+    setCohostMessage("Saving…");
+    cohostProfileSaveTimerRef.current = window.setTimeout(async () => {
+      try {
+        await saveCohostProfileWith(nextProfile);
+        setCohostSaving(false);
+        setCohostMessage("Saved");
+        window.setTimeout(() => setCohostMessage(null), 1800);
+      } catch (err: any) {
+        setCohostSaving(false);
+        setCohostMessage("Couldn't save — retry");
+        setError(err?.message || "Failed to save co-host defaults");
+      }
+    }, 700);
+  };
+
+  const scheduleRoleSave = (roleId: string, permissions: any, label: string) => {
+    if (roleSaveTimersRef.current[roleId]) {
+      window.clearTimeout(roleSaveTimersRef.current[roleId]!);
+    }
+    setRoleSaveStatus((prev) => ({ ...prev, [roleId]: "saving" }));
+    roleSaveTimersRef.current[roleId] = window.setTimeout(async () => {
+      try {
+        await updateRolePermissions(roleId, permissions, label);
+        setRoleSaveStatus((prev) => ({ ...prev, [roleId]: "saved" }));
+        window.setTimeout(() => {
+          setRoleSaveStatus((prev) => ({ ...prev, [roleId]: "idle" }));
+        }, 1500);
+
+        if (roleId === "cohost") {
+          setCohostProfile((prev) => {
+            const next = { ...prev, ...permissions };
+            scheduleCohostProfileSave(next);
+            return next;
+          });
+        }
+      } catch {
+        setRoleSaveStatus((prev) => ({ ...prev, [roleId]: "error" }));
+      }
+    }, 500);
   };
 
   const handleEmergencyDownload = async () => {
@@ -1504,47 +1530,22 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             ) : (
               <>
                 <p style={{ color: "#94a3b8", marginBottom: 14 }}>
-                  Define what a Co-Host can do. Links will carry this profile.
+                  Advanced roles control what different guests can do. Tweak permissions on each card; changes autosave.
                 </p>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                  {PERMISSION_ITEMS.map((item) => (
-                    <label key={item.key} style={{
-                      border: "1px solid #1f2937",
-                      borderRadius: 10,
-                      padding: "10px 12px",
-                      display: "grid",
-                      gap: 6,
-                      background: "rgba(255,255,255,0.02)",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <input
-                          type="checkbox"
-                          checked={(cohostProfile as any)[item.key]}
-                          onChange={(e) => setCohostProfile((prev) => ({ ...prev, [item.key]: e.target.checked }))}
-                        />
-                        <span style={{ fontWeight: 600 }}>{item.label}</span>
-                      </div>
-                      <span style={{ color: "#9ca3af", fontSize: 12 }}>
-                        {item.label === "Start/Stop Stream" ? "Allow controlling broadcast egress." :
-                         item.label === "Start/Stop Recording" ? "Control recording sessions." :
-                         item.label === "Manage Destinations" ? "Edit stream keys and platforms." :
-                         item.label === "Mute/Kick Guests" ? "Basic moderation tools." :
-                         item.label === "Change Layout/Scene" ? "Switch layouts or scenes." :
-                         item.label === "Share Screen" ? "Allow co-host screen share." :
-                         item.label === "Invite/Generate Links" ? "Create guest invites from the room." : "Read-only analytics/usage view."}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-
-                <div style={{ marginTop: 16, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+                <div style={{ marginTop: 4, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
                   <div style={{ display: "grid", gap: 6 }}>
                     <label style={{ fontWeight: 700 }}>Role Display Name</label>
                     <input
                       type="text"
                       value={cohostProfile.label}
-                      onChange={(e) => setCohostProfile((prev) => ({ ...prev, label: e.target.value }))}
+                      onChange={(e) =>
+                        setCohostProfile((prev) => {
+                          const next = { ...prev, label: e.target.value };
+                          scheduleCohostProfileSave(next);
+                          return next;
+                        })
+                      }
                       style={{ ...S.input, color: "#000", background: "#fff" }}
                       placeholder="Co-Host"
                     />
@@ -1556,7 +1557,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       min={1}
                       max={168}
                       value={cohostProfile.expiresHours}
-                      onChange={(e) => setCohostProfile((prev) => ({ ...prev, expiresHours: Number(e.target.value) }))}
+                      onChange={(e) =>
+                        setCohostProfile((prev) => {
+                          const next = { ...prev, expiresHours: Number(e.target.value) };
+                          scheduleCohostProfileSave(next);
+                          return next;
+                        })
+                      }
                       style={{ ...S.input, color: "#000", background: "#fff" }}
                     />
                   </div>
@@ -1567,7 +1574,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       min={1}
                       max={20}
                       value={cohostProfile.maxUses}
-                      onChange={(e) => setCohostProfile((prev) => ({ ...prev, maxUses: Number(e.target.value) }))}
+                      onChange={(e) =>
+                        setCohostProfile((prev) => {
+                          const next = { ...prev, maxUses: Number(e.target.value) };
+                          scheduleCohostProfileSave(next);
+                          return next;
+                        })
+                      }
                       style={{ ...S.input, color: "#000", background: "#fff" }}
                     />
                   </div>
@@ -1596,8 +1609,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     {roleProfiles.map((role) => {
                       const isViewer = role.id === "viewer" || role.slug === "viewer";
                       const isSystem = !!role.system || isViewer;
-                      const isEditing = editingRoleId === role.id;
-                      const isSelected = selectedRoleId === role.id;
+                      const status = roleSaveStatus[role.id] ?? "idle";
                       return (
                         <div
                           key={role.id}
@@ -1606,8 +1618,8 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             gap: 8,
                             padding: "10px 12px",
                             borderRadius: 8,
-                            border: isEditing ? "1px solid #6366f1" : isSelected ? "1px solid rgba(34,197,94,0.5)" : "1px solid #1f2937",
-                            background: isEditing ? "rgba(99,102,241,0.08)" : isSelected ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.02)",
+                            border: "1px solid #1f2937",
+                            background: "rgba(255,255,255,0.02)",
                           }}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1624,112 +1636,41 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                               }}>
                                 {isSystem ? "System" : "Custom"}
                               </span>
-                              {isEditing && (
-                                <span style={{ color: "#6366f1", fontSize: 12, fontWeight: 700 }}>Editing</span>
+                              {status === "saving" && (
+                                <span style={{ color: "#6366f1", fontSize: 12, fontWeight: 700 }}>Saving…</span>
                               )}
-                              {!isEditing && isSelected && (
-                                <span style={{ color: "#16a34a", fontSize: 12, fontWeight: 700 }}>Applied</span>
+                              {status === "saved" && (
+                                <span style={{ color: "#16a34a", fontSize: 12, fontWeight: 700 }}>Saved</span>
+                              )}
+                              {status === "error" && (
+                                <span style={{ color: "#f97316", fontSize: 12, fontWeight: 700 }}>Error — retry</span>
                               )}
                             </div>
                             <div style={{ display: "flex", gap: 8 }}>
-                              <button
-                                onClick={() => {
-                                  const next = {
-                                    ...cohostProfile,
-                                    ...role.permissions,
-                                  };
-                                  setCohostProfile(next);
-                                  saveCohostProfileWith(next);
-                                  setSelectedRoleId(role.id);
-                                }}
-                                style={{
-                                  ...S.primaryBtn,
-                                  ...(isSelected ? { background: "#16a34a", border: "1px solid #16a34a" } : {}),
-                                  opacity: cohostSaving ? 0.7 : 1,
-                                }}
-                                disabled={cohostSaving}
-                              >
-                                {isSelected ? "Applied" : "Apply"}
-                              </button>
-                              {isEditing ? (
-                                <button
-                                  onClick={async () => {
-                                    const roleRef = roleProfiles.find((r) => r.id === role.id);
-                                    if (roleRef && editingDraft) {
-                                      await updateRolePermissions(roleRef.id, editingDraft, roleRef.label);
-                                      if (selectedRoleId === roleRef.id) {
-                                        const next = { ...cohostProfile, ...editingDraft };
-                                        setCohostProfile(next);
-                                        await saveCohostProfileWith(next);
-                                      }
-                                      setEditingRoleId(null);
-                                      setEditingDraft(null);
-                                    }
-                                  }}
-                                  style={S.primaryBtn}
-                                >
-                                  Save
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    if (isViewer) return;
-                                    setEditingRoleId(role.id);
-                                    setEditingDraft({ ...(role.permissions || EMPTY_PERMISSIONS) });
-                                  }}
-                                  style={S.secondaryBtn}
-                                  disabled={isViewer}
-                                >
-                                  Edit
-                                </button>
-                              )}
-                              {isEditing && (
-                                <button
-                                  onClick={() => {
-                                    setEditingRoleId(null);
-                                    setEditingDraft(null);
-                                  }}
-                                  style={S.secondaryBtn}
-                                >
-                                  Cancel
-                                </button>
-                              )}
                               {!isSystem && (
                                 <button onClick={() => deleteRole(role.id)} style={S.dangerGhostBtn}>Delete</button>
                               )}
                             </div>
                           </div>
-
-                          {isEditing ? (
-                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                              {PERMISSION_ITEMS.map((item) => {
-                                const enabled = !!editingDraft?.[item.key];
-                                return (
-                                  <button
-                                    key={item.key}
-                                    onClick={() => setEditingDraft((prev: any) => ({ ...(prev || {}), [item.key]: !enabled }))}
-                                    style={{
-                                      padding: "6px 10px",
-                                      borderRadius: 999,
-                                      border: enabled ? "1px solid rgba(34,197,94,0.6)" : "1px solid #1f2937",
-                                      background: enabled ? "rgba(34,197,94,0.14)" : "rgba(255,255,255,0.04)",
-                                      color: enabled ? "#22c55e" : "#94a3b8",
-                                      fontSize: 12,
-                                      fontWeight: 700,
-                                      cursor: "pointer",
-                                    }}
-                                  >
-                                    {item.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                              {PERMISSION_ITEMS.map((item) => {
-                                const enabled = !!role.permissions?.[item.key];
-                                return (
-                                  <span key={item.key} style={{
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {PERMISSION_ITEMS.map((item) => {
+                              const enabled = !!role.permissions?.[item.key];
+                              const canEdit = !isViewer;
+                              return (
+                                <button
+                                  key={item.key}
+                                  type="button"
+                                  disabled={!canEdit}
+                                  onClick={() => {
+                                    if (!canEdit) return;
+                                    const base = role.permissions || EMPTY_PERMISSIONS;
+                                    const nextPermissions = { ...base, [item.key]: !enabled };
+                                    setRoleProfiles((prev) =>
+                                      prev.map((r) => (r.id === role.id ? { ...r, permissions: nextPermissions } : r))
+                                    );
+                                    scheduleRoleSave(role.id, nextPermissions, role.label);
+                                  }}
+                                  style={{
                                     padding: "3px 7px",
                                     borderRadius: 999,
                                     border: `1px solid ${enabled ? "rgba(34,197,94,0.5)" : "#1f2937"}`,
@@ -1737,13 +1678,15 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                                     color: enabled ? "#22c55e" : "#94a3b8",
                                     fontSize: 11,
                                     fontWeight: 600,
-                                  }}>
-                                    {item.label}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
+                                    cursor: canEdit ? "pointer" : "default",
+                                    opacity: canEdit ? 1 : 0.6,
+                                  }}
+                                >
+                                  {item.label}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       );
                     })}

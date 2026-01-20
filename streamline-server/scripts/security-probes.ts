@@ -303,7 +303,7 @@ async function hlsPost(path: string, hostJwt: string, roomAccessToken: string): 
   const headers: HeadersInit = {
     "Content-Type": "application/json",
     Cookie: `token=${hostJwt}`,
-    "x-room-access-token": roomAccessToken,
+    Authorization: `Bearer ${roomAccessToken}`,
   };
   const res = await fetch(url, { method: "POST", headers });
   const text = await res.text();

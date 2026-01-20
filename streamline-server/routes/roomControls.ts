@@ -174,7 +174,8 @@ function isHostOrCohost(role?: string): boolean {
 }
 
 // Host/cohost updates controls for the whole room.
-// PATCH /api/rooms/:roomId/controls?t=<roomAccessToken>
+// PATCH /api/rooms/:roomId/controls
+// Auth: Firebase session cookie + Authorization: Bearer <roomAccessToken>
 router.patch("/:roomId/controls", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
   const roomId = String(req.params.roomId || "").trim();
   if (!roomId) return res.status(400).json({ error: "roomId_required" });
@@ -232,7 +233,8 @@ router.patch("/:roomId/controls", requireAuth as any, requireRoomAccessToken as 
 });
 
 // Host/cohost updates controls for a specific participant identity (override doc).
-// PATCH /api/rooms/:roomId/controls/:identity?t=<roomAccessToken>
+// PATCH /api/rooms/:roomId/controls/:identity
+// Auth: Firebase session cookie + Authorization: Bearer <roomAccessToken>
 router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
   const roomId = String(req.params.roomId || "").trim();
   if (!roomId) return res.status(400).json({ error: "roomId_required" });
@@ -250,6 +252,49 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
 
   const identityDocId = normalizeControlsDocId(req.params.identity);
   const body = (req.body || {}) as any;
+
+  // If a role is provided, treat this as a role change and
+  // apply the corresponding preset defaults, resetting overrides.
+  const rolePresetId = parsePresetId(body.role);
+  if (rolePresetId) {
+    const preset = await loadPresetForUser(uid, rolePresetId);
+    const cleanedFromPreset: RoomControls = {
+      role: rolePresetId,
+      canPublishAudio: pickBoolean(preset.canPublishAudio),
+      canPublishVideo: pickBoolean(preset.canPublishVideo),
+      canScreenShare: pickBoolean(preset.canScreenShare),
+      tileVisible: pickBoolean(preset.tileVisible),
+      canMuteGuests: pickBoolean(preset.canMuteGuests),
+      canInviteLinks: pickBoolean(preset.canInviteLinks),
+      canManageDestinations: pickBoolean(preset.canManageDestinations),
+      canStartStopStream: pickBoolean(preset.canStartStopStream),
+      canStartStopRecording: pickBoolean(preset.canStartStopRecording),
+      canViewAnalytics: pickBoolean(preset.canViewAnalytics),
+      canChangeLayoutScene: pickBoolean(preset.canChangeLayoutScene),
+    };
+
+    // Hard guarantees for moderator.
+    if (rolePresetId === "moderator") {
+      cleanedFromPreset.canViewAnalytics = false;
+      cleanedFromPreset.canChangeLayoutScene = false;
+    }
+
+    const ref = controlsDocRef(roomId, identityDocId);
+    await ref.set(
+      {
+        ...cleanedFromPreset,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedByUid: uid,
+        appliedPresetId: rolePresetId,
+      },
+      { merge: true },
+    );
+
+    const merged = await readControlsMerged(roomId, identityDocId);
+    return res.json({ ok: true, controls: merged });
+  }
+
+  // Otherwise, behave as a classic partial controls patch.
   const patch: RoomControls = {
     canPublishAudio: pickBoolean(body.canPublishAudio),
     canPublishVideo: pickBoolean(body.canPublishVideo),
@@ -289,7 +334,8 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
 });
 
 // Apply a saved preset to a participant identity.
-// POST /api/rooms/:roomId/controls/:identity/apply-preset?t=<roomAccessToken>
+// POST /api/rooms/:roomId/controls/:identity/apply-preset
+// Auth: Firebase session cookie + Authorization: Bearer <roomAccessToken>
 router.post("/:roomId/controls/:identity/apply-preset", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
   const roomId = String(req.params.roomId || "").trim();
   if (!roomId) return res.status(400).json({ error: "roomId_required" });
@@ -347,7 +393,8 @@ router.post("/:roomId/controls/:identity/apply-preset", requireAuth as any, requ
 });
 
 // SSE stream of current controls.
-// GET /api/rooms/:roomId/controls/stream?t=<roomAccessToken>
+// GET /api/rooms/:roomId/controls/stream
+// Auth: Authorization: Bearer <roomAccessToken>
 router.get("/:roomId/controls/stream", requireRoomAccessToken as any, async (req: any, res) => {
   const roomId = String(req.params.roomId || "").trim();
   if (!roomId) return res.status(400).json({ error: "roomId_required" });

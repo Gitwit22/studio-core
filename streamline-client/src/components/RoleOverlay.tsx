@@ -43,7 +43,7 @@ export default function RoleOverlay({
         border: '1px solid rgba(220, 38, 38, 0.5)',
         backdropFilter: 'blur(20px)',
         boxShadow: '0 20px 60px rgba(220, 38, 38, 0.2)',
-        width: '320px',
+        width: '420px',
         maxHeight: '50vh',
         display: 'flex',
         flexDirection: 'column',
@@ -143,6 +143,10 @@ function HostPanel({
   const { localParticipant } = useLocalParticipant();
   const [muteLock, setMuteLock] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [roleToast, setRoleToast] = React.useState<string | null>(null);
+  const roleToastTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [roleOverrides, setRoleOverrides] = React.useState<Record<string, RolePresetId>>({});
+  const [roleStatus, setRoleStatus] = React.useState<Record<string, "saving" | "saved">>({});
 
   // Load initial muteLock state for this room
   React.useEffect(() => {
@@ -195,6 +199,52 @@ function HostPanel({
       alert("Failed to update mute lock");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleChangeRole = async (identity: string, presetId: RolePresetId) => {
+    if (!roomId || !roomAccessToken) return;
+
+    setRoleOverrides((prev) => ({ ...prev, [identity]: presetId }));
+    setRoleStatus((prev) => ({ ...prev, [identity]: "saving" }));
+
+    try {
+      await apiSetRole(roomId, roomAccessToken, identity, presetId);
+      setRoleStatus((prev) => ({ ...prev, [identity]: "saved" }));
+
+      // Show a small global toast inside the dashboard for extra feedback.
+      setRoleToast("Role updated");
+      if (roleToastTimeoutRef.current) {
+        clearTimeout(roleToastTimeoutRef.current);
+      }
+      roleToastTimeoutRef.current = setTimeout(() => {
+        setRoleToast(null);
+        roleToastTimeoutRef.current = null;
+      }, 2000);
+
+      // Clear the "Saved" label after a short delay; underlying metadata will reflect the change.
+      setTimeout(() => {
+        setRoleStatus((prev) => {
+          const next = { ...prev };
+          if (next[identity] === "saved") {
+            delete next[identity];
+          }
+          return next;
+        });
+      }, 1500);
+    } catch (e: any) {
+      console.error("role change failed", e);
+      alert(e?.message || "Role change failed");
+      setRoleOverrides((prev) => {
+        const next = { ...prev };
+        delete next[identity];
+        return next;
+      });
+      setRoleStatus((prev) => {
+        const next = { ...prev };
+        delete next[identity];
+        return next;
+      });
     }
   };
   return (
@@ -253,11 +303,9 @@ function HostPanel({
           localIdentity={localParticipant?.identity || null}
           canMuteGuests={canMuteGuests}
           canChangeRoles={!!advancedRolesEnabled && !!roomId && !!roomAccessToken}
-          onChangeRole={
-            roomId && roomAccessToken
-              ? (identity, presetId) => apiApplyPreset(roomId, roomAccessToken, identity, presetId)
-              : undefined
-          }
+          onChangeRole={handleChangeRole}
+          roleOverrides={roleOverrides}
+          roleStatus={roleStatus}
         />
 
         {muteLock && (
@@ -266,6 +314,23 @@ function HostPanel({
           </p>
         )}
       </Section>
+
+      {roleToast && (
+        <div
+          style={{
+            marginTop: '0.75rem',
+            fontSize: '0.75rem',
+            borderRadius: '9999px',
+            padding: '0.35rem 0.75rem',
+            alignSelf: 'flex-start',
+            background: 'rgba(22, 163, 74, 0.12)',
+            border: '1px solid rgba(22, 163, 74, 0.6)',
+            color: '#bbf7d0',
+          }}
+        >
+          {roleToast}
+        </div>
+      )}
 
       <Section title="Greenroom (Coming Soon)">
         <p style={{ fontSize: '0.875rem', opacity: 0.7, color: 'rgba(255, 255, 255, 0.7)', lineHeight: 1.5 }}>
@@ -415,8 +480,10 @@ function ParticipantList({
   muteLock,
   localIdentity,
   canMuteGuests,
-   canChangeRoles,
-   onChangeRole,
+  canChangeRoles,
+  onChangeRole,
+  roleOverrides,
+  roleStatus,
 }: {
   participants: ReturnType<typeof useParticipants>;
   canModerate?: boolean;
@@ -425,8 +492,10 @@ function ParticipantList({
   muteLock?: boolean;
   localIdentity?: string | null;
   canMuteGuests?: boolean;
-   canChangeRoles?: boolean;
-   onChangeRole?: (identity: string, presetId: RolePresetId) => void;
+  canChangeRoles?: boolean;
+  onChangeRole?: (identity: string, presetId: RolePresetId) => void;
+  roleOverrides?: Record<string, RolePresetId>;
+  roleStatus?: Record<string, "saving" | "saved">;
 }) {
   if (!participants?.length) {
     return <p style={{ fontSize: '0.875rem', opacity: 0.7, color: 'rgba(255, 255, 255, 0.7)' }}>No one here yet.</p>;
@@ -448,20 +517,20 @@ function ParticipantList({
             gap: '0.5rem'
           }}
         >
-          <div style={{ fontSize: '0.875rem' }}>
+          <div style={{ fontSize: '0.875rem', flex: 1 }}>
             <div style={{ fontWeight: '600', color: '#ffffff' }}>{p.name || p.identity}</div>
             <div style={{ opacity: 0.6, fontSize: '0.75rem', wordBreak: 'break-all', color: 'rgba(255, 255, 255, 0.6)' }}>
               {p.identity}
             </div>
-            {canChangeRoles && (p as any)?.metadata?.rolePresetId && (
-              <div style={{ marginTop: '0.15rem', fontSize: '0.7rem', color: 'rgba(129, 140, 248, 0.9)' }}>
-                Role: {((p as any).metadata.rolePresetId === 'cohost'
-                  ? 'Co-host'
-                  : (p as any).metadata.rolePresetId === 'moderator'
-                  ? 'Moderator'
-                  : 'Participant')}
-              </div>
-            )}
+            {(() => {
+              const effectiveRole = (roleOverrides && roleOverrides[p.identity]) || (p as any)?.metadata?.rolePresetId;
+              if (!effectiveRole) return null;
+              return (
+                <div style={{ marginTop: '0.15rem', fontSize: '0.7rem', color: 'rgba(129, 140, 248, 0.9)' }}>
+                  Role: {effectiveRole === 'cohost' ? 'Co-host' : effectiveRole === 'moderator' ? 'Moderator' : 'Participant'}
+                </div>
+              );
+            })()}
           </div>
           {canModerate && (
             <div
@@ -474,43 +543,33 @@ function ParticipantList({
               }}
             >
               {canChangeRoles && onChangeRole && localIdentity && p.identity !== localIdentity && (
-                <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '0.15rem' }}>
-                  {(["participant", "cohost", "moderator"] as RolePresetId[]).map((roleId) => {
-                    const active = (p as any)?.metadata?.rolePresetId === roleId;
-                    return (
-                    <button
-                      key={roleId}
-                      style={{
-                        borderRadius: '9999px',
-                        border: active ? '1px solid rgba(251, 191, 36, 0.9)' : '1px solid rgba(148, 163, 184, 0.6)',
-                        padding: '0.15rem 0.45rem',
-                        fontSize: '0.65rem',
-                        background: active ? 'rgba(250, 204, 21, 0.15)' : 'rgba(31, 41, 55, 0.9)',
-                        color: active ? '#facc15' : '#e5e7eb',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease',
-                        fontWeight: active ? 600 : 500,
-                      }}
-                      onMouseEnter={(e) => {
-                        const target = e.target as HTMLButtonElement;
-                        if (!active) {
-                          target.style.background = 'rgba(55, 65, 81, 0.9)';
-                          target.style.borderColor = 'rgba(148, 163, 184, 0.9)';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        const target = e.target as HTMLButtonElement;
-                        if (!active) {
-                          target.style.background = 'rgba(31, 41, 55, 0.9)';
-                          target.style.borderColor = 'rgba(148, 163, 184, 0.6)';
-                        }
-                      }}
-                      onClick={() => onChangeRole(p.identity, roleId)}
-                    >
-                      {roleId === 'participant' ? 'Participant' : roleId === 'cohost' ? 'Co-host' : 'Moderator'}
-                    </button>
-                    );
-                  })}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.15rem' }}>
+                  <select
+                    value={
+                      ((roleOverrides && roleOverrides[p.identity]) || (p as any)?.metadata?.rolePresetId || 'participant') as RolePresetId
+                    }
+                    onChange={(e) => onChangeRole(p.identity, e.target.value as RolePresetId)}
+                    style={{
+                      borderRadius: '9999px',
+                      border: '1px solid rgba(148, 163, 184, 0.75)',
+                      padding: '0.2rem 0.7rem',
+                      fontSize: '0.7rem',
+                      background: 'radial-gradient(circle at top left, rgba(30, 64, 175, 0.5), rgba(15, 23, 42, 0.95))',
+                      color: '#e5e7eb',
+                      cursor: 'pointer',
+                      minWidth: '7.5rem',
+                    }}
+                  >
+                    <option value="participant">Participant</option>
+                    <option value="cohost">Co-host</option>
+                    <option value="moderator">Moderator</option>
+                  </select>
+                  {roleStatus && roleStatus[p.identity] === 'saving' && (
+                    <span style={{ fontSize: '0.65rem', color: 'rgba(148, 163, 184, 0.9)' }}>Saving…</span>
+                  )}
+                  {roleStatus && roleStatus[p.identity] === 'saved' && (
+                    <span style={{ fontSize: '0.65rem', color: 'rgba(34, 197, 94, 0.9)' }}>Saved</span>
+                  )}
                 </div>
               )}
               <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
@@ -669,34 +728,28 @@ async function apiSetMuteLock(
   return { muteLock: !!data.muteLock };
 }
 
-async function apiApplyPreset(
+async function apiSetRole(
   roomId: string,
   roomAccessToken: string,
   identity: string,
-  presetId: RolePresetId,
+  role: RolePresetId,
 ) {
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/controls/${encodeURIComponent(identity)}/apply-preset`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-room-access-token": roomAccessToken,
-        },
-        credentials: "include",
-        body: JSON.stringify({ presetId }),
+  const res = await fetch(
+    `${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/controls/${encodeURIComponent(identity)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${roomAccessToken}`,
       },
-    );
+      credentials: "include",
+      body: JSON.stringify({ role }),
+    },
+  );
 
-    const data = await res.json().catch(() => null);
-    if (!res.ok || (data && data.error)) {
-      console.error("apply-preset failed", { status: res.status, data });
-      alert((data && data.error) || `Role change failed (HTTP ${res.status})`);
-      return;
-    }
-  } catch (e) {
-    console.error("apply-preset failed (network)", e);
-    alert("Role change failed (network error)");
+  const data = await res.json().catch(() => null);
+  if (!res.ok || (data && data.error)) {
+    console.error("set-role failed", { status: res.status, data });
+    throw new Error((data && data.error) || `Role change failed (HTTP ${res.status})`);
   }
 }

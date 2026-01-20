@@ -603,7 +603,7 @@ export default function Room() {
         `/api/rooms/${encodeURIComponent(roomId)}/controls`,
         {
           method: "PATCH",
-          headers: { "x-room-access-token": roomAccessToken },
+          headers: { Authorization: `Bearer ${roomAccessToken}` },
           body: JSON.stringify(patch),
         },
         { allowNonOk: true },
