@@ -16,6 +16,8 @@ export default function RoleOverlay({
   roomAccessToken,
   canMuteGuests,
   advancedRolesEnabled,
+  greenroomEnabled,
+  overlaysEnabled,
 }: {
   open: boolean;
   onClose: () => void;
@@ -136,6 +138,8 @@ function HostPanel({
   roomAccessToken,
   canMuteGuests,
   advancedRolesEnabled,
+  greenroomEnabled,
+  overlaysEnabled,
 }: {
   roomName: string;
   roomId: string;
