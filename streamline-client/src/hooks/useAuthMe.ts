@@ -36,7 +36,8 @@ async function fetchAuthMeFresh(): Promise<AuthUser | null> {
 
   inFlight = (async () => {
     try {
-      const res = await apiFetch("/api/account/me");
+      // Use the canonical auth endpoint which exposes plan + billing + admin flags
+      const res = await apiFetch("/api/auth/me");
       const data = (await res.json()) as AuthUser;
       cachedUser = data;
       return data;
