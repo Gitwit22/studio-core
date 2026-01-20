@@ -4,6 +4,7 @@ import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useSearchParams,} from "react-router-dom";
+import { apiFetch, clearAuthStorage } from "../lib/api";
 
 type SavedEmbedSummary = {
   embedId: string;
@@ -1162,8 +1163,23 @@ export default function Join() {
         {/* LOGOUT BUTTON */}
         <div style={{ textAlign: "center" }}>
           <button
-            onClick={() => {
-              localStorage.removeItem("sl_displayName");
+            onClick={async () => {
+              try {
+                await apiFetch("/api/auth/logout", { method: "POST" }, { allowNonOk: true });
+              } catch {
+                // ignore network errors; we'll still clear client state
+              }
+              try {
+                clearAuthStorage();
+                localStorage.removeItem("sl_displayName");
+                localStorage.removeItem("sl_created_rooms");
+                localStorage.removeItem("sl_current_role");
+                localStorage.removeItem("sl_invite_token");
+                localStorage.removeItem("sl_guestId");
+                localStorage.removeItem("sl_last_room");
+              } catch {
+                // best-effort only
+              }
               window.location.href = "/";
             }}
             style={{
