@@ -640,6 +640,20 @@ function LiveKitShell({
             }}
           />
         )}
+        {dashboardOpen && !isViewer && (
+          <RoleOverlay
+            open={dashboardOpen}
+            onClose={onCloseDashboard}
+            role={dashboardRole}
+            roomName={roomName}
+            roomId={roomId || ""}
+            roomAccessToken={roomAccessToken || ""}
+            canMuteGuests={canMuteGuests}
+            advancedRolesEnabled={effectivePermissionsMode === "advanced"}
+            greenroomEnabled={dashboardGreenroomEnabled}
+            overlaysEnabled={dashboardOverlaysEnabled}
+          />
+        )}
       </div>
     </LiveKitRoom>
   );
@@ -837,6 +851,7 @@ function RoomPage() {
   const [viewerCount] = useState<number>(0);
   const [elapsedTime, setElapsedTime] = useState(0);
   const streamStartTimeRef = useRef<number | null>(null);
+  const streamEgressRef = useRef<string | null>(null);
   const lastElapsedRef = useRef(0);
   const usagePostedRef = useRef(false);
   const [didStreamThisSession, setDidStreamThisSession] = useState(false);

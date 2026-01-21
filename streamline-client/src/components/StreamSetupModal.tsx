@@ -636,13 +636,20 @@ export default function StreamSetupModalV2({
   ].filter(Boolean) as Array<{ label: string; value: string; ok: boolean }>;
 
   const selectedPlatforms = platformOrder.filter((p) => platformState[p].selected);
+  const customHasManual = platformState.custom.manualFields.some((f) => f.value.trim());
+  const anyPlatformSelection = selectedPlatforms.length > 0 || customHasManual;
   const missingKeySelected = selectedPlatforms.some((p) => {
     const main = mainByPlatform[p];
     const mainUsable = !!(main && main.hasKey && main.mode !== "connected");
     const manual = platformState[p].manualFields.find((f) => f.value.trim());
     return !(mainUsable || manual);
   });
-  const startDisabled = streamIsBusy || streamDisallowed || selectedPlatforms.length === 0 || missingKeySelected || warmupActive;
+  const startDisabled =
+    streamIsBusy ||
+    streamDisallowed ||
+    !anyPlatformSelection ||
+    missingKeySelected ||
+    warmupActive;
 
   const handleStartHls = async () => {
     if (!hlsRoomReady || !effectiveHlsRoomId) {
@@ -713,12 +720,13 @@ export default function StreamSetupModalV2({
     platformOrder.forEach((platform) => {
       const state = platformState[platform];
       nextPlatformState[platform] = { ...state, error: null, info: state.info };
-      if (!state.selected) return;
-      hasSelection = true;
 
       const main = mainByPlatform[platform];
       const mainUsable = !!(main && main.hasKey && main.mode !== "connected");
       const manualField = state.manualFields.find((f) => f.value.trim());
+      const treatedAsSelected = state.selected || (platform === "custom" && !!manualField);
+      if (!treatedAsSelected) return;
+      hasSelection = true;
       let sessionKey = manualField?.value.trim() || "";
       const customBase = manualField?.base?.trim();
       const hasKey = mainUsable || !!sessionKey;
@@ -787,7 +795,7 @@ export default function StreamSetupModalV2({
     setPlatformState(nextPlatformState);
 
     if (!hasSelection) {
-      setStartError("Select at least one stream destination.");
+      setStartError("Add at least one stream destination or custom RTMP key.");
       return;
     }
 
