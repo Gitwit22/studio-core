@@ -63,6 +63,7 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
   const features = (data.features || {}) as any;
   const limits = (data.limits || {}) as any;
   const caps = (data.caps || {}) as any;
+  const idLower = String(id).toLowerCase();
 
   const rawMonthlyMinutes =
     limits.monthlyMinutesIncluded ??
@@ -91,7 +92,7 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
 
   const maxGuests = toNumber(limits.maxGuests ?? data.maxGuests, 0);
 
-  const rtmpDestinationsMax = toNumber(
+  let rtmpDestinationsMax = toNumber(
     limits.rtmpDestinationsMax ??
       limits.maxDestinations ??
       limits.rtmpDestinations ??
@@ -116,6 +117,33 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
     limits.transcodeMinutes ?? data.transcodeMinutes,
     0
   );
+
+  // Canonical multistream feature flag. Honor both the modern
+  // `features.multistream` key and the legacy/admin
+  // `features.rtmpMultistream` + top-level `multistreamEnabled`.
+  const multistreamFeature = toBool(
+    features.multistream ??
+      (features as any).rtmpMultistream ??
+      (data as any).multistreamEnabled ??
+      (data as any).multistream
+  );
+
+  // Built-in defaults for known plans when the destination cap
+  // has not been explicitly configured in the plan document.
+  // This keeps Pro/Internal Unlimited plans from appearing to
+  // have Stream Destinations disabled when only the feature
+  // toggle has been enabled.
+  if (rtmpDestinationsMax === 0) {
+    if (idLower === "pro") {
+      // Social multistream (YouTube, Facebook, Twitch)
+      rtmpDestinationsMax = 3;
+    } else if (idLower === "internal_unlimited") {
+      // Generous default for internal testing; can be overridden
+      // by explicitly setting limits.rtmpDestinationsMax or
+      // limits.maxDestinations on the plan document.
+      rtmpDestinationsMax = 10;
+    }
+  }
 
   const maxHoursPerMonth = (() => {
     const explicit = limits.maxHoursPerMonth ?? data.maxHoursPerMonth;
@@ -161,7 +189,6 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
   );
 
   if (!hasExplicitHlsFlag) {
-    const idLower = String(id).toLowerCase();
     // Default matrix:
     // - Free/Starter-style tiers: HLS OFF
     // - Paid/enterprise/internal tiers: HLS ON
@@ -221,7 +248,10 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
     features: {
       recording: toBool(features.recording ?? data.recordingEnabled),
       rtmp: toBool(features.rtmp ?? data.rtmpEnabled),
-      multistream: toBool(features.multistream ?? data.multistreamEnabled),
+      // Multistream is enabled when either the explicit feature flag
+      // is set or the numeric destination cap allows more than one
+      // RTMP destination.
+      multistream: multistreamFeature || rtmpDestinationsMax > 1,
       advancedPermissions: toBool(features.advancedPermissions ?? data.advancedPermissionsEnabled),
       hlsEnabled: canHls,
       hlsCustomizationEnabled,

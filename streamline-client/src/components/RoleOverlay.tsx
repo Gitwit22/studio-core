@@ -749,21 +749,23 @@ async function apiSetRole(
   role: RolePresetId,
 ) {
   const res = await fetch(
-    `${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/controls/${encodeURIComponent(identity)}`,
+    `${API_BASE}/api/rooms/${encodeURIComponent(
+      roomId,
+    )}/participants/${encodeURIComponent(identity)}/permissions`,
     {
-      method: "PATCH",
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${roomAccessToken}`,
       },
       credentials: "include",
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ roleId: role }),
     },
   );
 
   const data = await res.json().catch(() => null);
-  if (!res.ok || (data && data.error)) {
+  if (!res.ok || (data && (data as any).error)) {
     console.error("set-role failed", { status: res.status, data });
-    throw new Error((data && data.error) || `Role change failed (HTTP ${res.status})`);
+    throw new Error(((data as any) && (data as any).error) || `Role change failed (HTTP ${res.status})`);
   }
 }

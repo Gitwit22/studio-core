@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
 import { getLiveKitSdk } from "../lib/livekit";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
+import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 
 const router = Router();
 
@@ -409,6 +410,211 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
 
   const merged = await readControlsMerged(roomId, identityDocId);
   return res.json({ ok: true, controls: merged });
+});
+
+// Apply a role's permissions to a LiveKit participant immediately.
+// POST /api/rooms/:roomId/participants/:identity/permissions
+// Body: { roleId: "moderator" | "cohost" | "participant" }
+// Auth: Firebase session cookie + Authorization: Bearer <roomAccessToken>
+router.post("/:roomId/participants/:identity/permissions", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
+  const roomId = String(req.params.roomId || "").trim();
+  if (!roomId) return res.status(400).json({ error: "roomId_required" });
+
+  const access = (req as any).roomAccess as RoomAccessClaims | undefined;
+  if (!access || !access.roomId) return res.status(401).json({ error: "room_token_required" });
+  if (access.roomId !== roomId) return res.status(403).json({ error: "room_mismatch" });
+
+  const uid = (req as any).user?.uid as string | undefined;
+  if (!uid) return res.status(401).json({ error: "Unauthorized" });
+
+  // Authorize via room-level permissions so that only hosts/admins/moderators
+  // with canModerate can change participant permissions.
+  try {
+    await assertRoomPerm(req as any, roomId, "canModerate");
+  } catch (err: any) {
+    if (err instanceof RoomPermissionError) {
+      return res.status(err.status).json({ error: err.code });
+    }
+    console.error("[roomControls] apply-permissions assertRoomPerm failed", err);
+    return res.status(500).json({ error: "permission_check_failed" });
+  }
+
+  const rawIdentity = String(req.params.identity || "").trim();
+  if (!rawIdentity) return res.status(400).json({ error: "identity_required" });
+
+  const body = (req.body || {}) as any;
+  const presetId = parsePresetId(body.roleId || body.role || body.presetId);
+  if (!presetId) {
+    return res.status(400).json({ error: "roleId_invalid" });
+  }
+
+  const identityDocId = normalizeControlsDocId(rawIdentity);
+
+  try {
+    const preset = await loadPresetForUser(uid, presetId);
+    const presetPatch: RoomControls = {
+      role: presetId,
+      canPublishAudio: pickBoolean(preset.canPublishAudio),
+      canPublishVideo: pickBoolean(preset.canPublishVideo),
+      canScreenShare: pickBoolean(preset.canScreenShare),
+      tileVisible: pickBoolean(preset.tileVisible),
+      canMuteGuests: pickBoolean(preset.canMuteGuests),
+      canInviteLinks: pickBoolean(preset.canInviteLinks),
+      canManageDestinations: pickBoolean(preset.canManageDestinations),
+      canStartStopStream: pickBoolean(preset.canStartStopStream),
+      canStartStopRecording: pickBoolean(preset.canStartStopRecording),
+      canViewAnalytics: pickBoolean(preset.canViewAnalytics),
+      canChangeLayoutScene: pickBoolean(preset.canChangeLayoutScene),
+    };
+
+    // Hard guarantees for moderator.
+    if (presetId === "moderator") {
+      presetPatch.canViewAnalytics = false;
+      presetPatch.canChangeLayoutScene = false;
+    }
+
+    const cleanedFromPreset: RoomControls = {};
+    (Object.keys(presetPatch) as Array<keyof RoomControls>).forEach((k) => {
+      const val = presetPatch[k];
+      if (k === "role") {
+        (cleanedFromPreset as any)[k] = val;
+      } else if (typeof val === "boolean") {
+        (cleanedFromPreset as any)[k] = val;
+      }
+    });
+
+    const ref = controlsDocRef(roomId, identityDocId);
+    await ref.set(
+      {
+        ...cleanedFromPreset,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedByUid: uid,
+        appliedPresetId: presetId,
+      },
+      { merge: true },
+    );
+
+    // Push to LiveKit in real time so the participant's in-room
+    // capabilities update immediately.
+    let appliedPermission: any | null = null;
+    let livekitApplied = false;
+    let livekitReason: string | null = null;
+    try {
+      const sdk = await getLiveKitSdk();
+      const RoomServiceClient = (sdk as any).RoomServiceClient as any;
+
+      if (RoomServiceClient && process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
+        const roomService = new RoomServiceClient(
+          process.env.LIVEKIT_URL,
+          process.env.LIVEKIT_API_KEY,
+          process.env.LIVEKIT_API_SECRET,
+        );
+
+        const permission = mapPresetToLivekitPermission(presetId);
+        const resolved = await resolveRoomIdentity({ roomId });
+        const livekitRoomName = resolved?.roomName || roomId;
+
+        console.log("[roomControls] APPLY PERMISSIONS", {
+          roomId,
+          livekitRoomName,
+          targetIdentity: rawIdentity,
+          roleId: presetId,
+        });
+
+        await roomService.updateParticipant(livekitRoomName, rawIdentity, { permission });
+        appliedPermission = permission;
+        livekitApplied = true;
+        livekitReason = null;
+
+        const lostScreenShare =
+          Array.isArray((permission as any).canPublishSources) &&
+          !(permission as any).canPublishSources.includes(TrackSource.SCREEN_SHARE);
+
+        if (lostScreenShare) {
+          try {
+            const listResp = await (roomService as any).listParticipants(livekitRoomName);
+            const participants: any[] = Array.isArray((listResp as any)?.participants)
+              ? (listResp as any).participants
+              : Array.isArray(listResp)
+              ? (listResp as any)
+              : [];
+
+            const target = participants.find((p) => p && p.identity === rawIdentity);
+            if (!target) {
+              console.warn("[roomControls] demote-cleanup: participant not found in listParticipants", {
+                roomId,
+                livekitRoomName,
+                identity: rawIdentity,
+              });
+            } else {
+              const tracks: any[] = Array.isArray((target as any).tracks) ? (target as any).tracks : [];
+              for (const track of tracks) {
+                try {
+                  if (!track) continue;
+                  const source = (track as any).source;
+                  const sid = (track as any).sid || (track as any).trackSid;
+                  if (source === TrackSource.SCREEN_SHARE && sid) {
+                    console.log("[roomControls] demote-cleanup: muting screen_share track", {
+                      roomId,
+                      livekitRoomName,
+                      identity: rawIdentity,
+                      trackSid: sid,
+                    });
+                    await (roomService as any).mutePublishedTrack(livekitRoomName, rawIdentity, sid, true);
+                  }
+                } catch (muteErr) {
+                  console.warn("[roomControls] demote-cleanup: mutePublishedTrack failed", {
+                    roomId,
+                    livekitRoomName,
+                    identity: rawIdentity,
+                    error: muteErr,
+                  });
+                }
+              }
+            }
+          } catch (cleanupErr) {
+            console.warn("[roomControls] demote-cleanup: listParticipants failed", {
+              roomId,
+              identity: rawIdentity,
+              error: cleanupErr,
+            });
+          }
+        }
+      } else {
+        console.warn("[roomControls] LiveKit RoomServiceClient not configured; skipping permission update");
+        livekitApplied = false;
+        livekitReason = "not_configured";
+      }
+    } catch (err) {
+      const message = (err as any)?.message || String(err);
+      if (message.includes("status 404")) {
+        console.warn("[roomControls] LiveKit apply-permissions 404 (room or participant missing)", {
+          roomId,
+          identity: rawIdentity,
+          roleId: presetId,
+        });
+        livekitApplied = false;
+        livekitReason = "not_found";
+      } else {
+        console.error("[roomControls] livekit apply-permissions failed", err);
+        return res.status(500).json({ error: "livekit_role_update_failed" });
+      }
+    }
+
+    const merged = await readControlsMerged(roomId, identityDocId);
+    return res.json({
+      ok: true,
+      appliedPermission,
+      applied: appliedPermission,
+      livekitApplied,
+      livekitReason,
+      controls: merged,
+      roleId: presetId,
+    });
+  } catch (err: any) {
+    console.error("[roomControls] apply-permissions error", err);
+    return res.status(500).json({ error: "failed_to_apply_permissions" });
+  }
 });
 
 // Apply a saved preset to a participant identity.

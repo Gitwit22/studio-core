@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiStartRecording, apiStopRecording, apiFetch, getAuthToken, clearAuthStorage } from "../lib/api";
-import { LiveKitRoom, VideoConference } from "@livekit/components-react";
+import { LiveKitRoom, VideoConference, useLocalParticipant, useLocalParticipantPermissions } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
 import StreamSetupModalV2 from "../components/StreamSetupModal";
@@ -463,6 +463,7 @@ type LiveKitShellProps = {
   subjectToControls: boolean;
   controlsAllowPublishAudio: boolean;
   controlsTileVisible: boolean;
+  controlsAllowScreenShare: boolean;
   watermarkEnabled: boolean;
   dashboardOpen: boolean;
   onCloseDashboard: () => void;
@@ -473,6 +474,7 @@ type LiveKitShellProps = {
   dashboardGreenroomEnabled: boolean;
   dashboardOverlaysEnabled: boolean;
   dashboardRole: "host" | "moderator" | "participant";
+  debugPermissions: boolean;
   onDisconnected: () => void;
 };
 
@@ -485,6 +487,7 @@ function LiveKitShell({
   subjectToControls,
   controlsAllowPublishAudio,
   controlsTileVisible,
+   controlsAllowScreenShare,
   watermarkEnabled,
   dashboardOpen,
   onCloseDashboard,
@@ -495,10 +498,13 @@ function LiveKitShell({
   dashboardGreenroomEnabled,
   dashboardOverlaysEnabled,
   dashboardRole,
+  debugPermissions,
   onDisconnected,
 }: LiveKitShellProps) {
   const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
   const statusRef = useRef<GuestStatus>(null);
+  const { localParticipant } = useLocalParticipant();
+  const localPermissions: any = useLocalParticipantPermissions();
 
   useEffect(() => {
     if (!isHost || !roomId) return;
@@ -543,7 +549,9 @@ function LiveKitShell({
       data-lk-theme="default"
       className={`sl-layout${isViewer ? " sl-viewer" : ""}${
         subjectToControls && !controlsAllowPublishAudio ? " sl-controls-no-audio" : ""
-      }${subjectToControls && !controlsTileVisible ? " sl-controls-hide-self" : ""}`}
+      }${subjectToControls && !controlsTileVisible ? " sl-controls-hide-self" : ""}${
+        subjectToControls && !controlsAllowScreenShare ? " sl-controls-no-screen" : ""
+      }`}
       token={token}
       serverUrl={serverUrl}
       connect={true}
@@ -585,6 +593,39 @@ function LiveKitShell({
           </>
         )}
         <VideoConference />
+        {debugPermissions && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 12,
+              left: 12,
+              padding: "8px 10px",
+              borderRadius: 8,
+              background: "rgba(15,23,42,0.9)",
+              border: "1px solid rgba(148,163,184,0.6)",
+              color: "#e5e7eb",
+              fontSize: 11,
+              maxWidth: 260,
+              zIndex: 40,
+            }}
+         >
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Permissions Debug</div>
+            <div>identity: {(localParticipant as any)?.identity || "(none)"}</div>
+            <div>
+              canPublish: {String(localPermissions?.canPublish ?? "n/a")} · canPublishData: {String(localPermissions?.canPublishData ?? "n/a")}
+            </div>
+            <div>
+              sources: {
+                Array.isArray(localPermissions?.canPublishSources)
+                  ? (localPermissions.canPublishSources as any[]).map(String).join(", ") || "(none)"
+                  : "n/a"
+              }
+            </div>
+            <div>
+              effectiveRole: {((localParticipant as any)?.identityMetadata as any)?.rolePresetId || dashboardRole}
+            </div>
+          </div>
+        )}
         {watermarkEnabled && (
           <img
             src="/logo.png"
@@ -725,6 +766,7 @@ export default function Room() {
   const subjectToControls = !isHost && !isViewer;
   const controlsAllowPublishAudio = !subjectToControls || effectiveControls.canPublishAudio !== false;
   const controlsTileVisible = !subjectToControls || effectiveControls.tileVisible !== false;
+  const controlsAllowScreenShare = !subjectToControls || effectiveControls.canScreenShare !== false;
 
   const openReauthInNewTab = () => {
     try {
@@ -2656,6 +2698,7 @@ export default function Room() {
           subjectToControls={subjectToControls}
           controlsAllowPublishAudio={controlsAllowPublishAudio}
           controlsTileVisible={controlsTileVisible}
+          controlsAllowScreenShare={controlsAllowScreenShare}
           watermarkEnabled={watermarkEnabled}
           dashboardOpen={dashboardOpen}
           onCloseDashboard={() => setDashboardOpen(false)}
@@ -2674,6 +2717,7 @@ export default function Room() {
               ? "moderator"
               : "participant"
           }
+          debugPermissions={import.meta.env.DEV && (searchParams.get("debug") === "1")}
           onDisconnected={handleLeftRoom}
         />
       )}
@@ -2912,6 +2956,15 @@ export default function Room() {
           display: none !important;
         }
         ` : ""}
+
+        /* Realtime room controls: disable screen share for roles
+           whose effective controls do not allow it. */
+        .sl-layout.sl-controls-no-screen .lk-control-bar .lk-button-screen-share,
+        .sl-layout.sl-controls-no-screen .lk-control-bar [data-lk-button="toggle_screen_share"],
+        .sl-layout.sl-controls-no-screen .lk-control-bar button[aria-label*="Screen"] {
+          opacity: 0.6 !important;
+          filter: grayscale(1);
+        }
 
         /* Realtime room controls (Phase 1): disable guest mic UI */
         .sl-layout.sl-controls-no-audio .lk-control-bar .lk-button-microphone,

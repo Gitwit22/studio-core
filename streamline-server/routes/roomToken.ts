@@ -10,6 +10,8 @@ import { SIMPLE_ROLE_DEFAULTS } from "./account";
 import { intersectPermissionsWithEntitlements } from "../lib/rolePermissions";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
+import { roleToParticipantPermission } from "../lib/livekitPermissions";
+import { TrackSource } from "livekit-server-sdk";
 import jwt from "jsonwebtoken";
 
 // Dynamic import for AccessToken constructor
@@ -51,21 +53,54 @@ type ViewerInvite = {
 };
 
 function roleToGrant(role: GrantRole) {
+  // Start from the shared ParticipantPermission mapper so join-time
+  // grants and realtime updateParticipant calls stay aligned for
+  // publish/subscribe/data capabilities.
+  const permissionRole: "viewer" | "participant" | "moderator" | "cohost" =
+    role === "viewer"
+      ? "viewer"
+      : role === "moderator"
+        ? "moderator"
+        : role === "cohost" || role === "host"
+          ? "cohost"
+          : "participant";
+
+  const participantPerm = roleToParticipantPermission(permissionRole);
+
+  let canPublishSources: TrackSource[] = [];
+  if (permissionRole === "viewer") {
+    canPublishSources = [];
+  } else if (permissionRole === "cohost") {
+    canPublishSources = [
+      TrackSource.MICROPHONE,
+      TrackSource.CAMERA,
+      TrackSource.SCREEN_SHARE,
+    ];
+  } else {
+    // participant + moderator
+    canPublishSources = [TrackSource.MICROPHONE, TrackSource.CAMERA];
+  }
+
   const base = {
     roomJoin: true,
-    canSubscribe: true,
-  } as any;
+    canSubscribe: participantPerm.canSubscribe,
+    canPublish: participantPerm.canPublish,
+    canPublishData: participantPerm.canPublishData,
+    canPublishSources,
+  } as const;
 
   if (role === "viewer") {
-    return { ...base, canPublish: false, canPublishData: false, canUpdateMetadata: false, roomAdmin: false };
+    return { ...base, roomAdmin: false, canUpdateMetadata: false };
   }
 
   if (role === "moderator") {
-    return { ...base, canPublish: true, canPublishData: true, canUpdateMetadata: true, roomAdmin: true };
+    // Moderator retains token-level admin powers; these flags belong
+    // on the VideoGrant, not on ParticipantPermission/updateParticipant.
+    return { ...base, roomAdmin: true, canUpdateMetadata: true };
   }
 
   // participant/host/cohost
-  return { ...base, canPublish: true, canPublishData: true, canUpdateMetadata: false, roomAdmin: false };
+  return { ...base, roomAdmin: false, canUpdateMetadata: false };
 }
 
 async function getAdvancedPermissionsFlag() {
