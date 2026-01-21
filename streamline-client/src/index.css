@@ -161,14 +161,6 @@ button:focus-visible {
   .sl-layout [data-lk-layout] [data-lk-source="screen_share"] {
     grid-column: span 2;
   }
-
-  /* Ensure screen-share video always fills its tile on mobile */
-  .sl-layout [data-lk-layout] [data-lk-source="screen_share"] video {
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: contain !important;
-    background-color: #000000;
-  }
 }
 
 /* Landscape: more columns if you want */
@@ -185,26 +177,6 @@ button:focus-visible {
   }
 }
 
-/* Desktop: make sure screen-share tiles show content and a badge */
+/* Desktop: allow LiveKit to control screen-share tile visuals; no extra overlay */
 @media (min-width: 769px) {
-  .sl-layout [data-lk-source="screen_share"] video {
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: contain !important;
-    background-color: #000000;
-  }
-
-  .sl-layout [data-lk-source="screen_share"]::after {
-    content: "Screen sharing";
-    position: absolute;
-    bottom: 8px;
-    left: 8px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.85);
-    color: #e5e7eb;
-    font-size: 11px;
-    letter-spacing: 0.02em;
-    pointer-events: none;
-  }
 }

@@ -75,6 +75,7 @@ function roleToGrant(role: GrantRole) {
       TrackSource.MICROPHONE,
       TrackSource.CAMERA,
       TrackSource.SCREEN_SHARE,
+      TrackSource.SCREEN_SHARE_AUDIO,
     ];
   } else {
     // participant + moderator

@@ -55,6 +55,7 @@ export function roleToParticipantPermission(
         TrackSource.MICROPHONE,
         TrackSource.CAMERA,
         TrackSource.SCREEN_SHARE,
+        TrackSource.SCREEN_SHARE_AUDIO,
       ];
       break;
     }

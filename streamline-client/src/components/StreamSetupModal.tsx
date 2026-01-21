@@ -6,12 +6,13 @@ import { APP_BASE } from "../lib/appBase";
 import { getHlsStatus, startHls, stopHls } from "../services/hls";
 import CollapsibleSection from "./CollapsibleSection";
 
-type PlatformKey = "youtube" | "facebook" | "twitch" | "custom";
+type PlatformKey = "youtube" | "facebook" | "twitch" | "instagram" | "custom";
 
 const PLATFORM_CONFIG: Record<PlatformKey, { label: string; accent: string }> = {
   youtube: { label: "YouTube", accent: "#ef4444" },
   facebook: { label: "Facebook", accent: "#3b82f6" },
   twitch: { label: "Twitch", accent: "#a855f7" },
+  instagram: { label: "Instagram", accent: "#f97316" },
   custom: { label: "Custom (RTMP)", accent: "#14b8a6" },
 };
 
@@ -37,6 +38,7 @@ const buildDefaultPlatformState = (): Record<PlatformKey, PlatformState> => ({
   youtube: { selected: false, manualFields: [], error: null, info: null },
   facebook: { selected: false, manualFields: [], error: null, info: null },
   twitch: { selected: false, manualFields: [], error: null, info: null },
+  instagram: { selected: false, manualFields: [], error: null, info: null },
   custom: { selected: false, manualFields: [], error: null, info: null },
 });
 
@@ -62,12 +64,22 @@ function getDefaultRtmpBase(p: PlatformKey): string {
       return "rtmps://live-api-s.facebook.com:443/rtmp/";
     case "twitch":
       return "rtmp://live.twitch.tv/app";
+    case "instagram":
+      return "";
     case "custom":
       return "";
     default:
       return "";
   }
 }
+
+type SessionRtmpDestination = {
+  type: "instagram";
+  protocol: "rtmp";
+  rtmpUrl: string;
+  streamKey: string;
+  label?: string;
+};
 
 interface Props {
   open: boolean;
@@ -88,6 +100,7 @@ interface Props {
     enabledTargetIds?: string[];
     sessionKeys?: Record<string, { rtmpUrlBase?: string; streamKey?: string }>;
     destinations?: EffectiveDestinationPayload[];
+    extraDestinations?: SessionRtmpDestination[];
     presetId?: string;
   }) => Promise<void>;
   onStopStream: () => Promise<void>;
@@ -157,6 +170,7 @@ export default function StreamSetupModalV2({
     youtube: false,
     facebook: false,
     twitch: false,
+    instagram: false,
     custom: false,
   });
   const [warmupLogged, setWarmupLogged] = useState(false);
@@ -175,7 +189,7 @@ export default function StreamSetupModalV2({
   const [boundEmbedError, setBoundEmbedError] = useState<string | null>(null);
   const [hlsAdvancedOpen, setHlsAdvancedOpen] = useState(false);
 
-  const platformOrder: PlatformKey[] = ["youtube", "facebook", "twitch", "custom"];
+  const platformOrder: PlatformKey[] = ["youtube", "facebook", "twitch", "instagram", "custom"];
 
   const [layout, setLayout] = useState<"speaker" | "grid">(defaultLayout);
   const [recordingMode, setRecordingMode] = useState<"cloud" | "dual">(defaultRecordingMode);
@@ -521,7 +535,7 @@ export default function StreamSetupModalV2({
       });
       setStartError(null);
       setWarmupStartedAt(null);
-      setWarmupReadyMap({ youtube: false, facebook: false, twitch: false, custom: false });
+      setWarmupReadyMap({ youtube: false, facebook: false, twitch: false, instagram: false, custom: false });
       setWarmupLogged(false);
     }
   }, [open]);
@@ -637,6 +651,9 @@ export default function StreamSetupModalV2({
 
   const selectedPlatforms = platformOrder.filter((p) => platformState[p].selected);
   const customHasManual = platformState.custom.manualFields.some((f) => f.value.trim());
+  const instagramState = platformState.instagram;
+  const instagramHasManual = instagramState.manualFields.some((f) => (f.value && f.value.trim()) || (f.base && f.base.trim()));
+  const instagramSelected = instagramState.selected || instagramHasManual;
   const anyPlatformSelection = selectedPlatforms.length > 0 || customHasManual;
   const missingKeySelected = selectedPlatforms.some((p) => {
     const main = mainByPlatform[p];
@@ -705,6 +722,7 @@ export default function StreamSetupModalV2({
       return;
     }
     const sessionKeyPayload: Record<string, { rtmpUrlBase?: string; streamKey?: string }> = {};
+    const instagramDestinations: SessionRtmpDestination[] = [];
     const enabledTargetIds: string[] = [];
     const effectiveDestinations: EffectiveDestinationPayload[] = [];
     let youtubeKey: string | undefined;
@@ -720,6 +738,44 @@ export default function StreamSetupModalV2({
     platformOrder.forEach((platform) => {
       const state = platformState[platform];
       nextPlatformState[platform] = { ...state, error: null, info: state.info };
+
+      if (platform === "instagram") {
+        const main = mainByPlatform[platform];
+        const hasMain = !!main;
+        const firstManual = state.manualFields.find((f) => (f.value && f.value.trim()) || (f.base && f.base.trim()));
+        const treatedAsSelected = state.selected || !!firstManual;
+        if (!treatedAsSelected) return;
+        hasSelection = true;
+
+        const rtmpUrl = (firstManual?.base || "").trim();
+        const streamKey = (firstManual?.value || "").trim();
+
+        if (!rtmpUrl || !streamKey) {
+          nextPlatformState[platform].error = !rtmpUrl ? "RTMP URL required." : "Stream key required.";
+          hasErrors = true;
+          return;
+        }
+
+        const hasValidScheme = rtmpUrl.startsWith("rtmp://") || rtmpUrl.startsWith("rtmps://");
+        if (!hasValidScheme) {
+          nextPlatformState[platform].error = "RTMP URL must start with rtmp:// or rtmps://.";
+          hasErrors = true;
+          return;
+        }
+
+        instagramDestinations.push({
+          type: "instagram",
+          protocol: "rtmp",
+          rtmpUrl,
+          streamKey,
+          label: "Instagram",
+        });
+
+        if (!hasMain && !state.manualFields.length) {
+          nextPlatformState[platform].info = "Session-only. Not saved for reuse.";
+        }
+        return;
+      }
 
       const main = mainByPlatform[platform];
       const mainUsable = !!(main && main.hasKey && main.mode !== "connected");
@@ -810,7 +866,7 @@ export default function StreamSetupModalV2({
       setWarmupActive(true);
       setWarmupStartedAt(now);
       setWarmupPlatforms(platformsNow);
-      setWarmupReadyMap({ youtube: false, facebook: false, twitch: false, custom: false });
+      setWarmupReadyMap({ youtube: false, facebook: false, twitch: false, instagram: false, custom: false });
       setWarmupLogged(false);
 
       await onStartStream({
@@ -820,6 +876,7 @@ export default function StreamSetupModalV2({
         enabledTargetIds: enabledTargetIds.length ? enabledTargetIds : undefined,
         sessionKeys: Object.keys(sessionKeyPayload).length ? sessionKeyPayload : undefined,
         destinations: effectiveDestinations,
+        extraDestinations: instagramDestinations.length ? instagramDestinations : undefined,
         presetId: selectedPresetId,
       });
     } catch (err: any) {
@@ -1004,7 +1061,12 @@ export default function StreamSetupModalV2({
                 const disabled = streamIsLive || streamIsBusy || streamDisallowed;
                 const connectedMode = false;
                 const mainPreview = main?.hasKey && main?.keyPreview ? ` • ••••${main.keyPreview}` : main?.hasKey ? "" : "";
-                const manualLabel = platform === "custom" ? "Custom stream key (RTMP)" : "Session stream key (this stream only)";
+                const manualLabel =
+                  platform === "custom"
+                    ? "Custom stream key (RTMP)"
+                    : platform === "instagram"
+                    ? "Stream key from Instagram Live Producer"
+                    : "Session stream key (this stream only)";
                 const manualMissing = state.selected && !mainHasKey && !state.manualFields.find((f) => f.value.trim());
                 const manualLimitReached = state.manualFields.length >= MAX_MANUAL_FIELDS;
 
@@ -1071,7 +1133,9 @@ export default function StreamSetupModalV2({
                     </div>
                     {!main && (
                       <div style={{ fontSize: '0.75rem', color: 'rgba(226,232,240,0.7)' }}>
-                        No saved destination yet. Add one in Settings → Stream Destinations to reuse across sessions.
+                        {platform === 'instagram'
+                          ? 'Instagram Live is session-only. Enter RTMP URL + Stream Key from Instagram Live Producer each time you go live.'
+                          : 'No saved destination yet. Add one in Settings → Stream Destinations to reuse across sessions.'}
                       </div>
                     )}
 
@@ -1120,7 +1184,7 @@ export default function StreamSetupModalV2({
                                 ✕
                               </button>
                             </div>
-                            {platform === 'custom' && (
+                            {(platform === 'custom' || platform === 'instagram') && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                 <input
                                   type="text"
@@ -1129,7 +1193,7 @@ export default function StreamSetupModalV2({
                                     const nextFields = state.manualFields.map((f) => (f.id === field.id ? { ...f, base: e.target.value } : f));
                                     updatePlatformState(platform, { manualFields: nextFields, error: null });
                                   }}
-                                  placeholder="Optional RTMP ingest URL (base)"
+                                  placeholder={platform === 'instagram' ? 'RTMP URL from Instagram Live Producer' : 'Optional RTMP ingest URL (base)'}
                                   disabled={streamIsLive || streamDisallowed}
                                   style={{
                                     flex: 1,
@@ -1181,6 +1245,20 @@ export default function StreamSetupModalV2({
                 );
               })}
             </div>
+
+            {instagramSelected && (
+              <div style={{
+                marginTop: '0.6rem',
+                padding: '0.5rem 0.6rem',
+                borderRadius: '0.45rem',
+                border: '1px solid rgba(234,179,8,0.6)',
+                background: 'rgba(250,204,21,0.08)',
+                fontSize: '0.75rem',
+                color: '#facc15'
+              }}>
+                Instagram performs best in portrait 9:16 (720×1280).
+              </div>
+            )}
 
             <div style={{ marginTop: '0.75rem' }}>
               {(streamStatus === "idle" || streamStatus === "starting") ? (

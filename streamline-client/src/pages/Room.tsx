@@ -8,7 +8,6 @@ import { fetchDestinations, preflight, type DestinationItem } from "../services/
 import StreamSetupModalV2 from "../components/StreamSetupModal";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import RoleOverlay from "../components/RoleOverlay";
-import { HostAVControls } from "../components/HostAVControls";
 import { RoleChangeToast } from "../components/RoleChangeToast";
 import { API_BASE } from "../lib/apiBase";
 import { APP_BASE } from "../lib/appBase";
@@ -600,32 +599,29 @@ function LiveKitShell({
     >
       <div style={{ width: "100%", height: "100%", position: "relative" }}>
         {isHost && !isViewer && (
-          <>
-            <HostAVControls guestStatus={guestStatus ?? undefined} />
-            <div
-              style={{
-                position: "absolute",
-                top: 10,
-                left: "50%",
-                transform:
-                  guestStatus === "viewing_join"
-                    ? "translateX(-50%) translateY(0)"
-                    : "translateX(-50%) translateY(-6px)",
-                padding: "6px 12px",
-                borderRadius: 999,
-                background: "rgba(15,23,42,0.9)",
-                border: "1px solid rgba(59,130,246,0.7)",
-                fontSize: 12,
-                color: "#bfdbfe",
-                zIndex: 20,
-                opacity: guestStatus === "viewing_join" ? 1 : 0,
-                pointerEvents: "none",
-                transition: "opacity 0.35s ease-in-out, transform 0.35s ease-in-out",
-              }}
-            >
-              Guest is viewing the join page.
-            </div>
-          </>
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              left: "50%",
+              transform:
+                guestStatus === "viewing_join"
+                  ? "translateX(-50%) translateY(0)"
+                  : "translateX(-50%) translateY(-6px)",
+              padding: "6px 12px",
+              borderRadius: 999,
+              background: "rgba(15,23,42,0.9)",
+              border: "1px solid rgba(59,130,246,0.7)",
+              fontSize: 12,
+              color: "#bfdbfe",
+              zIndex: 20,
+              opacity: guestStatus === "viewing_join" ? 1 : 0,
+              pointerEvents: "none",
+              transition: "opacity 0.35s ease-in-out, transform 0.35s ease-in-out",
+            }}
+          >
+            Guest is viewing the join page.
+          </div>
         )}
         <VideoConference />
         {watermarkEnabled && (
@@ -1935,6 +1931,14 @@ function RoomPage() {
     rtmpUrlBase?: string;
   };
 
+  type ExtraRtmpDestination = {
+    type: "instagram";
+    protocol: "rtmp";
+    rtmpUrl: string;
+    streamKey: string;
+    label?: string;
+  };
+
   const handleStartMultistream = async (keys: {
     youtubeKey?: string;
     facebookKey?: string;
@@ -1944,6 +1948,7 @@ function RoomPage() {
     enabledTargetIds?: string[];
     sessionKeys?: Record<string, { rtmpUrlBase?: string; streamKey?: string }>;
     destinations?: EffectiveDestinationInput[];
+    extraDestinations?: ExtraRtmpDestination[];
   }) => {
     if (isViewer) {
       alert("View-only mode: publishing controls are disabled.");
@@ -1974,6 +1979,7 @@ function RoomPage() {
     let twitchKey = keys.twitchKey;
     let enabledTargetIds = Array.isArray(keys.enabledTargetIds) ? keys.enabledTargetIds.filter((id) => !!id) : [];
     let sessionKeyMap: Record<string, { rtmpUrlBase?: string; streamKey?: string }> = keys.sessionKeys ? { ...keys.sessionKeys } : {};
+    const extraDestinations = Array.isArray(keys.extraDestinations) ? keys.extraDestinations : [];
 
     if (destinationInputs.length) {
       const fromDestinations: string[] = [];
@@ -2053,6 +2059,7 @@ function RoomPage() {
           sessionKeys: hasSessionKeys ? sessionKeyMap : undefined,
           userId: getOrCreateUid(),
           presetId: selectedPresetId,
+          extraDestinations: extraDestinations.length ? extraDestinations : undefined,
         };
         console.log("   Sending to API:", requestBody);
         const res = await fetch(

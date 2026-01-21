@@ -62,7 +62,7 @@ router.post("/:roomId/start-multistream", requireAuth, async (req, res) => {
     const youtubeStreamKey = trimKey(rawBody.youtubeStreamKey) || undefined;
     const facebookStreamKey = trimKey(rawBody.facebookStreamKey) || undefined;
     const twitchStreamKey = trimKey(rawBody.twitchStreamKey) || undefined;
-    const { guestCount, destinationIds, enabledTargetIds, sessionKeys, presetId } = rawBody;
+    const { guestCount, destinationIds, enabledTargetIds, sessionKeys, presetId, extraDestinations } = rawBody;
     console.log("[multistream:start] uid:", uid, "room:", roomId, {
       youtubeStreamKey: !!youtubeStreamKey,
       facebookStreamKey: !!facebookStreamKey,
@@ -80,7 +80,19 @@ router.post("/:roomId/start-multistream", requireAuth, async (req, res) => {
     const sessionKeyMap: Record<string, { rtmpUrlBase?: string; streamKey?: string }> =
       sessionKeys && typeof sessionKeys === "object" ? (sessionKeys as any) : {};
 
-    if (!youtubeStreamKey && !facebookStreamKey && !twitchStreamKey && destIds.length === 0) {
+    const extraArray: Array<{ type?: string; protocol?: string; rtmpUrl?: string; streamKey?: string; label?: string }> =
+      Array.isArray(extraDestinations) ? extraDestinations : [];
+
+    const hasExtraInstagram = extraArray.some((d) => {
+      if (!d) return false;
+      const type = String(d.type || "").toLowerCase();
+      const protocol = String(d.protocol || "rtmp").toLowerCase();
+      const base = normalizeRtmpBase(String(d.rtmpUrl || ""));
+      const key = trimKey(d.streamKey);
+      return type === "instagram" && protocol === "rtmp" && !!base && !!key;
+    });
+
+    if (!youtubeStreamKey && !facebookStreamKey && !twitchStreamKey && destIds.length === 0 && !hasExtraInstagram) {
       return res.status(400).json({ error: "At least one stream key is required" });
     }
 
@@ -214,6 +226,21 @@ router.post("/:roomId/start-multistream", requireAuth, async (req, res) => {
       if (!base || !dec) continue;
       const url = `${base}/${dec}`;
       pushLog("custom", url, dec, "session");
+    }
+
+    // Handle extra session-only destinations such as Instagram Live Producer
+    for (const dest of extraArray) {
+      if (!dest) continue;
+      const type = String(dest.type || "").toLowerCase();
+      if (type !== "instagram") continue;
+      const protocol = String(dest.protocol || "rtmp").toLowerCase();
+      if (protocol !== "rtmp") continue;
+      const baseRaw = String(dest.rtmpUrl || "");
+      const base = normalizeRtmpBase(baseRaw);
+      const key = trimKey(dest.streamKey);
+      if (!base || !key) continue;
+      const url = `${base}/${key}`;
+      pushLog("instagram", url, key, "session");
     }
 
     if (urls.length === 0) {
