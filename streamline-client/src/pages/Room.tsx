@@ -637,7 +637,18 @@ function LiveKitShell({
               top: "12px",
               right: "12px",
               width: "96px",
-              }
+            }}
+          />
+        )}
+      </div>
+    </LiveKitRoom>
+  );
+}
+
+function RoomPage() {
+  const location = useLocation();
+  const nav = useNavigate();
+  const { roomId: routeRoomIdParam } = useParams<{ roomId?: string }>();
   const routeRoomId = routeRoomIdParam ? decodeURIComponent(routeRoomIdParam) : null;
   const [searchParams] = useSearchParams();
 
@@ -2949,3 +2960,5 @@ function LiveKitShell({
     </>
   );
 };
+
+export default RoomPage;
