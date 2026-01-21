@@ -648,8 +648,8 @@ function LiveKitShell({
 function RoomPage() {
   const location = useLocation();
   const nav = useNavigate();
-  const { roomName } = useParams();
-  const routeRoomId = roomName ? decodeURIComponent(roomName) : null;
+  const { roomName: routeRoomNameParam } = useParams();
+  const routeRoomId = routeRoomNameParam ? decodeURIComponent(routeRoomNameParam) : null;
   const [searchParams] = useSearchParams();
 
   const [displayName, setDisplayName] = useState(() => {
