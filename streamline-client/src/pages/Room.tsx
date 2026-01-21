@@ -155,6 +155,45 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
   );
 }
 
+function PermissionsDebugOverlay({ dashboardRole }: { dashboardRole: "host" | "moderator" | "participant" }) {
+  const { localParticipant } = useLocalParticipant();
+  const localPermissions: any = useLocalParticipantPermissions();
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: 12,
+        left: 12,
+        padding: "8px 10px",
+        borderRadius: 8,
+        background: "rgba(15,23,42,0.9)",
+        border: "1px solid rgba(148,163,184,0.6)",
+        color: "#e5e7eb",
+        fontSize: 11,
+        maxWidth: 260,
+        zIndex: 40,
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>Permissions Debug</div>
+      <div>identity: {(localParticipant as any)?.identity || "(none)"}</div>
+      <div>
+        canPublish: {String(localPermissions?.canPublish ?? "n/a")} · canPublishData: {String(localPermissions?.canPublishData ?? "n/a")}
+      </div>
+      <div>
+        sources: {
+          Array.isArray(localPermissions?.canPublishSources)
+            ? (localPermissions.canPublishSources as any[]).map(String).join(", ") || "(none)"
+            : "n/a"
+        }
+      </div>
+      <div>
+        effectiveRole: {((localParticipant as any)?.identityMetadata as any)?.rolePresetId || dashboardRole}
+      </div>
+    </div>
+  );
+}
+
 function StreamEndedModal({
   recordingId,
   onStartEditing,
@@ -503,8 +542,6 @@ function LiveKitShell({
 }: LiveKitShellProps) {
   const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
   const statusRef = useRef<GuestStatus>(null);
-  const { localParticipant } = useLocalParticipant();
-  const localPermissions: any = useLocalParticipantPermissions();
 
   useEffect(() => {
     if (!isHost || !roomId) return;
@@ -593,39 +630,7 @@ function LiveKitShell({
           </>
         )}
         <VideoConference />
-        {debugPermissions && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: 12,
-              left: 12,
-              padding: "8px 10px",
-              borderRadius: 8,
-              background: "rgba(15,23,42,0.9)",
-              border: "1px solid rgba(148,163,184,0.6)",
-              color: "#e5e7eb",
-              fontSize: 11,
-              maxWidth: 260,
-              zIndex: 40,
-            }}
-         >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Permissions Debug</div>
-            <div>identity: {(localParticipant as any)?.identity || "(none)"}</div>
-            <div>
-              canPublish: {String(localPermissions?.canPublish ?? "n/a")} · canPublishData: {String(localPermissions?.canPublishData ?? "n/a")}
-            </div>
-            <div>
-              sources: {
-                Array.isArray(localPermissions?.canPublishSources)
-                  ? (localPermissions.canPublishSources as any[]).map(String).join(", ") || "(none)"
-                  : "n/a"
-              }
-            </div>
-            <div>
-              effectiveRole: {((localParticipant as any)?.identityMetadata as any)?.rolePresetId || dashboardRole}
-            </div>
-          </div>
-        )}
+        {debugPermissions && <PermissionsDebugOverlay dashboardRole={dashboardRole} />}
         {watermarkEnabled && (
           <img
             src="/logo.png"
