@@ -110,30 +110,6 @@ button:focus-visible {
     right: 6px;
   }
 }
-
-
-@media (min-width: 769px) {
-  .sl-layout .lk-video-grid {
-    display: flex !important;     /* restore LiveKit flex layout */
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 8px;
-  }
-
-  .sl-layout .lk-video-grid > * {
-    aspect-ratio: auto !important;
-    width: auto !important;
-    height: auto !important;
-    flex: 0 1 auto !important;    /* normal rectangular tiles */
-    border-radius: 8px;
-    overflow: hidden;
-    position: relative;           /* allow screen-share badge overlay */
-  }
-
-  .sl-layout .lk-video-grid > * video {
-    object-fit: cover !important;
-  }
-}
 /* Optional: light-mode override (remove if you always want dark) */
 @media (prefers-color-scheme: light) {
   body {
@@ -211,14 +187,14 @@ button:focus-visible {
 
 /* Desktop: make sure screen-share tiles show content and a badge */
 @media (min-width: 769px) {
-  .sl-layout .lk-video-grid [data-lk-source="screen_share"] video {
+  .sl-layout [data-lk-source="screen_share"] video {
     width: 100% !important;
     height: 100% !important;
     object-fit: contain !important;
     background-color: #000000;
   }
 
-  .sl-layout .lk-video-grid [data-lk-source="screen_share"]::after {
+  .sl-layout [data-lk-source="screen_share"]::after {
     content: "Screen sharing";
     position: absolute;
     bottom: 8px;
