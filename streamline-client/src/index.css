@@ -127,6 +127,7 @@ button:focus-visible {
     flex: 0 1 auto !important;    /* normal rectangular tiles */
     border-radius: 8px;
     overflow: hidden;
+    position: relative;           /* allow screen-share badge overlay */
   }
 
   .sl-layout .lk-video-grid > * video {
@@ -184,6 +185,14 @@ button:focus-visible {
   .sl-layout [data-lk-layout] [data-lk-source="screen_share"] {
     grid-column: span 2;
   }
+
+  /* Ensure screen-share video always fills its tile on mobile */
+  .sl-layout [data-lk-layout] [data-lk-source="screen_share"] video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+    background-color: #000000;
+  }
 }
 
 /* Landscape: more columns if you want */
@@ -197,5 +206,29 @@ button:focus-visible {
 @media (max-width: 768px) and (orientation: landscape) {
   .sl-layout .lk-video-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Desktop: make sure screen-share tiles show content and a badge */
+@media (min-width: 769px) {
+  .sl-layout .lk-video-grid [data-lk-source="screen_share"] video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+    background-color: #000000;
+  }
+
+  .sl-layout .lk-video-grid [data-lk-source="screen_share"]::after {
+    content: "Screen sharing";
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #e5e7eb;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    pointer-events: none;
   }
 }
