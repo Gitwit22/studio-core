@@ -14,11 +14,13 @@ export type RealtimePreset = {
 export function presetToParticipantPermission(p: RealtimePreset): ParticipantPermission {
   const canPublish = !!p.canPublishAudio || !!p.canPublishVideo || !!p.canScreenShare;
 
-  return {
+  const base = {
     canSubscribe: p.canSubscribe ?? true,
     canPublish,
     canPublishData: p.canSendData ?? true,
-  };
+  } as ParticipantPermission;
+
+  return base;
 }
 
 // Optional coarse role mapping so role-based grants can share the same truth
