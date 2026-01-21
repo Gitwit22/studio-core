@@ -2267,7 +2267,10 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </p>
                 
                 <div style={S.lockedGrid}>
-                  {(!entitlements.recording || !currentPlan.features.recording) && (
+                  {(
+                    !entitlements.recording &&
+                    !currentPlan.features.recording
+                  ) && (
                     <LockedFeature
                       icon="🎥"
                       title="Recording"
@@ -2275,7 +2278,10 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       requiredPlan="Starter"
                     />
                   )}
-                  {!currentPlan.features.multistream && (
+                  {(
+                    !entitlements.rtmpMultistream &&
+                    !currentPlan.features.multistream
+                  ) && (
                     <LockedFeature
                       icon="📡"
                       title="Multistream"

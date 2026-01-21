@@ -36,6 +36,7 @@ export default function UsageBanner() {
 
         const eff = (accountJson as any)?.effectiveEntitlements || {};
         const limits = (eff as any).limits || {};
+        const effFeatures = (eff as any).features || {};
 
         const planId = eff.planId || usageJson?.plan?.id || usageJson?.user?.planId || "free";
 
@@ -61,7 +62,12 @@ export default function UsageBanner() {
             usageJson?.plan?.limits?.maxDestinations ??
             0
         );
-        const multistreamEnabled = rtmpDestinationsMax > 1;
+        const rtmpAllowed = rtmpDestinationsMax >= 1;
+        const multistreamCapAllowed = rtmpDestinationsMax >= 2;
+        const multistreamFlag = effFeatures && typeof (effFeatures as any).rtmpMultistream === "boolean"
+          ? !!(effFeatures as any).rtmpMultistream
+          : false;
+        const multistreamEnabled = multistreamCapAllowed || multistreamFlag;
 
         const maxGuests = Number(
           (limits as any).maxGuests ??

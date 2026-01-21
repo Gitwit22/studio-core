@@ -123,6 +123,12 @@ interface Props {
   // Controls whether the HLS Setup (branding/config) section is rendered at all (platform-level flag).
   showHlsSection?: boolean;
 
+  // Optional: whether this caller has permission to start/stop HLS.
+  canStartStopHls?: boolean;
+
+  // Optional: whether plan/platform entitlements have hydrated.
+  entitlementsReady?: boolean;
+
   // Optional: plan + per-clip recording cap (in minutes)
   planId?: string;
   recordingMaxMinutes?: number;
@@ -156,6 +162,8 @@ export default function StreamSetupModalV2({
   hlsCustomizationEnabled = false,
   onUpgradeHls,
   showHlsSection = true,
+  canStartStopHls = true,
+  entitlementsReady = true,
   planId,
   recordingMaxMinutes,
   savedDestinations,
@@ -584,6 +592,16 @@ export default function StreamSetupModalV2({
 
   if (!open) return null;
 
+  if (!entitlementsReady) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+        <div className="rounded-lg bg-slate-900 px-4 py-3 text-sm text-slate-100 shadow-lg">
+          Loading stream features...
+        </div>
+      </div>
+    );
+  }
+
   const streamIsLive = streamStatus === "live";
   const streamIsBusy = streamStatus === "starting" || streamStatus === "stopping";
   const rtmpCap = typeof rtmpDestinationsMax === "number" ? rtmpDestinationsMax : 0;
@@ -620,7 +638,6 @@ export default function StreamSetupModalV2({
   const showRecordingControls = recordingEnabled !== false;
 
   const hasRecordingCap = typeof recordingMaxMinutes === "number" && recordingMaxMinutes > 0;
-
   const hlsAllowed = hlsEnabled !== false;
 
   const badgeItems = [
@@ -1721,23 +1738,23 @@ export default function StreamSetupModalV2({
                 <button
                   type="button"
                   onClick={handleStartHls}
-                  disabled={!hlsAllowed || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
+                  disabled={!hlsAllowed || !canStartStopHls || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')}
                   style={{
                     flex: 1,
                     padding: '0.6rem 0.7rem',
                     borderRadius: '0.45rem',
                     border: 'none',
                     background:
-                      !hlsAllowed || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
+                      !hlsAllowed || !canStartStopHls || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error')
                         ? 'rgba(37,99,235,0.4)'
                         : 'linear-gradient(135deg, #22c55e, #16a34a)',
                     color: '#ffffff',
                     fontSize: '0.8rem',
                     fontWeight: 600,
                     cursor:
-                      !hlsAllowed || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
+                      !hlsAllowed || !canStartStopHls || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 'not-allowed' : 'pointer',
                     opacity:
-                      !hlsAllowed || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
+                      !hlsAllowed || !canStartStopHls || !hlsRoomReady || !boundEmbedId || hlsBusy || !(hlsStatus === 'idle' || hlsStatus === 'error') ? 0.6 : 1,
                   }}
                 >
                   {hlsBusy && (hlsStatus === 'starting' || hlsStatus === 'idle')
@@ -1747,23 +1764,23 @@ export default function StreamSetupModalV2({
                 <button
                   type="button"
                   onClick={handleStopHls}
-                  disabled={!boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')}
+                  disabled={!canStartStopHls || !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')}
                   style={{
                     flex: 1,
                     padding: '0.6rem 0.7rem',
                     borderRadius: '0.45rem',
                     border: 'none',
                     background:
-                      !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')
+                      !canStartStopHls || !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting')
                         ? 'rgba(248,113,113,0.35)'
                         : 'linear-gradient(135deg, #dc2626, #b91c1c)',
                     color: '#ffffff',
                     fontSize: '0.8rem',
                     fontWeight: 600,
                     cursor:
-                      !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 'not-allowed' : 'pointer',
+                      !canStartStopHls || !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 'not-allowed' : 'pointer',
                     opacity:
-                      !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 0.6 : 1,
+                      !canStartStopHls || !boundEmbedId || hlsBusy || !(hlsStatus === 'live' || hlsStatus === 'starting') ? 0.6 : 1,
                   }}
                 >
                   {hlsBusy && (hlsStatus === 'live' || hlsStatus === 'starting')

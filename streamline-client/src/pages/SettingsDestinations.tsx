@@ -240,8 +240,15 @@ export default function SettingsDestinations() {
             <StatusBadge status={validation.status} reason={validation.statusReason || undefined} />
           </div>
         )}
-        <form onSubmit={onCreate}>
+        <form onSubmit={onCreate} autoComplete="off">
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+            {/* Autofill decoy to absorb email/username autofill */}
+            <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              style={{ display: "none" }}
+            />
             <select
               value={platform}
               onChange={e => setPlatform(e.target.value)}
@@ -272,6 +279,8 @@ export default function SettingsDestinations() {
             />
             <input
               type="password"
+              name="streamKey"
+              id="stream-destination-stream-key"
               value={streamKey}
               onChange={e => setStreamKey(e.target.value)}
               placeholder="Enter stream key (optional, stored encrypted)"
@@ -282,7 +291,7 @@ export default function SettingsDestinations() {
                 color: "#f9fafb",
                 background: "rgba(15, 23, 42, 0.7)",
               }}
-              autoComplete="off"
+              autoComplete="new-password"
             />
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#e5e7eb" }}>
@@ -494,6 +503,8 @@ export default function SettingsDestinations() {
                         {editingId === item.id ? (
                           <input
                             type="password"
+                            name="streamKey"
+                            id={`stream-destination-stream-key-${item.id}`}
                             value={editForm.streamKeyPlain}
                             onChange={e => setEditForm(f => ({ ...f, streamKeyPlain: e.target.value }))}
                             placeholder={item.hasKey ? "Enter new key (stored encrypted, never shown)" : "Enter new key"}
@@ -507,7 +518,7 @@ export default function SettingsDestinations() {
                               minWidth: 100,
                               maxWidth: 140,
                             }}
-                            autoComplete="off"
+                            autoComplete="new-password"
                           />
                         ) : (
                           // Do not show any part of the stored key; only indicate presence

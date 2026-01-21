@@ -13,6 +13,9 @@ import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { roleToParticipantPermission } from "../lib/livekitPermissions";
 import { TrackSource } from "livekit-server-sdk";
 import jwt from "jsonwebtoken";
+import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { resolveMaxDestinations } from "../lib/planLimits";
+import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
 
 // Dynamic import for AccessToken constructor
 async function getAccessTokenCtor() {
@@ -23,6 +26,26 @@ async function getAccessTokenCtor() {
 async function getRoomServiceClient() {
   const mod = await import("livekit-server-sdk");
   return mod.RoomServiceClient;
+}
+
+async function getHlsUiFlag() {
+  const snap = await firestore.collection("featureFlags").doc("hlsSettingsTab").get();
+  const data = snap.exists ? ((snap.data() as any) || {}) : {};
+  const enabled = data.enabled === undefined ? true : !!data.enabled;
+  return {
+    enabled,
+    reason: typeof data.reason === "string" ? data.reason : undefined,
+  };
+}
+
+async function getRecordingUiFlag() {
+  const snap = await firestore.collection("featureFlags").doc("recording").get();
+  const data = snap.exists ? ((snap.data() as any) || {}) : {};
+  const enabled = data.enabled === undefined ? true : !!data.enabled;
+  return {
+    enabled,
+    reason: typeof data.reason === "string" ? data.reason : undefined,
+  };
 }
 
 function deriveServiceUrl(): string | null {
@@ -424,20 +447,6 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       if (inviteRoomName && inviteRoomName !== roomName) return res.status(403).json({ error: "invite_room_mismatch" });
     }
 
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    if (!apiKey || !apiSecret) {
-      return res.status(500).json({ error: "LiveKit keys missing in env" });
-    }
-
-    const inviteIdentity = invite?.identity || invite?.uid || invite?.sub || null;
-    const tokenIdentity = (identity && identity.trim()) || uid || inviteIdentity || `invite-${roomName}`; // prefer provided identity, fallback to auth/ invite
-
-    // Determine which account's entitlements and permission mode should apply.
-    // For invite-based joins, we always scope permissions to the host who
-    // created the invite; otherwise we fall back to the authenticated user.
-    const entitlementsUid = (invite as any)?.createdByUid || uid;
-
     // Prefer role from invite claims when present; allow cohost/moderator if present.
     let requestedRole = rawRole;
     const inviteRoleRaw = (invite as any)?.role as string | undefined;
@@ -466,6 +475,50 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       if (!ok) requestedRole = "participant";
     }
 
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    if (!apiKey || !apiSecret) {
+      return res.status(500).json({ error: "LiveKit keys missing in env" });
+    }
+
+    const inviteIdentity = invite?.identity || invite?.uid || invite?.sub || null;
+    const tokenIdentity = (identity && identity.trim()) || uid || inviteIdentity || `invite-${roomName}`; // prefer provided identity, fallback to auth/ invite
+
+    // Determine which account's entitlements and permission mode should apply.
+    // We always scope entitlements to the room owner, never the caller.
+    let entitlementsUid: string | null = null;
+    let roomSnapExists: boolean | null = null;
+    try {
+      const roomRef = firestore.collection("rooms").doc(roomId);
+      const roomSnap = await roomRef.get();
+      roomSnapExists = roomSnap.exists;
+      const roomData = (roomSnap.exists ? roomSnap.data() : null) as any;
+      if (roomData && typeof roomData.ownerId === "string" && roomData.ownerId.trim()) {
+        entitlementsUid = roomData.ownerId.trim();
+      } else if (uid && normalizedRequested === "host") {
+        // Fallback: for freshly created rooms with no doc yet, treat the
+        // authenticated host caller as the owner so joins still work.
+        entitlementsUid = uid;
+      }
+    } catch (err) {
+      console.error("[roomToken] failed to load room owner", err);
+    }
+
+    // Invariant: a host join with auth should always resolve an entitlementsUid.
+    // If this ever fails, it indicates a broken room document or ownership state.
+    if (normalizedRequested === "host" && uid && !entitlementsUid) {
+      console.error("[roomToken] host join with no entitlementsUid", {
+        roomId,
+        uid,
+        normalizedRequested,
+        roomSnapExists,
+      });
+      return res.status(409).json({ error: "room_owner_missing" });
+    }
+
+    let effectiveEntitlementsPayload: any = null;
+    let platformFlags: any = null;
+
     if (entitlementsUid) {
       try {
         await ensureRoomDoc({
@@ -479,9 +532,87 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
         console.error("[roomToken] ensureRoomDoc failed", err);
         return res.status(500).json({ error: "room_init_failed" });
       }
+
+      try {
+        const [entitlements, hlsUi, recordingUi] = await Promise.all([
+          getEffectiveEntitlements(entitlementsUid),
+          getHlsUiFlag(),
+          getRecordingUiFlag(),
+        ]);
+
+        const plan = entitlements.plan;
+        const limits = entitlements.limits;
+        const features = entitlements.features;
+        const rawFeatures = ((plan.raw?.features || {}) as any) || {};
+
+        const rtmpMultistreamEnabled = Boolean(
+          rawFeatures.rtmpMultistream ??
+            rawFeatures.multistream ??
+            (plan.raw as any)?.multistreamEnabled ??
+            features.multistream,
+        );
+
+        const canHls = Boolean(
+          (features as any).hls ??
+            (features as any).hlsEnabled ??
+            (features as any).canHls ??
+            rawFeatures.canHls ??
+            rawFeatures.hls ??
+            rawFeatures.hlsBroadcast,
+        );
+
+        const hlsCustomizationEnabled = (() => {
+          const explicit = (features as any).hlsCustomizationEnabled;
+          if (typeof explicit === "boolean") return explicit;
+          const legacy = (rawFeatures as any).canCustomizeHlsPage;
+          if (typeof legacy === "boolean") return legacy;
+          return canHls;
+        })();
+
+        const rtmpDestinationsMax = resolveMaxDestinations(limits);
+
+        // Keep plan-based entitlements and platform-level flags separate.
+        // The client is responsible for combining them when gating UI.
+        effectiveEntitlementsPayload = {
+          planId: entitlements.planId,
+          planName: plan.name || entitlements.planId,
+          features: {
+            recording: !!features.recording,
+            rtmpMultistream: rtmpMultistreamEnabled,
+            dualRecording: !!(rawFeatures.dualRecording ?? rawFeatures.dual_recording),
+            watermark: !!(rawFeatures.watermarkRecordings ?? rawFeatures.watermark),
+            canHls,
+            hls: canHls,
+            hlsEnabled: canHls,
+            hlsCustomizationEnabled,
+            canCustomizeHlsPage: hlsCustomizationEnabled,
+          },
+          limits: {
+            rtmpDestinationsMax,
+            maxDestinations: rtmpDestinationsMax,
+            maxGuests: Number(limits.maxGuests || 0),
+            participantMinutes: Number(
+              (limits as any).monthlyMinutes || (limits as any).monthlyMinutesIncluded || 0,
+            ),
+            transcodeMinutes: Number((limits as any).transcodeMinutes || 0),
+            maxRecordingMinutesPerClip: Number((limits as any).maxRecordingMinutesPerClip || 0),
+          },
+          caps: entitlements.caps || {},
+        };
+
+        const platformTranscodeEnabled = getPlatformTranscodeEnabled();
+        platformFlags = {
+          hlsEnabled: hlsUi.enabled,
+          hlsSettingsTab: hlsUi.enabled,
+          transcodeEnabled: platformTranscodeEnabled,
+          recordingEnabled: recordingUi.enabled,
+        };
+      } catch (err) {
+        console.error("[roomToken] failed to compute effectiveEntitlements", err);
+      }
     }
 
-    const resolved = await resolveRoleForInvite({ uid: entitlementsUid, requestedRole });
+    const resolved = await resolveRoleForInvite({ uid: entitlementsUid || uid || null, requestedRole });
     if (resolved.ok === false) {
       const payload = resolved.error;
       return res.status(400).json(payload);
@@ -535,6 +666,8 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       roomId,
       roomName,
       roomAccessToken,
+      effectiveEntitlements: effectiveEntitlementsPayload,
+      platformFlags,
     });
   } catch (err: any) {
     console.error("roomToken error:", err);

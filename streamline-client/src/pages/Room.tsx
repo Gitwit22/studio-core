@@ -854,10 +854,12 @@ function RoomPage() {
   // Plan/entitlement flags are informational only; in-room gating is driven by roomPermissions.
   const [planMultistreamEnabled, setPlanMultistreamEnabled] = useState<boolean>(false);
   const [planRtmpDestinationsMax, setPlanRtmpDestinationsMax] = useState<number | null>(null);
-  const [planRecordingEnabled, setPlanRecordingEnabled] = useState<boolean>(true);
+  const [planRecordingEnabled, setPlanRecordingEnabled] = useState<boolean>(false);
   const [planHlsEnabled, setPlanHlsEnabled] = useState<boolean>(false);
   const [planHlsCustomizationEnabled, setPlanHlsCustomizationEnabled] = useState<boolean>(false);
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
+  const [platformRecordingEnabled, setPlatformRecordingEnabled] = useState<boolean>(true);
+  const [entitlementsReady, setEntitlementsReady] = useState(false);
   const [dashboardGreenroomEnabled, setDashboardGreenroomEnabled] = useState<boolean>(false);
   const [dashboardOverlaysEnabled, setDashboardOverlaysEnabled] = useState<boolean>(false);
   const [dualRecordingAllowed, setDualRecordingAllowed] = useState<boolean>(false);
@@ -888,6 +890,22 @@ function RoomPage() {
     return cached || "";
   });
   const effectiveRoomName = roomName;
+
+  useEffect(() => {
+    // When navigating between rooms in a single SPA session, always
+    // require a fresh entitlements snapshot and clear plan-derived
+    // flags so we never briefly show stale caps.
+    setEntitlementsReady(false);
+    setPlanRecordingEnabled(false);
+    setPlanHlsEnabled(false);
+    setPlanRtmpDestinationsMax(null);
+    setPlanHlsCustomizationEnabled(false);
+    setPlanMultistreamEnabled(false);
+    setDualRecordingAllowed(false);
+    setWatermarkEnabled(false);
+    setMaxGuestsAllowed(null);
+    setMaxRecordingMinutesPerClip(null);
+  }, [roomId]);
 
   useEffect(() => {
     setHostCheckReady(true);
@@ -1148,6 +1166,142 @@ function RoomPage() {
     setPresetClamped(false);
   };
 
+  const applyEntitlementsAndPlatform = (eff: any, platformFlags: any) => {
+    const platform = platformFlags && typeof platformFlags === "object" ? platformFlags : {};
+
+    if (platform && Object.prototype.hasOwnProperty.call(platform, "hlsEnabled")) {
+      if (typeof (platform as any).hlsEnabled === "boolean") {
+        setPlatformHlsEnabled((platform as any).hlsEnabled);
+      }
+    }
+
+    if (platform && Object.prototype.hasOwnProperty.call(platform, "recordingEnabled")) {
+      if (typeof (platform as any).recordingEnabled === "boolean") {
+        setPlatformRecordingEnabled((platform as any).recordingEnabled);
+      }
+    }
+
+    const dashboardGreenroomFlag =
+      (platform as any).dashboardGreenroomEnabled ?? (platform as any).greenroomDashboard;
+    if (typeof dashboardGreenroomFlag === "boolean") {
+      setDashboardGreenroomEnabled(dashboardGreenroomFlag);
+    }
+
+    const dashboardOverlaysFlag =
+      (platform as any).dashboardOverlaysEnabled ?? (platform as any).overlaysDashboard;
+    if (typeof dashboardOverlaysFlag === "boolean") {
+      setDashboardOverlaysEnabled(dashboardOverlaysFlag);
+    }
+
+    let appliedEff = false;
+
+    if (eff && typeof eff === "object") {
+      const features = eff.features || {};
+      const limits = eff.limits || {};
+
+      if (typeof eff.planId === "string") {
+        setRecordingPlanId(eff.planId);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(features, "recording")) {
+        if (typeof (features as any).recording === "boolean") {
+          setPlanRecordingEnabled((features as any).recording);
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(features, "dualRecording")) {
+        if (typeof (features as any).dualRecording === "boolean") {
+          setDualRecordingAllowed((features as any).dualRecording);
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(features, "watermark")) {
+        if (typeof (features as any).watermark === "boolean") {
+          setWatermarkEnabled((features as any).watermark);
+        }
+      }
+
+      const hasRtmpLimit =
+        Object.prototype.hasOwnProperty.call(limits, "rtmpDestinationsMax") ||
+        Object.prototype.hasOwnProperty.call(limits as any, "maxDestinations");
+      if (hasRtmpLimit) {
+        const maxRtmpFromLimits =
+          typeof limits.rtmpDestinationsMax === "number"
+            ? limits.rtmpDestinationsMax
+            : typeof (limits as any).maxDestinations === "number"
+            ? (limits as any).maxDestinations
+            : 0;
+        setPlanRtmpDestinationsMax(maxRtmpFromLimits);
+        if (Object.prototype.hasOwnProperty.call(features as any, "rtmpMultistream")) {
+          if (typeof (features as any).rtmpMultistream === "boolean") {
+            setPlanMultistreamEnabled((features as any).rtmpMultistream);
+          }
+        } else {
+          setPlanMultistreamEnabled(maxRtmpFromLimits > 1);
+        }
+      }
+
+      const runtimeHls = (features as any).hls ?? (features as any).hlsEnabled;
+      const legacyHls = (features as any).canHls;
+      if (
+        Object.prototype.hasOwnProperty.call(features as any, "hls") ||
+        Object.prototype.hasOwnProperty.call(features as any, "hlsEnabled") ||
+        Object.prototype.hasOwnProperty.call(features as any, "canHls")
+      ) {
+        if (typeof runtimeHls === "boolean") {
+          setPlanHlsEnabled(runtimeHls);
+        } else if (typeof legacyHls === "boolean") {
+          setPlanHlsEnabled(legacyHls);
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(features as any, "hlsCustomizationEnabled")) {
+        const customizationHls = (features as any).hlsCustomizationEnabled;
+        if (typeof customizationHls === "boolean") {
+          setPlanHlsCustomizationEnabled(customizationHls);
+        }
+      } else if (
+        Object.prototype.hasOwnProperty.call(features as any, "hls") ||
+        Object.prototype.hasOwnProperty.call(features as any, "hlsEnabled") ||
+        Object.prototype.hasOwnProperty.call(features as any, "canHls")
+      ) {
+        const customizationHls = (features as any).hlsCustomizationEnabled;
+        const runtime = (features as any).hls ?? (features as any).hlsEnabled;
+        const legacy = (features as any).canHls;
+        setPlanHlsCustomizationEnabled(
+          typeof customizationHls === "boolean"
+            ? customizationHls
+            : typeof runtime === "boolean"
+            ? runtime
+            : !!legacy,
+        );
+      }
+
+      if (Object.prototype.hasOwnProperty.call(limits, "maxGuests")) {
+        if (typeof limits.maxGuests === "number") {
+          setMaxGuestsAllowed(limits.maxGuests);
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(limits, "maxRecordingMinutesPerClip")) {
+        if (
+          typeof limits.maxRecordingMinutesPerClip === "number" &&
+          limits.maxRecordingMinutesPerClip > 0
+        ) {
+          setMaxRecordingMinutesPerClip(limits.maxRecordingMinutesPerClip);
+        } else {
+          setMaxRecordingMinutesPerClip(null);
+        }
+      }
+
+      appliedEff = true;
+    }
+
+    if (appliedEff) {
+      setEntitlementsReady(true);
+    }
+  };
+
   useEffect(() => {
     if (!hostCheckReady) return;
     if (!displayName) return;
@@ -1300,6 +1454,9 @@ function RoomPage() {
         } else {
           setRoomPermissions(null);
         }
+        if (data.effectiveEntitlements || data.platformFlags) {
+          applyEntitlementsAndPlatform(data.effectiveEntitlements, data.platformFlags || {});
+        }
         const { token, serverUrl, roomId: returnedRoomId, roomAccessToken: roomAccessTokenRaw, participantIdentity: participantIdentityRaw } = data as any;
         if (typeof returnedRoomId === "string" && returnedRoomId.trim()) {
           setFirestoreRoomId(returnedRoomId.trim());
@@ -1416,79 +1573,7 @@ function RoomPage() {
             setEffectivePermissionsMode("simple");
           }
           const platformFlags = (me as any)?.platformFlags || {};
-          if (typeof platformFlags.hlsEnabled === "boolean") {
-            setPlatformHlsEnabled(platformFlags.hlsEnabled);
-          } else {
-            setPlatformHlsEnabled(true);
-          }
-
-          const dashboardGreenroomFlag =
-            (platformFlags as any).dashboardGreenroomEnabled ?? (platformFlags as any).greenroomDashboard;
-          if (typeof dashboardGreenroomFlag === "boolean") {
-            setDashboardGreenroomEnabled(dashboardGreenroomFlag);
-          }
-
-          const dashboardOverlaysFlag =
-            (platformFlags as any).dashboardOverlaysEnabled ?? (platformFlags as any).overlaysDashboard;
-          if (typeof dashboardOverlaysFlag === "boolean") {
-            setDashboardOverlaysEnabled(dashboardOverlaysFlag);
-          }
-          if (eff && typeof eff === "object") {
-            const features = eff.features || {};
-            const limits = eff.limits || {};
-            if (typeof eff.planId === "string") {
-              setRecordingPlanId(eff.planId);
-            }
-            if (typeof features.recording === "boolean") {
-              setPlanRecordingEnabled(features.recording);
-            }
-            if (typeof features.dualRecording === "boolean") {
-              setDualRecordingAllowed(features.dualRecording);
-            }
-            if (typeof features.watermark === "boolean") {
-              setWatermarkEnabled(features.watermark);
-            }
-            // Derive multistream/RTMP capability from the numeric
-            // destination cap first, so a plan with 1+ destinations
-            // but multistream=false still enables RTMP.
-            const maxRtmpFromLimits =
-              typeof limits.rtmpDestinationsMax === "number"
-                ? limits.rtmpDestinationsMax
-                : typeof (limits as any).maxDestinations === "number"
-                ? (limits as any).maxDestinations
-                : 0;
-            setPlanRtmpDestinationsMax(maxRtmpFromLimits);
-            if (typeof features.rtmpMultistream === "boolean") {
-              // Keep legacy flag for display, but don't rely on it
-              // as the sole capability toggle.
-              setPlanMultistreamEnabled(features.rtmpMultistream);
-            } else {
-              setPlanMultistreamEnabled(maxRtmpFromLimits > 1);
-            }
-            const runtimeHls = (features as any).hls ?? (features as any).hlsEnabled;
-            const legacyHls = (features as any).canHls;
-            if (typeof runtimeHls === "boolean") {
-              setPlanHlsEnabled(runtimeHls);
-            } else if (typeof legacyHls === "boolean") {
-              setPlanHlsEnabled(legacyHls);
-            }
-
-            const customizationHls = (features as any).hlsCustomizationEnabled;
-            if (typeof customizationHls === "boolean") {
-              setPlanHlsCustomizationEnabled(customizationHls);
-            } else {
-              // Default: customization follows runtime unless explicitly set.
-              setPlanHlsCustomizationEnabled(typeof runtimeHls === "boolean" ? runtimeHls : !!legacyHls);
-            }
-            if (typeof limits.maxGuests === "number") {
-              setMaxGuestsAllowed(limits.maxGuests);
-            }
-            if (typeof limits.maxRecordingMinutesPerClip === "number" && limits.maxRecordingMinutesPerClip > 0) {
-              setMaxRecordingMinutesPerClip(limits.maxRecordingMinutesPerClip);
-            } else {
-              setMaxRecordingMinutesPerClip(null);
-            }
-          }
+          applyEntitlementsAndPlatform(eff, platformFlags);
         }
       } catch (err) {
         if (!cancelled) {
@@ -2409,9 +2494,20 @@ function RoomPage() {
   const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
   const rtmpCap = planRtmpDestinationsMax ?? 0;
   const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • RTMP:${rtmpCap === 0 ? "off" : rtmpCap === 1 ? "1" : `up to ${rtmpCap}`} • HLS:${planHlsEnabled ? "on" : "off"} • HLS Setup:${planHlsCustomizationEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
-  const recordingEnabled = planRecordingEnabled && !needsReauth && !isViewer && (isHost || can("canRecord") || !!effectiveControls.canStartStopRecording);
+  const recordingEnabled =
+    planRecordingEnabled &&
+    platformRecordingEnabled &&
+    !needsReauth &&
+    !isViewer &&
+    (isHost || can("canRecord") || !!effectiveControls.canStartStopRecording);
   const canMultistream = (rtmpCap > 0) && !needsReauth && !isViewer && (isHost || can("canDestinations") || !!effectiveControls.canManageDestinations);
-  const canHls = planHlsEnabled && !needsReauth && !isViewer && (isHost || can("canStream") || !!effectiveControls.canStartStopStream);
+  const hlsAvailable =
+    planHlsEnabled &&
+    platformHlsEnabled &&
+    !needsReauth;
+  const canStartStopHls =
+    !isViewer &&
+    (isHost || can("canStream") || !!effectiveControls.canStartStopStream);
 
   const handleUpgradeHls = () => {
     nav("/settings/billing");
@@ -2866,9 +2962,11 @@ function RoomPage() {
           recordingEnabled={recordingEnabled}
           rtmpDestinationsMax={planRtmpDestinationsMax ?? undefined}
           multistreamAllowed={canMultistream}
-          hlsEnabled={canHls}
+          hlsEnabled={hlsAvailable}
           hlsCustomizationEnabled={planHlsCustomizationEnabled && (isHost || can("canLayout"))}
-          showHlsSection={platformHlsEnabled}
+          showHlsSection={hlsAvailable}
+          canStartStopHls={canStartStopHls}
+          entitlementsReady={entitlementsReady}
           onUpgradeHls={handleUpgradeHls}
           dualRecordingAllowed={dualRecordingAllowed}
           maxGuests={maxGuestsAllowed === null ? undefined : maxGuestsAllowed || undefined}
