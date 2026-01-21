@@ -573,10 +573,31 @@ export default function StreamSetupModalV2({
   const streamIsLive = streamStatus === "live";
   const streamIsBusy = streamStatus === "starting" || streamStatus === "stopping";
   const rtmpCap = typeof rtmpDestinationsMax === "number" ? rtmpDestinationsMax : 0;
-  // When multistreamAllowed is false, the caller has already determined that
-  // this user lacks in-room permissions (roomPermissions) to manage streaming.
-  // Additionally, a plan-level cap of 0 fully disables RTMP destinations.
-  const streamDisallowed = !multistreamAllowed || rtmpCap <= 0;
+  // Entitlement-level caps: numeric RTMP destinations are the single
+  // source of truth for whether destinations are included in the plan.
+  //
+  // - rtmpDestinationsAllowed: can stream to at least one platform
+  // - multistreamCapAllowed: can stream to multiple platforms (true multistream)
+  const rtmpDestinationsAllowed = rtmpCap >= 1;
+  const multistreamCapAllowed = rtmpCap >= 2;
+  // Caller-level permission flag (roomPermissions) controls whether this
+  // particular user may manage destinations at all.
+  const hasStreamingPermission = multistreamAllowed !== false;
+  // Final gate: either the plan disables RTMP entirely, or this user
+  // lacks in-room permission to manage streaming.
+  const streamDisallowed = !rtmpDestinationsAllowed || !hasStreamingPermission;
+  // Temporary debug to verify canonical entitlements wiring in UI.
+  if (typeof window !== "undefined") {
+    console.debug("[StreamSetupModal] gating", {
+      rtmpDestinationsMax: rtmpDestinationsMax ?? null,
+      rtmpCap,
+      rtmpDestinationsAllowed,
+      multistreamCapAllowed,
+      multistreamAllowed,
+      hasStreamingPermission,
+      streamDisallowed,
+    });
+  }
   
   const recordingIsActive = recordingStatus === "recording";
   const recordingIsBusy = recordingStatus === "stopping";
@@ -945,14 +966,14 @@ export default function StreamSetupModalV2({
             padding: '0.75rem'
           }}>
             <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#3b82f6', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
-              {rtmpCap <= 0
-                ? '📡 Stream Destinations'
-                : rtmpCap === 1
-                ? '📡 RTMP (1 destination)'
+              {!rtmpDestinationsAllowed
+                ? "📡 Stream Destinations"
+                : !multistreamCapAllowed
+                ? "📡 RTMP (1 destination)"
                 : `📡 Multistream (up to ${rtmpCap})`}
             </div>
 
-            {streamDisallowed && (
+            {!rtmpDestinationsAllowed && (
               <div style={{
                 marginBottom: '0.75rem',
                 padding: '0.55rem 0.75rem',
@@ -962,7 +983,7 @@ export default function StreamSetupModalV2({
                 fontSize: '0.75rem',
                 color: '#fca5a5'
               }}>
-                Stream Destinations are disabled for this plan. Upgrade in Settings → Usage to enable streaming to external destinations.
+                Stream Destinations are disabled for this plan. Upgrade in Settings  Usage to enable streaming to external destinations.
               </div>
             )}
 

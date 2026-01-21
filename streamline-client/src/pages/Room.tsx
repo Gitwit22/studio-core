@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiStartRecording, apiStopRecording, apiFetch, getAuthToken, clearAuthStorage } from "../lib/api";
-import { LiveKitRoom, VideoConference, useLocalParticipant, useLocalParticipantPermissions } from "@livekit/components-react";
+import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
 import StreamSetupModalV2 from "../components/StreamSetupModal";
@@ -513,7 +513,6 @@ type LiveKitShellProps = {
   dashboardGreenroomEnabled: boolean;
   dashboardOverlaysEnabled: boolean;
   dashboardRole: "host" | "moderator" | "participant";
-  debugPermissions: boolean;
   onDisconnected: () => void;
 };
 
@@ -537,7 +536,6 @@ function LiveKitShell({
   dashboardGreenroomEnabled,
   dashboardOverlaysEnabled,
   dashboardRole,
-  debugPermissions,
   onDisconnected,
 }: LiveKitShellProps) {
   const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
@@ -630,7 +628,6 @@ function LiveKitShell({
           </>
         )}
         <VideoConference />
-        {debugPermissions && <PermissionsDebugOverlay dashboardRole={dashboardRole} />}
         {watermarkEnabled && (
           <img
             src="/logo.png"
@@ -640,46 +637,7 @@ function LiveKitShell({
               top: "12px",
               right: "12px",
               width: "96px",
-              opacity: 0.8,
-            }}
-          />
-        )}
-      </div>
-
-      <RoleOverlay
-        open={dashboardOpen}
-        onClose={onCloseDashboard}
-        role={dashboardRole}
-        roomName={roomName || ""}
-        roomId={roomId || ""}
-        roomAccessToken={roomAccessToken || ""}
-        canMuteGuests={canMuteGuests}
-        advancedRolesEnabled={effectivePermissionsMode === "advanced"}
-        greenroomEnabled={dashboardGreenroomEnabled}
-        overlaysEnabled={dashboardOverlaysEnabled}
-      />
-    </LiveKitRoom>
-  );
-}
-
-export default function Room() {
-  useEffect(() => {
-    logAuthDebugContext("Arrive Room Page");
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      recordingCountdownTimersRef.current.forEach(clearTimeout);
-      recordingCountdownTimersRef.current = [];
-      liveCountdownTimersRef.current.forEach(clearTimeout);
-      liveCountdownTimersRef.current = [];
-    };
-  }, []);
-
-  const streamEgressRef = useRef<string | null>(null);
-  const nav = useNavigate();
-  const location = useLocation();
-  const { roomName: routeRoomIdParam } = useParams<{ roomName?: string }>();
+              }
   const routeRoomId = routeRoomIdParam ? decodeURIComponent(routeRoomIdParam) : null;
   const [searchParams] = useSearchParams();
 
@@ -2722,7 +2680,6 @@ export default function Room() {
               ? "moderator"
               : "participant"
           }
-          debugPermissions={import.meta.env.DEV && (searchParams.get("debug") === "1")}
           onDisconnected={handleLeftRoom}
         />
       )}
@@ -2874,6 +2831,7 @@ export default function Room() {
           onStartRecording={startRecording}
           onStopRecording={stopRecording}
           recordingEnabled={recordingEnabled}
+          rtmpDestinationsMax={planRtmpDestinationsMax ?? undefined}
           multistreamAllowed={canMultistream}
           hlsEnabled={canHls}
           hlsCustomizationEnabled={planHlsCustomizationEnabled && (isHost || can("canLayout"))}

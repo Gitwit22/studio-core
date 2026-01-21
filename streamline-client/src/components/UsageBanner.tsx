@@ -23,28 +23,56 @@ export default function UsageBanner() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/usage/me`, { credentials: "include" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        const [usageRes, accountRes] = await Promise.all([
+          fetch(`${API_BASE}/api/usage/me`, { credentials: "include" }),
+          fetch(`${API_BASE}/api/account/me`, { credentials: "include" }),
+        ]);
 
-        const planId = json?.plan?.id || json?.user?.planId || "free";
-        const participantMinutes = Number(json?.usageMonthly?.usage?.participantMinutes ?? 0);
-        const usedHours = Math.round((participantMinutes / 60) * 10) / 10;
-        const maxMinutes = Number(json?.plan?.limits?.participantMinutes ?? 0);
+        if (!usageRes.ok) throw new Error(`usage HTTP ${usageRes.status}`);
+        if (!accountRes.ok) throw new Error(`account HTTP ${accountRes.status}`);
+
+        const usageJson = await usageRes.json();
+        const accountJson = await accountRes.json();
+
+        const eff = (accountJson as any)?.effectiveEntitlements || {};
+        const limits = (eff as any).limits || {};
+
+        const planId = eff.planId || usageJson?.plan?.id || usageJson?.user?.planId || "free";
+
+        const participantMinutesUsed = Number(usageJson?.usageMonthly?.usage?.participantMinutes ?? 0);
+        const usedHours = Math.round((participantMinutesUsed / 60) * 10) / 10;
+
+        const maxMinutes = Number(
+          (limits as any).participantMinutes ??
+            usageJson?.plan?.limits?.participantMinutes ??
+            0
+        );
         const maxHours = maxMinutes > 0 ? Math.round((maxMinutes / 60) * 10) / 10 : 0;
-        const ytdMinutes = Number(json?.usageMonthly?.ytd?.participantMinutes ?? 0);
+
+        const ytdMinutes = Number(usageJson?.usageMonthly?.ytd?.participantMinutes ?? 0);
         const ytdHours = Math.round((ytdMinutes / 60) * 10) / 10;
-        const resetDate = json?.resetDate || null;
+
+        const resetDate = usageJson?.resetDate || null;
+
         const rtmpDestinationsMax = Number(
-          json?.plan?.limits?.rtmpDestinationsMax ??
-            json?.plan?.limits?.maxDestinations ??
+          (limits as any).rtmpDestinationsMax ??
+            (limits as any).maxDestinations ??
+            usageJson?.plan?.limits?.rtmpDestinationsMax ??
+            usageJson?.plan?.limits?.maxDestinations ??
             0
         );
         const multistreamEnabled = rtmpDestinationsMax > 1;
-        const maxGuests = Number(json?.plan?.limits?.maxGuests ?? (planId === "pro" ? 10 : planId === "starter" ? 2 : 1));
+
+        const maxGuests = Number(
+          (limits as any).maxGuests ??
+            usageJson?.plan?.limits?.maxGuests ??
+            (planId === "pro" ? 10 : planId === "starter" ? 2 : 1)
+        );
+
+        const displayName = (accountJson as any)?.displayName || "";
 
         setData({
-          displayName: "",
+          displayName,
           planId,
           usedHours,
           maxHours,

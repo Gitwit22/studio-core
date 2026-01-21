@@ -505,6 +505,12 @@ router.get("/me", async (req, res) => {
         return canHls;
       })();
 
+      // Canonical RTMP destinations cap: derive once from the
+      // normalized plan limits and expose both the canonical
+      // rtmpDestinationsMax and a maxDestinations alias so
+      // older callers can continue to function.
+      const rtmpDestinationsMax = resolveMaxDestinations(limits);
+
       effectiveEntitlements = {
         planId: entitlements.planId,
         planName: plan.name || entitlements.planId,
@@ -523,7 +529,10 @@ router.get("/me", async (req, res) => {
           canCustomizeHlsPage: hlsCustomizationEnabled,
         },
         limits: {
-          maxDestinations: resolveMaxDestinations(limits),
+          // Canonical numeric usage/feature caps
+          rtmpDestinationsMax,
+          // Backwards-compatible alias for older clients
+          maxDestinations: rtmpDestinationsMax,
           maxGuests: Number(limits.maxGuests || 0),
           participantMinutes: Number(limits.monthlyMinutes || limits.monthlyMinutesIncluded || 0),
           transcodeMinutes: Number(limits.transcodeMinutes || 0),
