@@ -617,7 +617,21 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       const payload = resolved.error;
       return res.status(400).json(payload);
     }
-    const { grantRole, permissions, effectiveRoleKey, locked } = resolved.result;
+    const { grantRole, effectiveRoleKey, locked } = resolved.result;
+    let permissions = { ...resolved.result.permissions };
+
+    // Host invariants: the canonical host role should always retain full
+    // streaming + moderation surface area, regardless of editable presets.
+    if (effectiveRoleKey === "host" || normalizedRequested === "host") {
+      permissions = {
+        ...permissions,
+        canStream: true,
+        canRecord: true,
+        canDestinations: true,
+        canLayout: true,
+        canModerate: true,
+      };
+    }
     const isViewer = grantRole === "viewer";
 
     if (process.env.AUTH_DEBUG === "1") {
