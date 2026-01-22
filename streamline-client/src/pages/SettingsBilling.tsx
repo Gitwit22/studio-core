@@ -860,32 +860,6 @@ export default function SettingsBilling() {
     }, 700);
   };
 
-  const scheduleRoleSave = (roleId: string, permissions: any, label: string) => {
-    if (roleSaveTimersRef.current[roleId]) {
-      window.clearTimeout(roleSaveTimersRef.current[roleId]!);
-    }
-    setRoleSaveStatus((prev) => ({ ...prev, [roleId]: "saving" }));
-    roleSaveTimersRef.current[roleId] = window.setTimeout(async () => {
-      try {
-        await updateRolePermissions(roleId, permissions, label);
-        setRoleSaveStatus((prev) => ({ ...prev, [roleId]: "saved" }));
-        window.setTimeout(() => {
-          setRoleSaveStatus((prev) => ({ ...prev, [roleId]: "idle" }));
-        }, 1500);
-
-        if (roleId === "cohost") {
-          setCohostProfile((prev) => {
-            const next = { ...prev, ...permissions };
-            scheduleCohostProfileSave(next);
-            return next;
-          });
-        }
-      } catch {
-        setRoleSaveStatus((prev) => ({ ...prev, [roleId]: "error" }));
-      }
-    }, 500);
-  };
-
   const handleEmergencyDownload = async () => {
     try {
       setEmergencyLoading(true);

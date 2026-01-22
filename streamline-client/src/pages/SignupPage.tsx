@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
-import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate } from "react-router-dom";
 
-// Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 import { API_BASE } from "../services/apiBase";
 import { apiFetch } from "../lib/api";
 
@@ -74,12 +71,11 @@ export const SignupPage = () => {
     }
 
     try {
-      const body: Record<string, any> = {
+      const body: Record<string, unknown> = {
         displayName: displayName.trim(),
         email: email.trim().toLowerCase(),
         password,
         timeZone: timeZone || "America/Chicago",
-        // Explicitly signal Terms of Service acceptance to the backend.
         tosAccepted: true,
       };
 
@@ -105,58 +101,163 @@ export const SignupPage = () => {
 
       // Store user data and token in localStorage
       localStorage.setItem("sl_user", JSON.stringify(data.user));
-
       localStorage.setItem("sl_token", data.token);
       localStorage.setItem("sl_userId", data.user.id || data.user.uid);
       localStorage.setItem("sl_displayName", data.user.displayName);
+
       // Fallback: Set JWT as a non-httpOnly cookie for backend auth (for local dev)
       if (typeof document !== "undefined" && data.token) {
         document.cookie = `token=${data.token}; path=/; max-age=${60 * 60 * 24 * 7}`;
-        // Debug: Log cookies after setting
-        console.log('[Signup] Cookies after signup:', document.cookie);
+        console.log("[Signup] Cookies after signup:", document.cookie);
       }
 
       // Initialize canonical account document with plan + stream defaults.
       try {
-        await apiFetch("/api/account/init", {
-          method: "POST",
-        });
+        await apiFetch("/api/account/init", { method: "POST" });
       } catch (initErr) {
-        // Intentionally swallow init failures so signup can still proceed.
         console.warn("[Signup] account init failed", initErr);
-                  background: 'rgba(31, 41, 55, 0.8)',
-                  color: '#ffffff',
-                  border: '1px solid rgba(75, 85, 99, 0.5)',
-                  outline: 'none',
-                  transition: 'all 0.3s ease',
-                  backdropFilter: 'blur(10px)'
+      }
+
+      // Redirect to next URL or dashboard
+      nav(nextUrl || "/");
+    } catch (err) {
+      console.error("Signup error:", err);
+      setError("An unexpected error occurred. Please try again.");
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "2rem 1rem",
+        background: "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)",
+        color: "#ffffff",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {/* Background decoration */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "radial-gradient(ellipse at 50% 0%, rgba(220, 38, 38, 0.1) 0%, transparent 50%)",
+          pointerEvents: "none",
+        }}
+      />
+
+      <form
+        onSubmit={handleSubmit}
+        style={{
+          width: "100%",
+          maxWidth: "420px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "1.25rem",
+          background: "rgba(15, 23, 42, 0.8)",
+          padding: "2rem",
+          borderRadius: "1rem",
+          border: "1px solid rgba(248, 113, 113, 0.2)",
+          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          backdropFilter: "blur(20px)",
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        <h2
+          style={{
+            fontSize: "1.75rem",
+            fontWeight: "700",
+            textAlign: "center",
+            marginBottom: "0.5rem",
+            background: "linear-gradient(135deg, #ffffff, #f87171)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+          }}
+        >
+          Create your account
+        </h2>
+
+        {/* Account info fields */}
+        <div>
+          <h3
+            style={{
+              fontSize: "1.125rem",
+              fontWeight: "600",
+              marginBottom: "0.75rem",
+              color: "#dc2626",
+            }}
+          >
+            Account Info
+          </h3>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            <div>
+              <label
+                style={{ display: "block", fontSize: "0.875rem", marginBottom: "0.25rem" }}
+              >
+                Display name
+              </label>
+              <input
+                type="text"
+                placeholder="Your name (optional)"
+                style={{
+                  width: "100%",
+                  padding: "0.75rem",
+                  borderRadius: "0.5rem",
+                  background: "rgba(31, 41, 55, 0.8)",
+                  color: "#ffffff",
+                  border: "1px solid rgba(75, 85, 99, 0.5)",
+                  outline: "none",
+                  transition: "all 0.3s ease",
+                  backdropFilter: "blur(10px)",
                 }}
-                onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
-                onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+                onFocus={(e) =>
+                  ((e.target as HTMLInputElement).style.borderColor = "#dc2626")
+                }
+                onBlur={(e) =>
+                  ((e.target as HTMLInputElement).style.borderColor =
+                    "rgba(75, 85, 99, 0.5)")
+                }
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                required
               />
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Email</label>
+              <label
+                style={{ display: "block", fontSize: "0.875rem", marginBottom: "0.25rem" }}
+              >
+                Email
+              </label>
               <input
                 type="email"
                 placeholder="you@example.com"
                 style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  borderRadius: '0.5rem',
-                  background: 'rgba(31, 41, 55, 0.8)',
-                  color: '#ffffff',
-                  border: '1px solid rgba(75, 85, 99, 0.5)',
-                  outline: 'none',
-                  transition: 'all 0.3s ease',
-                  backdropFilter: 'blur(10px)'
+                  width: "100%",
+                  padding: "0.75rem",
+                  borderRadius: "0.5rem",
+                  background: "rgba(31, 41, 55, 0.8)",
+                  color: "#ffffff",
+                  border: "1px solid rgba(75, 85, 99, 0.5)",
+                  outline: "none",
+                  transition: "all 0.3s ease",
+                  backdropFilter: "blur(10px)",
                 }}
-                onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
-                onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+                onFocus={(e) =>
+                  ((e.target as HTMLInputElement).style.borderColor = "#dc2626")
+                }
+                onBlur={(e) =>
+                  ((e.target as HTMLInputElement).style.borderColor =
+                    "rgba(75, 85, 99, 0.5)")
+                }
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -164,23 +265,32 @@ export const SignupPage = () => {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Password</label>
+              <label
+                style={{ display: "block", fontSize: "0.875rem", marginBottom: "0.25rem" }}
+              >
+                Password
+              </label>
               <input
                 type="password"
                 placeholder="At least 6 characters"
                 style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  borderRadius: '0.5rem',
-                  background: 'rgba(31, 41, 55, 0.8)',
-                  color: '#ffffff',
-                  border: '1px solid rgba(75, 85, 99, 0.5)',
-                  outline: 'none',
-                  transition: 'all 0.3s ease',
-                  backdropFilter: 'blur(10px)'
+                  width: "100%",
+                  padding: "0.75rem",
+                  borderRadius: "0.5rem",
+                  background: "rgba(31, 41, 55, 0.8)",
+                  color: "#ffffff",
+                  border: "1px solid rgba(75, 85, 99, 0.5)",
+                  outline: "none",
+                  transition: "all 0.3s ease",
+                  backdropFilter: "blur(10px)",
                 }}
-                onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
-                onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+                onFocus={(e) =>
+                  ((e.target as HTMLInputElement).style.borderColor = "#dc2626")
+                }
+                onBlur={(e) =>
+                  ((e.target as HTMLInputElement).style.borderColor =
+                    "rgba(75, 85, 99, 0.5)")
+                }
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -191,182 +301,36 @@ export const SignupPage = () => {
 
         {/* Plan info display (read-only, always starts as free) */}
         <div>
-          <h3 style={{
-            fontSize: '1.125rem',
-            fontWeight: '600',
-            marginBottom: '0.5rem',
-            color: '#dc2626'
-          }}>
+          <h3
+            style={{
+              fontSize: "1.125rem",
+              fontWeight: "600",
+              marginBottom: "0.5rem",
+              color: "#dc2626",
+            }}
+          >
             Your Plan
           </h3>
-          <div style={{
-            padding: '0.75rem',
-            borderRadius: '0.5rem',
-            background: 'rgba(31, 41, 55, 0.5)',
-            border: '1px solid rgba(34, 197, 94, 0.3)',
-            backdropFilter: 'blur(10px)'
-          }}>
-            <div style={{ fontWeight: '500', color: '#22c55e', marginBottom: '0.25rem' }}>
+          <div
+            style={{
+              padding: "0.75rem",
+              borderRadius: "0.5rem",
+              background: "rgba(31, 41, 55, 0.5)",
+              border: "1px solid rgba(34, 197, 94, 0.3)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <div
+              style={{ fontWeight: "500", color: "#22c55e", marginBottom: "0.25rem" }}
+            >
               Free Plan
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'rgba(156, 163, 175, 0.8)' }}>
-              Perfect for getting started with StreamLine. You can upgrade anytime—just head to Settings → Billing when you're ready.
+            <div style={{ fontSize: "0.75rem", color: "rgba(156, 163, 175, 0.8)" }}>
+              Everyone starts on the Free plan. You can upgrade anytime in Settings →
+              Billing.
             </div>
           </div>
         </div>
-
-        {/* Skip onboarding checkbox */}
-        <div>
-          <label style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '0.5rem',
-            fontSize: '0.875rem',
-            cursor: 'pointer',
-            padding: '0.5rem',
-            borderRadius: '0.375rem',
-            background: 'rgba(31, 41, 55, 0.3)'
-          }}>
-            <input
-              type="checkbox"
-              checked={skipOnboarding}
-              onChange={(e) => setSkipOnboarding(e.target.checked)}
-              style={{ marginTop: '0.125rem', accentColor: '#dc2626' }}
-            />
-            <span>Skip streaming setup for now (you can set this up later)</span>
-          </label>
-        </div>
-
-        {/* STEP 2 – Streaming defaults */}
-        {!skipOnboarding && (
-          <>
-            <div>
-              <h3 style={{
-                fontSize: '1.125rem',
-                fontWeight: '600',
-                marginBottom: '0.5rem',
-                color: '#dc2626'
-              }}>
-                Step 2 – Streaming Defaults (optional)
-              </h3>
-
-              <p style={{
-                fontSize: '0.875rem',
-                color: 'rgba(156, 163, 175, 0.85)',
-                marginBottom: '0.75rem'
-              }}>
-                Add your stream keys once here—they're saved for future streams, so you can go live faster next time.
-              </p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                    Default resolution
-                  </label>
-                  <select
-                    style={{
-                      width: '100%',
-                      padding: '0.75rem',
-                      borderRadius: '0.5rem',
-                      background: 'rgba(31, 41, 55, 0.8)',
-                      color: '#ffffff',
-                      border: '1px solid rgba(75, 85, 99, 0.5)',
-                      outline: 'none',
-                      backdropFilter: 'blur(10px)'
-                    }}
-                    value={defaultResolution}
-                    onChange={(e) => setDefaultResolution(e.target.value)}
-                  >
-                    <option value="720p">720p</option>
-                    <option value="1080p">1080p</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                    Default destinations
-                  </label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.875rem' }}>
-                    <label style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem',
-                      borderRadius: '0.375rem',
-                      background: 'rgba(31, 41, 55, 0.3)',
-                      cursor: 'pointer'
-                    }}>
-                      <input
-                        type="checkbox"
-                        checked={defaultDestinations.youtube}
-                        onChange={() => toggleDestination("youtube")}
-                        style={{ accentColor: '#dc2626' }}
-                      />
-                      <span>Use YouTube by default when I go live</span>
-                    </label>
-                    <label style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem',
-                      borderRadius: '0.375rem',
-                      background: 'rgba(31, 41, 55, 0.3)',
-                      cursor: 'pointer'
-                    }}>
-                      <input
-                        type="checkbox"
-                        checked={defaultDestinations.facebook}
-                        onChange={() => toggleDestination("facebook")}
-                        style={{ accentColor: '#dc2626' }}
-                      />
-                      <span>Use Facebook by default when I go live</span>
-                    </label>
-                    <label style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem',
-                      borderRadius: '0.375rem',
-                      background: 'rgba(31, 41, 55, 0.3)',
-                      cursor: 'pointer'
-                    }}>
-                      <input
-                        type="checkbox"
-                        checked={defaultDestinations.twitch}
-                        onChange={() => toggleDestination("twitch")}
-                        style={{ accentColor: '#dc2626' }}
-                      />
-                      <span>Use Twitch by default when I go live</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                    Default YouTube privacy (optional)
-                  </label>
-                  <select
-                    style={{
-                      width: '100%',
-                      padding: '0.75rem',
-                      borderRadius: '0.5rem',
-                      background: 'rgba(31, 41, 55, 0.8)',
-                      color: '#ffffff',
-                      border: '1px solid rgba(75, 85, 99, 0.5)',
-                      outline: 'none',
-                      backdropFilter: 'blur(10px)'
-                    }}
-                    value={defaultPrivacy}
-                    onChange={(e) => setDefaultPrivacy(e.target.value)}
-                  >
-                    <option value="public">Public</option>
-                    <option value="unlisted">Unlisted</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
 
         {/* Terms of Service agreement (required) */}
         <div>
@@ -391,8 +355,7 @@ export const SignupPage = () => {
               required
             />
             <span>
-              I agree to the
-              {" "}
+              I agree to the{" "}
               <button
                 type="button"
                 onClick={() => setShowTermsModal(true)}
@@ -418,49 +381,57 @@ export const SignupPage = () => {
           type="submit"
           disabled={loading}
           style={{
-            padding: '0.75rem',
-            borderRadius: '0.75rem',
-            background: loading ? 'rgba(75, 85, 99, 0.5)' : 'linear-gradient(135deg, #dc2626, #ef4444)',
-            color: '#ffffff',
-            fontWeight: '600',
-            border: 'none',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            width: '100%',
-            transition: 'all 0.3s ease',
-            opacity: loading ? 0.6 : 1
+            padding: "0.75rem",
+            borderRadius: "0.75rem",
+            background: loading
+              ? "rgba(75, 85, 99, 0.5)"
+              : "linear-gradient(135deg, #dc2626, #ef4444)",
+            color: "#ffffff",
+            fontWeight: "600",
+            border: "none",
+            cursor: loading ? "not-allowed" : "pointer",
+            width: "100%",
+            transition: "all 0.3s ease",
+            opacity: loading ? 0.6 : 1,
           }}
           onMouseEnter={(e) => {
             if (!loading) {
-              (e.target as HTMLButtonElement).style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
-              (e.target as HTMLButtonElement).style.boxShadow = '0 0 20px rgba(220, 38, 38, 0.4)';
+              (e.target as HTMLButtonElement).style.background =
+                "linear-gradient(135deg, #b91c1c, #dc2626)";
+              (e.target as HTMLButtonElement).style.boxShadow =
+                "0 0 20px rgba(220, 38, 38, 0.4)";
             }
           }}
           onMouseLeave={(e) => {
             if (!loading) {
-              (e.target as HTMLButtonElement).style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
-              (e.target as HTMLButtonElement).style.boxShadow = 'none';
+              (e.target as HTMLButtonElement).style.background =
+                "linear-gradient(135deg, #dc2626, #ef4444)";
+              (e.target as HTMLButtonElement).style.boxShadow = "none";
             }
           }}
         >
           {loading ? "Creating account..." : "Create account"}
         </button>
 
+        {/* Next steps note */}
         <div
           style={{
-            marginTop: "0.75rem",
+            marginTop: "0.5rem",
             fontSize: "0.75rem",
-            color: "rgba(148,163,184,0.9)",
+            color: "rgba(148, 163, 184, 0.9)",
             textAlign: "left",
           }}
         >
           <div style={{ fontWeight: 500, marginBottom: "0.15rem" }}>Next steps:</div>
           <div>
-            After creating your account, head to Settings to review your stream preferences and add any stream keys you
-            plan to use. You can start a stream right away, or set things up first0 it's up to you.
+            After creating your account, head to Settings to review your stream
+            preferences and add any stream keys you plan to use. You can start a stream
+            right away, or set things up first — it's up to you.
           </div>
         </div>
       </form>
 
+      {/* Terms modal */}
       {showTermsModal && (
         <div
           style={{
@@ -513,28 +484,38 @@ export const SignupPage = () => {
               </button>
             </div>
 
-            <p style={{ fontSize: "0.85rem", color: "#d1d5db", marginBottom: "0.75rem" }}>
-              By creating a StreamLine account you agree to our Terms of
-              Service. This is a summary; the full legal text is available on
-              the dedicated Terms page.
+            <p
+              style={{ fontSize: "0.85rem", color: "#d1d5db", marginBottom: "0.75rem" }}
+            >
+              By creating a StreamLine account you agree to our Terms of Service. This is
+              a summary; the full legal text is available on the dedicated Terms page.
             </p>
 
-            <ul style={{ fontSize: "0.8rem", color: "#9ca3af", paddingLeft: "1.1rem", marginBottom: "0.75rem" }}>
+            <ul
+              style={{
+                fontSize: "0.8rem",
+                color: "#9ca3af",
+                paddingLeft: "1.1rem",
+                marginBottom: "0.75rem",
+              }}
+            >
               <li>Use StreamLine only for lawful, authorized content and activity.</li>
               <li>You are responsible for your account and any activity under it.</li>
               <li>
-                Paid plans, if enabled, are billed on a recurring basis and may
-                have usage limits.
+                Paid plans, if enabled, are billed on a recurring basis and may have
+                usage limits.
               </li>
               <li>
-                We may suspend or terminate accounts that violate these terms or
-                abuse the service.
+                We may suspend or terminate accounts that violate these terms or abuse
+                the service.
               </li>
             </ul>
 
-            <p style={{ fontSize: "0.8rem", color: "#9ca3af", marginBottom: "0.75rem" }}>
-              For full details, including acceptable use, billing, and
-              limitations of liability, review the complete Terms of Service.
+            <p
+              style={{ fontSize: "0.8rem", color: "#9ca3af", marginBottom: "0.75rem" }}
+            >
+              For full details, including acceptable use, billing, and limitations of
+              liability, review the complete Terms of Service.
             </p>
 
             <a
@@ -556,39 +537,49 @@ export const SignupPage = () => {
       )}
 
       {error && (
-        <p style={{
-          marginTop: '1rem',
-          color: '#ef4444',
-          fontSize: '0.875rem',
-          background: 'rgba(239, 68, 68, 0.1)',
-          padding: '0.75rem',
-          borderRadius: '0.5rem',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
-          backdropFilter: 'blur(10px)',
-          position: 'relative',
-          zIndex: 1
-        }}>
+        <p
+          style={{
+            marginTop: "1rem",
+            color: "#ef4444",
+            fontSize: "0.875rem",
+            background: "rgba(239, 68, 68, 0.1)",
+            padding: "0.75rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            backdropFilter: "blur(10px)",
+            position: "relative",
+            zIndex: 1,
+            maxWidth: "420px",
+            width: "100%",
+          }}
+        >
           {error}
         </p>
       )}
 
-      <p style={{
-        marginTop: '1rem',
-        fontSize: '0.875rem',
-        color: 'rgba(255, 255, 255, 0.7)',
-        position: 'relative',
-        zIndex: 1
-      }}>
-        Already have an account?{' '}
+      <p
+        style={{
+          marginTop: "1rem",
+          fontSize: "0.875rem",
+          color: "rgba(255, 255, 255, 0.7)",
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        Already have an account?{" "}
         <a
           href="/login"
           style={{
-            color: '#dc2626',
-            textDecoration: 'none',
-            fontWeight: '600'
+            color: "#dc2626",
+            textDecoration: "none",
+            fontWeight: "600",
           }}
-          onMouseEnter={(e) => (e.target as HTMLAnchorElement).style.textDecoration = 'underline'}
-          onMouseLeave={(e) => (e.target as HTMLAnchorElement).style.textDecoration = 'none'}
+          onMouseEnter={(e) =>
+            ((e.target as HTMLAnchorElement).style.textDecoration = "underline")
+          }
+          onMouseLeave={(e) =>
+            ((e.target as HTMLAnchorElement).style.textDecoration = "none")
+          }
         >
           Sign in
         </a>
