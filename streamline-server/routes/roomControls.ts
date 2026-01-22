@@ -401,10 +401,10 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
               existingMeta = {};
             }
           }
-          const mergedMeta = { ...existingMeta, rolePresetId: presetId };
+          const mergedMeta = { ...existingMeta, rolePresetId: rolePresetId };
           nextMetadata = JSON.stringify(mergedMeta);
         } catch {
-          nextMetadata = JSON.stringify({ rolePresetId: presetId });
+          nextMetadata = JSON.stringify({ rolePresetId: rolePresetId });
         }
 
         await roomService.updateParticipant(livekitRoomName, rawIdentity, {
