@@ -215,7 +215,6 @@ export async function assertRoomPerm(
   } else {
     actorType = "invite";
     role = ((invite?.role as any) || "viewer") as RoomActorRole;
-    if (role === "moderator") role = "cohost";
     if (role === "cohost" || role === "participant") {
       const base = ROLE_PERMISSIONS[role as RoomRole] || ROLE_PERMISSIONS.participant;
       permissions = await intersectPermissionsWithEntitlements(base, invite?.createdByUid) as RolePermissions;
