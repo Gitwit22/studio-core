@@ -103,6 +103,8 @@ export default function Live() {
   const [viewerCount, setViewerCount] = useState<number>(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   // Resolve savedEmbedId -> activeRoomId and basic viewer metadata
   useEffect(() => {
@@ -260,6 +262,52 @@ export default function Live() {
       }
     }
   }, [reloadViewerConfig, fetchHlsStatus]);
+
+  // Track playback position so we can render a timeline similar to
+  // a standard video player, even for live HLS with a sliding window.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!playlistUrl || !v) return;
+
+    const updateTime = () => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      const seekable = video.seekable;
+      let effectiveDuration = video.duration;
+      let position = video.currentTime;
+
+      // For live HLS, duration is often Infinity. In that case, use the
+      // current seekable window and treat position as offset from the start
+      // of that window so the slider stays bounded.
+      if (!Number.isFinite(effectiveDuration) || effectiveDuration <= 0) {
+        if (seekable && seekable.length) {
+          const start = seekable.start(0);
+          const end = seekable.end(seekable.length - 1);
+          effectiveDuration = Math.max(0, end - start);
+          position = Math.max(0, Math.min(effectiveDuration, video.currentTime - start));
+        } else {
+          effectiveDuration = 0;
+          position = 0;
+        }
+      } else if (seekable && seekable.length) {
+        const start = seekable.start(0);
+        position = Math.max(0, Math.min(effectiveDuration, video.currentTime - start));
+      }
+
+      setDuration(effectiveDuration || 0);
+      setCurrentTime(position || 0);
+    };
+
+    updateTime();
+    v.addEventListener("timeupdate", updateTime);
+    v.addEventListener("progress", updateTime);
+
+    return () => {
+      v.removeEventListener("timeupdate", updateTime);
+      v.removeEventListener("progress", updateTime);
+    };
+  }, [playlistUrl]);
 
   // Attach HLS playback (source + player wiring) once per playlist URL.
   // Mute/volume are applied in a separate effect so toggling audio does
@@ -538,8 +586,9 @@ export default function Live() {
 
                     {/* overlay controls */}
                     <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent opacity-100 md:opacity-0 md:hover:opacity-100 transition-opacity duration-300">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
                           <button
                             onClick={toggleMute}
                             className="p-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50"
@@ -570,24 +619,60 @@ export default function Live() {
                               Click to unmute
                             </span>
                           )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleRefreshGoLive}
+                              className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50 text-xs font-medium text-white"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              <span>Live View</span>
+                            </button>
+
+                            <button
+                              onClick={toggleFullscreen}
+                              className="p-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50"
+                              aria-label="Fullscreen"
+                            >
+                              <Maximize className="w-5 h-5 text-white" />
+                            </button>
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={handleRefreshGoLive}
-                            className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50 text-xs font-medium text-white"
-                          >
-                            <RefreshCw className="w-3 h-3" />
-                            <span>Live View</span>
-                          </button>
+                        {/* Timeline */}
+                        <div className="flex items-center gap-3 px-1">
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={0.1}
+                            value={duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0}
+                            onChange={(e) => {
+                              const pct = Number(e.target.value);
+                              const v = videoRef.current;
+                              if (!v || !Number.isFinite(pct) || duration <= 0) return;
 
-                          <button
-                            onClick={toggleFullscreen}
-                            className="p-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50"
-                            aria-label="Fullscreen"
-                          >
-                            <Maximize className="w-5 h-5 text-white" />
-                          </button>
+                              const seekable = v.seekable;
+                              let targetOffset = (pct / 100) * duration;
+
+                              if (seekable && seekable.length) {
+                                const start = seekable.start(0);
+                                const end = seekable.end(seekable.length - 1);
+                                const windowDuration = Math.max(0, end - start);
+                                if (windowDuration > 0) {
+                                  targetOffset = (pct / 100) * windowDuration;
+                                  v.currentTime = start + targetOffset;
+                                }
+                              } else {
+                                v.currentTime = targetOffset;
+                              }
+
+                              void v.play().catch(() => {});
+                            }}
+                            className="w-full h-1 rounded-full bg-neutral-700 accent-red-500 cursor-pointer"
+                            aria-label="Playback position"
+                          />
                         </div>
                       </div>
                     </div>

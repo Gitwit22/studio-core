@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "../middleware/roomAccessToken";
 import { getLiveKitSdk } from "../lib/livekit";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
+import { roleToParticipantPermission } from "../lib/livekitPermissions";
 
 const router = Router();
 
@@ -209,14 +210,13 @@ function isHostOrCohost(role?: string): boolean {
 }
 
 function mapPresetToLivekitPermission(role: PresetId) {
-  const base = {
-    canSubscribe: true,
-    canPublish: true,
-    canPublishData: true,
-    canUpdateMetadata: false,
-    roomAdmin: false,
-  } as any;
-  return base;
+  // Map our simple room role presets (participant/cohost) to LiveKit
+  // ParticipantPermission objects so we can accurately control which
+  // track sources (including screen share) are allowed. This is
+  // important for demotion flows where we need to detect when
+  // screen-share capability is lost and proactively mute any
+  // existing screen-share tracks.
+  return roleToParticipantPermission(role);
 }
 
 // Host/cohost updates controls for the whole room.
