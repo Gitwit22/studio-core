@@ -63,21 +63,8 @@ const ROLE_PRESET_GROUPS: Array<{ title: string; keys: Array<{ key: RolePresetTo
     keys: [
       { key: "canStartStopStream", label: "Start/Stop Stream" },
       { key: "canStartStopRecording", label: "Start/Stop Recording" },
-      { key: "canManageDestinations", label: "Manage Destinations" },
-      { key: "canChangeLayoutScene", label: "Change Layout/Scene" },
-      { key: "canViewAnalytics", label: "View Analytics" },
-    ],
-  },
-];
 
-const EMPTY_PERMISSIONS = {
-  canStream: false,
-  canRecord: false,
-  canDestinations: false,
-  canModerate: false,
-  canLayout: false,
-  canScreenShare: false,
-  canInvite: false,
+  if (!plans.length && !loading) {
   canAnalytics: false,
 };
 
@@ -280,6 +267,9 @@ export default function SettingsBilling() {
   const [emergencyLoading, setEmergencyLoading] = useState(false);
   const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
 
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState<string | null>(null);
+
   const [actionLoading, setActionLoading] = useState<CheckoutPlanVariant | "portal" | null>(null);
 
   const [checkoutTosAccepted, setCheckoutTosAccepted] = useState(false);
@@ -329,21 +319,32 @@ export default function SettingsBilling() {
     loadAllData();
   }, []);
 
+  // Lazy-load usage when the user switches to the Usage tab.
+  useEffect(() => {
+    if (activeTab === "usage" && !usage && !usageLoading) {
+      loadUsage();
+    }
+  }, [activeTab, usage, usageLoading]);
+
   const loadAllData = async () => {
     setLoading(true);
     setError(null);
     try {
       // Ensure we have a baseline user object before applying entitlements/TOS metadata
-      await loadUser();
+      const account = await loadUser();
 
       await Promise.all([
         loadPlans(),
-        loadUsage(),
-        loadEntitlements(),
-        loadMediaPrefs(),
+        loadEntitlements(account),
+        loadMediaPrefs(account),
         loadCohostProfile(),
         loadRolePresets(),
       ]);
+
+      // If the user is currently on the Usage tab, refresh usage as well.
+      if (activeTab === "usage") {
+        await loadUsage();
+      }
     } catch (err: any) {
       setError(err?.message || "Failed to load data");
     } finally {
@@ -362,6 +363,7 @@ export default function SettingsBilling() {
           window.localStorage.setItem("sl_userId", String((data as any).id || (data as any).uid));
         }
       } catch {}
+      return data;
     } catch (err: any) {
       if (err?.status === 401 || err?.status === 403) {
         clearAuthStorage();
@@ -390,11 +392,16 @@ export default function SettingsBilling() {
     }
   };
 
-  const loadEntitlements = async () => {
+  const loadEntitlements = async (account?: any) => {
     try {
-      // Prefer canonical effectiveEntitlements from /api/account/me
-      const res = await apiFetch("/api/account/me");
-      const data = await res.json();
+      // Prefer canonical effectiveEntitlements from /api/account/me.
+      // Reuse the account payload from loadUser when available to avoid
+      // extra network calls on initial load.
+      let data = account;
+      if (!data) {
+        const res = await apiFetch("/api/account/me");
+        data = await res.json();
+      }
 
       try {
         const platformFlags = (data as any)?.platformFlags || {};
@@ -507,6 +514,10 @@ export default function SettingsBilling() {
  
   const loadUsage = async () => {
     try {
+      setUsageLoading(true);
+      setUsageError(null);
+      // Usage is relatively heavy; this is now called lazily when the
+      // user opens the Usage tab, and after Test Mode plan switches.
       const res = await apiFetch("/api/usage/me");
       const data = await res.json();
       const limits = data?.plan?.limits || {};
@@ -567,15 +578,15 @@ export default function SettingsBilling() {
     } catch (err) {
       console.warn("loadUsage failed; using defaults", err);
       setUsage(DEFAULT_USAGE);
+      setUsageError("Failed to load detailed usage. Showing approximate defaults.");
+    } finally {
+      setUsageLoading(false);
     }
   };
 
-  const loadMediaPrefs = async () => {
+  const loadMediaPrefs = async (account?: any) => {
     try {
-      const [presetsRes, meRes] = await Promise.all([
-        fetch(`${API_BASE}/api/account/presets`, { credentials: "include" }),
-        fetch(`${API_BASE}/api/account/me`, { credentials: "include" }),
-      ]);
+      const presetsRes = await fetch(`${API_BASE}/api/account/presets`, { credentials: "include" });
 
       let availablePresets: Array<{ id: string; label: string }> = [{ id: "standard_720p30", label: "Standard (720p30)" }];
 
@@ -590,10 +601,22 @@ export default function SettingsBilling() {
           console.error("Failed to parse presets", err);
         }
       }
+      let me = account;
 
-      if (meRes.ok) {
+      if (!me) {
+        const meRes = await fetch(`${API_BASE}/api/account/me`, { credentials: "include" });
+
+        if (meRes.ok) {
+          try {
+            me = await meRes.json();
+          } catch (err) {
+            console.error("Failed to parse /account/me", err);
+          }
+        }
+      }
+
+      if (me) {
         try {
-          const me = await meRes.json();
           const prefs = me?.mediaPrefs ? { ...DEFAULT_MEDIA_PREFS, ...me.mediaPrefs } : DEFAULT_MEDIA_PREFS;
           const adv = me?.advancedPermissions || { enabled: false, plan: false, override: false, global: false, lockReason: me?.advancedPermissionsLockedReason };
           const lockReason = adv.lockReason || me?.advancedPermissionsLockedReason || null;
@@ -1180,7 +1203,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         <div style={S.header}>
           <h1 style={S.title}>💳 Billing & Plans</h1>
           <button onClick={loadAllData} style={S.refreshBtn} disabled={loading}>
-            🔄 Refresh
+            {loading ? "⏳ Refreshing..." : "🔄 Refresh"}
           </button>
         </div>
 
@@ -1549,6 +1572,17 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         </span>
                       </div>
                     )}
+                  </div>
+                </div>
+              ) : loading ? (
+                <div style={S.planDisplay}>
+                  <div style={S.planInfo}>
+                    <div style={S.planNameRow}>
+                      <span style={S.planName}>Loading plan…</span>
+                    </div>
+                    <p style={S.planDescription}>
+                      Fetching your current plan details. This usually only takes a moment.
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -2118,7 +2152,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         {/* ================================================================ */}
         {/* SECTION 5: USAGE THIS MONTH */}
         {/* ================================================================ */}
-        {activeTab === "usage" && usage && (
+        {activeTab === "usage" && (
           <div style={{ ...S.card, opacity: isBlocked ? 0.6 : 1 }}>
             <div style={S.cardHeader}>
               <h2 style={S.cardTitle}>📊 Usage This Month</h2>
@@ -2128,162 +2162,194 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </span>
               )}
             </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 4 }}>
-              <div style={{ color: "#e5e7eb", fontWeight: 600 }}>Plan entitlements</div>
-              <div style={{
-                padding: "4px 10px",
-                borderRadius: 999,
-                border: "1px solid rgba(255,255,255,0.15)",
-                color: "#cbd5e1",
-                fontSize: 12,
-              }}>
-                {entitlements.planName || currentPlan?.name || "Plan"}
+            {usageLoading && !usage && (
+              <div style={{ marginTop: 16, padding: 16, display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={S.spinner} />
+                <div style={{ color: "#e5e7eb", fontSize: 13 }}>Loading usage details…</div>
               </div>
-            </div>
+            )}
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 12,
-                marginTop: 8,
-                marginBottom: 16,
-              }}
-            >
-              {renderEntitlementPill(
-                "Recording",
-                entitlements.recording ? "Enabled" : "Disabled",
-                entitlements.recording
-              )}
-              {renderEntitlementPill(
-                "Dual Recording",
-                entitlements.dualRecording ? "Cloud + Local" : "Cloud only",
-                entitlements.dualRecording
-              )}
-              {renderEntitlementPill(
-                "Multistream",
-                entitlements.rtmpMultistream ? "Enabled" : "Single destination",
-                entitlements.rtmpMultistream
-              )}
-              {renderEntitlementPill(
-                "Guests",
-                formatLimitLabel(entitlements.maxGuests, "guest"),
-                entitlements.maxGuests !== 0
-              )}
-              {renderEntitlementPill(
-                "Stream Destinations",
-                formatLimitLabel(entitlements.maxDestinations, "stream destination"),
-                entitlements.maxDestinations !== 0
-              )}
-              {renderEntitlementPill(
-                "Monthly minutes",
-                `${formatLimitLabel(entitlements.participantMinutes, "min")}${entitlements.participantMinutes > 0 ? "/mo" : ""}`,
-                entitlements.participantMinutes !== 0
-              )}
-            </div>
-
-            <div style={{ marginTop: 8, marginBottom: 12, padding: 12, border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, background: "rgba(255,255,255,0.02)" }}>
-              <div style={{ fontWeight: 700, color: "#e5e7eb", marginBottom: 6 }}>Minutes Used (This Month)</div>
-              <div style={{ color: "#cbd5e1", marginBottom: 4 }}>
-                Live streaming: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.streamingMinutes.used}</span> min
-              </div>
-              <div style={{ color: "#cbd5e1", marginBottom: 6 }}>
-                Recording: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.used}</span> min
-              </div>
-              <div style={{ color: "#94a3b8", fontSize: 12 }}>Recording minutes are included in your total usage.</div>
-              <div style={{ marginTop: 8 }}>
+            {!usageLoading && !usage && (
+              <div style={{ marginTop: 16, padding: 16, borderRadius: 10, border: "1px solid rgba(148,163,184,0.4)", background: "rgba(15,23,42,0.7)", color: "#e5e7eb", fontSize: 13 }}>
+                <div style={{ marginBottom: 6 }}>Usage details are not available yet.</div>
+                {usageError && <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 6 }}>{usageError}</div>}
                 <button
                   type="button"
-                  onClick={() => setShowLifetimeDetails((prev) => !prev)}
+                  onClick={loadUsage}
                   style={{
-                    background: "transparent",
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    color: "#cbd5e1",
-                    padding: "6px 10px",
+                    padding: "8px 12px",
                     borderRadius: 8,
+                    border: "1px solid rgba(148,163,184,0.7)",
+                    background: "transparent",
+                    color: "#cbd5e1",
                     cursor: "pointer",
                     fontSize: 12,
                   }}
                 >
-                  {showLifetimeDetails ? "Hide lifetime details" : "Show lifetime details"}
+                  Retry loading usage
                 </button>
               </div>
-              {showLifetimeDetails && (
-                <div style={{ marginTop: 8, color: "#cbd5e1", fontSize: 13 }}>
-                  <div>Lifetime live minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.streamingMinutes.lifetime ?? 0}</span> min</div>
-                  <div>Lifetime recording minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.lifetime}</span> min</div>
+            )}
+
+            {usage && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 4 }}>
+                  <div style={{ color: "#e5e7eb", fontWeight: 600 }}>Plan entitlements</div>
+                  <div style={{
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    color: "#cbd5e1",
+                    fontSize: 12,
+                  }}>
+                    {entitlements.planName || currentPlan?.name || "Plan"}
+                  </div>
                 </div>
-              )}
-            </div>
 
-            <div style={S.usageGrid}>
-              <UsageBar
-                label="Streaming Minutes"
-                used={usage.streamingMinutes.used}
-                limit={
-                  usage.streamingMinutes.limit ||
-                  currentPlan.limits?.monthlyMinutesIncluded ||
-                  0
-                }
-                unit="min"
-              />
-              <UsageBar
-                label="Stream Destinations"
-                used={usage.rtmpDestinations.used}
-                limit={
-                  entitlements.maxDestinations ??
-                  usage.rtmpDestinations.limit ??
-                  currentPlan.limits?.rtmpDestinationsMax ??
-                  0
-                }
-                unit=""
-              />
-              {(isPaidValid || usage.storage.limit > 0) && (
-                <UsageBar
-                  label="Storage"
-                  used={usage.storage.used}
-                  limit={usage.storage.limit || currentPlan.editing?.maxStorageGB || 0}
-                  unit="GB"
-                />
-              )}
-              {(isPaidValid || usage.projects.limit > 0) && (
-                <UsageBar
-                  label="Projects"
-                  used={usage.projects.used}
-                  limit={usage.projects.limit || currentPlan.editing?.maxProjects || 0}
-                  unit=""
-                />
-              )}
-            </div>
-
-            <div style={{ marginTop: 16, padding: 12, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, background: "rgba(255,255,255,0.02)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ color: "#e5e7eb", fontWeight: 600 }}>Emergency Download (Latest Recording)</div>
-                <button
-                  type="button"
-                  onClick={handleEmergencyDownload}
-                  disabled={emergencyLoading}
+                <div
                   style={{
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(239, 68, 68, 0.6)",
-                    background: emergencyLoading ? "rgba(239, 68, 68, 0.2)" : "rgba(239, 68, 68, 0.15)",
-                    color: "#fecaca",
-                    cursor: emergencyLoading ? "not-allowed" : "pointer",
-                    fontWeight: 600,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 12,
+                    marginTop: 8,
+                    marginBottom: 16,
                   }}
                 >
-                  {emergencyLoading ? "Preparing..." : "Download latest recording"}
-                </button>
-              </div>
-              <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
-                Use this if your in-room download didn’t work. Downloads are available for a limited time.
-              </div>
-              {emergencyMessage && (
-                <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>{emergencyMessage}</div>
-              )}
-            </div>
+                  {renderEntitlementPill(
+                    "Recording",
+                    entitlements.recording ? "Enabled" : "Disabled",
+                    entitlements.recording
+                  )}
+                  {renderEntitlementPill(
+                    "Dual Recording",
+                    entitlements.dualRecording ? "Cloud + Local" : "Cloud only",
+                    entitlements.dualRecording
+                  )}
+                  {renderEntitlementPill(
+                    "Multistream",
+                    entitlements.rtmpMultistream ? "Enabled" : "Single destination",
+                    entitlements.rtmpMultistream
+                  )}
+                  {renderEntitlementPill(
+                    "Guests",
+                    formatLimitLabel(entitlements.maxGuests, "guest"),
+                    entitlements.maxGuests !== 0
+                  )}
+                  {renderEntitlementPill(
+                    "Stream Destinations",
+                    formatLimitLabel(entitlements.maxDestinations, "stream destination"),
+                    entitlements.maxDestinations !== 0
+                  )}
+                  {renderEntitlementPill(
+                    "Monthly minutes",
+                    `${formatLimitLabel(entitlements.participantMinutes, "min")}${entitlements.participantMinutes > 0 ? "/mo" : ""}`,
+                    entitlements.participantMinutes !== 0
+                  )}
+                </div>
+
+                <div style={{ marginTop: 8, marginBottom: 12, padding: 12, border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, background: "rgba(255,255,255,0.02)" }}>
+                  <div style={{ fontWeight: 700, color: "#e5e7eb", marginBottom: 6 }}>Minutes Used (This Month)</div>
+                  <div style={{ color: "#cbd5e1", marginBottom: 4 }}>
+                    Live streaming: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.streamingMinutes.used}</span> min
+                  </div>
+                  <div style={{ color: "#cbd5e1", marginBottom: 6 }}>
+                    Recording: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.used}</span> min
+                  </div>
+                  <div style={{ color: "#94a3b8", fontSize: 12 }}>Recording minutes are included in your total usage.</div>
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowLifetimeDetails((prev) => !prev)}
+                      style={{
+                        background: "transparent",
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        color: "#cbd5e1",
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      {showLifetimeDetails ? "Hide lifetime details" : "Show lifetime details"}
+                    </button>
+                  </div>
+                  {showLifetimeDetails && (
+                    <div style={{ marginTop: 8, color: "#cbd5e1", fontSize: 13 }}>
+                      <div>Lifetime live minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.streamingMinutes.lifetime ?? 0}</span> min</div>
+                      <div>Lifetime recording minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.lifetime}</span> min</div>
+                    </div>
+                  )}
+                </div>
+
+                <div style={S.usageGrid}>
+                  <UsageBar
+                    label="Streaming Minutes"
+                    used={usage.streamingMinutes.used}
+                    limit={
+                      usage.streamingMinutes.limit ||
+                      currentPlan.limits?.monthlyMinutesIncluded ||
+                      0
+                    }
+                    unit="min"
+                  />
+                  <UsageBar
+                    label="Stream Destinations"
+                    used={usage.rtmpDestinations.used}
+                    limit={
+                      entitlements.maxDestinations ??
+                      usage.rtmpDestinations.limit ??
+                      currentPlan.limits?.rtmpDestinationsMax ??
+                      0
+                    }
+                    unit=""
+                  />
+                  {(isPaidValid || usage.storage.limit > 0) && (
+                    <UsageBar
+                      label="Storage"
+                      used={usage.storage.used}
+                      limit={usage.storage.limit || currentPlan.editing?.maxStorageGB || 0}
+                      unit="GB"
+                    />
+                  )}
+                  {(isPaidValid || usage.projects.limit > 0) && (
+                    <UsageBar
+                      label="Projects"
+                      used={usage.projects.used}
+                      limit={usage.projects.limit || currentPlan.editing?.maxProjects || 0}
+                      unit=""
+                    />
+                  )}
+                </div>
+
+                <div style={{ marginTop: 16, padding: 12, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, background: "rgba(255,255,255,0.02)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ color: "#e5e7eb", fontWeight: 600 }}>Emergency Download (Latest Recording)</div>
+                    <button
+                      type="button"
+                      onClick={handleEmergencyDownload}
+                      disabled={emergencyLoading}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid rgba(239, 68, 68, 0.6)",
+                        background: emergencyLoading ? "rgba(239, 68, 68, 0.2)" : "rgba(239, 68, 68, 0.15)",
+                        color: "#fecaca",
+                        cursor: emergencyLoading ? "not-allowed" : "pointer",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {emergencyLoading ? "Preparing..." : "Download latest recording"}
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
+                    Use this if your in-room download didn’t work. Downloads are available for a limited time.
+                  </div>
+                  {emergencyMessage && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>{emergencyMessage}</div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 

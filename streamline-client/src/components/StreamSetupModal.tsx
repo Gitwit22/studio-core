@@ -65,7 +65,7 @@ function getDefaultRtmpBase(p: PlatformKey): string {
     case "twitch":
       return "rtmp://live.twitch.tv/app";
     case "instagram":
-      return "";
+      return "rtmps://edgetee-upload-det1-1.xx.fbcdn.net:443/rtmp/";
     case "custom":
       return "";
     default:
@@ -1130,7 +1130,7 @@ export default function StreamSetupModalV2({
                         <button
                           onClick={() => {
                             const fieldId = `${platform}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-                            const nextFields = [...state.manualFields, { id: fieldId, value: "", base: "" }];
+                            const nextFields = [...state.manualFields, { id: fieldId, value: "", base: getDefaultRtmpBase(platform) }];
                             updatePlatformState(platform, { manualFields: nextFields, error: null });
                           }}
                           disabled={disabled || manualLimitReached}
