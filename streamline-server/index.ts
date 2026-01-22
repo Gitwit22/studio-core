@@ -565,7 +565,7 @@ app.post("/api/roomModeration/remove-all", requireAuth, requireRoomAccessToken a
         await roomService.removeParticipant(livekitRoomName, identity);
         results.push({ identity, removed: true });
       } catch (err: any) {
-        console.error("remove-all failed for participant", { room, identity, err });
+        console.error("remove-all failed for participant", { livekitRoomName, identity, err });
         results.push({
           identity,
           removed: false,

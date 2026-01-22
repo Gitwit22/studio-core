@@ -793,13 +793,6 @@ router.patch("/role-presets/:presetId", requireAuth, async (req, res) => {
     // Host-only moderation: templates never grant guest mute/remove powers.
     if ("canMuteGuests" in cleaned) delete cleaned.canMuteGuests;
 
-    // Hard guarantees: moderator cannot enable these (kept for legacy safety,
-    // though moderator templates are no longer user-editable).
-    if (presetId === "moderator") {
-      if ("canViewAnalytics" in cleaned) delete cleaned.canViewAnalytics;
-      if ("canChangeLayoutScene" in cleaned) delete cleaned.canChangeLayoutScene;
-    }
-
     await firestore
       .collection("users")
       .doc(uid)
