@@ -984,9 +984,8 @@ export default function Join() {
               </div>
             )}
 
-            {/* HOST JOIN MODE TOGGLE (always rendered for hosts; Saved Room option is enabled
-                only when HLS is allowed and Saved Rooms are available) */}
-            {!isParticipant && (
+            {/* HOST JOIN MODE TOGGLE (only shown when platform HLS/Saved Rooms join is enabled) */}
+            {!isParticipant && platformHlsEnabled && savedEmbeds.length > 0 && (
               <div style={{ marginBottom: "20px" }}>
                 <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>Join mode</div>
                 <div
