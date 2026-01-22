@@ -138,7 +138,7 @@ export async function apiStartRecording(
     body: JSON.stringify({ roomId, layout, mode, presetId }),
     headers: roomAccessToken
       ? {
-          Authorization: `Bearer ${roomAccessToken}`,
+          "x-room-access-token": roomAccessToken,
         }
       : undefined,
   });
@@ -151,7 +151,7 @@ export async function apiStopRecording(recordingId: string, roomAccessToken?: st
     body: JSON.stringify({ recordingId }),
     headers: roomAccessToken
       ? {
-          Authorization: `Bearer ${roomAccessToken}`,
+          "x-room-access-token": roomAccessToken,
         }
       : undefined,
   });

@@ -409,7 +409,12 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
 
     const trimmedRoomId = String(rawRoomId || "").trim();
     const trimmedRoomName = sanitizeDisplayName(String(rawRoomName || "")).trim();
-    const displayName = sanitizeDisplayName(String(rawDisplayName || "")).trim() || undefined;
+
+    const userDisplayNameRaw = (req as any).user?.displayName as string | undefined;
+    const bodyDisplayNameSanitized = sanitizeDisplayName(String(rawDisplayName || "")).trim();
+    const userDisplayNameSanitized = sanitizeDisplayName(String(userDisplayNameRaw || "")).trim();
+    const displayName =
+      bodyDisplayNameSanitized || userDisplayNameSanitized || "Guest";
 
     // Host/control-plane contract: authenticated callers without an invite
     // must provide a canonical roomId. Name-only is rejected so we never

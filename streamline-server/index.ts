@@ -236,9 +236,19 @@ async function assertEffectiveRoomControl(
     throw new RoomPermissionError(403, "room_mismatch");
   }
 
+  const role = String(access.role || "").toLowerCase();
+  const requiredRole = "host";
+  const roleOk = role === requiredRole;
+  if (process.env.AUTH_DEBUG === "1") {
+    console.log("[perm-debug] moderation role check", {
+      role,
+      required: requiredRole,
+      pass: roleOk,
+    });
+  }
   // Updated policy: only hosts can use roomModeration endpoints.
   // Non-hosts are blocked here regardless of controls docs.
-  if (String(access.role || "").toLowerCase() !== "host") {
+  if (!roleOk) {
     throw new RoomPermissionError(403, "insufficient_role");
   }
 }
@@ -246,14 +256,13 @@ async function assertEffectiveRoomControl(
 // Mute/unmute a single participant's audio (host tools, not platform admin)
 app.post("/api/roomModeration/mute", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
-    const { room, identity, muted } = req.body as {
-      room?: string;
+    const { identity, muted } = req.body as {
       identity?: string;
       muted?: boolean;
     };
 
-    if (!room || !identity || typeof muted !== "boolean") {
-      return res.status(400).json({ error: "room, identity and muted are required" });
+    if (!identity || typeof muted !== "boolean") {
+      return res.status(400).json({ error: "identity and muted are required" });
     }
 
     const { roomId, livekitRoomName } = getRoomAccess(req as any);
@@ -318,10 +327,10 @@ app.post("/api/roomModeration/mute", requireAuth, requireRoomAccessToken as any,
 // Mute/unmute ALL participants' audio (host tools)
 app.post("/api/roomModeration/mute-all", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
-    const { room, muted } = req.body as { room?: string; muted?: boolean };
+    const { muted } = req.body as { room?: string; muted?: boolean };
 
-    if (!room || typeof muted !== "boolean") {
-      return res.status(400).json({ error: "room and muted are required" });
+    if (typeof muted !== "boolean") {
+      return res.status(400).json({ error: "muted is required" });
     }
 
     const { roomId, livekitRoomName } = getRoomAccess(req as any);
@@ -396,8 +405,8 @@ app.post("/api/roomModeration/mute-lock", requireAuth, requireRoomAccessToken as
       hostIdentity?: string;
     };
 
-    if (!room || typeof muteLock !== "boolean") {
-      return res.status(400).json({ error: "room and muteLock are required" });
+    if (typeof muteLock !== "boolean") {
+      return res.status(400).json({ error: "muteLock is required" });
     }
 
     const { roomId, livekitRoomName } = getRoomAccess(req as any);
@@ -483,10 +492,10 @@ app.get("/api/roomSettings/:room", (req, res) => {
 // Remove/kick a participant
 app.post("/api/roomModeration/remove", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
-    const { room, identity } = req.body;
+    const { identity } = req.body;
 
-    if (!room || !identity) {
-      return res.status(400).json({ ok: false, error: "room and identity are required" });
+    if (!identity) {
+      return res.status(400).json({ ok: false, error: "identity is required" });
     }
 
     const { roomId, livekitRoomName } = getRoomAccess(req as any);
@@ -521,12 +530,6 @@ app.post("/api/roomModeration/remove", requireAuth, requireRoomAccessToken as an
 // Remove/kick ALL participants in a room
 app.post("/api/roomModeration/remove-all", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
-    const { room } = req.body as { room?: string };
-
-    if (!room) {
-      return res.status(400).json({ ok: false, error: "room is required" });
-    }
-
     const { roomId, livekitRoomName } = getRoomAccess(req as any);
 
     try {

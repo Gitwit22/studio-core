@@ -59,19 +59,27 @@ export function getRoomAccess(req: any): { access: RoomAccessClaims; roomId: str
 }
 
 export function extractRoomAccessToken(req: Request): string | null {
-  const authHeader = req.headers.authorization || req.headers.Authorization;
-  if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
-    return authHeader.slice(7).trim();
+  // 1) Explicit room-access header wins.
+  const explicit = (req.headers as any)["x-room-access-token"] ?? (req.headers as any)["X-Room-Access-Token"];
+  if (typeof explicit === "string" && explicit.trim()) {
+    return explicit.trim();
   }
 
-  const headerToken = req.headers["x-room-access-token"] as string | undefined;
-  if (headerToken && headerToken.trim()) {
-    return headerToken.trim();
-  }
-
+  // 2) Legacy query param fallback (primarily for SSE/EventSource where
+  // attaching headers is awkward). Safe because this is always scoped
+  // to a single room access token.
   const fromQuery = (req.query as any)?.t as string | undefined;
-  if (fromQuery && typeof fromQuery === "string" && fromQuery.trim()) {
+  if (typeof fromQuery === "string" && fromQuery.trim()) {
     return fromQuery.trim();
+  }
+
+  // 3) Legacy Authorization: Bearer <token> fallback. Only used when
+  // neither the explicit header nor query param are present so that
+  // user auth headers never override a dedicated room access header.
+  const auth = (req.headers as any).authorization as string | undefined;
+  if (typeof auth === "string") {
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    if (m?.[1]) return m[1].trim();
   }
 
   return null;

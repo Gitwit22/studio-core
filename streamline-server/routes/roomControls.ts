@@ -127,6 +127,15 @@ function parsePresetId(raw: any): PresetId | null {
   return null;
 }
 
+function coercePresetIdForApply(presetId: PresetId): PresetId {
+  // Moderator is no longer a public-facing role. For any new apply
+  // operations, treat incoming "moderator" as "participant" so legacy
+  // data and stale clients cannot re-introduce a distinct moderator role
+  // in LiveKit metadata or controls.
+  if (presetId === "moderator") return "participant";
+  return presetId;
+}
+
 async function loadPresetForUser(uid: string, presetId: PresetId): Promise<RoomControls> {
   try {
     const snap = await presetDocRef(uid, presetId).get();
@@ -331,8 +340,9 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
 
   // If a role is provided, treat this as a role change and
   // apply the corresponding preset defaults, resetting overrides.
-  const rolePresetId = parsePresetId(body.role);
-  if (rolePresetId) {
+  const parsedRolePresetId = parsePresetId(body.role);
+  if (parsedRolePresetId) {
+    const rolePresetId: PresetId = coercePresetIdForApply(parsedRolePresetId);
     const loadedPreset = await loadPresetForUser(uid, rolePresetId);
     const presetPatch = normalizePresetForApply(rolePresetId, loadedPreset);
 
@@ -496,10 +506,12 @@ router.post("/:roomId/participants/:identity/permissions", requireAuth as any, r
   if (!rawIdentity) return res.status(400).json({ error: "identity_required" });
 
   const body = (req.body || {}) as any;
-  const presetId = parsePresetId(body.roleId || body.role || body.presetId);
-  if (!presetId) {
+  const parsedPresetId = parsePresetId(body.roleId || body.role || body.presetId);
+  if (!parsedPresetId) {
     return res.status(400).json({ error: "roleId_invalid" });
   }
+
+  const presetId: PresetId = coercePresetIdForApply(parsedPresetId);
 
   const identityDocId = normalizeControlsDocId(rawIdentity);
 
@@ -697,8 +709,10 @@ router.post("/:roomId/controls/:identity/apply-preset", requireAuth as any, requ
   const uid = (req as any).user?.uid as string | undefined;
   if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
-  const presetId = parsePresetId((req.body as any)?.presetId);
-  if (!presetId) return res.status(400).json({ error: "presetId_required" });
+  const parsedPresetId = parsePresetId((req.body as any)?.presetId);
+  if (!parsedPresetId) return res.status(400).json({ error: "presetId_required" });
+
+  const presetId: PresetId = coercePresetIdForApply(parsedPresetId);
 
   const identityDocId = normalizeControlsDocId(req.params.identity);
   const loadedPreset = await loadPresetForUser(uid, presetId);

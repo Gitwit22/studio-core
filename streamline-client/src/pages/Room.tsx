@@ -11,6 +11,7 @@ import RoleOverlay from "../components/RoleOverlay";
 import { RoleChangeToast } from "../components/RoleChangeToast";
 import { API_BASE } from "../lib/apiBase";
 import { APP_BASE } from "../lib/appBase";
+import { normalizeUiRolePresetId } from "../lib/roles";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
@@ -44,7 +45,7 @@ type EffectiveControls = {
   canManageDestinations?: boolean;
   canStartStopStream?: boolean;
   canStartStopRecording?: boolean;
-  rolePresetId?: "participant" | "cohost" | "moderator";
+  rolePresetId?: "participant" | "cohost";
 };
 
 function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: boolean; onHome?: () => void }) {
@@ -158,6 +159,8 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
 function PermissionsDebugOverlay({ dashboardRole }: { dashboardRole: "host" | "moderator" | "participant" }) {
   const { localParticipant } = useLocalParticipant();
   const localPermissions: any = useLocalParticipantPermissions();
+  const rawRolePresetId = ((localParticipant as any)?.identityMetadata as any)?.rolePresetId;
+  const normalizedRolePresetId = normalizeUiRolePresetId(rawRolePresetId);
 
   return (
     <div
@@ -188,7 +191,7 @@ function PermissionsDebugOverlay({ dashboardRole }: { dashboardRole: "host" | "m
         }
       </div>
       <div>
-        effectiveRole: {((localParticipant as any)?.identityMetadata as any)?.rolePresetId || dashboardRole}
+        effectiveRole: {normalizedRolePresetId || dashboardRole}
       </div>
     </div>
   );
@@ -817,7 +820,7 @@ function RoomPage() {
         `/api/rooms/${encodeURIComponent(roomId)}/controls`,
         {
           method: "PATCH",
-          headers: { Authorization: `Bearer ${roomAccessToken}` },
+          headers: { "x-room-access-token": roomAccessToken },
           body: JSON.stringify(patch),
         },
         { allowNonOk: true },
@@ -839,8 +842,8 @@ function RoomPage() {
             canStartStopStream: typeof c.canStartStopStream === "boolean" ? c.canStartStopStream : false,
             canStartStopRecording: typeof c.canStartStopRecording === "boolean" ? c.canStartStopRecording : false,
             rolePresetId:
-              c.role === "cohost" || c.role === "moderator" || c.role === "participant"
-                ? c.role
+              c.role === "cohost" || c.role === "participant"
+                ? normalizeUiRolePresetId(c.role)
                 : undefined,
           });
         }
@@ -972,25 +975,18 @@ function RoomPage() {
     let closed = false;
     const es = new EventSource(url, { withCredentials: true } as any);
 
-    let lastRole: "moderator" | "cohost" | "participant" | undefined = undefined;
+    let lastRole: "cohost" | "participant" | undefined = undefined;
 
     es.onmessage = (ev) => {
       if (closed) return;
       try {
         const data = JSON.parse(ev.data);
 
-        const nextRole: "moderator" | "cohost" | "participant" | undefined =
-          data?.role === "cohost" || data?.role === "moderator" || data?.role === "participant"
-            ? data.role
-            : undefined;
+        const rawRole = data?.role;
+        const nextRole = rawRole === "cohost" || rawRole === "participant" ? normalizeUiRolePresetId(rawRole) : undefined;
 
         if (nextRole && lastRole && nextRole !== lastRole) {
-          const roleName =
-            nextRole === "cohost"
-              ? "Co-host"
-              : nextRole === "moderator"
-              ? "Moderator"
-              : "Participant";
+          const roleName = nextRole === "cohost" ? "Co-host" : "Participant";
 
           const msg = `You're now a ${roleName}`;
           setRoleChangeMessage(msg);
@@ -1010,6 +1006,8 @@ function RoomPage() {
           lastRole = nextRole;
         }
 
+        const normalizedRolePresetId = nextRole ? normalizeUiRolePresetId(nextRole) : undefined;
+
         setEffectiveControls({
           canPublishAudio: typeof data?.canPublishAudio === "boolean" ? data.canPublishAudio : true,
           tileVisible: typeof data?.tileVisible === "boolean" ? data.tileVisible : true,
@@ -1021,7 +1019,7 @@ function RoomPage() {
           canManageDestinations: typeof data?.canManageDestinations === "boolean" ? data.canManageDestinations : false,
           canStartStopStream: typeof data?.canStartStopStream === "boolean" ? data.canStartStopStream : false,
           canStartStopRecording: typeof data?.canStartStopRecording === "boolean" ? data.canStartStopRecording : false,
-          rolePresetId: nextRole,
+          rolePresetId: normalizedRolePresetId,
         });
       } catch {
         // ignore
@@ -1852,7 +1850,7 @@ function RoomPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${roomAccessToken}`,
+            "x-room-access-token": roomAccessToken,
           },
           credentials: "include",
           body: JSON.stringify({ room: effectiveRoomName }),
@@ -2183,7 +2181,7 @@ function RoomPage() {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...(roomAccessToken ? { Authorization: `Bearer ${roomAccessToken}` } : {}),
+              ...(roomAccessToken ? { "x-room-access-token": roomAccessToken } : {}),
             },
             body: JSON.stringify(requestBody),
             credentials: "include",
@@ -2282,7 +2280,7 @@ function RoomPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(roomAccessToken ? { Authorization: `Bearer ${roomAccessToken}` } : {}),
+            ...(roomAccessToken ? { "x-room-access-token": roomAccessToken } : {}),
           },
           body: JSON.stringify({ egressId: streamEgressId }),
           credentials: "include",

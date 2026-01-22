@@ -240,7 +240,7 @@ export async function assertRoomPerm(
   }
 
   if (!permissions[perm]) {
-    throw new RoomPermissionError(403, "forbidden");
+    throw new RoomPermissionError(403, "insufficient_permissions");
   }
 
   return {

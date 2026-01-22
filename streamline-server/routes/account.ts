@@ -65,6 +65,7 @@ const DEFAULT_ROLE_PRESETS: Record<RolePresetId, RolePresetDoc> = {
     canPublishVideo: true,
     canScreenShare: false,
     tileVisible: true,
+    // Host-only moderation: participants never gain mute/remove powers from templates.
     canMuteGuests: false,
     canInviteLinks: false,
     canManageDestinations: false,
@@ -77,7 +78,9 @@ const DEFAULT_ROLE_PRESETS: Record<RolePresetId, RolePresetDoc> = {
     canPublishVideo: true,
     canScreenShare: false,
     tileVisible: true,
-    canMuteGuests: true,
+    // Legacy moderator profile kept for backwards-compat reads only.
+    // Moderation powers are enforced host-only elsewhere.
+    canMuteGuests: false,
     canInviteLinks: true,
     canManageDestinations: false,
     canStartStopStream: false,
@@ -91,7 +94,8 @@ const DEFAULT_ROLE_PRESETS: Record<RolePresetId, RolePresetDoc> = {
     canPublishVideo: true,
     canScreenShare: true,
     tileVisible: true,
-    canMuteGuests: true,
+    // Host-only moderation: co-hosts never gain mute/remove powers from templates.
+    canMuteGuests: false,
     canInviteLinks: true,
     canManageDestinations: true,
     canStartStopStream: true,
@@ -164,7 +168,7 @@ const DEFAULT_ROLE_TEMPLATES: RoleProfile[] = DEFAULT_ROLE_PROFILES.map((profile
   permissions: profile.permissions,
 }));
 
-const DEFAULT_QUICK_ROLE_IDS: string[] = ["participant", "cohost", "moderator"];
+const DEFAULT_QUICK_ROLE_IDS: string[] = ["participant", "cohost"];
 
 export const SIMPLE_ROLE_DEFAULTS: Record<"participant" | "moderator" | "cohost" | "host", PermissionSet> = {
   participant: {
@@ -388,7 +392,9 @@ async function loadRolesForUser(uid: string) {
   const data = snap.exists ? snap.data() || {} : {};
   const roleProfiles = normalizeRoleProfiles(data.roleProfiles);
   const quickRoleIdsRaw: string[] = Array.isArray((data as any).quickRoleIds) ? (data as any).quickRoleIds : [];
-  const quickRoleIds = quickRoleIdsRaw.filter((id) => roleProfiles.find((r) => r.id === id));
+  const quickRoleIds = quickRoleIdsRaw
+    .map((id) => String(id))
+    .filter((id) => id !== "moderator" && roleProfiles.find((r) => r.id === id));
   const ensuredQuick = quickRoleIds.length ? quickRoleIds : DEFAULT_QUICK_ROLE_IDS;
   return { roleProfiles, quickRoleIds: ensuredQuick };
 }
@@ -409,16 +415,13 @@ async function loadEffectiveRoles(uid: string, advancedEnabled: boolean) {
         ...DEFAULT_ROLE_TEMPLATES.find((r) => r.id === "cohost")!,
         permissions: { ...SIMPLE_ROLE_DEFAULTS.cohost },
       },
-      {
-        ...DEFAULT_ROLE_TEMPLATES.find((r) => r.id === "moderator")!,
-        permissions: { ...SIMPLE_ROLE_DEFAULTS.moderator },
-      },
     ];
-    const quickRoleIds = DEFAULT_ROLE_TEMPLATES.map((r) => r.id);
+    const quickRoleIds: string[] = ["participant", "cohost"];
     return { roleProfiles: simpleRoles, quickRoleIds, simpleMode };
   }
   const { roleProfiles, quickRoleIds } = await loadRolesForUser(uid);
-  return { roleProfiles, quickRoleIds, simpleMode };
+  const filteredQuick = quickRoleIds.filter((id) => id !== "moderator");
+  return { roleProfiles, quickRoleIds: filteredQuick, simpleMode };
 }
 
 router.use(requireAuth);
@@ -725,19 +728,23 @@ router.get("/role-presets", requireAuth, async (req, res) => {
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "unauthorized" });
 
-    const [participant, cohost, moderator] = await Promise.all([
+    // Role defaults are now locked to two templates: participant and cohost.
+    // Any legacy moderator data is ignored for new writes and UI, but can
+    // still be read/migrated server-side if needed.
+    const [participant, cohost] = await Promise.all([
       readRolePreset(uid, "participant"),
       readRolePreset(uid, "cohost"),
-      readRolePreset(uid, "moderator"),
     ]);
 
     return res.json({
       presets: {
         participant,
         cohost,
-        moderator,
       },
-      defaults: DEFAULT_ROLE_PRESETS,
+      defaults: {
+        participant: DEFAULT_ROLE_PRESETS.participant,
+        cohost: DEFAULT_ROLE_PRESETS.cohost,
+      },
     });
   } catch (err: any) {
     console.error("[account/role-presets] error", err);
@@ -752,6 +759,11 @@ router.patch("/role-presets/:presetId", requireAuth, async (req, res) => {
 
     const presetId = parseRolePresetId(req.params.presetId);
     if (!presetId) return res.status(400).json({ error: "invalid_presetId" });
+
+    // Moderator templates are legacy-only and no longer user-editable.
+    if (presetId === "moderator") {
+      return res.status(400).json({ error: "preset_disabled" });
+    }
 
     const body = (req.body || {}) as any;
     const patch: Partial<RolePresetDoc> = {
@@ -778,7 +790,11 @@ router.patch("/role-presets/:presetId", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "no_valid_fields" });
     }
 
-    // Hard guarantees: moderator cannot enable these.
+    // Host-only moderation: templates never grant guest mute/remove powers.
+    if ("canMuteGuests" in cleaned) delete cleaned.canMuteGuests;
+
+    // Hard guarantees: moderator cannot enable these (kept for legacy safety,
+    // though moderator templates are no longer user-editable).
     if (presetId === "moderator") {
       if ("canViewAnalytics" in cleaned) delete cleaned.canViewAnalytics;
       if ("canChangeLayoutScene" in cleaned) delete cleaned.canChangeLayoutScene;
@@ -829,141 +845,32 @@ router.patch("/cohost-profile", async (req, res) => {
   }
 });
 
-router.get("/roles", async (req, res) => {
-  try {
-    const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+// Advanced custom roles have been fully replaced by two fixed role
+// templates (participant and cohost). Expose a clear, non-successful
+// response for any legacy callers so they cannot silently reintroduce
+// complexity.
 
-    const adv = await getAdvancedPermissionsEnabled(uid);
-    const { roleProfiles, quickRoleIds, simpleMode } = await loadEffectiveRoles(uid, adv.enabled);
-    if (!simpleMode) {
-      await firestore.collection("users").doc(uid).set({ roleProfiles, quickRoleIds }, { merge: true });
-    }
-
-    const defaultRoleProfiles = DEFAULT_ROLE_PROFILES;
-
-    return res.json({
-      roles: roleProfiles,
-      quickRoleIds,
-      locked: simpleMode,
-      lockReason: adv.globalLock ? "global_lock" : undefined,
-      defaultRoleProfiles,
-    });
-  } catch (err: any) {
-    console.error("[account/roles] error", err);
-    return res.status(500).json({ error: "failed_to_load_roles" });
-  }
+router.get("/roles", async (_req, res) => {
+  return res.status(410).json({
+    error: "roles_disabled",
+    message: "Custom roles have been removed; use role-presets instead.",
+  });
 });
 
-router.post("/roles", async (req, res) => {
-  try {
-    const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
-
-    const adv = await getAdvancedPermissionsEnabled(uid);
-    const { simpleMode, roleProfiles, quickRoleIds } = await loadEffectiveRoles(uid, adv.enabled);
-    if (simpleMode) {
-      const payload: any = { roles: roleProfiles, quickRoleIds };
-      return res.status(400).json(adv.globalLock ? { error: "advanced_disabled", reason: "global_lock", ...payload } : { error: "simple_mode_locked", ...payload });
-    }
-
-    const labelRaw = String((req.body?.label ?? "")).trim();
-    if (!labelRaw) return res.status(400).json({ error: "label_required" });
-    const permissions = normalizePermissions(req.body?.permissions || {});
-    const id = crypto.randomBytes(6).toString("hex");
-
-    roleProfiles.push({ id, label: labelRaw.slice(0, 64), system: false, lockedName: false, permissions });
-    await firestore.collection("users").doc(uid).set({ roleProfiles, quickRoleIds }, { merge: true });
-
-    return res.json({ roles: roleProfiles, quickRoleIds });
-  } catch (err: any) {
-    console.error("[account/roles create] error", err);
-    return res.status(500).json({ error: "failed_to_create_role" });
-  }
+router.post("/roles", async (_req, res) => {
+  return res.status(410).json({ error: "roles_disabled" });
 });
 
-router.patch("/roles/:id", async (req, res) => {
-  try {
-    const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
-    const roleId = String(req.params.id);
-
-    const adv = await getAdvancedPermissionsEnabled(uid);
-    const { roleProfiles, quickRoleIds, simpleMode } = await loadEffectiveRoles(uid, adv.enabled);
-    if (simpleMode) {
-      const payload: any = { roles: roleProfiles, quickRoleIds };
-      return res.status(400).json(adv.globalLock ? { error: "advanced_disabled", reason: "global_lock", ...payload } : { error: "simple_mode_locked", ...payload });
-    }
-    const idx = roleProfiles.findIndex((r) => r.id === roleId);
-    if (idx === -1) return res.status(404).json({ error: "role_not_found" });
-
-    const current = roleProfiles[idx];
-    const nextPermissions = normalizePermissions(req.body?.permissions || {});
-    const nextLabel = String(req.body?.label ?? current.label).trim().slice(0, 64) || current.label;
-
-    const updated: RoleProfile = {
-      ...current,
-      permissions: nextPermissions,
-      label: current.lockedName ? current.label : nextLabel,
-    };
-
-    roleProfiles[idx] = updated;
-    await firestore.collection("users").doc(uid).set({ roleProfiles, quickRoleIds }, { merge: true });
-
-    return res.json({ roles: roleProfiles, quickRoleIds });
-  } catch (err: any) {
-    console.error("[account/roles update] error", err);
-    return res.status(500).json({ error: "failed_to_update_role" });
-  }
+router.patch("/roles/:id", async (_req, res) => {
+  return res.status(410).json({ error: "roles_disabled" });
 });
 
-router.delete("/roles/:id", async (req, res) => {
-  try {
-    const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
-    const roleId = String(req.params.id);
-
-    const adv = await getAdvancedPermissionsEnabled(uid);
-    const { roleProfiles, quickRoleIds, simpleMode } = await loadEffectiveRoles(uid, adv.enabled);
-    if (simpleMode) {
-      const payload: any = { roles: roleProfiles, quickRoleIds };
-      return res.status(400).json(adv.globalLock ? { error: "advanced_disabled", reason: "global_lock", ...payload } : { error: "simple_mode_locked", ...payload });
-    }
-    const role = roleProfiles.find((r) => r.id === roleId);
-    if (!role) return res.status(404).json({ error: "role_not_found" });
-    if (role.system) return res.status(400).json({ error: "cannot_delete_system_role" });
-
-    const nextRoles = roleProfiles.filter((r) => r.id !== roleId);
-    const nextQuick = quickRoleIds.filter((id) => id !== roleId);
-    await firestore.collection("users").doc(uid).set({ roleProfiles: nextRoles, quickRoleIds: nextQuick }, { merge: true });
-
-    return res.json({ roles: nextRoles, quickRoleIds: nextQuick });
-  } catch (err: any) {
-    console.error("[account/roles delete] error", err);
-    return res.status(500).json({ error: "failed_to_delete_role" });
-  }
+router.delete("/roles/:id", async (_req, res) => {
+  return res.status(410).json({ error: "roles_disabled" });
 });
 
-router.put("/roles/quick", async (req, res) => {
-  try {
-    const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
-    const adv = await getAdvancedPermissionsEnabled(uid);
-    const { roleProfiles, simpleMode, quickRoleIds: effectiveQuick } = await loadEffectiveRoles(uid, adv.enabled);
-    if (simpleMode) {
-      const payload: any = { roles: roleProfiles, quickRoleIds: effectiveQuick };
-      return res.status(400).json(adv.globalLock ? { error: "advanced_disabled", reason: "global_lock", ...payload } : { error: "simple_mode_locked", ...payload });
-    }
-    const requested: string[] = Array.isArray(req.body?.roleIds) ? req.body.roleIds.map((r: any) => String(r)) : [];
-    const filtered = requested.filter((id) => roleProfiles.find((r) => r.id === id));
-    const quickRoleIds = filtered.length ? filtered : DEFAULT_QUICK_ROLE_IDS;
-
-    await firestore.collection("users").doc(uid).set({ roleProfiles, quickRoleIds }, { merge: true });
-    return res.json({ roles: roleProfiles, quickRoleIds });
-  } catch (err: any) {
-    console.error("[account/roles quick] error", err);
-    return res.status(500).json({ error: "failed_to_update_quick_roles" });
-  }
+router.put("/roles/quick", async (_req, res) => {
+  return res.status(410).json({ error: "roles_disabled" });
 });
 
 export default router;

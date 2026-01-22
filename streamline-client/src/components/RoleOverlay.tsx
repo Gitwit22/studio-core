@@ -1,11 +1,12 @@
 import React from "react";
 import { useParticipants, useLocalParticipant } from "@livekit/components-react";
+import { normalizeUiRolePresetId } from "../lib/roles";
 
 // Normalize API base to avoid trailing slashes that cause "//api/..." URLs
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
-type Role = "host" | "moderator" | "participant";
-type RolePresetId = "participant" | "cohost" | "moderator";
+type Role = "host" | "participant";
+type RolePresetId = "participant" | "cohost";
 
 export default function RoleOverlay({
   open,
@@ -129,15 +130,6 @@ export default function RoleOverlay({
               overlaysEnabled={overlaysEnabled}
             />
           )}
-          {role === "moderator" && (
-            <ModeratorPanel
-              roomName={roomName}
-              roomAccessToken={roomAccessToken}
-              canMuteGuests={canMuteGuests}
-              canRemoveGuests={canRemoveGuests}
-              canModerate={canModerate}
-            />
-          )}
           {role === "participant" && <ParticipantPanel roomName={roomName} />}
         </div>
       </div>
@@ -240,7 +232,7 @@ function HostPanel({
       const result = await apiSetRole(roomId, roomAccessToken, identity, presetId);
 
       const nextRole =
-        result && result.roleId && (result.roleId === "participant" || result.roleId === "cohost" || result.roleId === "moderator")
+        result && result.roleId && (result.roleId === "participant" || result.roleId === "cohost")
           ? (result.roleId as RolePresetId)
           : presetId;
 
@@ -433,32 +425,12 @@ function HostPanel({
   );
 }
 
-function ModeratorPanel({ roomName, roomAccessToken, canMuteGuests, canRemoveGuests, canModerate }: { roomName: string; roomAccessToken: string; canMuteGuests?: boolean; canRemoveGuests?: boolean; canModerate?: boolean }) {
-  const parts = useParticipants();
-  return (
-    <>
-      <Section title="Moderation">
-        <p className="text-sm opacity-70">
-          Mute/Remove participants. Host defines permissions.
-        </p>
-      </Section>
-      <Section title="Live Participants">
-        <ParticipantList participants={parts} />
-      </Section>
-    </>
-  );
-}
-
 function ParticipantPanel({ roomName }: { roomName: string }) {
   const { localParticipant } = useLocalParticipant();
   const roleLabel = (() => {
-    const name = (localParticipant as any)?.identityMetadata?.rolePresetId as
-      | "participant"
-      | "cohost"
-      | "moderator"
-      | undefined;
+    const raw = (localParticipant as any)?.identityMetadata?.rolePresetId;
+    const name = normalizeUiRolePresetId(raw);
     if (name === "cohost") return "You are a Co-host";
-    if (name === "moderator") return "You are a Moderator";
     if (name === "participant") return "You are a Participant";
     return null;
   })();
@@ -537,7 +509,8 @@ function ParticipantList({
       {participants.map((p) => (
         (() => {
           const stableRole = roleByIdentity && roleByIdentity[p.identity];
-          const metaRole = (p as any)?.metadata?.rolePresetId as RolePresetId | undefined;
+          const metaRoleRaw = (p as any)?.metadata?.rolePresetId;
+          const metaRole = metaRoleRaw ? normalizeUiRolePresetId(metaRoleRaw) : undefined;
           const currentRole: RolePresetId = (stableRole || metaRole || "participant") as RolePresetId;
 
           return (
@@ -555,10 +528,19 @@ function ParticipantList({
           }}
         >
           <div style={{ fontSize: '0.875rem', flex: 1 }}>
-            <div style={{ fontWeight: '600', color: '#ffffff' }}>{p.name || p.identity}</div>
-            <div style={{ opacity: 0.6, fontSize: '0.75rem', wordBreak: 'break-all', color: 'rgba(255, 255, 255, 0.6)' }}>
-              {p.identity}
-            </div>
+            <div style={{ fontWeight: '600', color: '#ffffff' }}>{p.name || "Guest"}</div>
+            {canModerate && (
+              <div
+                style={{
+                  opacity: 0.6,
+                  fontSize: '0.75rem',
+                  wordBreak: 'break-all',
+                  color: 'rgba(255, 255, 255, 0.6)',
+                }}
+              >
+                {p.identity}
+              </div>
+            )}
           </div>
           {canModerate && (
             <div
@@ -574,7 +556,7 @@ function ParticipantList({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.15rem' }}>
                   <select
                     className="sl-role-select"
-                    value={currentRole === "moderator" ? "participant" : currentRole}
+                    value={currentRole}
                     onChange={(e) => onChangeRole(p.identity, e.target.value as RolePresetId)}
                     style={{
                       borderRadius: '9999px',
@@ -673,7 +655,7 @@ async function apiRemove(room: string, identity: string, roomAccessToken: string
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${roomAccessToken}`,
+        "x-room-access-token": roomAccessToken,
       },
       credentials: "include",
       body: JSON.stringify({ room, identity }),
@@ -705,7 +687,7 @@ async function apiMute(_room: string, identity: string, muted: boolean, roomAcce
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${roomAccessToken}`,
+        "x-room-access-token": roomAccessToken,
       },
       credentials: "include",
       body: JSON.stringify({ room: _room, identity, muted }),
@@ -729,7 +711,7 @@ async function apiMuteAll(_room: string, muted: boolean, roomAccessToken: string
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${roomAccessToken}`,
+        "x-room-access-token": roomAccessToken,
       },
       credentials: "include",
       body: JSON.stringify({ room: _room, muted }),
@@ -757,7 +739,7 @@ async function apiSetMuteLock(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${roomAccessToken}`,
+      "x-room-access-token": roomAccessToken,
     },
     credentials: "include",
     body: JSON.stringify({ room: _room, muteLock, hostIdentity }),
@@ -785,7 +767,7 @@ async function apiSetRole(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${roomAccessToken}`,
+        "x-room-access-token": roomAccessToken,
       },
       credentials: "include",
       body: JSON.stringify({ roleId: role }),

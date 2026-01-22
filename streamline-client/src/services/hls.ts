@@ -14,7 +14,7 @@ function buildAuthHeaders(roomAccessToken?: string): HeadersInit {
     "Content-Type": "application/json",
   };
   if (roomAccessToken) {
-    headers["Authorization"] = `Bearer ${roomAccessToken}`;
+    headers["x-room-access-token"] = roomAccessToken;
   }
   return headers;
 }
@@ -44,7 +44,7 @@ export async function stopHls(roomId: string, roomAccessToken?: string) {
   const url = `${API_BASE}/api/hls/stop/${encodeURIComponent(roomId)}`;
   const res = await fetch(url, {
     method: "POST",
-    headers: roomAccessToken ? { Authorization: `Bearer ${roomAccessToken}` } : undefined,
+    headers: roomAccessToken ? { "x-room-access-token": roomAccessToken } : undefined,
     credentials: "include",
   });
   const data = (await res.json().catch(() => ({}))) as any;
@@ -57,7 +57,7 @@ export async function stopHls(roomId: string, roomAccessToken?: string) {
 
 export async function getHlsStatus(roomId: string, roomAccessToken?: string) {
   const url = `${API_BASE}/api/hls/status/${encodeURIComponent(roomId)}`;
-  const headers = roomAccessToken ? { Authorization: `Bearer ${roomAccessToken}` } : undefined;
+  const headers = roomAccessToken ? { "x-room-access-token": roomAccessToken } : undefined;
   const res = await fetch(url, { headers, credentials: "include" });
   if (!res.ok) {
     const text = await res.text().catch(() => "");

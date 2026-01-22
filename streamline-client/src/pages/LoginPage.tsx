@@ -44,7 +44,7 @@ export const LoginPage: React.FC = () => {
     try {
       const sp = new URLSearchParams(location.search || "");
       const role = (sp.get("inviteRole") || "").toLowerCase();
-      if (role === "cohost" || role === "moderator") return role;
+      if (role === "cohost") return role;
       return null;
     } catch {
       return null;
@@ -227,7 +227,7 @@ export const LoginPage: React.FC = () => {
               }}
             >
               <strong style={{ color: "#4ade80" }}>Heads up:</strong>{" "}
-              To join as a {inviteRoleHint === "cohost" ? "co-host" : "moderator"}, you’ll need to sign in
+              To join as a co-host, you’ll need to sign in
               or create a free StreamLine account. Once you’re in, we’ll drop you straight into the live room.
             </div>
           )}

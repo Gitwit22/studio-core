@@ -14,56 +14,58 @@ import SettingsHlsSetup from "./settings/SettingsHlsSetup";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
-type RolePresetId = "participant" | "cohost" | "moderator";
+type RolePresetId = "participant" | "cohost";
 
 type RolePresetDoc = {
   role: RolePresetId;
-  // Publishing / presence controls
+  // Publishing / presence controls (fixed sensible defaults; not exposed in UI)
   canPublishAudio: boolean;
   canPublishVideo: boolean;
   canScreenShare: boolean;
   tileVisible: boolean;
   // Access scopes (in-room gated UI)
+  // NOTE: moderation powers are host-only and not driven by templates.
   canMuteGuests: boolean;
   canInviteLinks: boolean;
   canManageDestinations: boolean;
   canStartStopStream: boolean;
   canStartStopRecording: boolean;
-  // Optional future scopes (not used in UI right now)
+  // Optional future scopes
   canViewAnalytics?: boolean;
   canChangeLayoutScene?: boolean;
   updatedAt?: number;
 };
 
-type RolePresetToggleKey = Exclude<
-  keyof RolePresetDoc,
-  "role" | "updatedAt" | "canViewAnalytics" | "canChangeLayoutScene"
->;
+type RolePresetToggleKey =
+  | "canScreenShare"
+  | "canInviteLinks"
+  | "canManageDestinations"
+  | "canStartStopStream"
+  | "canStartStopRecording"
+  | "canChangeLayoutScene"
+  | "canViewAnalytics";
 
 const ROLE_PRESET_LABELS: Record<RolePresetId, string> = {
   participant: "Participant",
-  cohost: "Cohost",
-  moderator: "Moderator",
+  cohost: "Co-host",
 };
 
 const ROLE_PRESET_GROUPS: Array<{ title: string; keys: Array<{ key: RolePresetToggleKey; label: string }> }> = [
   {
-    title: "Access scopes",
+    title: "Core actions",
     keys: [
-      { key: "canMuteGuests", label: "Mute/Kick Guests" },
+      { key: "canScreenShare", label: "Share Screen" },
       { key: "canInviteLinks", label: "Invite/Generate Links" },
-      { key: "canManageDestinations", label: "Manage Destinations" },
-      { key: "canStartStopStream", label: "Start/Stop Stream" },
-      { key: "canStartStopRecording", label: "Start/Stop Recording" },
     ],
   },
   {
-    title: "Publishing",
+    title: "Stream controls",
     keys: [
-      { key: "canPublishAudio", label: "Publish Audio" },
-      { key: "canPublishVideo", label: "Publish Video" },
-      { key: "canScreenShare", label: "Share Screen" },
-      { key: "tileVisible", label: "Show Tile" },
+      { key: "canStartStopStream", label: "Start/Stop Stream" },
+      { key: "canStartStopRecording", label: "Start/Stop Recording" },
+      { key: "canManageDestinations", label: "Manage Destinations" },
+      { key: "canChangeLayoutScene", label: "Change Layout/Scene" },
+      { key: "canViewAnalytics", label: "View Analytics" },
     ],
   },
 ];
@@ -96,19 +98,6 @@ const SIMPLE_ROLE_DEFAULTS = {
       canDestinations: false,
       canModerate: false,
       canLayout: false,
-      canScreenShare: false,
-      canInvite: false,
-      canAnalytics: false,
-    },
-  },
-  moderator: {
-    label: "Moderator",
-    permissions: {
-      canStream: false,
-      canRecord: false,
-      canDestinations: false,
-      canModerate: true,
-      canLayout: true,
       canScreenShare: false,
       canInvite: false,
       canAnalytics: false,
@@ -271,7 +260,12 @@ export default function SettingsBilling() {
 
   const [serverDefaultRoleProfiles, setServerDefaultRoleProfiles] = useState<any[] | null>(null);
   const [roleProfiles, setRoleProfiles] = useState<any[]>([]);
-  const [quickRoleIds, setQuickRoleIds] = useState<string[]>(["participant", "cohost", "moderator"]);
+  const [rolePresets, setRolePresets] = useState<Record<RolePresetId, RolePresetDoc> | null>(null);
+  const [rolePresetsSaving, setRolePresetsSaving] = useState<Record<RolePresetId, "idle" | "saving" | "saved" | "error">>({
+    participant: "idle",
+    cohost: "idle",
+  });
+  const [quickRoleIds, setQuickRoleIds] = useState<string[]>(["participant", "cohost"]);
   const [roleLabelInput, setRoleLabelInput] = useState("");
   const [roleMessage, setRoleMessage] = useState<string | null>(null);
   const [roleSaveStatus, setRoleSaveStatus] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
@@ -348,7 +342,7 @@ export default function SettingsBilling() {
         loadEntitlements(),
         loadMediaPrefs(),
         loadCohostProfile(),
-        loadRoles(),
+        loadRolePresets(),
       ]);
     } catch (err: any) {
       setError(err?.message || "Failed to load data");
@@ -669,6 +663,25 @@ export default function SettingsBilling() {
     }
   };
 
+  const loadRolePresets = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/account/role-presets`, { credentials: "include" });
+      if (!res.ok) throw new Error("role-presets endpoint failed");
+      const data = await res.json();
+      if (data?.presets) {
+        const p = data.presets as any;
+        const next: Record<RolePresetId, RolePresetDoc> = {
+          participant: p.participant,
+          cohost: p.cohost,
+        };
+        setRolePresets(next);
+      }
+    } catch (err) {
+      console.warn("loadRolePresets failed", err);
+      setRolePresets(null);
+    }
+  };
+
   const applySimpleRoleDefaults = () => {
     const source = serverDefaultRoleProfiles ?? null;
     const ensureDefaults = (id: string) => {
@@ -683,7 +696,7 @@ export default function SettingsBilling() {
       return SIMPLE_ROLE_DEFAULTS[key];
     };
 
-    const simpleList = ["participant", "cohost", "moderator"].map((key) => {
+    const simpleList = ["participant", "cohost"].map((key) => {
       const def = ensureDefaults(key);
       return {
         id: key,
@@ -694,28 +707,7 @@ export default function SettingsBilling() {
       };
     });
     setRoleProfiles(simpleList);
-    setQuickRoleIds(["participant", "cohost", "moderator"]);
-  };
-
-  const loadRoles = async () => {
-    try {
-      if ((mediaPrefs.permissionsMode ?? "simple") === "simple") {
-        applySimpleRoleDefaults();
-        return;
-      }
-      const res = await fetch(`${API_BASE}/api/account/roles`, { credentials: "include" });
-      if (!res.ok) throw new Error("roles endpoint failed");
-      const data = await res.json();
-      if (Array.isArray(data?.defaultRoleProfiles)) {
-        setServerDefaultRoleProfiles(data.defaultRoleProfiles);
-      }
-      if (Array.isArray(data?.roles)) {
-        setRoleProfiles(data.roles);
-      }
-      if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds);
-    } catch (err) {
-      console.warn("loadRoles failed", err);
-    }
+    setQuickRoleIds(["participant", "cohost"]);
   };
 
   const saveCohostProfile = async () => {
@@ -768,106 +760,44 @@ export default function SettingsBilling() {
     }
   };
 
-  const saveRoles = async (payload: any, method: string, path: string) => {
-    const res = await fetch(`${API_BASE}/api/account/${path}`, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: payload ? JSON.stringify(payload) : undefined,
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || "role update failed");
-    }
-    const data = await res.json();
-    if (Array.isArray(data?.roles)) setRoleProfiles(data.roles);
-    if (Array.isArray(data?.quickRoleIds)) setQuickRoleIds(data.quickRoleIds);
-  };
-
-  const addRole = async () => {
-    const label = roleLabelInput.trim();
-    if (!label) return;
+  const saveRolePreset = async (presetId: RolePresetId, patch: Partial<RolePresetDoc>) => {
+    setRolePresetsSaving((prev) => ({ ...prev, [presetId]: "saving" }));
     try {
-      await saveRoles({ label, permissions: EMPTY_PERMISSIONS }, "POST", "roles");
-      setRoleLabelInput("");
-    } catch (err: any) {
-      setError(err?.message || "Failed to add role");
-    }
-  };
-
-  const updateRolePermissions = async (roleId: string, permissions: any, label?: string) => {
-    try {
-      await saveRoles({ permissions, label }, "PATCH", `roles/${roleId}`);
-      setRoleMessage("Role updated");
-      setTimeout(() => setRoleMessage(null), 2000);
-    } catch (err: any) {
-      setError(err?.message || "Failed to update role");
-    }
-  };
-
-  const deleteRole = async (roleId: string) => {
-    try {
-      await saveRoles(null, "DELETE", `roles/${roleId}`);
-    } catch (err: any) {
-      setError(err?.message || "Failed to delete role");
-    }
-  };
-
-  const updateQuickRoles = async (next: string[]) => {
-    setQuickRoleIds(next);
-    try {
-      await saveRoles({ roleIds: next }, "PUT", "roles/quick");
-    } catch (err: any) {
-      setError(err?.message || "Failed to update quick roles");
-    }
-  };
-
-  const updatePermissionsMode = async (mode: "simple" | "advanced") => {
-    if (mode === "advanced" && (!advancedPermissions.enabled || advancedPermissions.globalLock)) {
-      if (advancedPermissions.lockReason === "global_lock") {
-        setError("Advanced Permissions are temporarily disabled during an upgrade. Check back soon.");
-      } else {
-        setError("Advanced permissions are not available on your plan. Upgrade or request an override.");
-      }
-      return;
-    }
-    try {
-      const res = await fetch(`${API_BASE}/api/account/media-prefs`, {
+      const res = await fetch(`${API_BASE}/api/account/role-presets/${presetId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ permissionsMode: mode }),
+        body: JSON.stringify(patch),
       });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Failed to update permissions mode");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data as any)?.error) {
+        throw new Error(((data as any)?.error as string) || "Failed to update role defaults");
       }
-      const data = await res.json();
-      if (data?.mediaPrefs) {
-        setMediaPrefs((prev) => ({ ...prev, ...data.mediaPrefs, permissionsMode: mode }));
+      if (data?.preset && rolePresets) {
+        setRolePresets({ ...rolePresets, [presetId]: data.preset as RolePresetDoc });
       } else {
-        setMediaPrefs((prev) => ({ ...prev, permissionsMode: mode }));
+        // Fallback: just merge the patch locally.
+        setRolePresets((prev) =>
+          prev
+            ? {
+                ...prev,
+                [presetId]: { ...(prev[presetId] as RolePresetDoc), ...(patch as any) },
+              }
+            : prev,
+        );
       }
-      setAdvancedPermissions((prev) => ({ ...prev, effectivePermissionsMode: mode }));
-      if (mode === "simple") {
-        const cohostFromServer = serverDefaultRoleProfiles?.find((p) => p.id === "cohost");
-        const cohostPerms = cohostFromServer?.permissions ?? SIMPLE_ROLE_DEFAULTS.cohost.permissions;
-        const cohostLabel = cohostFromServer?.name ?? SIMPLE_ROLE_DEFAULTS.cohost.label;
-        setCohostProfile((prev) => ({
-          ...prev,
-          ...cohostPerms,
-          label: cohostLabel,
-          expiresHours: SIMPLE_ROLE_DEFAULTS.cohost.expiresHours || 24,
-          maxUses: SIMPLE_ROLE_DEFAULTS.cohost.maxUses || 1,
-        }));
-        applySimpleRoleDefaults();
-      } else {
-        await loadRoles();
-      }
+      setRolePresetsSaving((prev) => ({ ...prev, [presetId]: "saved" }));
+      window.setTimeout(() => {
+        setRolePresetsSaving((prev) => ({ ...prev, [presetId]: "idle" }));
+      }, 1500);
     } catch (err: any) {
-      setError(err?.message || "Failed to update permissions mode");
+      setRolePresetsSaving((prev) => ({ ...prev, [presetId]: "error" }));
+      setError(err?.message || "Failed to update role defaults");
     }
   };
+
+  // Advanced Permissions mode is now controlled server-side; the settings
+  // UI only exposes simple role defaults (participant/co-host templates).
 
   const saveMediaPrefs = async () => {
     setMediaPrefsSaving(true);
@@ -1436,370 +1366,129 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         )}
 
         {/* ================================================================ */}
-        {/* SECTION 4: MOD/GUEST SETUP (Cohost profile) */}
+        {/* SECTION 4: ROLE DEFAULTS (Participant / Co-host templates) */}
         {/* ================================================================ */}
         {activeTab === "roles" && (
           <div style={{ ...S.card, opacity: isBlocked ? 0.6 : 1 }}>
             <div style={S.cardHeader}>
-              <h2 style={S.cardTitle}>🛡️ Mod/Guest Setup</h2>
-              {cohostMessage && <div style={S.successPill}>{cohostMessage}</div>}
+              <h2 style={S.cardTitle}>🛡️ Role Defaults</h2>
             </div>
-            {simpleMode ? (
-              <div style={{ display: "grid", gap: 12 }}>
-                <p style={{ color: "#94a3b8", marginBottom: 0 }}>
-                  Simple mode keeps a single Participant link with standard access. Switch to Advanced to unlock Co-host and Moderator roles.
-                </p>
-                {["participant"].map((key) => {
-                  const fromServer = serverDefaultRoleProfiles?.find((p) => p.id === key);
-                  const roleKey = key as keyof typeof SIMPLE_ROLE_DEFAULTS;
-                  const fallback = SIMPLE_ROLE_DEFAULTS[roleKey];
-                  const roleLabel = fromServer?.name || fallback.label;
-                  const perms = fromServer?.permissions || fallback.permissions;
-                  const visibleItems = key === "moderator"
-                    ? PERMISSION_ITEMS.filter((item) => item.key !== "canLayout" && item.key !== "canAnalytics")
-                    : PERMISSION_ITEMS;
-                  return (
-                    <div key={roleKey} style={{
+
+            <p style={{ color: "#94a3b8", marginBottom: 14 }}>
+              Configure what Participants and Co-hosts can do in-room. These templates apply whenever you change a guest's
+              role from the Host Dashboard. Moderation (mute/remove) always stays host-only.
+            </p>
+
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+              {(["participant", "cohost"] as RolePresetId[]).map((id) => {
+                const preset = rolePresets?.[id];
+                const savingState = rolePresetsSaving[id];
+                const label = ROLE_PRESET_LABELS[id];
+                const description =
+                  id === "participant"
+                    ? "Guests who join as standard participants. Usually limited to screen share and invites."
+                    : "Elevated guests who can help run the stream (destinations, layout, recording).";
+
+                return (
+                  <div
+                    key={id}
+                    style={{
                       border: "1px solid #1f2937",
                       borderRadius: 10,
                       padding: "10px 12px",
-                      background: "rgba(255,255,255,0.02)",
+                      background: "rgba(15,23,42,0.85)",
                       display: "grid",
-                      gap: 8,
-                    }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <span style={{ fontWeight: 700 }}>{roleLabel}</span>
-                          <span style={{
-                            color: "#22c55e",
-                            background: "rgba(34,197,94,0.12)",
-                            border: "1px solid rgba(34,197,94,0.4)",
-                            borderRadius: 999,
-                            padding: "2px 8px",
-                            fontSize: 11,
-                            fontWeight: 700,
-                          }}>System</span>
-                        </div>
-                        <span style={{ color: "#9ca3af", fontSize: 12 }}>Standard access</span>
-                      </div>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {visibleItems.map((item) => {
-                          const enabled = !!(perms as any)[item.key];
-                          return (
-                            <span key={item.key} style={{
-                              padding: "3px 7px",
-                              borderRadius: 999,
-                              border: `1px solid ${enabled ? "rgba(34,197,94,0.5)" : "#1f2937"}`,
-                              background: enabled ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)",
-                              color: enabled ? "#22c55e" : "#94a3b8",
-                              fontSize: 11,
-                              fontWeight: 600,
-                            }}>
-                              {item.label}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
-                  <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                    {advancedPermissions.globalLock
-                      ? "Advanced Permissions temporarily disabled during an upgrade. Check back soon."
-                      : advancedPermissions.enabled
-                        ? "Need Co-host and Moderator links with custom permissions? Enable Advanced Permissions Mode."
-                        : "Advanced Permissions Mode is not included on this plan. Upgrade or ask an admin for an override."}
-                  </span>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-                    <button
-                      onClick={() => updatePermissionsMode("advanced")}
-                      style={advancedPermissions.enabled && !advancedPermissions.globalLock ? S.primaryBtn : { ...S.primaryBtn, opacity: 0.5, cursor: "not-allowed" }}
-                      disabled={!advancedPermissions.enabled || advancedPermissions.globalLock}
-                    >
-                      {advancedPermissions.globalLock
-                        ? "Temporarily disabled"
-                        : advancedPermissions.enabled
-                          ? "Enable Advanced Permissions Mode"
-                          : "Locked on current plan"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <>
-                <p style={{ color: "#94a3b8", marginBottom: 14 }}>
-                  Advanced roles control what different guests can do. Tweak permissions on each card; changes autosave.
-                </p>
-
-                <div style={{ marginTop: 4, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <label style={{ fontWeight: 700 }}>Role Display Name</label>
-                    <input
-                      type="text"
-                      value={cohostProfile.label}
-                      onChange={(e) =>
-                        setCohostProfile((prev) => {
-                          const next = { ...prev, label: e.target.value };
-                          scheduleCohostProfileSave(next);
-                          return next;
-                        })
-                      }
-                      style={S.input}
-                      placeholder="Co-Host"
-                    />
-                  </div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <label style={{ fontWeight: 700 }}>Link Expiry (hours)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={168}
-                      value={cohostProfile.expiresHours}
-                      onChange={(e) =>
-                        setCohostProfile((prev) => {
-                          const next = { ...prev, expiresHours: Number(e.target.value) };
-                          scheduleCohostProfileSave(next);
-                          return next;
-                        })
-                      }
-                      style={S.input}
-                    />
-                  </div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <label style={{ fontWeight: 700 }}>Max Uses</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={cohostProfile.maxUses}
-                      onChange={(e) =>
-                        setCohostProfile((prev) => {
-                          const next = { ...prev, maxUses: Number(e.target.value) };
-                          scheduleCohostProfileSave(next);
-                          return next;
-                        })
-                      }
-                      style={S.input}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>Roles & Presets</div>
-                      <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 2 }}>
-                        Click permission chips to toggle; changes auto-save.
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input
-                        type="text"
-                        value={roleLabelInput}
-                        onChange={(e) => setRoleLabelInput(e.target.value)}
-                        placeholder="Add custom role"
-                        style={{ ...S.input, width: 180 }}
-                      />
-                      <button onClick={addRole} style={S.secondaryBtn}>Add</button>
-                    </div>
-                  </div>
-
-                  {roleMessage && (
-                    <div style={{ color: "#22c55e", fontWeight: 600 }}>{roleMessage}</div>
-                  )}
-
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {roleProfiles.map((role) => {
-                      const isViewer = role.id === "viewer" || role.slug === "viewer";
-                      const isSystem = !!role.system || isViewer;
-                      const status = roleSaveStatus[role.id] ?? "idle";
-                      return (
-                        <div
-                          key={role.id}
-                          style={{
-                            display: "grid",
-                            gap: 8,
-                            padding: "10px 12px",
-                            borderRadius: 8,
-                            border: "1px solid #1f2937",
-                            background: "rgba(255,255,255,0.02)",
-                          }}
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                              <span style={{ fontWeight: 600 }}>{role.label}</span>
-                              <span style={{
-                                color: isSystem ? "#22c55e" : "#38bdf8",
-                                background: isSystem ? "rgba(34,197,94,0.12)" : "rgba(56,189,248,0.12)",
-                                border: isSystem ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(56,189,248,0.4)",
-                                borderRadius: 999,
-                                padding: "2px 8px",
-                                fontSize: 11,
-                                fontWeight: 700,
-                              }}>
-                                {isSystem ? "System" : "Custom"}
-                              </span>
-                              {status === "saving" && (
-                                <span style={{ color: "#6366f1", fontSize: 12, fontWeight: 700 }}>Saving…</span>
-                              )}
-                              {status === "saved" && (
-                                <span style={{ color: "#16a34a", fontSize: 12, fontWeight: 700 }}>Saved</span>
-                              )}
-                              {status === "error" && (
-                                <span style={{ color: "#f97316", fontSize: 12, fontWeight: 700 }}>Error — retry</span>
-                              )}
-                            </div>
-                            <div style={{ display: "flex", gap: 8 }}>
-                              {!isSystem && (
-                                <button onClick={() => deleteRole(role.id)} style={S.dangerGhostBtn}>Delete</button>
-                              )}
-                            </div>
-                          </div>
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            {PERMISSION_ITEMS.map((item) => {
-                              const enabled = !!role.permissions?.[item.key];
-                              const canEdit = !isViewer;
-                              return (
-                                <button
-                                  key={item.key}
-                                  type="button"
-                                  disabled={!canEdit}
-                                  onClick={() => {
-                                    if (!canEdit) return;
-                                    const base = role.permissions || EMPTY_PERMISSIONS;
-                                    const nextPermissions = { ...base, [item.key]: !enabled };
-                                    setRoleProfiles((prev) =>
-                                      prev.map((r) => (r.id === role.id ? { ...r, permissions: nextPermissions } : r))
-                                    );
-                                    scheduleRoleSave(role.id, nextPermissions, role.label);
-                                  }}
-                                  style={{
-                                    padding: "3px 7px",
-                                    borderRadius: 999,
-                                    border: `1px solid ${enabled ? "rgba(34,197,94,0.5)" : "#1f2937"}`,
-                                    background: enabled ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)",
-                                    color: enabled ? "#22c55e" : "#94a3b8",
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    cursor: canEdit ? "pointer" : "default",
-                                    opacity: canEdit ? 1 : 0.6,
-                                  }}
-                                >
-                                  {item.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <div style={{ fontWeight: 700 }}>Current saved defaults</div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!window.confirm("Delete saved co-host defaults and reset to system defaults?")) return;
-                        const resetProfile = {
-                          label: SIMPLE_ROLE_DEFAULTS.cohost.label,
-                          expiresHours: SIMPLE_ROLE_DEFAULTS.cohost.expiresHours || 24,
-                          maxUses: SIMPLE_ROLE_DEFAULTS.cohost.maxUses || 1,
-                          ...SIMPLE_ROLE_DEFAULTS.cohost.permissions,
-                        };
-                        setCohostProfile(resetProfile);
-                        await saveCohostProfileWith(resetProfile);
-                      }}
-                      style={S.dangerGhostBtn}
-                    >
-                      Delete defaults
-                    </button>
-                  </div>
-                  <div style={{
-                    border: "1px solid #1f2937",
-                    borderRadius: 10,
-                    padding: "10px 12px",
-                    background: "rgba(255,255,255,0.02)",
-                    display: "grid",
-                    gap: 6,
-                  }}>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                      <span style={{ fontWeight: 600 }}>{cohostProfile.label || "Co-Host"}</span>
-                      <span style={{ color: "#9ca3af", fontSize: 12 }}>Expires: {cohostProfile.expiresHours}h</span>
-                      <span style={{ color: "#9ca3af", fontSize: 12 }}>Max uses: {cohostProfile.maxUses}</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {PERMISSION_ITEMS.map((item) => {
-                        const enabled = (cohostProfile as any)[item.key];
-                        return (
-                          <span
-                            key={item.key}
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: 999,
-                              border: `1px solid ${enabled ? "rgba(34,197,94,0.5)" : "#1f2937"}`,
-                              background: enabled ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)",
-                              color: enabled ? "#22c55e" : "#94a3b8",
-                              fontSize: 12,
-                              fontWeight: 600,
-                            }}
-                          >
-                            {item.label}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                  <button
-                    onClick={() => {
-                      if (window.confirm("Switch to Simple Permissions? Custom roles will be hidden until you re-enable Advanced.")) {
-                        updatePermissionsMode("simple");
-                      }
+                      gap: 10,
                     }}
-                    style={S.secondaryBtn}
                   >
-                    Switch to Simple
-                  </button>
-                </div>
-              </>
-            )}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontWeight: 700 }}>{label}</span>
+                        <span style={{ color: "#9ca3af", fontSize: 12 }}>{description}</span>
+                      </div>
+                      <span
+                        style={{
+                          color: "#22c55e",
+                          background: "rgba(34,197,94,0.12)",
+                          border: "1px solid rgba(34,197,94,0.4)",
+                          borderRadius: 999,
+                          padding: "2px 8px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        Template
+                      </span>
+                    </div>
 
-            {!simpleMode ? (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Quick roles shown in Room</div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {roleProfiles.map((role) => {
-                    const checked = quickRoleIds.includes(role.id);
-                    return (
-                      <label key={role.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#e5e7eb", border: "1px solid #1f2937", borderRadius: 10, padding: "6px 10px", background: "rgba(255,255,255,0.02)" }}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const next = e.target.checked
-                              ? [...quickRoleIds, role.id]
-                              : quickRoleIds.filter((id) => id !== role.id);
-                            updateQuickRoles(next);
-                          }}
-                        />
-                        <span>{role.label}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div style={{ marginTop: 14, color: "#9ca3af", fontSize: 12 }}>
-                Quick roles are fixed in Simple mode and hidden here.
-              </div>
-            )}
+                    {savingState === "saving" && (
+                      <div style={{ color: "#6366f1", fontSize: 12, fontWeight: 600 }}>Saving…</div>
+                    )}
+                    {savingState === "saved" && (
+                      <div style={{ color: "#16a34a", fontSize: 12, fontWeight: 600 }}>Saved</div>
+                    )}
+                    {savingState === "error" && (
+                      <div style={{ color: "#f97316", fontSize: 12, fontWeight: 600 }}>Error — retry</div>
+                    )}
+
+                    {ROLE_PRESET_GROUPS.map((group) => (
+                      <div key={group.title} style={{ display: "grid", gap: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#e5e7eb" }}>{group.title}</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {group.keys.map(({ key, label: chipLabel }) => {
+                            const enabled = !!(preset as any)?.[key];
+                            return (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => {
+                                  const nextValue = !enabled;
+                                  saveRolePreset(id, { [key]: nextValue } as any);
+                                  setRolePresets((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          [id]: {
+                                            ...(prev[id] as RolePresetDoc),
+                                            [key]: nextValue,
+                                          } as RolePresetDoc,
+                                        }
+                                      : prev,
+                                  );
+                                }}
+                                style={{
+                                  padding: "3px 7px",
+                                  borderRadius: 999,
+                                  border: `1px solid ${enabled ? "rgba(34,197,94,0.5)" : "#1f2937"}`,
+                                  background: enabled ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.02)",
+                                  color: enabled ? "#22c55e" : "#94a3b8",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {chipLabel}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ marginTop: 14, color: "#9ca3af", fontSize: 12 }}>
+              Notes:
+              <ul style={{ marginTop: 6, paddingLeft: 18 }}>
+                <li>Host-only actions like mute/remove, mute-all, and mute-lock are never granted by these templates.</li>
+                <li>
+                  If any legacy roles or moderator presets exist, they are treated as Participant in-room so older data can't
+                  reintroduce extra roles.
+                </li>
+              </ul>
+            </div>
           </div>
         )}
 
