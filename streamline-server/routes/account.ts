@@ -203,34 +203,10 @@ async function getNormalizedMediaPrefs(uid: string) {
   return { mediaPrefs: normalizeMediaPrefs((data as any).mediaPrefs, planId), planId };
 }
 
-async function getPlanFeatures(planId: string) {
-  const snap = await firestore.collection("plans").doc(planId).get();
-  const data = snap.exists ? (snap.data() as any) || {} : {};
-  const features = data.features || {};
-  return {
-    advancedPermissions: !!features.advancedPermissions,
-  };
-}
-
-async function getForceSimpleMode() {
-  const snap = await firestore.collection("featureFlags").doc("forceSimpleMode").get();
-  const data = snap.exists ? (snap.data() as any) || {} : {};
-  return {
-    enabled: !!data.enabled,
-    reason: typeof data.reason === "string" ? data.reason : undefined,
-  };
-}
-
-async function getAdvancedPermissionsFlag() {
-  const snap = await firestore.collection("featureFlags").doc("advancedPermissions").get();
-  const data = snap.exists ? (snap.data() as any) || {} : {};
-  // Default to enabled if the flag doc is missing.
-  const enabled = data.enabled === undefined ? true : !!data.enabled;
-  return {
-    enabled,
-    reason: typeof data.reason === "string" ? data.reason : undefined,
-  };
-}
+// Advanced permissions have been fully removed in favor of a single,
+// simple permissions mode. Keep a minimal helper that always reports
+// advanced permissions as disabled so existing callers continue to
+// receive a stable payload shape.
 
 async function getHlsUiFlag() {
   // Global HLS UI/tab flag, driven from the featureFlags collection.
@@ -260,31 +236,13 @@ async function getAdvancedPermissionsEnabled(uid: string) {
   const userSnap = await firestore.collection("users").doc(uid).get();
   const userData = userSnap.exists ? userSnap.data() || {} : {};
   const planId = await getUserPlanId(uid);
-  const planFeatures = await getPlanFeatures(planId);
-  const force = await getForceSimpleMode();
-  const flag = await getAdvancedPermissionsFlag();
-  const override = userData.advancedPermissionsOverride === true;
-
-  // Global disables should always force simple mode regardless of plan/override.
-  const globallyDisabled = force.enabled || flag.enabled === false;
-  const enabled = !globallyDisabled && (planFeatures.advancedPermissions || override);
-
-  const lockReason = force.enabled
-    ? "global_lock"
-    : flag.enabled === false
-      ? "coming_soon"
-      : enabled
-        ? undefined
-        : "plan";
-
-  const globalReason = force.enabled ? force.reason : flag.enabled === false ? flag.reason : undefined;
   return {
-    enabled,
-    planFlag: planFeatures.advancedPermissions,
-    override,
-    globalLock: globallyDisabled,
-    lockReason,
-    globalReason,
+    enabled: false,
+    planFlag: false,
+    override: false,
+    globalLock: false,
+    lockReason: "plan" as const,
+    globalReason: undefined,
     planId,
     userData,
   };
@@ -469,8 +427,8 @@ router.get("/me", async (req, res) => {
       usageMinutes.recording?.lifetime ?? ytdMinutes.recording?.lifetime
     );
 
-    const effectivePermissionsMode = adv.enabled && mediaPrefs.permissionsMode === "advanced" ? "advanced" : "simple";
-    const permissionsModeLockReason = adv.globalLock ? "global_lock" : (adv.enabled ? undefined : "plan");
+    const effectivePermissionsMode = "simple" as const;
+    const permissionsModeLockReason = "plan" as const;
 
     // Canonical effective entitlements payload (features + limits) for client gating
     let effectiveEntitlements: any = null;
@@ -557,14 +515,14 @@ router.get("/me", async (req, res) => {
       displayName: data.displayName || null,
       permissionsMode: mediaPrefs.permissionsMode,
       advancedPermissions: {
-        enabled: adv.enabled,
-        plan: adv.planFlag,
-        override: adv.override,
-        global: adv.globalLock,
-        lockReason: adv.lockReason,
-        globalReason: adv.globalReason,
+        enabled: false,
+        plan: false,
+        override: false,
+        global: false,
+        lockReason: "plan" as const,
+        globalReason: undefined,
       },
-      advancedPermissionsLockedReason: adv.lockReason || null,
+      advancedPermissionsLockedReason: "plan",
       effectivePermissionsMode,
       permissionsModeLockReason: permissionsModeLockReason || null,
       mediaPrefs,

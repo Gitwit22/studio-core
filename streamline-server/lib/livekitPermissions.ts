@@ -25,7 +25,7 @@ export function presetToParticipantPermission(p: RealtimePreset): ParticipantPer
 
 // Optional coarse role mapping so role-based grants can share the same truth
 export function roleToParticipantPermission(
-  role: "viewer" | "participant" | "cohost" | "host" | "moderator",
+  role: "viewer" | "participant" | "cohost" | "host",
 ): ParticipantPermission {
   const canSubscribe = true;
   let canPublish = false;
@@ -39,8 +39,7 @@ export function roleToParticipantPermission(
       canPublishSources = [];
       break;
     }
-    case "participant":
-    case "moderator": {
+    case "participant": {
       canPublish = true;
       canPublishData = true;
       canPublishSources = [TrackSource.MICROPHONE, TrackSource.CAMERA];

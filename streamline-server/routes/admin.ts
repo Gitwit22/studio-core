@@ -537,7 +537,8 @@ router.post("/plans/migrate-schema", async (req, res) => {
         "recording",
         "rtmp",
         "multistream",
-        "advancedPermissions",
+        // "advancedPermissions" is no longer admin-editable; keep any stored
+        // value as-is and treat advanced permissions as removed from plans.
         "rtmpMultistream",
         "overagesAllowed",
       ];

@@ -9,7 +9,7 @@ export type RoomAccessClaims = {
   // This must always match the actual LiveKit room key, even if
   // roomName is repurposed as a human display label.
   livekitRoomName: string;
-  role: "host" | "participant" | "cohost" | "moderator" | "viewer";
+  role: "host" | "participant" | "cohost" | "viewer";
   permissions?: Record<string, boolean>;
   // LiveKit identity for the caller inside the room. Used to
   // bind room-level permissions to per-participant controls docs.

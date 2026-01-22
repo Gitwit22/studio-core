@@ -46,7 +46,8 @@ function normalizeControlsDocId(raw: any): string {
   return id;
 }
 
-type PresetId = "moderator" | "cohost" | "participant";
+type RawPresetId = "moderator" | "cohost" | "participant";
+type PresetId = "cohost" | "participant";
 
 const SYSTEM_ROLE_PRESETS: Record<
   PresetId,
@@ -84,21 +85,6 @@ const SYSTEM_ROLE_PRESETS: Record<
     canViewAnalytics: false,
     canChangeLayoutScene: false,
   },
-  moderator: {
-    role: "moderator",
-    canPublishAudio: true,
-    canPublishVideo: true,
-    canScreenShare: false,
-    tileVisible: true,
-    canMuteGuests: true,
-    canRemoveGuests: true,
-    canInviteLinks: true,
-    canManageDestinations: false,
-    canStartStopStream: false,
-    canStartStopRecording: false,
-    canViewAnalytics: false,
-    canChangeLayoutScene: false,
-  },
   cohost: {
     role: "cohost",
     canPublishAudio: true,
@@ -121,13 +107,13 @@ function presetDocRef(uid: string, presetId: PresetId) {
   return admin.firestore().collection("users").doc(uid).collection("rolePresets").doc(presetId);
 }
 
-function parsePresetId(raw: any): PresetId | null {
+function parsePresetId(raw: any): RawPresetId | null {
   const v = String(raw || "").toLowerCase();
-  if (v === "moderator" || v === "cohost" || v === "participant") return v;
+  if (v === "moderator" || v === "cohost" || v === "participant") return v as RawPresetId;
   return null;
 }
 
-function coercePresetIdForApply(presetId: PresetId): PresetId {
+function coercePresetIdForApply(presetId: RawPresetId): PresetId {
   // Moderator is no longer a public-facing role. For any new apply
   // operations, treat incoming "moderator" as "participant" so legacy
   // data and stale clients cannot re-introduce a distinct moderator role
@@ -156,12 +142,6 @@ async function loadPresetForUser(uid: string, presetId: PresetId): Promise<RoomC
         canViewAnalytics: pickBoolean(data.canViewAnalytics),
         canChangeLayoutScene: pickBoolean(data.canChangeLayoutScene),
       };
-
-      // Hard guarantees for moderator.
-      if (presetId === "moderator") {
-        merged.canViewAnalytics = false;
-        merged.canChangeLayoutScene = false;
-      }
 
       return merged;
     }
@@ -196,12 +176,6 @@ function normalizePresetForApply(presetId: PresetId, preset: RoomControls): Room
     canViewAnalytics: coerce("canViewAnalytics"),
     canChangeLayoutScene: coerce("canChangeLayoutScene"),
   };
-
-  // Hard guarantees for moderator presets regardless of overrides.
-  if (presetId === "moderator") {
-    normalized.canViewAnalytics = false;
-    normalized.canChangeLayoutScene = false;
-  }
 
   return normalized;
 }
@@ -242,15 +216,6 @@ function mapPresetToLivekitPermission(role: PresetId) {
     canUpdateMetadata: false,
     roomAdmin: false,
   } as any;
-
-  if (role === "moderator") {
-    return {
-      ...base,
-      canUpdateMetadata: true,
-      roomAdmin: true,
-    };
-  }
-
   return base;
 }
 
@@ -566,8 +531,8 @@ router.post("/:roomId/participants/:identity/permissions", requireAuth as any, r
           roleId: presetId,
         });
 
-        // Merge rolePresetId into existing metadata so host/moderator
-        // UIs can render a stable role label and dropdown value.
+        // Merge rolePresetId into existing metadata so host UIs can
+        // render a stable role label and dropdown value.
         let nextMetadata: string | undefined;
         try {
           const listResp = await (roomService as any).listParticipants(livekitRoomName);

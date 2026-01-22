@@ -252,7 +252,9 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
       // is set or the numeric destination cap allows more than one
       // RTMP destination.
       multistream: multistreamFeature || rtmpDestinationsMax > 1,
-      advancedPermissions: toBool(features.advancedPermissions ?? data.advancedPermissionsEnabled),
+      // Advanced permissions have been removed; plans no longer toggle
+      // permissions mode. Always operate in simple mode.
+      advancedPermissions: false,
       hlsEnabled: canHls,
       hlsCustomizationEnabled,
       canHls,

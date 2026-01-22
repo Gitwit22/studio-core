@@ -119,37 +119,9 @@ function roleToGrant(role: GrantRole) {
   return { ...base, roomAdmin: false, canUpdateMetadata: false };
 }
 
-async function getAdvancedPermissionsFlag() {
-  const snap = await firestore.collection("featureFlags").doc("advancedPermissions").get();
-  const data = snap.exists ? (snap.data() as any) || {} : {};
-  // Default to enabled if the flag doc is missing.
-  const enabled = data.enabled === undefined ? true : !!data.enabled;
-  return { enabled };
-}
-
-async function getAdvancedPermissionsEnabled(uid: string) {
-  const userSnap = await firestore.collection("users").doc(uid).get();
-  const userData = userSnap.exists ? userSnap.data() || {} : {};
-  const planId = String((userData as any).planId || (userData as any).plan || "free");
-  const planSnap = await firestore.collection("plans").doc(planId).get();
-  const planFeatures = planSnap.exists ? ((planSnap.data() as any)?.features || {}) : {};
-  const planFlag = !!planFeatures.advancedPermissions;
-  const override = (userData as any).advancedPermissionsOverride === true;
-  const force = await firestore.collection("featureFlags").doc("forceSimpleMode").get();
-  const forceEnabled = force.exists ? !!(force.data() as any)?.enabled : false;
-  const advFlag = await getAdvancedPermissionsFlag();
-  const globalLock = forceEnabled || advFlag.enabled === false;
-  return { enabled: !globalLock && (planFlag || override), planFlag, override, globalLock };
-}
-
 async function getPermissionsMode(uid?: string): Promise<"simple" | "advanced"> {
-  if (!uid) return "simple";
-  const snap = await firestore.collection("users").doc(uid).get();
-  const prefs = (snap.data() as any)?.mediaPrefs;
-  const mode = prefs?.permissionsMode;
-  const advanced = await getAdvancedPermissionsEnabled(uid);
-  if (!advanced.enabled) return "simple";
-  return mode === "advanced" ? "advanced" : "simple";
+  // Advanced permissions have been removed; always operate in simple mode.
+  return "simple";
 }
 
 type ResolvedRole = {

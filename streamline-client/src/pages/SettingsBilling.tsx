@@ -1833,14 +1833,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         )}
                         <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
                         {platformHlsEnabled ? <FeatureRow label="HLS Broadcast Page" value={(plan as any).features?.canHls} /> : null}
-                        {advancedPermissions.lockReason !== "coming_soon" ? (
-                          <FeatureRow
-                            label="Advanced Permissions Mode"
-                            value={!!plan.features.advancedPermissions}
-                            pill
-                            subBullets={plan.features.advancedPermissions && planId !== "starter" ? [] : undefined}
-                          />
-                        ) : null}
+                        {/* Advanced Permissions is now removed from plan marketing UI; all accounts use simple Participant/Co-host defaults. */}
                         {plan.editing?.access && (
                           <>
                             <FeatureRow label="Projects" value={plan.editing.maxProjects} />
