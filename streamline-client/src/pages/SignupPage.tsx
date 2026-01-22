@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 import { API_BASE } from "../services/apiBase";
+import { apiFetch } from "../lib/api";
 
 // Email validation function
 function validateEmail(email: string): boolean {
@@ -137,6 +138,16 @@ export const SignupPage = () => {
         document.cookie = `token=${data.token}; path=/; max-age=${60 * 60 * 24 * 7}`;
         // Debug: Log cookies after setting
         console.log('[Signup] Cookies after signup:', document.cookie);
+      }
+
+      // Initialize canonical account document with plan + stream defaults.
+      try {
+        await apiFetch("/api/account/init", {
+          method: "POST",
+        });
+      } catch (initErr) {
+        // Intentionally swallow init failures so signup can still proceed.
+        console.warn("[Signup] account init failed", initErr);
       }
 
       setLoading(false);

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { firestore } from "../firebaseAdmin";
+import admin from "firebase-admin";
 import { requireAuth } from "../middleware/requireAuth";
 import { clampPresetForPlan, getPresetById, getUserPlanId, MEDIA_PRESETS, MediaPresetId } from "../lib/mediaPresets";
 import { getCurrentMonthKey } from "../lib/usageTracker";
@@ -383,6 +384,83 @@ async function loadEffectiveRoles(uid: string, advancedEnabled: boolean) {
 }
 
 router.use(requireAuth);
+
+// ---------------------------------------------------------------------------
+// Minimal account init endpoint for new-style accounts collection.
+// This is intentionally simple: it only creates accounts/{uid} once with
+// conservative streaming defaults and ToS metadata. Older flows that rely on
+// users/{uid} remain unchanged.
+// ---------------------------------------------------------------------------
+
+// NOTE: Client baseline lives in streamline-client/src/lib/streamDefaults.ts
+// under DEFAULT_STREAM_DEFAULTS. If you change one, update the other to match.
+const BASE_STREAM_DEFAULTS = Object.freeze({
+  video: { resolution: "720p", fps: 30, bitrateKbps: 2500 },
+  audio: { sampleRate: 48000, channels: 2 },
+  platform: { youtubePrivacy: "public" as const },
+  features: {
+    recordingDefault: false,
+    hlsDefault: false,
+    transcodeDefault: false,
+  },
+} as const);
+
+router.post("/init", async (req, res) => {
+  try {
+    const user = (req as any).user || {};
+    const uid: string | undefined = user.uid;
+
+    if (!uid) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    const accountsRef = firestore.collection("accounts").doc(uid);
+    const existing = await accountsRef.get();
+
+    if (existing.exists) {
+      return res.json({ ok: true, alreadyInitialized: true });
+    }
+
+    const accountDoc: any = {
+      uid,
+      plan: "free",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAtMs: Date.now(),
+      streamDefaults: BASE_STREAM_DEFAULTS,
+    };
+
+    // Optionally mirror basic identity + ToS fields from the primary
+    // users/{uid} document when available. If the user doc is missing,
+    // we still create the minimal accounts/{uid} shell.
+    try {
+      const userSnap = await firestore.collection("users").doc(uid).get();
+      const userData = userSnap.exists ? (userSnap.data() as any) || {} : {};
+
+      if (typeof userData.email === "string" && userData.email) {
+        accountDoc.email = userData.email;
+      }
+      if (typeof userData.displayName === "string" && userData.displayName) {
+        accountDoc.displayName = userData.displayName;
+      }
+
+      if (typeof userData.tosVersion === "string") {
+        accountDoc.tosVersion = userData.tosVersion;
+      }
+      if (typeof userData.tosAcceptedAt === "number") {
+        accountDoc.tosAcceptedAt = userData.tosAcceptedAt;
+      }
+    } catch (mirrorErr) {
+      console.warn("[account/init] failed to mirror user fields", mirrorErr);
+    }
+
+    await accountsRef.set(accountDoc, { merge: false });
+
+    return res.json({ ok: true, initialized: true });
+  } catch (err: any) {
+    console.error("POST /api/account/init failed", err?.message || err);
+    return res.status(500).json({ error: "account_init_failed" });
+  }
+});
 
 router.get("/me", async (req, res) => {
   try {
