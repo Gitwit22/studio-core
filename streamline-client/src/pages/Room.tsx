@@ -509,6 +509,8 @@ type LiveKitShellProps = {
   roomName: string;
   roomAccessToken: string | null;
   canMuteGuests: boolean;
+  canRemoveGuests: boolean;
+  canModerate: boolean;
   effectivePermissionsMode: "simple" | "advanced";
   dashboardGreenroomEnabled: boolean;
   dashboardOverlaysEnabled: boolean;
@@ -532,6 +534,8 @@ function LiveKitShell({
   roomName,
   roomAccessToken,
   canMuteGuests,
+  canRemoveGuests,
+  canModerate,
   effectivePermissionsMode,
   dashboardGreenroomEnabled,
   dashboardOverlaysEnabled,
@@ -646,8 +650,8 @@ function LiveKitShell({
             roomId={roomId || ""}
             roomAccessToken={roomAccessToken || ""}
             canMuteGuests={canMuteGuests}
-            canRemoveGuests={canRemoveGuestsUi}
-            canModerate={canModerateUi}
+            canRemoveGuests={canRemoveGuests}
+            canModerate={canModerate}
             advancedRolesEnabled={effectivePermissionsMode === "advanced"}
             greenroomEnabled={dashboardGreenroomEnabled}
             overlaysEnabled={dashboardOverlaysEnabled}
@@ -2815,6 +2819,8 @@ function RoomPage() {
           roomName={roomName || ""}
           roomAccessToken={roomAccessToken}
           canMuteGuests={canMuteGuestsUi}
+          canRemoveGuests={canRemoveGuestsUi}
+          canModerate={canModerateUi}
           effectivePermissionsMode={effectivePermissionsMode}
           dashboardGreenroomEnabled={dashboardGreenroomEnabled}
           dashboardOverlaysEnabled={dashboardOverlaysEnabled}
