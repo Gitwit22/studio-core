@@ -870,10 +870,14 @@ router.get("/features", async (req, res) => {
       byName.set(doc.id, doc.data());
     });
 
-    const features: any[] = snapshot.docs.map((doc) => ({
-      name: doc.id,
-      ...doc.data(),
-    }));
+    const features: any[] = snapshot.docs
+      .map((doc) => ({
+        name: doc.id,
+        ...doc.data(),
+      }))
+      // Advanced permissions is now a legacy flag and should not
+      // be exposed as a toggle in the Admin UI.
+      .filter((f) => f.name !== "advancedPermissions");
 
     for (const seed of seededDefaults) {
       if (!byName.has(seed.name)) {

@@ -1204,7 +1204,6 @@ export default function AdminDashboard() {
                           <FeaturePill enabled={plan.features?.recording} label="Recording" />
                           <FeaturePill enabled={plan.features?.dualRecording} label="Dual Recording" />
                           <FeaturePill enabled={plan.features?.rtmpMultistream ?? plan.multistreamEnabled} label="Multistream" />
-                          <FeaturePill enabled={plan.features?.advancedPermissions} label="Advanced Permissions Mode" />
                           <FeaturePill enabled={plan.editing?.access} label="Editing" />
                           <FeaturePill enabled={plan.editing?.ai?.autoCut} label="AI AutoCut" />
                           <FeaturePill enabled={plan.editing?.ai?.captions} label="AI Captions" />
@@ -1387,11 +1386,6 @@ export default function AdminDashboard() {
                                   />
                                 </>
                               )}
-                              <ToggleRow
-                                label="Advanced Permissions Mode"
-                                value={plan.features?.advancedPermissions}
-                                onChange={(v) => updatePlanField(plan.id, "features.advancedPermissions", v)}
-                              />
                               <ToggleRow
                                 label="Watermark Recordings"
                                 value={plan.features?.watermarkRecordings}
