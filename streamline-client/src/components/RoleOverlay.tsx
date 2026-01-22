@@ -173,6 +173,7 @@ function HostPanel({
   const [busy, setBusy] = React.useState(false);
   const [roleToast, setRoleToast] = React.useState<string | null>(null);
   const roleToastTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [roleByIdentity, setRoleByIdentity] = React.useState<Record<string, RolePresetId>>({});
   const [roleOverrides, setRoleOverrides] = React.useState<Record<string, RolePresetId>>({});
   const [roleStatus, setRoleStatus] = React.useState<Record<string, "saving" | "saved">>({});
 
@@ -240,6 +241,8 @@ function HostPanel({
     try {
       await apiSetRole(roomId, roomAccessToken, identity, presetId);
       setRoleStatus((prev) => ({ ...prev, [identity]: "saved" }));
+
+      setRoleByIdentity((prev) => ({ ...prev, [identity]: presetId }));
 
       // Show a small global toast inside the dashboard for extra feedback.
       setRoleToast("Role updated");
@@ -548,6 +551,12 @@ function ParticipantList({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
       {participants.map((p) => (
+        (() => {
+          const metaRole = (p as any)?.metadata?.rolePresetId as RolePresetId | undefined;
+          const overrideRole = roleOverrides && roleOverrides[p.identity];
+          const currentRole: RolePresetId = metaRole || overrideRole || "participant";
+
+          return (
         <div
           key={p.identity}
           style={{
@@ -567,7 +576,7 @@ function ParticipantList({
               {p.identity}
             </div>
             {(() => {
-              const effectiveRole = (roleOverrides && roleOverrides[p.identity]) || (p as any)?.metadata?.rolePresetId;
+              const effectiveRole = metaRole || overrideRole;
               if (!effectiveRole) return null;
               return (
                 <div style={{ marginTop: '0.15rem', fontSize: '0.7rem', color: 'rgba(129, 140, 248, 0.9)' }}>
@@ -589,9 +598,8 @@ function ParticipantList({
               {canChangeRoles && onChangeRole && localIdentity && p.identity !== localIdentity && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.15rem' }}>
                   <select
-                    value={
-                      ((roleOverrides && roleOverrides[p.identity]) || (p as any)?.metadata?.rolePresetId || 'participant') as RolePresetId
-                    }
+                            className="sl-role-select"
+                    value={currentRole}
                     onChange={(e) => onChangeRole(p.identity, e.target.value as RolePresetId)}
                     style={{
                       borderRadius: '9999px',
@@ -678,6 +686,8 @@ function ParticipantList({
             </div>
           )}
         </div>
+          );
+        })()
       ))}
     </div>
   );

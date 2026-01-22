@@ -965,6 +965,8 @@ function RoomPage() {
     if (participantIdentity) qs.set("identity", participantIdentity);
     const url = `${base}/api/rooms/${encodeURIComponent(roomId)}/controls/stream?${qs.toString()}`;
 
+    console.log("[Room controls SSE] identity from roomToken:", participantIdentity, "url:", url);
+
     let closed = false;
     const es = new EventSource(url, { withCredentials: true } as any);
 
