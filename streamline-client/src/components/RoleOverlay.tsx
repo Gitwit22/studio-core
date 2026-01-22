@@ -443,14 +443,7 @@ function ModeratorPanel({ roomName, roomAccessToken, canMuteGuests, canRemoveGue
         </p>
       </Section>
       <Section title="Live Participants">
-        <ParticipantList
-          participants={parts}
-          onRemove={(id) => apiRemove(roomName, id, roomAccessToken)}
-          onMute={(id, muted) => apiMute(roomName, id, muted, roomAccessToken)}
-          canModerate={!!canModerate}
-          canMuteGuests={canMuteGuests}
-          canRemoveGuests={canRemoveGuests}
-        />
+        <ParticipantList participants={parts} />
       </Section>
     </>
   );
@@ -580,8 +573,8 @@ function ParticipantList({
               {canChangeRoles && onChangeRole && localIdentity && p.identity !== localIdentity && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.15rem' }}>
                   <select
-                            className="sl-role-select"
-                    value={currentRole}
+                    className="sl-role-select"
+                    value={currentRole === "moderator" ? "participant" : currentRole}
                     onChange={(e) => onChangeRole(p.identity, e.target.value as RolePresetId)}
                     style={{
                       borderRadius: '9999px',
@@ -596,7 +589,6 @@ function ParticipantList({
                   >
                     <option value="participant">Participant</option>
                     <option value="cohost">Co-host</option>
-                    <option value="moderator">Moderator</option>
                   </select>
                   {roleStatus && roleStatus[p.identity] === 'saving' && (
                     <span style={{ fontSize: '0.65rem', color: 'rgba(148, 163, 184, 0.9)' }}>Saving…</span>

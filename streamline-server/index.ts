@@ -236,31 +236,10 @@ async function assertEffectiveRoomControl(
     throw new RoomPermissionError(403, "room_mismatch");
   }
 
-  // Host (or other non-roomAccess actors elevated via assertRoomPerm) are
-  // governed purely by role-level permissions; controls docs are
-  // primarily for in-room delegates like moderators/cohosts.
-  if (access.role === "host") {
-    return;
-  }
-
-  const callerIdentity = access.identity;
-  if (!callerIdentity) {
-    throw new RoomPermissionError(403, "room_identity_required");
-  }
-
-  const identityDocId = normalizeControlsDocId(callerIdentity);
-  const snap = await db
-    .collection("rooms")
-    .doc(trimmedRoomId)
-    .collection("controls")
-    .doc(identityDocId)
-    .get();
-
-  const controls = (snap.data() as any) || {};
-  const allowed = perm === "canMuteGuests" ? !!controls.canMuteGuests : !!controls.canRemoveGuests;
-
-  if (!allowed) {
-    throw new RoomPermissionError(403, "forbidden");
+  // Updated policy: only hosts can use roomModeration endpoints.
+  // Non-hosts are blocked here regardless of controls docs.
+  if (String(access.role || "").toLowerCase() !== "host") {
+    throw new RoomPermissionError(403, "insufficient_role");
   }
 }
 

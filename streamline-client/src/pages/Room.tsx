@@ -752,18 +752,20 @@ function RoomPage() {
   const canMuteGuestsUi =
     !needsReauth &&
     !isViewer &&
-    (isHost || !!effectiveControls.canMuteGuests || can("canModerate"));
+    isHost &&
+    (!!effectiveControls.canMuteGuests || can("canModerate"));
 
   const canRemoveGuestsUi =
     !needsReauth &&
     !isViewer &&
-    (isHost || !!effectiveControls.canRemoveGuests || can("canModerate"));
+    isHost &&
+    (!!effectiveControls.canRemoveGuests || can("canModerate"));
 
   const canModerateUi =
     !needsReauth &&
     !isViewer &&
-    (isHost ||
-      can("canModerate") ||
+    isHost &&
+    (can("canModerate") ||
       !!effectiveControls.canRemoveGuests ||
       !!effectiveControls.canMuteGuests);
 
@@ -901,7 +903,6 @@ function RoomPage() {
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
   const [participantIdentity, setParticipantIdentity] = useState<string | null>(null);
-  const [controlsRolePresetId, setControlsRolePresetId] = useState<EffectiveControls["rolePresetId"] | null>(null);
   const [, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
     const [effectivePermissionsMode, setEffectivePermissionsMode] = useState<"simple" | "advanced">("simple");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
@@ -1022,8 +1023,6 @@ function RoomPage() {
           canStartStopRecording: typeof data?.canStartStopRecording === "boolean" ? data.canStartStopRecording : false,
           rolePresetId: nextRole,
         });
-
-        setControlsRolePresetId(nextRole ?? "participant");
       } catch {
         // ignore
       }
@@ -2829,15 +2828,7 @@ function RoomPage() {
           effectivePermissionsMode={effectivePermissionsMode}
           dashboardGreenroomEnabled={dashboardGreenroomEnabled}
           dashboardOverlaysEnabled={dashboardOverlaysEnabled}
-          dashboardRole={
-            isHost
-              ? "host"
-              : controlsRolePresetId === "moderator"
-              ? "moderator"
-              : controlsRolePresetId === "cohost"
-              ? "moderator"
-              : "participant"
-          }
+          dashboardRole={isHost ? "host" : "participant"}
           onDisconnected={handleLeftRoom}
         />
       )}

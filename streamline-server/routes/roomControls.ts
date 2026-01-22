@@ -5,7 +5,6 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
 import { getLiveKitSdk } from "../lib/livekit";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
-import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 
 const router = Router();
 
@@ -222,7 +221,8 @@ function pickBoolean(v: any): boolean | undefined {
 
 function isHostOrCohost(role?: string): boolean {
   const r = String(role || "").toLowerCase();
-  return r === "host" || r === "cohost";
+  // Updated policy: only hosts can modify room controls or presets.
+  return r === "host";
 }
 
 function mapPresetToLivekitPermission(role: PresetId) {
@@ -485,20 +485,13 @@ router.post("/:roomId/participants/:identity/permissions", requireAuth as any, r
   if (!access || !access.roomId) return res.status(401).json({ error: "room_token_required" });
   if (access.roomId !== roomId) return res.status(403).json({ error: "room_mismatch" });
 
+  // Host-only moderation: only a host can change participant roles/permissions.
+  if (String(access.role || "").toLowerCase() !== "host") {
+    return res.status(403).json({ error: "insufficient_role" });
+  }
+
   const uid = (req as any).user?.uid as string | undefined;
   if (!uid) return res.status(401).json({ error: "Unauthorized" });
-
-  // Authorize via room-level permissions so that only hosts/admins/moderators
-  // with canModerate can change participant permissions.
-  try {
-    await assertRoomPerm(req as any, roomId, "canModerate");
-  } catch (err: any) {
-    if (err instanceof RoomPermissionError) {
-      return res.status(err.status).json({ error: err.code });
-    }
-    console.error("[roomControls] apply-permissions assertRoomPerm failed", err);
-    return res.status(500).json({ error: "permission_check_failed" });
-  }
 
   const rawIdentity = String(req.params.identity || "").trim();
   if (!rawIdentity) return res.status(400).json({ error: "identity_required" });
