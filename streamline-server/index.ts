@@ -39,7 +39,7 @@ import publicRoomsHlsConfigRoutes from "./routes/publicRoomsHlsConfig";
 import { sanitizeDisplayName } from "./lib/sanitizeDisplayName";
 import { resolveRoomIdentity } from "./lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "./lib/rolePermissions";
-import { requireRoomAccessToken, type RoomAccessClaims } from "./middleware/roomAccessToken";
+import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "./middleware/roomAccessToken";
 
 
 import { uploadVideo } from "./lib/storageClient";
@@ -256,12 +256,7 @@ app.post("/api/roomModeration/mute", requireAuth, requireRoomAccessToken as any,
       return res.status(400).json({ error: "room, identity and muted are required" });
     }
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ error: "room_token_required" });
-    }
-    const roomId = String(access.roomId || "").trim();
-    const livekitRoomName = access.roomName || room;
+    const { roomId, livekitRoomName } = getRoomAccess(req as any);
 
     try {
       await assertEffectiveRoomControl(req as any, roomId, "canMuteGuests");
@@ -289,6 +284,15 @@ app.post("/api/roomModeration/mute", requireAuth, requireRoomAccessToken as any,
     if (!audioTrack) {
       console.warn("No audio track found for", { roomId, livekitRoomName, identity });
       return res.status(404).json({ error: "no audio track found" });
+    }
+
+    if (process.env.AUTH_DEBUG === "1") {
+      console.log("[livekit-debug] mutePublishedTrack", {
+        livekitRoomName,
+        identity,
+        trackSid: audioTrack.sid,
+        muted,
+      });
     }
 
     await roomService.mutePublishedTrack(livekitRoomName, identity, audioTrack.sid, muted);
@@ -320,12 +324,7 @@ app.post("/api/roomModeration/mute-all", requireAuth, requireRoomAccessToken as 
       return res.status(400).json({ error: "room and muted are required" });
     }
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ error: "room_token_required" });
-    }
-    const roomId = String(access.roomId || "").trim();
-    const livekitRoomName = access.roomName || room;
+    const { roomId, livekitRoomName } = getRoomAccess(req as any);
 
     try {
       await assertEffectiveRoomControl(req as any, roomId, "canMuteGuests");
@@ -343,6 +342,10 @@ app.post("/api/roomModeration/mute-all", requireAuth, requireRoomAccessToken as 
     const TrackType = sdk.TrackType;
     const TrackSource = sdk.TrackSource;
 
+    if (process.env.AUTH_DEBUG === "1") {
+      console.log("[livekit-debug] listParticipants (mute-all)", { livekitRoomName });
+    }
+
     const participants = await roomService.listParticipants(livekitRoomName);
     const results: Array<{ identity: string; trackSid: string | null; changed: boolean }> = [];
 
@@ -358,7 +361,16 @@ app.post("/api/roomModeration/mute-all", requireAuth, requireRoomAccessToken as 
         continue;
       }
 
-      await roomService.mutePublishedTrack(livekitRoomName, p.identity, audioTrack.sid, muted);
+          if (process.env.AUTH_DEBUG === "1") {
+            console.log("[livekit-debug] mutePublishedTrack (mute-all)", {
+              livekitRoomName,
+              identity: p.identity,
+              trackSid: audioTrack.sid,
+              muted,
+            });
+          }
+
+          await roomService.mutePublishedTrack(livekitRoomName, p.identity, audioTrack.sid, muted);
       results.push({ identity: p.identity, trackSid: audioTrack.sid, changed: true });
     }
 
@@ -388,12 +400,7 @@ app.post("/api/roomModeration/mute-lock", requireAuth, requireRoomAccessToken as
       return res.status(400).json({ error: "room and muteLock are required" });
     }
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ error: "room_token_required" });
-    }
-    const roomId = String(access.roomId || "").trim();
-    const livekitRoomName = access.roomName || room;
+    const { roomId, livekitRoomName } = getRoomAccess(req as any);
 
     try {
       await assertEffectiveRoomControl(req as any, roomId, "canMuteGuests");
@@ -482,12 +489,7 @@ app.post("/api/roomModeration/remove", requireAuth, requireRoomAccessToken as an
       return res.status(400).json({ ok: false, error: "room and identity are required" });
     }
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ ok: false, error: "room_token_required" });
-    }
-    const roomId = String(access.roomId || "").trim();
-    const livekitRoomName = access.roomName || room;
+    const { roomId, livekitRoomName } = getRoomAccess(req as any);
 
     try {
       await assertEffectiveRoomControl(req as any, roomId, "canRemoveGuests");
@@ -499,6 +501,14 @@ app.post("/api/roomModeration/remove", requireAuth, requireRoomAccessToken as an
     }
 
     const roomService = await getRoomService();
+
+    if (process.env.AUTH_DEBUG === "1") {
+      console.log("[livekit-debug] removeParticipant", {
+        livekitRoomName,
+        identity,
+      });
+    }
+
     await roomService.removeParticipant(livekitRoomName, identity);
 
     return res.json({ ok: true });
@@ -517,12 +527,7 @@ app.post("/api/roomModeration/remove-all", requireAuth, requireRoomAccessToken a
       return res.status(400).json({ ok: false, error: "room is required" });
     }
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ ok: false, error: "room_token_required" });
-    }
-    const roomId = String(access.roomId || "").trim();
-    const livekitRoomName = access.roomName || room;
+    const { roomId, livekitRoomName } = getRoomAccess(req as any);
 
     try {
       await assertEffectiveRoomControl(req as any, roomId, "canRemoveGuests");
@@ -534,6 +539,11 @@ app.post("/api/roomModeration/remove-all", requireAuth, requireRoomAccessToken a
     }
 
     const roomService = await getRoomService();
+
+    if (process.env.AUTH_DEBUG === "1") {
+      console.log("[livekit-debug] listParticipants (remove-all)", { livekitRoomName });
+    }
+
     const participants = await roomService.listParticipants(livekitRoomName);
 
     const results: Array<{ identity: string; removed: boolean; error?: string }> = [];
@@ -542,6 +552,13 @@ app.post("/api/roomModeration/remove-all", requireAuth, requireRoomAccessToken a
       const identity = (p as any)?.identity;
       if (!identity) continue;
       try {
+        if (process.env.AUTH_DEBUG === "1") {
+          console.log("[livekit-debug] removeParticipant (remove-all)", {
+            livekitRoomName,
+            identity,
+          });
+        }
+
         await roomService.removeParticipant(livekitRoomName, identity);
         results.push({ identity, removed: true });
       } catch (err: any) {

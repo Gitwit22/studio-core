@@ -3,12 +3,17 @@ import jwt from "jsonwebtoken";
 
 export type RoomAccessClaims = {
   roomId: string;
+  // Optional human/display label for the room.
   roomName?: string;
-  role?: string;
+  // Canonical LiveKit room name used for RoomService/egress calls.
+  // This must always match the actual LiveKit room key, even if
+  // roomName is repurposed as a human display label.
+  livekitRoomName: string;
+  role: "host" | "participant" | "cohost" | "moderator" | "viewer";
   permissions?: Record<string, boolean>;
   // LiveKit identity for the caller inside the room. Used to
   // bind room-level permissions to per-participant controls docs.
-  identity?: string;
+  identity: string;
 };
 
 function getRoomAccessSecret(): string {
@@ -23,6 +28,34 @@ function getRoomAccessSecret(): string {
 export function verifyRoomAccessToken(rawToken: string): RoomAccessClaims {
   const decoded = jwt.verify(rawToken, getRoomAccessSecret());
   return decoded as RoomAccessClaims;
+}
+
+export function getRoomAccess(req: any): { access: RoomAccessClaims; roomId: string; livekitRoomName: string } {
+  const access = (req as any)?.roomAccess as RoomAccessClaims | undefined;
+  if (!access || !access.roomId) {
+    throw new Error("room_token_required");
+  }
+
+  const roomId = String(access.roomId || "").trim();
+  const livekitRoomName = String(access.livekitRoomName || "").trim();
+
+  if (!roomId) {
+    throw new Error("room_token_required");
+  }
+  if (!livekitRoomName) {
+    throw new Error("livekit_room_missing");
+  }
+
+  if (process.env.AUTH_DEBUG === "1") {
+    console.log("[roomAccess-debug] getRoomAccess", {
+      roomId,
+      livekitRoomName,
+      identity: access.identity,
+      role: access.role,
+    });
+  }
+
+  return { access, roomId, livekitRoomName };
 }
 
 export function extractRoomAccessToken(req: Request): string | null {

@@ -130,19 +130,30 @@ export async function apiStartRecording(
   roomId: string,
   layout: "speaker" | "grid",
   mode: "cloud" | "dual" = "cloud",
-  presetId?: string
+  presetId?: string,
+  roomAccessToken?: string | null
 ) {
   const res = await apiFetch("/api/recordings/start", {
     method: "POST",
     body: JSON.stringify({ roomId, layout, mode, presetId }),
+    headers: roomAccessToken
+      ? {
+          Authorization: `Bearer ${roomAccessToken}`,
+        }
+      : undefined,
   });
   return res.json();
 }
 
-export async function apiStopRecording(recordingId: string) {
+export async function apiStopRecording(recordingId: string, roomAccessToken?: string | null) {
   const res = await apiFetch("/api/recordings/stop", {
     method: "POST",
     body: JSON.stringify({ recordingId }),
+    headers: roomAccessToken
+      ? {
+          Authorization: `Bearer ${roomAccessToken}`,
+        }
+      : undefined,
   });
   return res.json() as Promise<{ ok: true }>;
 }

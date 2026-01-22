@@ -526,6 +526,8 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
         await ensureRoomDoc({
           roomId,
           ownerId: entitlementsUid,
+          // Store the canonical LiveKit room key; do not depend on
+          // any future display-only roomName changes.
           livekitRoomName: roomName,
           roomType: "rtc",
           initialStatus: "live",
@@ -651,10 +653,16 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       });
     }
 
+    // Canonical LiveKit room key must never depend on display labels.
+    // For now, our resolver only exposes a single roomName field which is
+    // already derived from rooms.livekitRoomName || roomName || name || id.
+    // Treat that as the canonical LiveKit key and carry it explicitly.
+    const livekitRoomName = roomName;
+
     const AccessToken = await getAccessTokenCtor();
     const at = new AccessToken(apiKey, apiSecret, { identity: tokenIdentity, name: displayName });
     at.addGrant({
-      room: roomName,
+      room: livekitRoomName,
       ...roleToGrant(grantRole),
     });
     const lkJwt = await at.toJwt();
@@ -664,7 +672,10 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
 
     const roomAccessPayload = {
       roomId,
+      // Optional human/display label for the room; safe for UI.
       roomName,
+      // Required canonical LiveKit room key for all LK APIs.
+      livekitRoomName,
       role: effectiveRoleKey,
       permissions,
       identity: tokenIdentity,
@@ -814,6 +825,7 @@ router.post("/guest", async (req, res) => {
     const roomAccessPayload = {
       roomId,
       roomName,
+      livekitRoomName: roomName,
       role: resolved.result.effectiveRoleKey,
       permissions: resolved.result.permissions,
       identity,

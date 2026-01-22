@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
-import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
+import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "../middleware/roomAccessToken";
 import { canAccessFeature } from "./featureAccess";
 import type { ApiErrorCode } from "../types/streaming";
 import { decryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
@@ -36,11 +36,7 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ error: "room_token_required" });
-    }
-    const canonicalRoomId = String(access.roomId || "").trim();
+    const { roomId: canonicalRoomId, livekitRoomName } = getRoomAccess(req as any);
     if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });
 
     const requestedRoomId = String((req.params as any).roomId || "").trim();
@@ -49,7 +45,7 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
     }
 
     const roomId = canonicalRoomId;
-    const roomName = (access.roomName && String(access.roomName).trim()) || roomId;
+    const roomName = livekitRoomName;
 
     try {
       await assertRoomPerm(req as any, roomId, "canDestinations");
@@ -267,6 +263,13 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
       const streamOutput = new StreamOutput({ protocol: StreamProtocol.RTMP, urls });
 
       // Start Room Composite egress with preset encoding
+      if (process.env.AUTH_DEBUG === "1") {
+        console.log("[livekit-debug] startRoomCompositeEgress (multistream)", {
+          livekitRoomName: roomName,
+          urls,
+        });
+      }
+
       const response = await egressClient.startRoomCompositeEgress(
         roomName,
         { stream: streamOutput },
@@ -338,11 +341,7 @@ router.post("/:roomId/stop-multistream", requireAuth, requireRoomAccessToken as 
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ error: "room_token_required" });
-    }
-    const canonicalRoomId = String(access.roomId || "").trim();
+    const { roomId: canonicalRoomId, livekitRoomName } = getRoomAccess(req as any);
     if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });
 
     const requestedRoomId = String((req.params as any).roomId || "").trim();
@@ -351,7 +350,7 @@ router.post("/:roomId/stop-multistream", requireAuth, requireRoomAccessToken as 
     }
 
     const roomId = canonicalRoomId;
-    const roomName = (access.roomName && String(access.roomName).trim()) || roomId;
+    const roomName = livekitRoomName;
 
     try {
       await assertRoomPerm(req as any, roomId, "canDestinations");

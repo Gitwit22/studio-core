@@ -2,7 +2,7 @@ import { Router } from "express";
 import { TrackSource } from "livekit-server-sdk";
 import admin from "firebase-admin";
 import { requireAuth } from "../middleware/requireAuth";
-import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
+import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "../middleware/roomAccessToken";
 import { getLiveKitSdk } from "../lib/livekit";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
 
@@ -371,8 +371,7 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
         );
 
         const permission = mapPresetToLivekitPermission(rolePresetId);
-        const resolved = await resolveRoomIdentity({ roomId });
-        const livekitRoomName = resolved?.roomName || roomId;
+        const { livekitRoomName } = getRoomAccess(req as any);
 
         console.log("[roomControls] ROLE UPDATE", {
           roomId,
@@ -546,8 +545,7 @@ router.post("/:roomId/participants/:identity/permissions", requireAuth as any, r
         );
 
         const permission = mapPresetToLivekitPermission(presetId);
-        const resolved = await resolveRoomIdentity({ roomId });
-        const livekitRoomName = resolved?.roomName || roomId;
+        const { livekitRoomName } = getRoomAccess(req as any);
 
         console.log("[roomControls] APPLY PERMISSIONS", {
           roomId,

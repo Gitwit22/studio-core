@@ -1,7 +1,7 @@
 import { Router } from "express";
 import admin from "firebase-admin";
 import { getRoom, setHlsError, setHlsIdle, setHlsLive, setHlsStarting } from "../services/rooms";
-import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
+import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "../middleware/roomAccessToken";
 import { requireAuth } from "../middleware/requireAuth";
 import { startHlsEgress, HlsPresetId, stopEgress } from "../services/livekitEgress";
 import { firestore } from "../firebaseAdmin";
@@ -88,12 +88,7 @@ router.get("/public/:roomId", async (req: any, res) => {
 });
 
 router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
-  const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-  if (!access || !access.roomId) {
-    return res.status(401).json({ error: "room_token_required" });
-  }
-
-  const canonicalRoomId = String(access.roomId || "").trim();
+  const { roomId: canonicalRoomId, livekitRoomName } = getRoomAccess(req);
   if (!canonicalRoomId || /[ \u2013#]/.test(canonicalRoomId)) {
     return res.status(400).json({ error: "invalid_room_id" });
   }
@@ -151,8 +146,6 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     // For best viewer UX, point clients at the live sliding playlist.
     const playlistUrl = `${publicBase}/${roomId}/${livePlaylistName}`;
 
-    const lkRoomName = (access.roomName && String(access.roomName).trim()) || (room as any).livekitRoomName || roomId;
-
     // Cap enforcement (per-session): compute stopAt at start and persist in room.hls
     // caps.hlsMaxMinutesPerSession: null/missing => unlimited
     let capMinutes: number | null = null;
@@ -175,7 +168,7 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     try {
       // 2) Start egress
       const { egressId } = await startHlsEgress({
-        roomName: lkRoomName,
+        roomName: livekitRoomName,
         layout: "speaker",
         prefix,
         playlistName,
@@ -234,12 +227,7 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
 // GET /api/hls/status/:roomId
 // Returns current HLS state for the room so the client can poll
 router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
-  const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-  if (!access || !access.roomId) {
-    return res.status(401).json({ error: "room_token_required" });
-  }
-
-  const canonicalRoomId = String(access.roomId || "").trim();
+  const { roomId: canonicalRoomId } = getRoomAccess(req);
   if (!canonicalRoomId || /[ \u2013#]/.test(canonicalRoomId)) {
     return res.status(400).json({ error: "invalid_room_id" });
   }
@@ -348,16 +336,17 @@ router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any,
 // POST /api/hls/stop/:roomId
 // Stops the LiveKit egress for this room and marks HLS idle
 router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
-  const roomId = req.params.roomId;
-  if (/[ \u2013#]/.test(roomId)) {
+  const { roomId: canonicalRoomId } = getRoomAccess(req);
+  if (!canonicalRoomId || /[ \u2013#]/.test(canonicalRoomId)) {
     return res.status(400).json({ error: "invalid_room_id" });
   }
 
-  const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-  if (!access || !access.roomId) {
-    return res.status(401).json({ error: "room_token_required" });
+  const requestedRoomId = String(req.params.roomId || "").trim();
+  if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
+    return res.status(400).json({ error: "room_mismatch" });
   }
 
+  const roomId = canonicalRoomId;
   try {
     const uid = (req as any).user?.uid;
     if (!uid) {

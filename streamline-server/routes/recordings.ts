@@ -21,7 +21,7 @@
 import { Router } from "express";
 import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
-import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
+import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "../middleware/roomAccessToken";
 import { canAccessFeature } from "./featureAccess";
 import { clampRecordingPreset, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { Timestamp } from "firebase-admin/firestore";
@@ -576,11 +576,11 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
     }
 
     // Feature access gate
-    const access = await canAccessFeature((req as any).account || uid, "recording");
-    if (!access.allowed) {
+    const featureAccess = await canAccessFeature((req as any).account || uid, "recording");
+    if (!featureAccess.allowed) {
       return res.status(403).json({
         success: false,
-        error: access.reason || "Recording requires upgrade",
+        error: featureAccess.reason || "Recording requires upgrade",
       });
     }
 
@@ -594,14 +594,7 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
       usageType?: string;
     };
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ error: "room_token_required" });
-    }
-    const canonicalRoomId = String(access.roomId || "").trim();
-    if (!canonicalRoomId) {
-      return res.status(400).json({ error: "Missing roomId" });
-    }
+    const { roomId: canonicalRoomId, livekitRoomName, access: roomAccess } = getRoomAccess(req as any);
 
     // If caller sent a roomId/roomName in the body, ensure it matches the token (defensive only)
     if (rawRoomId && String(rawRoomId).trim() && String(rawRoomId).trim() !== canonicalRoomId) {
@@ -609,7 +602,6 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
     }
 
     const roomId = canonicalRoomId;
-    const roomName = (access.roomName && String(access.roomName).trim()) || roomId;
 
     try {
       await assertRoomPerm(req as any, roomId, "canRecord");
@@ -641,7 +633,7 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
 
     // If a stream is live, lower recording quality to stream preset when required
     const streamDocIdNew = `${uid}_${roomId}`;
-    const streamDocIdLegacy = `${uid}_${roomName}`;
+    const streamDocIdLegacy = `${uid}_${roomAccess.roomName || roomId}`;
     let streamDocId = streamDocIdNew;
     let activeStreamPresetId: string | null = null;
     let hasActiveStream = false;
@@ -709,7 +701,8 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
       id: recordingId,
       userId: uid,
       roomId,
-      roomName,
+      roomName: roomAccess.roomName || roomId,
+      livekitRoomName,
       layout: layout || "grid",
       mode,
       status: "starting",
@@ -757,7 +750,7 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
         {
           uid,
           roomId,
-          roomName,
+          roomName: roomAccess.roomName || roomId,
           recordingId,
           status: "starting",
           createdAt: now,
@@ -856,13 +849,15 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
         videoOnly: false,
       };
 
-      console.log("[recordings/start] Egress request:", {
-        roomName,
-        objectKey,
-        layout: compositeOpts.layout,
-      });
+      if (process.env.AUTH_DEBUG === "1") {
+        console.log("[livekit-debug] startRoomCompositeEgress (recording)", {
+          livekitRoomName,
+          objectKey,
+          layout: compositeOpts.layout,
+        });
+      }
 
-      const egressResp = await egressClient.startRoomCompositeEgress(roomName, fileOutput, {
+      const egressResp = await egressClient.startRoomCompositeEgress(livekitRoomName, fileOutput, {
         ...compositeOpts,
         encodingOptions,
       });
@@ -1019,14 +1014,7 @@ router.post("/stop", requireAuth, requireRoomAccessToken as any, async (req, res
 
     const data = snap.data() || {};
 
-    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
-    if (!access || !access.roomId) {
-      return res.status(401).json({ error: "room_token_required" });
-    }
-    const canonicalRoomId = String(access.roomId || "").trim();
-    if (!canonicalRoomId) {
-      return res.status(400).json({ error: "Missing roomId" });
-    }
+    const { roomId: canonicalRoomId } = getRoomAccess(req as any);
 
     // If the recording has a stored roomId, ensure it matches the caller's room
     const recordingRoomId: string | null = typeof (data as any).roomId === "string" ? (data as any).roomId.trim() : null;

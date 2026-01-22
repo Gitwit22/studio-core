@@ -62,6 +62,14 @@ export async function startHlsEgress(params: {
   });
 
   // RoomComposite + Segments output => HLS manifest + segments uploaded continuously.
+  if (process.env.AUTH_DEBUG === "1") {
+    console.log("[livekit-debug] startRoomCompositeEgress (HLS)", {
+      livekitRoomName: params.roomName,
+      layout: params.layout,
+      prefix: params.prefix,
+    });
+  }
+
   const info = await client.startRoomCompositeEgress(
     params.roomName,
     { segments: output },

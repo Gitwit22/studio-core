@@ -1845,11 +1845,14 @@ function RoomPage() {
 
     // When the host leaves, request that the server
     // disconnect all remaining participants from this room.
-    if (isHost && effectiveRoomName) {
+    if (isHost && effectiveRoomName && roomAccessToken) {
       try {
         fetch(`${API_BASE}/api/roomModeration/remove-all`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${roomAccessToken}`,
+          },
           credentials: "include",
           body: JSON.stringify({ room: effectiveRoomName }),
         }).catch(() => {
@@ -1934,7 +1937,7 @@ function RoomPage() {
       setRecordingCountdown("You're recording");
       try {
         console.log("📡 Calling apiStartRecording...");
-        const response = await apiStartRecording(roomId, layout, requestedMode, presetId || selectedPresetId);
+        const response = await apiStartRecording(roomId, layout, requestedMode, presetId || selectedPresetId, roomAccessToken || undefined);
         console.log("📡 Got response:", response);
         const recId = response?.data?.recordingId ?? response?.recordingId;
         console.log("🎬 Extracted recordingId:", recId);
@@ -1997,7 +2000,7 @@ function RoomPage() {
     console.log("🛑 Stopping recording with ID:", id);
     setRecordingStatus("stopping");
     try {
-      await apiStopRecording(id);
+      await apiStopRecording(id, roomAccessToken || undefined);
       console.log("✅ Recording stopped successfully");
       setRecordingStatus("stopped");
       setRecordingId(id);
@@ -2177,9 +2180,12 @@ function RoomPage() {
           `${API_BASE}/api/multistream/${encodeURIComponent(roomId)}/start-multistream`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(roomAccessToken ? { Authorization: `Bearer ${roomAccessToken}` } : {}),
+            },
             body: JSON.stringify(requestBody),
-            credentials: 'include',
+            credentials: "include",
           }
         );
         const raw = await res.text();
@@ -2273,7 +2279,10 @@ function RoomPage() {
         `${API_BASE}/api/multistream/${encodeURIComponent(roomId)}/stop-multistream`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(roomAccessToken ? { Authorization: `Bearer ${roomAccessToken}` } : {}),
+          },
           body: JSON.stringify({ egressId: streamEgressId }),
           credentials: "include",
           signal: controller.signal,
