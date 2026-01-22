@@ -55,7 +55,7 @@ function deriveServiceUrl(): string | null {
   return raw.replace(/^wss?:\/\//i, (m) => (m.toLowerCase() === "ws://" ? "http://" : "https://"));
 }
 
-type GrantRole = "viewer" | "participant" | "host" | "moderator" | "cohost";
+type GrantRole = "viewer" | "participant" | "host" | "cohost";
 
 type ViewerInvite = {
   roomId: string;
@@ -79,14 +79,12 @@ function roleToGrant(role: GrantRole) {
   // Start from the shared ParticipantPermission mapper so join-time
   // grants and realtime updateParticipant calls stay aligned for
   // publish/subscribe/data capabilities.
-  const permissionRole: "viewer" | "participant" | "moderator" | "cohost" =
+  const permissionRole: "viewer" | "participant" | "cohost" =
     role === "viewer"
       ? "viewer"
-      : role === "moderator"
-        ? "moderator"
-        : role === "cohost" || role === "host"
-          ? "cohost"
-          : "participant";
+      : role === "cohost" || role === "host"
+        ? "cohost"
+        : "participant";
 
   const participantPerm = roleToParticipantPermission(permissionRole);
 
@@ -117,13 +115,7 @@ function roleToGrant(role: GrantRole) {
     return { ...base, roomAdmin: false, canUpdateMetadata: false };
   }
 
-  if (role === "moderator") {
-    // Moderator retains token-level admin powers; these flags belong
-    // on the VideoGrant, not on ParticipantPermission/updateParticipant.
-    return { ...base, roomAdmin: true, canUpdateMetadata: true };
-  }
-
-  // participant/host/cohost
+  // participant/host/cohost/viewer
   return { ...base, roomAdmin: false, canUpdateMetadata: false };
 }
 
@@ -163,12 +155,12 @@ async function getPermissionsMode(uid?: string): Promise<"simple" | "advanced"> 
 type ResolvedRole = {
   grantRole: GrantRole;
   permissions: Record<string, boolean>;
-  effectiveRoleKey: "viewer" | "participant" | "cohost" | "moderator" | "host";
+  effectiveRoleKey: "viewer" | "participant" | "cohost" | "host";
   locked: boolean;
 };
 
 async function resolveRoleForInvite(opts: { uid?: string; requestedRole?: string }): Promise<{ ok: true; result: ResolvedRole } | { ok: false; error: any }> {
-  const allowedSimpleRoles: Array<ResolvedRole["effectiveRoleKey"]> = ["participant", "moderator", "cohost", "host"];
+  const allowedSimpleRoles: Array<ResolvedRole["effectiveRoleKey"]> = ["participant", "cohost", "host"];
   const requested = String(opts.requestedRole || "participant").toLowerCase();
   const mode = await getPermissionsMode(opts.uid);
   if (mode === "simple") {
@@ -193,10 +185,10 @@ async function resolveRoleForInvite(opts: { uid?: string; requestedRole?: string
     const basePerms =
       effectiveRoleKey === "host"
         ? SIMPLE_ROLE_DEFAULTS.host
-        : SIMPLE_ROLE_DEFAULTS[effectiveRoleKey as "participant" | "moderator" | "cohost"];
+        : SIMPLE_ROLE_DEFAULTS[effectiveRoleKey as "participant" | "cohost"];
 
-    const grantRole: GrantRole = effectiveRoleKey === "moderator" || effectiveRoleKey === "host"
-      ? "moderator"
+    const grantRole: GrantRole = effectiveRoleKey === "host"
+      ? "host"
       : effectiveRoleKey === "cohost"
         ? "participant"
         : (effectiveRoleKey as GrantRole);
@@ -215,13 +207,12 @@ async function resolveRoleForInvite(opts: { uid?: string; requestedRole?: string
   }
 
   // advanced: preserve existing behavior
-  const allowedRoles: GrantRole[] = ["host", "participant", "moderator", "viewer", "cohost"];
+  const allowedRoles: GrantRole[] = ["host", "participant", "viewer", "cohost"];
   const normalizedRole = (allowedRoles.includes(requested as GrantRole) ? (requested as GrantRole) : "participant") as GrantRole;
-  const wantsModerator = normalizedRole === "moderator";
-  const grantRole: GrantRole = wantsModerator ? "moderator" : normalizedRole === "cohost" ? "participant" : normalizedRole;
+  const grantRole: GrantRole = normalizedRole === "cohost" ? "participant" : normalizedRole;
   const effectiveRoleKey: ResolvedRole["effectiveRoleKey"] = normalizedRole === "cohost" ? "cohost" : (normalizedRole as any);
-  // Advanced mode currently does not hydrate custom profiles; keep existing grant mapping
-  const basePerms = { canStream: true, canRecord: true, canDestinations: true, canModerate: grantRole === "moderator", canLayout: true, canScreenShare: true, canInvite: true, canAnalytics: grantRole === "moderator" };
+  // Advanced mode currently does not hydrate custom profiles; keep existing grant mapping (moderation now host-only)
+  const basePerms = { canStream: true, canRecord: true, canDestinations: true, canModerate: false, canLayout: true, canScreenShare: true, canInvite: true, canAnalytics: false };
   const permissions = await intersectPermissionsWithEntitlements(basePerms, opts.uid);
   return { ok: true, result: { grantRole, permissions, effectiveRoleKey, locked: false } };
 }

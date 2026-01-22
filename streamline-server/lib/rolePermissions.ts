@@ -8,7 +8,7 @@ import {
   type RolePermissionMap,
 } from "./permissions/defaultRoleProfiles";
 
-export type RoomRole = "participant" | "moderator" | "cohost";
+export type RoomRole = "participant" | "cohost";
 
 export type RolePermissions = RolePermissionMap;
 
@@ -17,9 +17,6 @@ export type RolePermissions = RolePermissionMap;
 export const ROLE_PERMISSIONS: Record<RoomRole, RolePermissions> = {
   participant: {
     ...DEFAULT_ROLE_PROFILES_BY_ID.participant.permissions,
-  },
-  moderator: {
-    ...DEFAULT_ROLE_PROFILES_BY_ID.moderator.permissions,
   },
   cohost: {
     ...DEFAULT_ROLE_PROFILES_BY_ID.cohost.permissions,
@@ -218,7 +215,8 @@ export async function assertRoomPerm(
   } else {
     actorType = "invite";
     role = ((invite?.role as any) || "viewer") as RoomActorRole;
-    if (role === "cohost" || role === "moderator" || role === "participant") {
+    if (role === "moderator") role = "cohost";
+    if (role === "cohost" || role === "participant") {
       const base = ROLE_PERMISSIONS[role as RoomRole] || ROLE_PERMISSIONS.participant;
       permissions = await intersectPermissionsWithEntitlements(base, invite?.createdByUid) as RolePermissions;
     } else {

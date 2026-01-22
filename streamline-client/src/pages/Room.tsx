@@ -156,7 +156,7 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
   );
 }
 
-function PermissionsDebugOverlay({ dashboardRole }: { dashboardRole: "host" | "moderator" | "participant" }) {
+function PermissionsDebugOverlay({ dashboardRole }: { dashboardRole: "host" | "participant" }) {
   const { localParticipant } = useLocalParticipant();
   const localPermissions: any = useLocalParticipantPermissions();
   const rawRolePresetId = ((localParticipant as any)?.identityMetadata as any)?.rolePresetId;
@@ -1064,7 +1064,7 @@ function RoomPage() {
         const resolvedId = String(data.roomId || "");
         const resolvedName = String(data.roomName || "");
         const rawResolvedRole = String(data.role || "guest");
-        const resolvedRole = rawResolvedRole === "cohost" || rawResolvedRole === "moderator" ? "guest" : rawResolvedRole;
+        const resolvedRole = rawResolvedRole === "cohost" ? "guest" : rawResolvedRole;
         const expectedId = roomId || "";
         const expectedName = effectiveRoomName || "";
         const clearStaleInvite = () => {
@@ -1338,8 +1338,8 @@ function RoomPage() {
     if (roomTokenMintInFlightRef.current) return;
     // Role used to mint the LiveKit token + roomAccessToken.
     // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
-    const requestedRole = isHost ? "host" : userRole;
-    const roleNeedsAuth = requestedRole === "cohost" || requestedRole === "moderator" || requestedRole === "host";
+    const requestedRole = isHost ? "host" : userRole === "moderator" ? "participant" : userRole;
+    const roleNeedsAuth = requestedRole === "cohost" || requestedRole === "host";
     const role = requestedRole;
     const isGuest = role === "guest";
 
@@ -1833,11 +1833,11 @@ function RoomPage() {
 
   const handleLeftRoom = () => {
     sendUsageOnExit();
-    // Drop elevated cohost/moderator roles on leave; a fresh invite
+    // Drop elevated cohost roles on leave; a fresh invite
     // (or host/participant flow) must re-establish them on rejoin.
     try {
       const storedRole = localStorage.getItem("sl_current_role");
-      if (storedRole === "cohost" || storedRole === "moderator") {
+      if (storedRole === "cohost") {
         localStorage.setItem("sl_current_role", "participant");
       }
     } catch {}

@@ -25,7 +25,7 @@ export function presetToParticipantPermission(p: RealtimePreset): ParticipantPer
 
 // Optional coarse role mapping so role-based grants can share the same truth
 export function roleToParticipantPermission(
-  role: "viewer" | "participant" | "moderator" | "cohost" | "host",
+  role: "viewer" | "participant" | "cohost" | "host" | "moderator",
 ): ParticipantPermission {
   const canSubscribe = true;
   let canPublish = false;

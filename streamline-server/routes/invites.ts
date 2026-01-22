@@ -5,7 +5,7 @@ import { requireAuth, tryGetAuthUser, verifyInviteToken } from "../middleware/re
 import { resolveRoomIdentity } from "../lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 
-type InviteRole = "guest" | "cohost" | "moderator";
+type InviteRole = "guest" | "cohost";
 
 type InviteTokenClaims = {
   roomId: string;
@@ -19,14 +19,16 @@ function getInviteSecret(): string {
 }
 
 function requiresAuthForRole(role: InviteRole): boolean {
-  return role === "cohost" || role === "moderator";
+  return role === "cohost";
 }
 
 function normalizeRole(raw: unknown): InviteRole | null {
   const v = String(raw || "").toLowerCase();
   if (v === "guest" || v === "participant") return "guest";
   if (v === "cohost") return "cohost";
-  if (v === "moderator") return "moderator";
+  // Legacy moderator invites are treated as co-host for capabilities,
+  // but the UI no longer exposes a distinct moderator role.
+  if (v === "moderator") return "cohost";
   return null;
 }
 
@@ -127,7 +129,7 @@ router.post("/resolve", async (req, res) => {
     const resolved = await resolveRoomIdentity({ roomId, roomName });
     if (!resolved) return res.status(400).json({ error: "invite_room_missing" });
 
-    const requiresAuth = role === "cohost" || role === "moderator";
+    const requiresAuth = role === "cohost";
 
     return res.json({
       roomId: resolved.roomId,
@@ -144,7 +146,7 @@ router.post("/resolve", async (req, res) => {
 /**
  * POST /api/invites/accept
  * Body: { inviteToken }
- * Auth: required for cohost/moderator; guest does not require auth
+ * Auth: required for cohost; guest does not require auth
  * Returns: { roomName, role, requiresAuth }
  */
 router.post("/accept", async (req, res) => {
@@ -179,7 +181,7 @@ router.post("/accept", async (req, res) => {
       );
     }
 
-    const requiresAuth = role === "cohost" || role === "moderator";
+    const requiresAuth = role === "cohost";
 
     return res.json({
       roomId: resolved.roomId,
