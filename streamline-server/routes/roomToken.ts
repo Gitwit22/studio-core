@@ -636,6 +636,8 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
         canDestinations: true,
         canLayout: true,
         canModerate: true,
+        canMuteGuests: true,
+        canRemoveGuests: true,
       };
     }
     const isViewer = grantRole === "viewer";

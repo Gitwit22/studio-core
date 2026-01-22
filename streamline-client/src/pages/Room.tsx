@@ -1377,6 +1377,7 @@ function RoomPage() {
             payload.guestId = getOrCreateUid();
           } else {
             payload.uid = getOrCreateUid();
+            payload.displayName = displayName;
             // Invites are currently guest/participant-only (no elevated roles).
           }
 
