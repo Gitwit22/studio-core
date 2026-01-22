@@ -11,6 +11,7 @@ import { apiFetch, clearAuthStorage } from "../lib/api";
 import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
+import { getMeCached, clearMeCache } from "../lib/meCache";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -325,10 +326,6 @@ export default function SettingsBilling() {
     };
   }, []);
 
-  useEffect(() => {
-    loadAllData();
-  }, []);
-
   const loadAllData = async () => {
     setLoading(true);
     setError(null);
@@ -351,15 +348,24 @@ export default function SettingsBilling() {
     }
   };
 
-  const loadUser = async () => {
+  useEffect(() => {
+    loadAllData();
+  }, []);
+
+  const loadUser = async (opts?: { forceRefresh?: boolean }) => {
     try {
-      const res = await apiFetch("/api/account/me");
-      const data = await res.json();
+      if (opts?.forceRefresh) {
+        clearMeCache();
+      }
+
+      const data = await getMeCached();
       setUser(data);
       try {
-        window.localStorage.setItem("sl_user", JSON.stringify(data));
-        if ((data as any)?.id || (data as any)?.uid) {
-          window.localStorage.setItem("sl_userId", String((data as any).id || (data as any).uid));
+        if (data) {
+          window.localStorage.setItem("sl_user", JSON.stringify(data));
+          if ((data as any)?.id || (data as any)?.uid) {
+            window.localStorage.setItem("sl_userId", String((data as any).id || (data as any).uid));
+          }
         }
       } catch {}
     } catch (err: any) {
@@ -393,8 +399,7 @@ export default function SettingsBilling() {
   const loadEntitlements = async () => {
     try {
       // Prefer canonical effectiveEntitlements from /api/account/me
-      const res = await apiFetch("/api/account/me");
-      const data = await res.json();
+      const data = await getMeCached();
 
       try {
         const platformFlags = (data as any)?.platformFlags || {};
@@ -572,9 +577,9 @@ export default function SettingsBilling() {
 
   const loadMediaPrefs = async () => {
     try {
-      const [presetsRes, meRes] = await Promise.all([
+      const [presetsRes, me] = await Promise.all([
         fetch(`${API_BASE}/api/account/presets`, { credentials: "include" }),
-        fetch(`${API_BASE}/api/account/me`, { credentials: "include" }),
+        getMeCached(),
       ]);
 
       let availablePresets: Array<{ id: string; label: string }> = [{ id: "standard_720p30", label: "Standard (720p30)" }];
@@ -591,9 +596,8 @@ export default function SettingsBilling() {
         }
       }
 
-      if (meRes.ok) {
+      if (me) {
         try {
-          const me = await meRes.json();
           const prefs = me?.mediaPrefs ? { ...DEFAULT_MEDIA_PREFS, ...me.mediaPrefs } : DEFAULT_MEDIA_PREFS;
           const adv = me?.advancedPermissions || { enabled: false, plan: false, override: false, global: false, lockReason: me?.advancedPermissionsLockedReason };
           const lockReason = adv.lockReason || me?.advancedPermissionsLockedReason || null;
@@ -633,7 +637,7 @@ export default function SettingsBilling() {
             setServerDefaultRoleProfiles(me.defaultRoleProfiles);
           }
         } catch (err) {
-          console.error("Failed to parse /account/me", err);
+          console.error("Failed to apply /account/me media prefs", err);
           setMediaPrefs(DEFAULT_MEDIA_PREFS);
           setPresetOptions(availablePresets);
           setAdvancedPermissions({ enabled: false, plan: false, override: false, globalLock: false, lockReason: null, effectivePermissionsMode: "simple", permissionsModeLockReason: null });
@@ -1040,6 +1044,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setUser((prev) => (prev ? { ...prev, planId: newPlanId, pendingPlan: null } : prev));
 
       try {
+        clearMeCache();
         await Promise.all([refreshAuth(), loadEntitlements(), loadUsage()]);
       } catch {}
 

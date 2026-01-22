@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchDestinations, createDestination, validateDestinationPreCreate, preflight, updateDestination, deleteDestination, type DestinationItem } from "../services/destinations";
+import { getMeCached } from "../lib/meCache";
 
 function StatusBadge({ status, reason }: { status: string; reason?: string | null }) {
   const color = status === "connected" ? "#16a34a" : status === "disconnected" ? "#6b7280" : "#f59e0b";
@@ -61,9 +62,7 @@ export default function SettingsDestinations() {
     load();
     const loadAccount = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/account/me`, { credentials: "include" });
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await getMeCached();
         if (data?.connectedPlatforms) {
           setConnectedPlatforms({
             youtube: !!data.connectedPlatforms.youtube,
