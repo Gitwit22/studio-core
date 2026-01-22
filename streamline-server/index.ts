@@ -80,7 +80,15 @@ app.use(cors({
   },
   credentials: true,
   methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization","Cache-Control"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Cache-Control",
+    // Room-level access token used by in-room APIs (HLS, multistream, controls, etc.).
+    // Explicitly allow both typical header casings to satisfy browser preflight checks.
+    "x-room-access-token",
+    "X-Room-Access-Token",
+  ],
   exposedHeaders: ["x-sl-auth-fallback", "x-sl-auth-header-invalid"],
 }));
 

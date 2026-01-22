@@ -116,8 +116,6 @@ router.get("/plans", async (req, res) => {
       id: d.id,
       ...(d.data() as any),
     }));
-
-    console.log("🎯 4. Mapped all plans:", JSON.stringify(plans));
     return res.json({ plans });
   } catch (err: any) {
     console.error("🎯 ERROR in plans route:", err);

@@ -325,7 +325,7 @@ function HostPanel({
           localIdentity={localParticipant?.identity || null}
           canMuteGuests={canMuteGuests}
           canRemoveGuests={canRemoveGuests}
-          canChangeRoles={!!advancedRolesEnabled && !!roomId && !!roomAccessToken}
+          canChangeRoles={!!roomId && !!roomAccessToken}
           onChangeRole={handleChangeRole}
           roleByIdentity={roleByIdentity}
           roleStatus={roleStatus}
@@ -552,34 +552,39 @@ function ParticipantList({
                 justifyContent: 'center',
               }}
             >
-              {canChangeRoles && onChangeRole && localIdentity && p.identity !== localIdentity && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.15rem' }}>
-                  <select
-                    className="sl-role-select"
-                    value={currentRole}
-                    onChange={(e) => onChangeRole(p.identity, e.target.value as RolePresetId)}
-                    style={{
-                      borderRadius: '9999px',
-                      border: '1px solid rgba(148, 163, 184, 0.75)',
-                      padding: '0.2rem 0.7rem',
-                      fontSize: '0.7rem',
-                      background: 'radial-gradient(circle at top left, rgba(30, 64, 175, 0.5), rgba(15, 23, 42, 0.95))',
-                      color: '#e5e7eb',
-                      cursor: 'pointer',
-                      minWidth: '7.5rem',
-                    }}
-                  >
-                    <option value="participant">Participant</option>
-                    <option value="cohost">Co-host</option>
-                  </select>
-                  {roleStatus && roleStatus[p.identity] === 'saving' && (
-                    <span style={{ fontSize: '0.65rem', color: 'rgba(148, 163, 184, 0.9)' }}>Saving…</span>
-                  )}
-                  {roleStatus && roleStatus[p.identity] === 'saved' && (
-                    <span style={{ fontSize: '0.65rem', color: 'rgba(34, 197, 94, 0.9)' }}>Saved</span>
-                  )}
-                </div>
-              )}
+                {localIdentity && p.identity !== localIdentity && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.15rem' }}>
+                    <select
+                      className="sl-role-select"
+                      value={currentRole}
+                      disabled={!canChangeRoles || !onChangeRole}
+                      onChange={(e) => {
+                        if (!canChangeRoles || !onChangeRole) return;
+                        onChangeRole(p.identity, e.target.value as RolePresetId);
+                      }}
+                      style={{
+                        borderRadius: '9999px',
+                        border: '1px solid rgba(148, 163, 184, 0.75)',
+                        padding: '0.2rem 0.7rem',
+                        fontSize: '0.7rem',
+                        background: 'radial-gradient(circle at top left, rgba(30, 64, 175, 0.5), rgba(15, 23, 42, 0.95))',
+                        color: '#e5e7eb',
+                        cursor: !canChangeRoles || !onChangeRole ? 'not-allowed' : 'pointer',
+                        opacity: !canChangeRoles || !onChangeRole ? 0.6 : 1,
+                        minWidth: '7.5rem',
+                      }}
+                    >
+                      <option value="participant">Participant</option>
+                      <option value="cohost">Co-host</option>
+                    </select>
+                    {roleStatus && roleStatus[p.identity] === 'saving' && (
+                      <span style={{ fontSize: '0.65rem', color: 'rgba(148, 163, 184, 0.9)' }}>Saving…</span>
+                    )}
+                    {roleStatus && roleStatus[p.identity] === 'saved' && (
+                      <span style={{ fontSize: '0.65rem', color: 'rgba(34, 197, 94, 0.9)' }}>Saved</span>
+                    )}
+                  </div>
+                )}
               <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
                 {canMuteGuests !== false && (() => {
                   const micEnabled = (p as any).isMicrophoneEnabled as boolean | undefined;
