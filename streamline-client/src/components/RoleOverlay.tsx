@@ -132,6 +132,7 @@ export default function RoleOverlay({
           {role === "moderator" && (
             <ModeratorPanel
               roomName={roomName}
+              roomAccessToken={roomAccessToken}
               canMuteGuests={canMuteGuests}
               canRemoveGuests={canRemoveGuests}
               canModerate={canModerate}
@@ -194,13 +195,13 @@ function HostPanel({
   }, [roomName]);
 
   const handleMuteAllExceptHost = async () => {
-    if (!roomName) return;
+    if (!roomName || !roomAccessToken) return;
     setBusy(true);
     try {
-      await apiMuteAll(roomName, true);
+      await apiMuteAll(roomName, true, roomAccessToken);
       const hostId = localParticipant?.identity;
       if (hostId) {
-        await apiMute(roomName, hostId, false);
+        await apiMute(roomName, hostId, false, roomAccessToken);
       }
     } catch (e) {
       console.error("mute-all-except-host failed", e);
@@ -219,7 +220,8 @@ function HostPanel({
         await handleMuteAllExceptHost();
       }
       const hostId = localParticipant?.identity;
-      const res = await apiSetMuteLock(roomName, next, hostId);
+      if (!roomAccessToken) return;
+      const res = await apiSetMuteLock(roomName, next, hostId, roomAccessToken);
       setMuteLock(!!res.muteLock);
     } catch (e) {
       console.error("mute-lock toggle failed", e);
@@ -330,8 +332,8 @@ function HostPanel({
         </div>
         <ParticipantList
           participants={parts}
-          onRemove={(id) => apiRemove(roomName, id)}
-          onMute={(id, muted) => apiMute(roomName, id, muted)}
+          onRemove={(id) => apiRemove(roomName, id, roomAccessToken)}
+          onMute={(id, muted) => apiMute(roomName, id, muted, roomAccessToken)}
           canModerate={!!canModerate}
           muteLock={muteLock}
           localIdentity={localParticipant?.identity || null}
@@ -437,7 +439,7 @@ function HostPanel({
   );
 }
 
-function ModeratorPanel({ roomName, canMuteGuests, canRemoveGuests, canModerate }: { roomName: string; canMuteGuests?: boolean; canRemoveGuests?: boolean; canModerate?: boolean }) {
+function ModeratorPanel({ roomName, roomAccessToken, canMuteGuests, canRemoveGuests, canModerate }: { roomName: string; roomAccessToken: string; canMuteGuests?: boolean; canRemoveGuests?: boolean; canModerate?: boolean }) {
   const parts = useParticipants();
   return (
     <>
@@ -449,8 +451,8 @@ function ModeratorPanel({ roomName, canMuteGuests, canRemoveGuests, canModerate 
       <Section title="Live Participants">
         <ParticipantList
           participants={parts}
-          onRemove={(id) => apiRemove(roomName, id)}
-          onMute={(id, muted) => apiMute(roomName, id, muted)}
+          onRemove={(id) => apiRemove(roomName, id, roomAccessToken)}
+          onMute={(id, muted) => apiMute(roomName, id, muted, roomAccessToken)}
           canModerate={!!canModerate}
           canMuteGuests={canMuteGuests}
           canRemoveGuests={canRemoveGuests}
@@ -681,11 +683,14 @@ function ParticipantList({
   );
 }
 
-async function apiRemove(room: string, identity: string) {
+async function apiRemove(room: string, identity: string, roomAccessToken: string) {
   try {
     const res = await fetch(`${API_BASE}/api/roomModeration/remove`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${roomAccessToken}`,
+      },
       credentials: "include",
       body: JSON.stringify({ room, identity }),
     });
@@ -710,11 +715,14 @@ async function apiRemove(room: string, identity: string) {
   }
 }
 
-async function apiMute(room: string, identity: string, muted: boolean) {
+async function apiMute(room: string, identity: string, muted: boolean, roomAccessToken: string) {
   try {
     const res = await fetch(`${API_BASE}/api/roomModeration/mute`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${roomAccessToken}`,
+      },
       credentials: "include",
       body: JSON.stringify({ room, identity, muted }),
     });
@@ -731,11 +739,14 @@ async function apiMute(room: string, identity: string, muted: boolean) {
   }
 }
 
-async function apiMuteAll(room: string, muted: boolean) {
+async function apiMuteAll(room: string, muted: boolean, roomAccessToken: string) {
   try {
     const res = await fetch(`${API_BASE}/api/roomModeration/mute-all`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${roomAccessToken}`,
+      },
       credentials: "include",
       body: JSON.stringify({ room, muted }),
     });
@@ -755,11 +766,15 @@ async function apiMuteAll(room: string, muted: boolean) {
 async function apiSetMuteLock(
   room: string,
   muteLock: boolean,
-  hostIdentity?: string | null
+  hostIdentity: string | null,
+  roomAccessToken: string,
 ): Promise<{ muteLock: boolean }> {
   const res = await fetch(`${API_BASE}/api/roomModeration/mute-lock`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${roomAccessToken}`,
+    },
     credentials: "include",
     body: JSON.stringify({ room, muteLock, hostIdentity }),
   });

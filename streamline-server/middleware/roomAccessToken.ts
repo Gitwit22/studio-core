@@ -6,6 +6,9 @@ export type RoomAccessClaims = {
   roomName?: string;
   role?: string;
   permissions?: Record<string, boolean>;
+  // LiveKit identity for the caller inside the room. Used to
+  // bind room-level permissions to per-participant controls docs.
+  identity?: string;
 };
 
 function getRoomAccessSecret(): string {

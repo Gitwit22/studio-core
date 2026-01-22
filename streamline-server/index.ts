@@ -39,6 +39,7 @@ import publicRoomsHlsConfigRoutes from "./routes/publicRoomsHlsConfig";
 import { sanitizeDisplayName } from "./lib/sanitizeDisplayName";
 import { resolveRoomIdentity } from "./lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "./lib/rolePermissions";
+import { requireRoomAccessToken, type RoomAccessClaims } from "./middleware/roomAccessToken";
 
 
 import { uploadVideo } from "./lib/storageClient";
@@ -51,6 +52,14 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 
 const app = express();
+
+function normalizeControlsDocId(raw: any): string {
+  const id = String(raw || "").trim();
+  if (!id) return "default";
+  if (id.includes("/")) return "default";
+  if (id.length > 128) return id.slice(0, 128);
+  return id;
+}
 
 // Allow primary client plus local dev hosts for testing/incognito shares
 const allowedOrigins = [
@@ -207,8 +216,56 @@ async function getRoomService(): Promise<RoomServiceClient> {
 // In-memory room-level flags (non-persistent across server restarts)
 const roomMuteLocks = new Map<string, boolean>();
 
+async function assertEffectiveRoomControl(
+  req: express.Request,
+  roomId: string,
+  perm: "canMuteGuests" | "canRemoveGuests",
+): Promise<void> {
+  const trimmedRoomId = String(roomId || "").trim();
+  if (!trimmedRoomId) {
+    throw new RoomPermissionError(400, "invalid_room", "roomId is required");
+  }
+
+  const ctx = await assertRoomPerm(req as any, trimmedRoomId, perm);
+  const access = ctx.roomAccess as RoomAccessClaims | undefined;
+
+  if (!access || !access.roomId) {
+    throw new RoomPermissionError(401, "room_token_required");
+  }
+  if (access.roomId !== trimmedRoomId) {
+    throw new RoomPermissionError(403, "room_mismatch");
+  }
+
+  // Host (or other non-roomAccess actors elevated via assertRoomPerm) are
+  // governed purely by role-level permissions; controls docs are
+  // primarily for in-room delegates like moderators/cohosts.
+  if (access.role === "host") {
+    return;
+  }
+
+  const callerIdentity = access.identity;
+  if (!callerIdentity) {
+    throw new RoomPermissionError(403, "room_identity_required");
+  }
+
+  const identityDocId = normalizeControlsDocId(callerIdentity);
+  const snap = await db
+    .collection("rooms")
+    .doc(trimmedRoomId)
+    .collection("controls")
+    .doc(identityDocId)
+    .get();
+
+  const controls = (snap.data() as any) || {};
+  const allowed = perm === "canMuteGuests" ? !!controls.canMuteGuests : !!controls.canRemoveGuests;
+
+  if (!allowed) {
+    throw new RoomPermissionError(403, "forbidden");
+  }
+}
+
 // Mute/unmute a single participant's audio (host/mod tools, not platform admin)
-app.post("/api/roomModeration/mute", requireAuth, async (req, res) => {
+app.post("/api/roomModeration/mute", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const { room, identity, muted } = req.body as {
       room?: string;
@@ -225,7 +282,7 @@ app.post("/api/roomModeration/mute", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canMuteGuests");
+      await assertEffectiveRoomControl(req as any, resolved.roomId, "canMuteGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ error: err.code });
@@ -273,7 +330,7 @@ app.post("/api/roomModeration/mute", requireAuth, async (req, res) => {
 });
 
 // Mute/unmute ALL participants' audio
-app.post("/api/roomModeration/mute-all", requireAuth, async (req, res) => {
+app.post("/api/roomModeration/mute-all", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const { room, muted } = req.body as { room?: string; muted?: boolean };
 
@@ -286,7 +343,7 @@ app.post("/api/roomModeration/mute-all", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canMuteGuests");
+      await assertEffectiveRoomControl(req as any, resolved.roomId, "canMuteGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ error: err.code });
@@ -334,7 +391,7 @@ app.post("/api/roomModeration/mute-all", requireAuth, async (req, res) => {
 });
 
 // Room-level mute lock flag (in-memory) + LiveKit permissions update
-app.post("/api/roomModeration/mute-lock", requireAuth, async (req, res) => {
+app.post("/api/roomModeration/mute-lock", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const { room, muteLock, hostIdentity } = req.body as {
       room?: string;
@@ -351,7 +408,7 @@ app.post("/api/roomModeration/mute-lock", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canMuteGuests");
+      await assertEffectiveRoomControl(req as any, resolved.roomId, "canMuteGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ error: err.code });
@@ -429,7 +486,7 @@ app.get("/api/roomSettings/:room", (req, res) => {
 });
 
 // Remove/kick a participant
-app.post("/api/roomModeration/remove", requireAuth, async (req, res) => {
+app.post("/api/roomModeration/remove", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const { room, identity } = req.body;
 
@@ -442,7 +499,7 @@ app.post("/api/roomModeration/remove", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ ok: false, error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canRemoveGuests");
+      await assertEffectiveRoomControl(req as any, resolved.roomId, "canRemoveGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ ok: false, error: err.code });
@@ -461,7 +518,7 @@ app.post("/api/roomModeration/remove", requireAuth, async (req, res) => {
 });
 
 // Remove/kick ALL participants in a room
-app.post("/api/roomModeration/remove-all", requireAuth, async (req, res) => {
+app.post("/api/roomModeration/remove-all", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const { room } = req.body as { room?: string };
 
@@ -474,7 +531,7 @@ app.post("/api/roomModeration/remove-all", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ ok: false, error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canRemoveGuests");
+      await assertEffectiveRoomControl(req as any, resolved.roomId, "canRemoveGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ ok: false, error: err.code });

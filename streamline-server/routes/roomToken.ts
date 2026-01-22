@@ -665,6 +665,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       roomName,
       role: effectiveRoleKey,
       permissions,
+      identity: tokenIdentity,
     } as const;
 
     const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), {
@@ -813,6 +814,7 @@ router.post("/guest", async (req, res) => {
       roomName,
       role: resolved.result.effectiveRoleKey,
       permissions: resolved.result.permissions,
+      identity,
     } as const;
 
     const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), {

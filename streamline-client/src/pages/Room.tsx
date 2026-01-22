@@ -645,7 +645,7 @@ function LiveKitShell({
             roomName={roomName}
             roomId={roomId || ""}
             roomAccessToken={roomAccessToken || ""}
-            canMuteGuests={canMuteGuestsUi}
+            canMuteGuests={canMuteGuests}
             canRemoveGuests={canRemoveGuestsUi}
             canModerate={canModerateUi}
             advancedRolesEnabled={effectivePermissionsMode === "advanced"}
@@ -2814,7 +2814,7 @@ function RoomPage() {
           onCloseDashboard={() => setDashboardOpen(false)}
           roomName={roomName || ""}
           roomAccessToken={roomAccessToken}
-          canMuteGuests={canMuteGuests}
+          canMuteGuests={canMuteGuestsUi}
           effectivePermissionsMode={effectivePermissionsMode}
           dashboardGreenroomEnabled={dashboardGreenroomEnabled}
           dashboardOverlaysEnabled={dashboardOverlaysEnabled}

@@ -170,7 +170,7 @@ function normalizePresetForApply(presetId: PresetId, preset: RoomControls): Room
   const coerce = <K extends keyof typeof system>(key: K): boolean => {
     const v = (preset as any)?.[key];
     if (typeof v === "boolean") return v;
-    return system[key];
+    return !!system[key];
   };
 
   const normalized: RoomControls = {

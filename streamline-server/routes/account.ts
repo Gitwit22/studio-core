@@ -321,6 +321,8 @@ function normalizePermissions(raw: any): PermissionSet {
     canScreenShare: !!raw?.canScreenShare,
     canInvite: !!raw?.canInvite,
     canAnalytics: !!raw?.canAnalytics,
+    canMuteGuests: !!raw?.canMuteGuests,
+    canRemoveGuests: !!raw?.canRemoveGuests,
   };
 
   return clampNeverPermissions(perms);
