@@ -699,7 +699,7 @@ async function apiRemove(room: string, identity: string, roomAccessToken: string
   }
 }
 
-async function apiMute(room: string, identity: string, muted: boolean, roomAccessToken: string) {
+async function apiMute(_room: string, identity: string, muted: boolean, roomAccessToken: string) {
   try {
     const res = await fetch(`${API_BASE}/api/roomModeration/mute`, {
       method: "POST",
@@ -708,7 +708,7 @@ async function apiMute(room: string, identity: string, muted: boolean, roomAcces
         Authorization: `Bearer ${roomAccessToken}`,
       },
       credentials: "include",
-      body: JSON.stringify({ room, identity, muted }),
+      body: JSON.stringify({ room: _room, identity, muted }),
     });
 
     const data = await res.json().catch(() => null);
@@ -723,7 +723,7 @@ async function apiMute(room: string, identity: string, muted: boolean, roomAcces
   }
 }
 
-async function apiMuteAll(room: string, muted: boolean, roomAccessToken: string) {
+async function apiMuteAll(_room: string, muted: boolean, roomAccessToken: string) {
   try {
     const res = await fetch(`${API_BASE}/api/roomModeration/mute-all`, {
       method: "POST",
@@ -732,7 +732,7 @@ async function apiMuteAll(room: string, muted: boolean, roomAccessToken: string)
         Authorization: `Bearer ${roomAccessToken}`,
       },
       credentials: "include",
-      body: JSON.stringify({ room, muted }),
+      body: JSON.stringify({ room: _room, muted }),
     });
 
     const data = await res.json().catch(() => null);
@@ -748,7 +748,7 @@ async function apiMuteAll(room: string, muted: boolean, roomAccessToken: string)
 }
 
 async function apiSetMuteLock(
-  room: string,
+  _room: string,
   muteLock: boolean,
   hostIdentity: string | null,
   roomAccessToken: string,
@@ -760,7 +760,7 @@ async function apiSetMuteLock(
       Authorization: `Bearer ${roomAccessToken}`,
     },
     credentials: "include",
-    body: JSON.stringify({ room, muteLock, hostIdentity }),
+    body: JSON.stringify({ room: _room, muteLock, hostIdentity }),
   });
 
   const data = await res.json().catch(() => ({}));

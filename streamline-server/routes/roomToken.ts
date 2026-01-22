@@ -394,12 +394,13 @@ async function validateViewerInvite(inviteToken: string, roomId: string, session
 
 router.post("/", requireAuthOrInvite, async (req, res) => {
   try {
-    const { roomName: rawRoomName, roomId: rawRoomId, identity, role: rawRole } = req.body as {
+    const { roomName: rawRoomName, roomId: rawRoomId, identity: _ignoredIdentity, role: rawRole, displayName: rawDisplayName } = req.body as {
       roomName?: string;
       roomId?: string;
       identity?: string;
       inviteToken?: string;
       role?: string;
+      displayName?: string;
     };
     const uid = (req as any).user?.uid as string | undefined;
     const invite = (req as any).invite as InviteClaims | undefined;
@@ -408,6 +409,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
 
     const trimmedRoomId = String(rawRoomId || "").trim();
     const trimmedRoomName = sanitizeDisplayName(String(rawRoomName || "")).trim();
+    const displayName = sanitizeDisplayName(String(rawDisplayName || "")).trim() || undefined;
 
     // Host/control-plane contract: authenticated callers without an invite
     // must provide a canonical roomId. Name-only is rejected so we never
@@ -482,7 +484,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     }
 
     const inviteIdentity = invite?.identity || invite?.uid || invite?.sub || null;
-    const tokenIdentity = (identity && identity.trim()) || uid || inviteIdentity || `invite-${roomName}`; // prefer provided identity, fallback to auth/ invite
+    const tokenIdentity = uid || inviteIdentity || `invite-${roomId}`;
 
     // Determine which account's entitlements and permission mode should apply.
     // We always scope entitlements to the room owner, never the caller.
@@ -650,7 +652,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     }
 
     const AccessToken = await getAccessTokenCtor();
-    const at = new AccessToken(apiKey, apiSecret, { identity: tokenIdentity });
+    const at = new AccessToken(apiKey, apiSecret, { identity: tokenIdentity, name: displayName });
     at.addGrant({
       room: roomName,
       ...roleToGrant(grantRole),

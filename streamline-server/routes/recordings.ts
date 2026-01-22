@@ -21,6 +21,7 @@
 import { Router } from "express";
 import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
 import { canAccessFeature } from "./featureAccess";
 import { clampRecordingPreset, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { Timestamp } from "firebase-admin/firestore";
@@ -33,7 +34,6 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
-import { resolveRoomIdentity } from "../lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 
 const router = Router();
@@ -565,7 +565,7 @@ async function stopRecordingInternal(options: {
 // POST /start - Start Recording
 // =============================================================================
 
-router.post("/start", requireAuth, async (req, res) => {
+router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   const startTime = Date.now();
   console.log("[recordings/start] Request received");
 
@@ -594,21 +594,22 @@ router.post("/start", requireAuth, async (req, res) => {
       usageType?: string;
     };
 
-    if ((!rawRoomId || !String(rawRoomId).trim()) && (!rawRoomName || !String(rawRoomName).trim())) {
-      return res.status(400).json({ error: "roomId or roomName is required" });
+    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
+    if (!access || !access.roomId) {
+      return res.status(401).json({ error: "room_token_required" });
+    }
+    const canonicalRoomId = String(access.roomId || "").trim();
+    if (!canonicalRoomId) {
+      return res.status(400).json({ error: "Missing roomId" });
     }
 
-    const identity = await resolveRoomIdentity({
-      roomId: typeof rawRoomId === "string" ? rawRoomId : undefined,
-      roomName: typeof rawRoomName === "string" ? rawRoomName : undefined,
-    });
-
-    const roomId = String(identity.roomId || rawRoomId || rawRoomName || "").trim();
-    const roomName = String(identity.roomName || rawRoomName || roomId || "").trim();
-
-    if (!roomId || !roomName) {
-      return res.status(400).json({ error: "Unable to resolve room identity" });
+    // If caller sent a roomId/roomName in the body, ensure it matches the token (defensive only)
+    if (rawRoomId && String(rawRoomId).trim() && String(rawRoomId).trim() !== canonicalRoomId) {
+      return res.status(400).json({ error: "room_mismatch" });
     }
+
+    const roomId = canonicalRoomId;
+    const roomName = (access.roomName && String(access.roomName).trim()) || roomId;
 
     try {
       await assertRoomPerm(req as any, roomId, "canRecord");
@@ -995,7 +996,7 @@ router.post("/sweep", async (_req, res) => {
 // POST /stop - Stop Recording
 // =============================================================================
 
-router.post("/stop", requireAuth, async (req, res) => {
+router.post("/stop", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   console.log("[recordings/stop] Request received");
 
   try {
@@ -1018,22 +1019,22 @@ router.post("/stop", requireAuth, async (req, res) => {
 
     const data = snap.data() || {};
 
-    // Derive roomId from recording and enforce room-level canRecord permissions.
-    let roomId: string | null = typeof (data as any).roomId === "string" ? (data as any).roomId.trim() : null;
-    const roomName: string | null = typeof (data as any).roomName === "string" ? (data as any).roomName.trim() : null;
-
-    if (!roomId && roomName) {
-      try {
-        const identity = await resolveRoomIdentity({ roomId: undefined, roomName });
-        roomId = identity?.roomId || null;
-      } catch (e) {
-        console.warn("[recordings/stop] failed to resolve roomId from roomName", e);
-      }
+    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
+    if (!access || !access.roomId) {
+      return res.status(401).json({ error: "room_token_required" });
+    }
+    const canonicalRoomId = String(access.roomId || "").trim();
+    if (!canonicalRoomId) {
+      return res.status(400).json({ error: "Missing roomId" });
     }
 
-    if (!roomId) {
-      return res.status(400).json({ error: "invalid_recording_room" });
+    // If the recording has a stored roomId, ensure it matches the caller's room
+    const recordingRoomId: string | null = typeof (data as any).roomId === "string" ? (data as any).roomId.trim() : null;
+    if (recordingRoomId && recordingRoomId !== canonicalRoomId) {
+      return res.status(400).json({ error: "room_mismatch" });
     }
+
+    const roomId = canonicalRoomId;
 
     try {
       await assertRoomPerm(req as any, roomId, "canRecord");

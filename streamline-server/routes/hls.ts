@@ -88,16 +88,22 @@ router.get("/public/:roomId", async (req: any, res) => {
 });
 
 router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
-  const roomId = req.params.roomId;
-  if (/[ \u2013#]/.test(roomId)) {
-    return res.status(400).json({ error: "invalid_room_id" });
-  }
-
   const access = (req as any).roomAccess as RoomAccessClaims | undefined;
   if (!access || !access.roomId) {
     return res.status(401).json({ error: "room_token_required" });
   }
 
+  const canonicalRoomId = String(access.roomId || "").trim();
+  if (!canonicalRoomId || /[ \u2013#]/.test(canonicalRoomId)) {
+    return res.status(400).json({ error: "invalid_room_id" });
+  }
+
+  const requestedRoomId = String(req.params.roomId || "").trim();
+  if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
+    return res.status(400).json({ error: "room_mismatch" });
+  }
+
+  const roomId = canonicalRoomId;
   const presetId = (req.body?.presetId || "hls_720p") as HlsPresetId;
 
   try {
@@ -145,7 +151,7 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     // For best viewer UX, point clients at the live sliding playlist.
     const playlistUrl = `${publicBase}/${roomId}/${livePlaylistName}`;
 
-    const lkRoomName = room.livekitRoomName || roomId;
+    const lkRoomName = (access.roomName && String(access.roomName).trim()) || (room as any).livekitRoomName || roomId;
 
     // Cap enforcement (per-session): compute stopAt at start and persist in room.hls
     // caps.hlsMaxMinutesPerSession: null/missing => unlimited
@@ -228,16 +234,22 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
 // GET /api/hls/status/:roomId
 // Returns current HLS state for the room so the client can poll
 router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any, async (req: any, res) => {
-  const roomId = req.params.roomId;
-  if (/[ \u2013#]/.test(roomId)) {
-    return res.status(400).json({ error: "invalid_room_id" });
-  }
-
   const access = (req as any).roomAccess as RoomAccessClaims | undefined;
   if (!access || !access.roomId) {
     return res.status(401).json({ error: "room_token_required" });
   }
 
+  const canonicalRoomId = String(access.roomId || "").trim();
+  if (!canonicalRoomId || /[ \u2013#]/.test(canonicalRoomId)) {
+    return res.status(400).json({ error: "invalid_room_id" });
+  }
+
+  const requestedRoomId = String(req.params.roomId || "").trim();
+  if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
+    return res.status(400).json({ error: "room_mismatch" });
+  }
+
+  const roomId = canonicalRoomId;
   try {
     const uid = (req as any).user?.uid;
     if (!uid) {

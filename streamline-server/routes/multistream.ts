@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireRoomAccessToken, type RoomAccessClaims } from "../middleware/roomAccessToken";
 import { canAccessFeature } from "./featureAccess";
 import type { ApiErrorCode } from "../types/streaming";
 import { decryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
 import { clampPresetForPlan, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
-import { resolveRoomIdentity } from "../lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
@@ -30,19 +30,26 @@ async function getPlanLimit(uid: string, field: string): Promise<number | undefi
 
 const router = Router();
 
-router.post("/:roomId/start-multistream", requireAuth, async (req, res) => {
+router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const requestStartedAt = Date.now();
     const uid = (req as any).user?.uid;
-    const roomIdOrName = String((req.params as any).roomId || "").trim();
-
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
-    if (!roomIdOrName) return res.status(400).json({ error: "Missing roomId param" });
 
-    const resolvedRoom = await resolveRoomIdentity({ roomId: roomIdOrName, roomName: roomIdOrName });
-    if (!resolvedRoom) return res.status(400).json({ error: "Invalid room" });
-    const roomId = resolvedRoom.roomId;
-    const roomName = resolvedRoom.roomName;
+    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
+    if (!access || !access.roomId) {
+      return res.status(401).json({ error: "room_token_required" });
+    }
+    const canonicalRoomId = String(access.roomId || "").trim();
+    if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });
+
+    const requestedRoomId = String((req.params as any).roomId || "").trim();
+    if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
+      return res.status(400).json({ error: "room_mismatch" });
+    }
+
+    const roomId = canonicalRoomId;
+    const roomName = (access.roomName && String(access.roomName).trim()) || roomId;
 
     try {
       await assertRoomPerm(req as any, roomId, "canDestinations");
@@ -103,9 +110,9 @@ router.post("/:roomId/start-multistream", requireAuth, async (req, res) => {
     if (!userSnap.exists) return res.status(401).json({ error: "User not found" });
     const planId = await getUserPlanId(uid);
 
-    const access = await canAccessFeature((req as any).account || uid, "multistream");
-    if (!access.allowed) {
-      return res.status(403).json({ error: access.reason || "Multistreaming is not available on your plan" });
+    const featureAccess = await canAccessFeature((req as any).account || uid, "multistream");
+    if (!featureAccess.allowed) {
+      return res.status(403).json({ error: featureAccess.reason || "Multistreaming is not available on your plan" });
     }
 
     // Clamp preset by plan
@@ -326,17 +333,25 @@ router.post("/:roomId/start-multistream", requireAuth, async (req, res) => {
 });
 
 
-router.post("/:roomId/stop-multistream", requireAuth, async (req, res) => {
+router.post("/:roomId/stop-multistream", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    const roomIdOrName = String((req.params as any).roomId || "").trim();
     if (!uid) return res.status(401).json({ error: "Unauthorized" });
-    if (!roomIdOrName) return res.status(400).json({ error: "Missing roomId param" });
 
-    const resolvedRoom = await resolveRoomIdentity({ roomId: roomIdOrName, roomName: roomIdOrName });
-    if (!resolvedRoom) return res.status(400).json({ error: "Invalid room" });
-    const roomId = resolvedRoom.roomId;
-    const roomName = resolvedRoom.roomName;
+    const access = (req as any).roomAccess as RoomAccessClaims | undefined;
+    if (!access || !access.roomId) {
+      return res.status(401).json({ error: "room_token_required" });
+    }
+    const canonicalRoomId = String(access.roomId || "").trim();
+    if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });
+
+    const requestedRoomId = String((req.params as any).roomId || "").trim();
+    if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
+      return res.status(400).json({ error: "room_mismatch" });
+    }
+
+    const roomId = canonicalRoomId;
+    const roomName = (access.roomName && String(access.roomName).trim()) || roomId;
 
     try {
       await assertRoomPerm(req as any, roomId, "canDestinations");
