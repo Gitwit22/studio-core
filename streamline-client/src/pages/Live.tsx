@@ -274,6 +274,7 @@ export default function Live() {
       if (!video) return;
 
       const seekable = video.seekable;
+      const buffered = video.buffered;
       let effectiveDuration = video.duration;
       let position = video.currentTime;
 
@@ -284,6 +285,11 @@ export default function Live() {
         if (seekable && seekable.length) {
           const start = seekable.start(0);
           const end = seekable.end(seekable.length - 1);
+          effectiveDuration = Math.max(0, end - start);
+          position = Math.max(0, Math.min(effectiveDuration, video.currentTime - start));
+        } else if (buffered && buffered.length) {
+          const start = buffered.start(0);
+          const end = buffered.end(buffered.length - 1);
           effectiveDuration = Math.max(0, end - start);
           position = Math.max(0, Math.min(effectiveDuration, video.currentTime - start));
         } else {
@@ -392,12 +398,6 @@ export default function Live() {
           });
         } catch {
           // ignore diagnostics errors
-        }
-
-        // On stalls or recoverable errors, try snapping back to live.
-        if (data && !data.fatal && video.readyState >= 1) {
-          snapToLiveEdge(video);
-          void video.play().catch(() => {});
         }
 
         if (data?.fatal) {

@@ -133,9 +133,8 @@ export default function Join() {
 
   const [joinMode, setJoinMode] = useState<"new" | "saved">("new");
 
-  // Platform-level HLS flag (controls visibility of Saved Room join when HLS is disabled)
-  // Default to false so HLS-only UI never flashes on for users
-  // who don't have HLS enabled while account flags are loading.
+  // Platform-level HLS flag (controls enablement of Saved Room join when HLS is disabled)
+  // Default to false so HLS-only UI is disabled until account flags load.
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(false);
 
   // Use /api/auth/me for admin/test-mode status
@@ -985,8 +984,9 @@ export default function Join() {
               </div>
             )}
 
-            {/* HOST JOIN MODE TOGGLE + FIELDS (only when platform HLS is enabled) */}
-            {!isParticipant && platformHlsEnabled && savedEmbeds.length > 0 && (
+            {/* HOST JOIN MODE TOGGLE (always rendered for hosts; Saved Room option is enabled
+                only when HLS is allowed and Saved Rooms are available) */}
+            {!isParticipant && (
               <div style={{ marginBottom: "20px" }}>
                 <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>Join mode</div>
                 <div
@@ -1017,16 +1017,27 @@ export default function Join() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setJoinMode("saved")}
+                    disabled={!platformHlsEnabled || savedEmbeds.length === 0}
+                    onClick={() => {
+                      if (!platformHlsEnabled || savedEmbeds.length === 0) return;
+                      setJoinMode("saved");
+                    }}
                     style={{
                       padding: "6px 10px",
                       borderRadius: "999px",
                       border: "none",
                       fontSize: "12px",
-                      cursor: "pointer",
+                      cursor:
+                        !platformHlsEnabled || savedEmbeds.length === 0 ? "not-allowed" : "pointer",
                       background: joinMode === "saved" ? "#f97316" : "transparent",
-                      color: joinMode === "saved" ? "#111827" : "#e5e7eb",
+                      color:
+                        !platformHlsEnabled || savedEmbeds.length === 0
+                          ? "#6b7280"
+                          : joinMode === "saved"
+                          ? "#111827"
+                          : "#e5e7eb",
                       fontWeight: joinMode === "saved" ? 700 : 500,
+                      opacity: !platformHlsEnabled || savedEmbeds.length === 0 ? 0.5 : 1,
                     }}
                   >
                     Use Saved Room
