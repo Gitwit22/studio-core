@@ -622,7 +622,9 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
 
     // Host invariants: the canonical host role should always retain full
     // streaming + moderation surface area, regardless of editable presets.
-    if (effectiveRoleKey === "host" || normalizedRequested === "host") {
+    // We key this strictly off the effective role so that any
+    // downgrade logic in resolveRoleForInvite is respected.
+    if (effectiveRoleKey === "host") {
       permissions = {
         ...permissions,
         canStream: true,

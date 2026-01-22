@@ -109,6 +109,8 @@ function allTruePermissions(): RolePermissions {
     canScreenShare: true,
     canInvite: true,
     canAnalytics: true,
+    canMuteGuests: true,
+    canRemoveGuests: true,
   };
 }
 
@@ -122,6 +124,8 @@ function ensureBooleanPerms(perms: Partial<RolePermissions> | undefined): RolePe
     canScreenShare: false,
     canInvite: false,
     canAnalytics: false,
+    canMuteGuests: false,
+    canRemoveGuests: false,
   };
   const src = perms || {};
   return {
@@ -133,6 +137,8 @@ function ensureBooleanPerms(perms: Partial<RolePermissions> | undefined): RolePe
     canScreenShare: !!src.canScreenShare,
     canInvite: !!src.canInvite,
     canAnalytics: !!src.canAnalytics,
+    canMuteGuests: !!src.canMuteGuests,
+    canRemoveGuests: !!src.canRemoveGuests,
   };
 }
 

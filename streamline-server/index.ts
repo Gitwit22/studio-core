@@ -225,7 +225,7 @@ app.post("/api/roomModeration/mute", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+      await assertRoomPerm(req as any, resolved.roomId, "canMuteGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ error: err.code });
@@ -286,7 +286,7 @@ app.post("/api/roomModeration/mute-all", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+      await assertRoomPerm(req as any, resolved.roomId, "canMuteGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ error: err.code });
@@ -351,7 +351,7 @@ app.post("/api/roomModeration/mute-lock", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+      await assertRoomPerm(req as any, resolved.roomId, "canMuteGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ error: err.code });
@@ -442,7 +442,7 @@ app.post("/api/roomModeration/remove", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ ok: false, error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+      await assertRoomPerm(req as any, resolved.roomId, "canRemoveGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ ok: false, error: err.code });
@@ -474,7 +474,7 @@ app.post("/api/roomModeration/remove-all", requireAuth, async (req, res) => {
       if (!resolved || !resolved.roomId) {
         return res.status(400).json({ ok: false, error: "invalid_room" });
       }
-      await assertRoomPerm(req as any, resolved.roomId, "canModerate");
+      await assertRoomPerm(req as any, resolved.roomId, "canRemoveGuests");
     } catch (err) {
       if (err instanceof RoomPermissionError) {
         return res.status(err.status).json({ ok: false, error: err.code });

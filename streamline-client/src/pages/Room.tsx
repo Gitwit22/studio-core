@@ -39,6 +39,7 @@ type EffectiveControls = {
 
   // In-room capability scopes
   canMuteGuests?: boolean;
+  canRemoveGuests?: boolean;
   canInviteLinks?: boolean;
   canManageDestinations?: boolean;
   canStartStopStream?: boolean;
@@ -644,7 +645,9 @@ function LiveKitShell({
             roomName={roomName}
             roomId={roomId || ""}
             roomAccessToken={roomAccessToken || ""}
-            canMuteGuests={canMuteGuests}
+            canMuteGuests={canMuteGuestsUi}
+            canRemoveGuests={canRemoveGuestsUi}
+            canModerate={canModerateUi}
             advancedRolesEnabled={effectivePermissionsMode === "advanced"}
             greenroomEnabled={dashboardGreenroomEnabled}
             overlaysEnabled={dashboardOverlaysEnabled}
@@ -713,6 +716,7 @@ function RoomPage() {
     canPublishVideo: true,
     canScreenShare: false,
     canMuteGuests: false,
+    canRemoveGuests: false,
     canInviteLinks: false,
     canManageDestinations: false,
     canStartStopStream: false,
@@ -741,11 +745,23 @@ function RoomPage() {
       can("canStream") ||
       can("canRecord") ||
       can("canDestinations"));
-
-  const canMuteGuests =
+  const canMuteGuestsUi =
     !needsReauth &&
     !isViewer &&
-    (isHost || !!effectiveControls.canMuteGuests);
+    (isHost || !!effectiveControls.canMuteGuests || can("canModerate"));
+
+  const canRemoveGuestsUi =
+    !needsReauth &&
+    !isViewer &&
+    (isHost || !!effectiveControls.canRemoveGuests || can("canModerate"));
+
+  const canModerateUi =
+    !needsReauth &&
+    !isViewer &&
+    (isHost ||
+      can("canModerate") ||
+      !!effectiveControls.canRemoveGuests ||
+      !!effectiveControls.canMuteGuests);
 
   const subjectToControls = !isHost && !isViewer;
   const controlsAllowPublishAudio = !subjectToControls || effectiveControls.canPublishAudio !== false;
@@ -811,6 +827,7 @@ function RoomPage() {
             canPublishVideo: typeof c.canPublishVideo === "boolean" ? c.canPublishVideo : true,
             canScreenShare: typeof c.canScreenShare === "boolean" ? c.canScreenShare : false,
             canMuteGuests: typeof c.canMuteGuests === "boolean" ? c.canMuteGuests : false,
+                canRemoveGuests: typeof c.canRemoveGuests === "boolean" ? c.canRemoveGuests : false,
             canInviteLinks: typeof c.canInviteLinks === "boolean" ? c.canInviteLinks : false,
             canManageDestinations: typeof c.canManageDestinations === "boolean" ? c.canManageDestinations : false,
             canStartStopStream: typeof c.canStartStopStream === "boolean" ? c.canStartStopStream : false,
@@ -991,6 +1008,7 @@ function RoomPage() {
           canPublishVideo: typeof data?.canPublishVideo === "boolean" ? data.canPublishVideo : true,
           canScreenShare: typeof data?.canScreenShare === "boolean" ? data.canScreenShare : false,
           canMuteGuests: typeof data?.canMuteGuests === "boolean" ? data.canMuteGuests : false,
+          canRemoveGuests: typeof data?.canRemoveGuests === "boolean" ? data.canRemoveGuests : false,
           canInviteLinks: typeof data?.canInviteLinks === "boolean" ? data.canInviteLinks : false,
           canManageDestinations: typeof data?.canManageDestinations === "boolean" ? data.canManageDestinations : false,
           canStartStopStream: typeof data?.canStartStopStream === "boolean" ? data.canStartStopStream : false,

@@ -7,6 +7,8 @@ export type RolePermissionMap = {
   canScreenShare: boolean;
   canInvite: boolean;
   canAnalytics: boolean;
+  canMuteGuests: boolean;
+  canRemoveGuests: boolean;
 };
 
 export type DefaultRoleId = "host" | "cohost" | "moderator" | "participant" | "viewer";
@@ -29,6 +31,8 @@ function perms(p: Partial<RolePermissionMap>): RolePermissionMap {
     canScreenShare: !!p.canScreenShare,
     canInvite: !!p.canInvite,
     canAnalytics: !!p.canAnalytics,
+    canMuteGuests: !!p.canMuteGuests,
+    canRemoveGuests: !!p.canRemoveGuests,
   };
 }
 
@@ -49,6 +53,8 @@ export const DEFAULT_ROLE_PROFILES: DefaultRoleProfile[] = [
       canScreenShare: true,
       canInvite: true,
       canAnalytics: true,
+      canMuteGuests: true,
+      canRemoveGuests: true,
     }),
   },
   {
@@ -65,6 +71,8 @@ export const DEFAULT_ROLE_PROFILES: DefaultRoleProfile[] = [
       canScreenShare: true,
       canInvite: true,
       canAnalytics: false,
+      canMuteGuests: true,
+      canRemoveGuests: true,
     }),
   },
   {
@@ -81,6 +89,8 @@ export const DEFAULT_ROLE_PROFILES: DefaultRoleProfile[] = [
       canScreenShare: false,
       canInvite: false,
       canAnalytics: false,
+      canMuteGuests: true,
+      canRemoveGuests: true,
     }),
   },
   {
@@ -97,6 +107,8 @@ export const DEFAULT_ROLE_PROFILES: DefaultRoleProfile[] = [
       canScreenShare: false,
       canInvite: false,
       canAnalytics: false,
+      canMuteGuests: false,
+      canRemoveGuests: false,
     }),
   },
   {

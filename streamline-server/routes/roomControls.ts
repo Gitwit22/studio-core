@@ -16,6 +16,7 @@ type RoomControls = {
   tileVisible?: boolean;
   // Access scopes / capabilities (used for in-room UI gating; set via presets).
   canMuteGuests?: boolean;
+  canRemoveGuests?: boolean;
   canInviteLinks?: boolean;
   canManageDestinations?: boolean;
   canStartStopStream?: boolean;
@@ -59,10 +60,13 @@ const SYSTEM_ROLE_PRESETS: Record<
       | "canScreenShare"
       | "tileVisible"
       | "canMuteGuests"
+      | "canRemoveGuests"
       | "canInviteLinks"
       | "canManageDestinations"
       | "canStartStopStream"
       | "canStartStopRecording"
+      | "canViewAnalytics"
+      | "canChangeLayoutScene"
     >
   >
 > = {
@@ -73,10 +77,13 @@ const SYSTEM_ROLE_PRESETS: Record<
     canScreenShare: false,
     tileVisible: true,
     canMuteGuests: false,
+    canRemoveGuests: false,
     canInviteLinks: false,
     canManageDestinations: false,
     canStartStopStream: false,
     canStartStopRecording: false,
+    canViewAnalytics: false,
+    canChangeLayoutScene: false,
   },
   moderator: {
     role: "moderator",
@@ -85,10 +92,13 @@ const SYSTEM_ROLE_PRESETS: Record<
     canScreenShare: false,
     tileVisible: true,
     canMuteGuests: true,
+    canRemoveGuests: true,
     canInviteLinks: true,
     canManageDestinations: false,
     canStartStopStream: false,
     canStartStopRecording: false,
+    canViewAnalytics: false,
+    canChangeLayoutScene: false,
   },
   cohost: {
     role: "cohost",
@@ -97,10 +107,13 @@ const SYSTEM_ROLE_PRESETS: Record<
     canScreenShare: true,
     tileVisible: true,
     canMuteGuests: true,
+    canRemoveGuests: true,
     canInviteLinks: true,
     canManageDestinations: true,
     canStartStopStream: true,
     canStartStopRecording: true,
+    canViewAnalytics: false,
+    canChangeLayoutScene: true,
   },
 };
 
@@ -127,6 +140,7 @@ async function loadPresetForUser(uid: string, presetId: PresetId): Promise<RoomC
         canScreenShare: pickBoolean(data.canScreenShare),
         tileVisible: pickBoolean(data.tileVisible),
         canMuteGuests: pickBoolean(data.canMuteGuests),
+        canRemoveGuests: pickBoolean(data.canRemoveGuests),
         canInviteLinks: pickBoolean(data.canInviteLinks),
         canManageDestinations: pickBoolean(data.canManageDestinations),
         canStartStopStream: pickBoolean(data.canStartStopStream),
@@ -148,6 +162,40 @@ async function loadPresetForUser(uid: string, presetId: PresetId): Promise<RoomC
   }
 
   return { ...SYSTEM_ROLE_PRESETS[presetId] };
+}
+
+function normalizePresetForApply(presetId: PresetId, preset: RoomControls): RoomControls {
+  const system = SYSTEM_ROLE_PRESETS[presetId];
+
+  const coerce = <K extends keyof typeof system>(key: K): boolean => {
+    const v = (preset as any)?.[key];
+    if (typeof v === "boolean") return v;
+    return system[key];
+  };
+
+  const normalized: RoomControls = {
+    role: presetId,
+    canPublishAudio: coerce("canPublishAudio"),
+    canPublishVideo: coerce("canPublishVideo"),
+    canScreenShare: coerce("canScreenShare"),
+    tileVisible: coerce("tileVisible"),
+    canMuteGuests: coerce("canMuteGuests"),
+    canRemoveGuests: coerce("canRemoveGuests"),
+    canInviteLinks: coerce("canInviteLinks"),
+    canManageDestinations: coerce("canManageDestinations"),
+    canStartStopStream: coerce("canStartStopStream"),
+    canStartStopRecording: coerce("canStartStopRecording"),
+    canViewAnalytics: coerce("canViewAnalytics"),
+    canChangeLayoutScene: coerce("canChangeLayoutScene"),
+  };
+
+  // Hard guarantees for moderator presets regardless of overrides.
+  if (presetId === "moderator") {
+    normalized.canViewAnalytics = false;
+    normalized.canChangeLayoutScene = false;
+  }
+
+  return normalized;
 }
 
 function mergeControls(defaultDoc: any, identityDoc: any) {
@@ -222,6 +270,7 @@ router.patch("/:roomId/controls", requireAuth as any, requireRoomAccessToken as 
     canScreenShare: pickBoolean(body.canScreenShare),
     tileVisible: pickBoolean(body.tileVisible),
     canMuteGuests: pickBoolean(body.canMuteGuests),
+    canRemoveGuests: pickBoolean(body.canRemoveGuests),
     canInviteLinks: pickBoolean(body.canInviteLinks),
     canManageDestinations: pickBoolean(body.canManageDestinations),
     canStartStopStream: pickBoolean(body.canStartStopStream),
@@ -284,27 +333,8 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
   // apply the corresponding preset defaults, resetting overrides.
   const rolePresetId = parsePresetId(body.role);
   if (rolePresetId) {
-    const preset = await loadPresetForUser(uid, rolePresetId);
-    const presetPatch: RoomControls = {
-      role: rolePresetId,
-      canPublishAudio: pickBoolean(preset.canPublishAudio),
-      canPublishVideo: pickBoolean(preset.canPublishVideo),
-      canScreenShare: pickBoolean(preset.canScreenShare),
-      tileVisible: pickBoolean(preset.tileVisible),
-      canMuteGuests: pickBoolean(preset.canMuteGuests),
-      canInviteLinks: pickBoolean(preset.canInviteLinks),
-      canManageDestinations: pickBoolean(preset.canManageDestinations),
-      canStartStopStream: pickBoolean(preset.canStartStopStream),
-      canStartStopRecording: pickBoolean(preset.canStartStopRecording),
-      canViewAnalytics: pickBoolean(preset.canViewAnalytics),
-      canChangeLayoutScene: pickBoolean(preset.canChangeLayoutScene),
-    };
-
-    // Hard guarantees for moderator.
-    if (rolePresetId === "moderator") {
-      presetPatch.canViewAnalytics = false;
-      presetPatch.canChangeLayoutScene = false;
-    }
+    const loadedPreset = await loadPresetForUser(uid, rolePresetId);
+    const presetPatch = normalizePresetForApply(rolePresetId, loadedPreset);
 
     // Strip out any undefined booleans so Firestore never sees undefined fields.
     const cleanedFromPreset: RoomControls = {};
@@ -381,6 +411,7 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
     canScreenShare: pickBoolean(body.canScreenShare),
     tileVisible: pickBoolean(body.tileVisible),
     canMuteGuests: pickBoolean(body.canMuteGuests),
+    canRemoveGuests: pickBoolean(body.canRemoveGuests),
     canInviteLinks: pickBoolean(body.canInviteLinks),
     canManageDestinations: pickBoolean(body.canManageDestinations),
     canStartStopStream: pickBoolean(body.canStartStopStream),
@@ -452,27 +483,8 @@ router.post("/:roomId/participants/:identity/permissions", requireAuth as any, r
   const identityDocId = normalizeControlsDocId(rawIdentity);
 
   try {
-    const preset = await loadPresetForUser(uid, presetId);
-    const presetPatch: RoomControls = {
-      role: presetId,
-      canPublishAudio: pickBoolean(preset.canPublishAudio),
-      canPublishVideo: pickBoolean(preset.canPublishVideo),
-      canScreenShare: pickBoolean(preset.canScreenShare),
-      tileVisible: pickBoolean(preset.tileVisible),
-      canMuteGuests: pickBoolean(preset.canMuteGuests),
-      canInviteLinks: pickBoolean(preset.canInviteLinks),
-      canManageDestinations: pickBoolean(preset.canManageDestinations),
-      canStartStopStream: pickBoolean(preset.canStartStopStream),
-      canStartStopRecording: pickBoolean(preset.canStartStopRecording),
-      canViewAnalytics: pickBoolean(preset.canViewAnalytics),
-      canChangeLayoutScene: pickBoolean(preset.canChangeLayoutScene),
-    };
-
-    // Hard guarantees for moderator.
-    if (presetId === "moderator") {
-      presetPatch.canViewAnalytics = false;
-      presetPatch.canChangeLayoutScene = false;
-    }
+    const loadedPreset = await loadPresetForUser(uid, presetId);
+    const presetPatch = normalizePresetForApply(presetId, loadedPreset);
 
     const cleanedFromPreset: RoomControls = {};
     (Object.keys(presetPatch) as Array<keyof RoomControls>).forEach((k) => {
@@ -640,27 +652,8 @@ router.post("/:roomId/controls/:identity/apply-preset", requireAuth as any, requ
   if (!presetId) return res.status(400).json({ error: "presetId_required" });
 
   const identityDocId = normalizeControlsDocId(req.params.identity);
-  const preset = await loadPresetForUser(uid, presetId);
-  const cleaned: RoomControls = {
-    role: presetId,
-    canPublishAudio: pickBoolean(preset.canPublishAudio),
-    canPublishVideo: pickBoolean(preset.canPublishVideo),
-    canScreenShare: pickBoolean(preset.canScreenShare),
-    tileVisible: pickBoolean(preset.tileVisible),
-    canMuteGuests: pickBoolean(preset.canMuteGuests),
-    canInviteLinks: pickBoolean(preset.canInviteLinks),
-    canManageDestinations: pickBoolean(preset.canManageDestinations),
-    canStartStopStream: pickBoolean(preset.canStartStopStream),
-    canStartStopRecording: pickBoolean(preset.canStartStopRecording),
-    canViewAnalytics: pickBoolean(preset.canViewAnalytics),
-    canChangeLayoutScene: pickBoolean(preset.canChangeLayoutScene),
-  };
-
-  // Hard guarantees for moderator.
-  if (presetId === "moderator") {
-    cleaned.canViewAnalytics = false;
-    cleaned.canChangeLayoutScene = false;
-  }
+  const loadedPreset = await loadPresetForUser(uid, presetId);
+  const cleaned = normalizePresetForApply(presetId, loadedPreset);
 
   const ref = controlsDocRef(roomId, identityDocId);
   await ref.set(

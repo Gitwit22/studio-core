@@ -15,6 +15,8 @@ export default function RoleOverlay({
   roomId,
   roomAccessToken,
   canMuteGuests,
+  canRemoveGuests,
+  canModerate,
   advancedRolesEnabled,
   greenroomEnabled,
   overlaysEnabled,
@@ -26,6 +28,8 @@ export default function RoleOverlay({
   roomId: string;
   roomAccessToken: string;
   canMuteGuests?: boolean;
+  canRemoveGuests?: boolean;
+  canModerate?: boolean;
   advancedRolesEnabled?: boolean;
   greenroomEnabled?: boolean;
   overlaysEnabled?: boolean;
@@ -118,12 +122,21 @@ export default function RoleOverlay({
               roomId={roomId}
               roomAccessToken={roomAccessToken}
               canMuteGuests={canMuteGuests}
+              canRemoveGuests={canRemoveGuests}
+              canModerate={canModerate}
               advancedRolesEnabled={advancedRolesEnabled}
               greenroomEnabled={greenroomEnabled}
               overlaysEnabled={overlaysEnabled}
             />
           )}
-          {role === "moderator" && <ModeratorPanel roomName={roomName} canMuteGuests={canMuteGuests} />}
+          {role === "moderator" && (
+            <ModeratorPanel
+              roomName={roomName}
+              canMuteGuests={canMuteGuests}
+              canRemoveGuests={canRemoveGuests}
+              canModerate={canModerate}
+            />
+          )}
           {role === "participant" && <ParticipantPanel roomName={roomName} />}
         </div>
       </div>
@@ -137,6 +150,8 @@ function HostPanel({
   roomId,
   roomAccessToken,
   canMuteGuests,
+  canRemoveGuests,
+  canModerate,
   advancedRolesEnabled,
   greenroomEnabled,
   overlaysEnabled,
@@ -145,6 +160,8 @@ function HostPanel({
   roomId: string;
   roomAccessToken: string;
   canMuteGuests?: boolean;
+  canRemoveGuests?: boolean;
+  canModerate?: boolean;
   advancedRolesEnabled?: boolean;
   greenroomEnabled?: boolean;
   overlaysEnabled?: boolean;
@@ -242,6 +259,13 @@ function HostPanel({
           return next;
         });
       }, 1500);
+
+      // Clear any optimistic override so we don't mask SSE/metadata updates.
+      setRoleOverrides((prev) => {
+        const next = { ...prev };
+        delete next[identity];
+        return next;
+      });
     } catch (e: any) {
       console.error("role change failed", e);
       alert(e?.message || "Role change failed");
@@ -308,10 +332,11 @@ function HostPanel({
           participants={parts}
           onRemove={(id) => apiRemove(roomName, id)}
           onMute={(id, muted) => apiMute(roomName, id, muted)}
-          canModerate
+          canModerate={!!canModerate}
           muteLock={muteLock}
           localIdentity={localParticipant?.identity || null}
           canMuteGuests={canMuteGuests}
+          canRemoveGuests={canRemoveGuests}
           canChangeRoles={!!advancedRolesEnabled && !!roomId && !!roomAccessToken}
           onChangeRole={handleChangeRole}
           roleOverrides={roleOverrides}
@@ -412,7 +437,7 @@ function HostPanel({
   );
 }
 
-function ModeratorPanel({ roomName, canMuteGuests }: { roomName: string; canMuteGuests?: boolean }) {
+function ModeratorPanel({ roomName, canMuteGuests, canRemoveGuests, canModerate }: { roomName: string; canMuteGuests?: boolean; canRemoveGuests?: boolean; canModerate?: boolean }) {
   const parts = useParticipants();
   return (
     <>
@@ -426,8 +451,9 @@ function ModeratorPanel({ roomName, canMuteGuests }: { roomName: string; canMute
           participants={parts}
           onRemove={(id) => apiRemove(roomName, id)}
           onMute={(id, muted) => apiMute(roomName, id, muted)}
-          canModerate
+          canModerate={!!canModerate}
           canMuteGuests={canMuteGuests}
+          canRemoveGuests={canRemoveGuests}
         />
       </Section>
     </>
@@ -494,6 +520,7 @@ function ParticipantList({
   muteLock,
   localIdentity,
   canMuteGuests,
+  canRemoveGuests,
   canChangeRoles,
   onChangeRole,
   roleOverrides,
@@ -506,6 +533,7 @@ function ParticipantList({
   muteLock?: boolean;
   localIdentity?: string | null;
   canMuteGuests?: boolean;
+  canRemoveGuests?: boolean;
   canChangeRoles?: boolean;
   onChangeRole?: (identity: string, presetId: RolePresetId) => void;
   roleOverrides?: Record<string, RolePresetId>;
@@ -616,32 +644,34 @@ function ParticipantList({
                     </button>
                   );
                 })()}
-                <button
-                  style={{
-                    borderRadius: '0.25rem',
-                    border: '1px solid rgba(220, 38, 38, 0.5)',
-                    padding: '0.25rem 0.5rem',
-                    fontSize: '0.7rem',
-                    background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
-                    color: '#ffffff',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s ease',
-                    fontWeight: '600'
-                  }}
-                  onMouseEnter={(e) => {
-                    const target = e.target as HTMLButtonElement;
-                    target.style.background = 'linear-gradient(135deg, #b91c1c, #991b1b)';
-                    target.style.boxShadow = '0 0 8px rgba(220, 38, 38, 0.3)';
-                  }}
-                  onMouseLeave={(e) => {
-                    const target = e.target as HTMLButtonElement;
-                    target.style.background = 'linear-gradient(135deg, #dc2626, #b91c1c)';
-                    target.style.boxShadow = 'none';
-                  }}
-                  onClick={() => onRemove?.(p.identity)}
-                >
-                  Remove
-                </button>
+                {canRemoveGuests !== false && (
+                  <button
+                    style={{
+                      borderRadius: '0.25rem',
+                      border: '1px solid rgba(220, 38, 38, 0.5)',
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      fontWeight: '600'
+                    }}
+                    onMouseEnter={(e) => {
+                      const target = e.target as HTMLButtonElement;
+                      target.style.background = 'linear-gradient(135deg, #b91c1c, #991b1b)';
+                      target.style.boxShadow = '0 0 8px rgba(220, 38, 38, 0.3)';
+                    }}
+                    onMouseLeave={(e) => {
+                      const target = e.target as HTMLButtonElement;
+                      target.style.background = 'linear-gradient(135deg, #dc2626, #b91c1c)';
+                      target.style.boxShadow = 'none';
+                    }}
+                    onClick={() => onRemove?.(p.identity)}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
             </div>
           )}
