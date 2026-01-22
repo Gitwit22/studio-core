@@ -35,16 +35,6 @@ export const SignupPage = () => {
   const [password, setPassword] = useState("");
   const [timeZone, setTimeZone] = useState("");
 
-  // Streaming defaults (user choices)
-  const [defaultResolution, setDefaultResolution] = useState("720p");
-  const [defaultDestinations, setDefaultDestinations] = useState({
-    youtube: false,
-    facebook: false,
-    twitch: false,
-  });
-  const [defaultPrivacy, setDefaultPrivacy] = useState("public");
-  const [skipOnboarding, setSkipOnboarding] = useState(false);
-
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
 
@@ -59,13 +49,6 @@ export const SignupPage = () => {
       // ignore
     }
   }, []);
-
-  const toggleDestination = (platform: "youtube" | "facebook" | "twitch") => {
-    setDefaultDestinations((prev) => ({
-      ...prev,
-      [platform]: !prev[platform],
-    }));
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,16 +79,9 @@ export const SignupPage = () => {
         email: email.trim().toLowerCase(),
         password,
         timeZone: timeZone || "America/Chicago",
-        skipOnboarding,
         // Explicitly signal Terms of Service acceptance to the backend.
         tosAccepted: true,
       };
-
-      if (!skipOnboarding) {
-        body.defaultResolution = defaultResolution;
-        body.defaultDestinations = defaultDestinations;
-        body.defaultPrivacy = defaultPrivacy;
-      }
 
       console.log("📤 Sending signup request:", { email, displayName });
 
@@ -148,159 +124,6 @@ export const SignupPage = () => {
       } catch (initErr) {
         // Intentionally swallow init failures so signup can still proceed.
         console.warn("[Signup] account init failed", initErr);
-      }
-
-      setLoading(false);
-      // Log auth/user info after signup
-      logAuthDebugContext("After Signup Success");
-
-      // If signup was initiated from an invite flow, go back to that route.
-      if (nextUrl) {
-        nav(nextUrl, { replace: true });
-        return;
-      }
-
-      // After signup, send users to Streaming settings first (unless they explicitly
-      // skipped onboarding). From there they can configure destinations/keys and
-      // then navigate to Join or Dashboard.
-      if (!skipOnboarding) {
-        nav("/settings/billing?tab=destinations");
-        return;
-      }
-
-      // If onboarding was skipped, fall back to the existing plan/billing flow.
-      let planIdRaw = data.user.planId || "free";
-      let selectedPlan: PlanId = "free";
-      if (planIdRaw === "starter_paid" || planIdRaw === "starter_trial") {
-        selectedPlan = "starter";
-      } else if (isPlanId(planIdRaw)) {
-        selectedPlan = planIdRaw;
-      }
-      if (selectedPlan === "starter" || selectedPlan === "pro") {
-        try {
-          const billingRes = await fetch(`${API_BASE}/api/billing/checkout`, {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          if (billingRes.ok) {
-            const billingData = await billingRes.json();
-            if (billingData.url) {
-              window.location.href = billingData.url;
-              return;
-            }
-          }
-          // If billing fails, fallback to dashboard
-          nav("/dashboard");
-        } catch (err) {
-          nav("/dashboard");
-        }
-      } else {
-        // Free plan: continue to join page
-        nav("/join");
-      }
-    } catch (err: any) {
-      console.error("❌ Signup error:", err);
-      setLoading(false);
-      setError(err?.message || "Something went wrong. Try again.");
-    }
-  };
-
-  return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: '#000000',
-      color: '#ffffff',
-      padding: '1.5rem',
-      textAlign: 'center',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      {/* Animated Background Orbs */}
-      <div style={{
-        position: 'absolute',
-        top: '15%',
-        left: '10%',
-        width: '250px',
-        height: '250px',
-        borderRadius: '50%',
-        background: 'linear-gradient(135deg, #dc2626, #ef4444)',
-        opacity: 0.1,
-        filter: 'blur(40px)',
-        animation: 'float 6s ease-in-out infinite'
-      }} />
-      <div style={{
-        position: 'absolute',
-        bottom: '20%',
-        right: '15%',
-        width: '200px',
-        height: '200px',
-        borderRadius: '50%',
-        background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-        opacity: 0.08,
-        filter: 'blur(30px)',
-        animation: 'float 8s ease-in-out infinite reverse'
-      }} />
-      
-      <style>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0px) rotate(0deg); }
-          50% { transform: translateY(-20px) rotate(180deg); }
-        }
-      `}</style>
-
-      <h2 style={{
-        fontSize: '1.875rem',
-        fontWeight: 'bold',
-        marginBottom: '1.5rem',
-        position: 'relative',
-        zIndex: 1
-      }}>Create Your StreamLine Account</h2>
-
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          width: '100%',
-          maxWidth: '420px',
-          gap: '1.5rem',
-          textAlign: 'left',
-          background: 'rgba(39, 39, 42, 0.5)',
-          padding: '2rem',
-          borderRadius: '1rem',
-          border: '1px solid rgba(63, 63, 70, 0.8)',
-          backdropFilter: 'blur(20px)',
-          position: 'relative',
-          zIndex: 1
-        }}
-      >
-        {/* STEP 1 – Basic profile */}
-        <div>
-          <h3 style={{
-            fontSize: '1.125rem',
-            fontWeight: '600',
-            marginBottom: '0.5rem',
-            color: '#dc2626'
-          }}>
-            Step 1 – Basic Profile
-          </h3>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Display name</label>
-              <input
-                type="text"
-                placeholder="What should we call you?"
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  borderRadius: '0.5rem',
                   background: 'rgba(31, 41, 55, 0.8)',
                   color: '#ffffff',
                   border: '1px solid rgba(75, 85, 99, 0.5)',
@@ -621,6 +444,21 @@ export const SignupPage = () => {
         >
           {loading ? "Creating account..." : "Create account"}
         </button>
+
+        <div
+          style={{
+            marginTop: "0.75rem",
+            fontSize: "0.75rem",
+            color: "rgba(148,163,184,0.9)",
+            textAlign: "left",
+          }}
+        >
+          <div style={{ fontWeight: 500, marginBottom: "0.15rem" }}>Next steps:</div>
+          <div>
+            After creating your account, head to Settings to review your stream preferences and add any stream keys you
+            plan to use. You can start a stream right away, or set things up first0 it's up to you.
+          </div>
+        </div>
       </form>
 
       {showTermsModal && (
