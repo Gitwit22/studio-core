@@ -563,7 +563,36 @@ router.post("/:roomId/participants/:identity/permissions", requireAuth as any, r
           roleId: presetId,
         });
 
-        await roomService.updateParticipant(livekitRoomName, rawIdentity, { permission });
+        // Merge rolePresetId into existing metadata so host/moderator
+        // UIs can render a stable role label and dropdown value.
+        let nextMetadata: string | undefined;
+        try {
+          const listResp = await (roomService as any).listParticipants(livekitRoomName);
+          const participants: any[] = Array.isArray((listResp as any)?.participants)
+            ? (listResp as any).participants
+            : Array.isArray(listResp)
+            ? (listResp as any)
+            : [];
+          const target = participants.find((p) => p && p.identity === rawIdentity);
+          const existingMetaRaw = target?.metadata as string | undefined;
+          let existingMeta: any = {};
+          if (existingMetaRaw && typeof existingMetaRaw === "string") {
+            try {
+              existingMeta = JSON.parse(existingMetaRaw) || {};
+            } catch {
+              existingMeta = {};
+            }
+          }
+          const mergedMeta = { ...existingMeta, rolePresetId: presetId };
+          nextMetadata = JSON.stringify(mergedMeta);
+        } catch {
+          nextMetadata = JSON.stringify({ rolePresetId: presetId });
+        }
+
+        await roomService.updateParticipant(livekitRoomName, rawIdentity, {
+          permission,
+          metadata: nextMetadata,
+        });
         appliedPermission = permission;
         livekitApplied = true;
         livekitReason = null;

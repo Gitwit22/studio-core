@@ -901,6 +901,7 @@ function RoomPage() {
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
   const [participantIdentity, setParticipantIdentity] = useState<string | null>(null);
+  const [controlsRolePresetId, setControlsRolePresetId] = useState<EffectiveControls["rolePresetId"] | null>(null);
   const [, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
     const [effectivePermissionsMode, setEffectivePermissionsMode] = useState<"simple" | "advanced">("simple");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
@@ -1021,6 +1022,8 @@ function RoomPage() {
           canStartStopRecording: typeof data?.canStartStopRecording === "boolean" ? data.canStartStopRecording : false,
           rolePresetId: nextRole,
         });
+
+        setControlsRolePresetId(nextRole ?? "participant");
       } catch {
         // ignore
       }
@@ -2829,9 +2832,9 @@ function RoomPage() {
           dashboardRole={
             isHost
               ? "host"
-              : effectiveControls.rolePresetId === "cohost" || userRole === "cohost"
-              ? "host"
-              : effectiveControls.rolePresetId === "moderator" || userRole === "moderator"
+              : controlsRolePresetId === "moderator"
+              ? "moderator"
+              : controlsRolePresetId === "cohost"
               ? "moderator"
               : "participant"
           }

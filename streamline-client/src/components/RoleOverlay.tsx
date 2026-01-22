@@ -174,7 +174,6 @@ function HostPanel({
   const [roleToast, setRoleToast] = React.useState<string | null>(null);
   const roleToastTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [roleByIdentity, setRoleByIdentity] = React.useState<Record<string, RolePresetId>>({});
-  const [roleOverrides, setRoleOverrides] = React.useState<Record<string, RolePresetId>>({});
   const [roleStatus, setRoleStatus] = React.useState<Record<string, "saving" | "saved">>({});
 
   // Load initial muteLock state for this room
@@ -235,14 +234,18 @@ function HostPanel({
   const handleChangeRole = async (identity: string, presetId: RolePresetId) => {
     if (!roomId || !roomAccessToken) return;
 
-    setRoleOverrides((prev) => ({ ...prev, [identity]: presetId }));
     setRoleStatus((prev) => ({ ...prev, [identity]: "saving" }));
 
     try {
-      await apiSetRole(roomId, roomAccessToken, identity, presetId);
-      setRoleStatus((prev) => ({ ...prev, [identity]: "saved" }));
+      const result = await apiSetRole(roomId, roomAccessToken, identity, presetId);
 
-      setRoleByIdentity((prev) => ({ ...prev, [identity]: presetId }));
+      const nextRole =
+        result && result.roleId && (result.roleId === "participant" || result.roleId === "cohost" || result.roleId === "moderator")
+          ? (result.roleId as RolePresetId)
+          : presetId;
+
+      setRoleByIdentity((prev) => ({ ...prev, [identity]: nextRole }));
+      setRoleStatus((prev) => ({ ...prev, [identity]: "saved" }));
 
       // Show a small global toast inside the dashboard for extra feedback.
       setRoleToast("Role updated");
@@ -264,21 +267,9 @@ function HostPanel({
           return next;
         });
       }, 1500);
-
-      // Clear any optimistic override so we don't mask SSE/metadata updates.
-      setRoleOverrides((prev) => {
-        const next = { ...prev };
-        delete next[identity];
-        return next;
-      });
     } catch (e: any) {
       console.error("role change failed", e);
       alert(e?.message || "Role change failed");
-      setRoleOverrides((prev) => {
-        const next = { ...prev };
-        delete next[identity];
-        return next;
-      });
       setRoleStatus((prev) => {
         const next = { ...prev };
         delete next[identity];
@@ -344,7 +335,7 @@ function HostPanel({
           canRemoveGuests={canRemoveGuests}
           canChangeRoles={!!advancedRolesEnabled && !!roomId && !!roomAccessToken}
           onChangeRole={handleChangeRole}
-          roleOverrides={roleOverrides}
+          roleByIdentity={roleByIdentity}
           roleStatus={roleStatus}
         />
 
@@ -528,7 +519,7 @@ function ParticipantList({
   canRemoveGuests,
   canChangeRoles,
   onChangeRole,
-  roleOverrides,
+  roleByIdentity,
   roleStatus,
 }: {
   participants: ReturnType<typeof useParticipants>;
@@ -541,7 +532,7 @@ function ParticipantList({
   canRemoveGuests?: boolean;
   canChangeRoles?: boolean;
   onChangeRole?: (identity: string, presetId: RolePresetId) => void;
-  roleOverrides?: Record<string, RolePresetId>;
+  roleByIdentity?: Record<string, RolePresetId>;
   roleStatus?: Record<string, "saving" | "saved">;
 }) {
   if (!participants?.length) {
@@ -552,9 +543,9 @@ function ParticipantList({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
       {participants.map((p) => (
         (() => {
+          const stableRole = roleByIdentity && roleByIdentity[p.identity];
           const metaRole = (p as any)?.metadata?.rolePresetId as RolePresetId | undefined;
-          const overrideRole = roleOverrides && roleOverrides[p.identity];
-          const currentRole: RolePresetId = metaRole || overrideRole || "participant";
+          const currentRole: RolePresetId = (stableRole || metaRole || "participant") as RolePresetId;
 
           return (
         <div
@@ -575,15 +566,6 @@ function ParticipantList({
             <div style={{ opacity: 0.6, fontSize: '0.75rem', wordBreak: 'break-all', color: 'rgba(255, 255, 255, 0.6)' }}>
               {p.identity}
             </div>
-            {(() => {
-              const effectiveRole = metaRole || overrideRole;
-              if (!effectiveRole) return null;
-              return (
-                <div style={{ marginTop: '0.15rem', fontSize: '0.7rem', color: 'rgba(129, 140, 248, 0.9)' }}>
-                  Role: {effectiveRole === 'cohost' ? 'Co-host' : effectiveRole === 'moderator' ? 'Moderator' : 'Participant'}
-                </div>
-              );
-            })()}
           </div>
           {canModerate && (
             <div
@@ -802,7 +784,7 @@ async function apiSetRole(
   roomAccessToken: string,
   identity: string,
   role: RolePresetId,
-) {
+): Promise<{ roleId?: string } | null> {
   const res = await fetch(
     `${API_BASE}/api/rooms/${encodeURIComponent(
       roomId,
@@ -823,4 +805,10 @@ async function apiSetRole(
     console.error("set-role failed", { status: res.status, data });
     throw new Error(((data as any) && (data as any).error) || `Role change failed (HTTP ${res.status})`);
   }
+
+  if (data && typeof (data as any).roleId === "string") {
+    return { roleId: (data as any).roleId as string };
+  }
+
+  return null;
 }
