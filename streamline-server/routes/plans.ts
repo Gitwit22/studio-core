@@ -8,11 +8,6 @@ const router = Router();
 
 router.get("/", async (_req, res) => {
   try {
-    const advFlagSnap = await firestore.collection("featureFlags").doc("advancedPermissions").get();
-    const advFlagData = advFlagSnap.exists ? (advFlagSnap.data() as any) || {} : {};
-    // Default to enabled if missing.
-    const advancedPermissionsGloballyEnabled = advFlagData.enabled === undefined ? true : !!advFlagData.enabled;
-
     const snap = await firestore.collection("plans").get();
     const mapped = snap.docs.map((d) => {
       const data = (d.data() as any) || {};
@@ -60,7 +55,9 @@ router.get("/", async (_req, res) => {
           recording: !!plan.features.recording,
           rtmp: !!plan.features.rtmp,
           multistream: !!plan.features.multistream,
-          advancedPermissions: advancedPermissionsGloballyEnabled ? !!plan.features.advancedPermissions : false,
+          // Advanced permissions have been removed; all accounts use
+          // the simple Participant/Co-host model.
+          advancedPermissions: false,
         },
         editing: {
           access: !!data.editing?.access,
