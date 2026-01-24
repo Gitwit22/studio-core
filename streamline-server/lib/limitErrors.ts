@@ -8,3 +8,4 @@ export const LIMIT_ERRORS = {
 } as const;
 
 export type LimitErrorCode = typeof LIMIT_ERRORS[keyof typeof LIMIT_ERRORS];
+3
