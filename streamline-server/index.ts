@@ -39,6 +39,7 @@ import publicRoomsHlsConfigRoutes from "./routes/publicRoomsHlsConfig";
 import { sanitizeDisplayName } from "./lib/sanitizeDisplayName";
 import { resolveRoomIdentity } from "./lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "./lib/rolePermissions";
+import { PERMISSION_ERRORS } from "./lib/permissionErrors";
 import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "./middleware/roomAccessToken";
 
 
@@ -238,7 +239,7 @@ async function assertEffectiveRoomControl(
   const access = ctx.roomAccess as RoomAccessClaims | undefined;
 
   if (!access || !access.roomId) {
-    throw new RoomPermissionError(401, "room_token_required");
+    throw new RoomPermissionError(401, PERMISSION_ERRORS.UNAUTHORIZED);
   }
   if (access.roomId !== trimmedRoomId) {
     throw new RoomPermissionError(403, "room_mismatch");
@@ -257,7 +258,7 @@ async function assertEffectiveRoomControl(
   // Updated policy: only hosts can use roomModeration endpoints.
   // Non-hosts are blocked here regardless of controls docs.
   if (!roleOk) {
-    throw new RoomPermissionError(403, "insufficient_role");
+    throw new RoomPermissionError(403, PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS);
   }
 }
 
