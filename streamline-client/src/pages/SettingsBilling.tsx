@@ -226,6 +226,7 @@ export default function SettingsBilling() {
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
   const [platformTranscodeEnabled, setPlatformTranscodeEnabled] = useState<boolean>(true);
   const [platformHlsSettingsTabEnabled, setPlatformHlsSettingsTabEnabled] = useState<boolean>(true);
+  const [platformRecordingEnabled, setPlatformRecordingEnabled] = useState<boolean>(true);
 
   const [mediaPrefs, setMediaPrefs] = useState<typeof DEFAULT_MEDIA_PREFS>(DEFAULT_MEDIA_PREFS);
   const [presetOptions, setPresetOptions] = useState<Array<{ id: string; label: string }>>([]);
@@ -382,6 +383,7 @@ export default function SettingsBilling() {
       const res = await fetch(`${API_BASE}/api/plans`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
+        console.log("[SettingsBilling] /api/plans response:", data);
         if (Array.isArray(data.plans) && data.plans.length) {
           // Only use plans with visibility: 'public' (backend should already filter, but double-check)
           const visiblePlans = data.plans.filter((p: any) => p.visibility === "public");
@@ -415,6 +417,12 @@ export default function SettingsBilling() {
           setPlatformTranscodeEnabled(true);
         }
 
+        if (typeof platformFlags.recordingEnabled === "boolean") {
+          setPlatformRecordingEnabled(platformFlags.recordingEnabled);
+        } else {
+          setPlatformRecordingEnabled(true);
+        }
+
         // Settings gate: default to visible unless explicitly disabled.
         // Prefer platformFlags.hlsSettingsTab, fall back to platformFlags.hlsEnabled.
         const hlsTabFlag =
@@ -428,6 +436,7 @@ export default function SettingsBilling() {
         setPlatformHlsEnabled(true);
         setPlatformHlsSettingsTabEnabled(true);
         setPlatformTranscodeEnabled(true);
+        setPlatformRecordingEnabled(true);
       }
 
       // Capture Terms of Service metadata for display and gating.
@@ -1755,8 +1764,24 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             {/* ================================================================ */}
             {/* SECTION 4: PLAN COMPARISON */}
             {/* ================================================================ */}
+
             <div style={S.card}>
-              <h2 style={S.cardTitle}>📊 Compare Plans</h2>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <h2 style={S.cardTitle}>📊 Compare Plans</h2>
+                <a
+                  href="/pricing/explainer"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: "#60a5fa",
+                    fontSize: 13,
+                    textDecoration: "underline",
+                    fontWeight: 500,
+                  }}
+                >
+                  Click here to get an explanation of our pricing
+                </a>
+              </div>
 
               <div style={S.plansGrid}>
                 {plans.map((plan) => {
@@ -1804,14 +1829,21 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         )}
                       </div>
                       <ul style={S.featureList}>
-                        <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
+                        <FeatureRow label="In-Room Minutes" value={plan.limits.monthlyMinutesIncluded} />
+                        <FeatureRow label="Streaming Minutes" value={
+                          plan.limits.transcodeMinutes > 0
+                            ? plan.limits.transcodeMinutes
+                            : "Not included"
+                        } />
                         <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
                         <FeatureRow label="Stream destinations" value={plan.limits.rtmpDestinationsMax} />
-                        {entitlements.recording && (
+                        {platformRecordingEnabled && (
                           <FeatureRow label="Recording" value={plan.features.recording} />
                         )}
                         <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
-                        {platformHlsEnabled ? <FeatureRow label="HLS Broadcast Page" value={(plan as any).features?.canHls} /> : null}
+                        {platformHlsEnabled && (
+                          <FeatureRow label="HLS Broadcast Page" value={platformHlsEnabled ? "Enabled" : ((plan as any).features?.canHls)} />
+                        )}
                         {/* Advanced Permissions is now removed from plan marketing UI; all accounts use simple Participant/Co-host defaults. */}
                         {plan.editing?.access && (
                           <>
@@ -1820,6 +1852,10 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           </>
                         )}
                       </ul>
+                                        {/* Streaming Minutes explanation note */}
+                                        <div style={{ color: "#94a3b8", fontSize: 12, margin: "8px 0 0 0" }}>
+                                          <span style={{ color: "#60a5fa" }}>Streaming Minutes</span> are used when broadcasting outside StreamLine and are counted per destination.
+                                        </div>
                       <div style={S.planCardAction}>
                         {isTestMode ? (
                           isCurrent ? (

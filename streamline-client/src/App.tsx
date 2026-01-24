@@ -1,3 +1,4 @@
+import PricingExplainerPage from "./pages/PricingExplainerPage";
 import { Routes, Route } from "react-router-dom";
 import AdminUsage from './pages/AdminUsage';
 import AdminDashboard from './pages/AdminDashboard';
@@ -89,6 +90,7 @@ function App() {
 
       {/* Stripe/Billing routes */}
       <Route path="/settings/billing" element={<SettingsBilling />} />
+      <Route path="/pricing/explainer" element={<PricingExplainerPage />} />
       
     </Routes>
   );
