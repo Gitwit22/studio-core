@@ -1819,7 +1819,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       <div style={S.planCardHeader}>
                         <h3 style={{ ...S.planCardName, color }}>{plan.name}</h3>
                         <div style={S.planCardPrice}>
-                          <span style={S.planCardAmount}>${plan.price}</span>
+                          <span style={S.planCardAmount}>${plan.priceMonthly ?? plan.price}</span>
                           <span style={S.planCardPeriod}>/mo</span>
                         </div>
                         {plan.description && (

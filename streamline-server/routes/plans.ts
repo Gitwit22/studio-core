@@ -45,6 +45,7 @@ router.get("/", async (_req, res) => {
         billable: id === "free" ? true : (priceNumber > 0 && hasStripePrice),
         limits: {
           monthlyMinutesIncluded: plan.limits.monthlyMinutes,
+          transcodeMinutes: plan.limits.transcodeMinutes ?? data.limits?.transcodeMinutes ?? data.transcodeMinutes ?? data.minutes ?? 0,
           maxGuests: plan.limits.maxGuests,
           rtmpDestinationsMax: plan.limits.rtmpDestinationsMax,
           maxSessionMinutes: plan.limits.maxSessionMinutes,
