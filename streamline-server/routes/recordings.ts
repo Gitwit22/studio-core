@@ -24,6 +24,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "../middleware/roomAccessToken";
 import { canAccessFeature } from "./featureAccess";
 import { clampRecordingPreset, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
+import { LIMIT_ERRORS } from "../lib/limitErrors";
 import { Timestamp } from "firebase-admin/firestore";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import type { DocumentSnapshot } from "firebase-admin/firestore";
@@ -346,7 +347,8 @@ async function stopRecordingInternal(options: {
   }
 
   if (enforceOwnership && ownerUid && ownerUid !== uid) {
-    throw new Error("forbidden");
+    // Use canonical error code for forbidden/ownership
+    throw new Error(LIMIT_ERRORS.FEATURE_NOT_ENTITLED);
   }
 
   const now = new Date();
@@ -580,7 +582,8 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
     if (!featureAccess.allowed) {
       return res.status(403).json({
         success: false,
-        error: featureAccess.reason || "Recording requires upgrade",
+        error: LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
+        reason: featureAccess.reason || "Recording requires upgrade",
       });
     }
 

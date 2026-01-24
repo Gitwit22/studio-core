@@ -19,6 +19,7 @@ async function handleUsageSummary(req: any, res: any) {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) {
+      // Unauthorized is not a limit error, leave as is
       return res.status(401).json({ success: false, error: "unauthorized" });
     }
 
@@ -27,6 +28,7 @@ async function handleUsageSummary(req: any, res: any) {
     const userSnap = await userRef.get();
 
     if (!userSnap.exists) {
+      // Not a limit error, leave as is
       return res.status(404).json({ success: false, error: "user not found" });
     }
 

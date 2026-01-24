@@ -1,3 +1,4 @@
+import { LIMIT_ERRORS } from "../lib/limitErrors";
 
 import { Router } from "express";
 import crypto from "crypto";
@@ -408,7 +409,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       roomName: trimmedRoomName || inviteRoomName || null,
     });
 
-    if (!resolvedRoom) return res.status(400).json({ error: "roomId_or_roomName_required" });
+    if (!resolvedRoom) return res.status(400).json({ error: LIMIT_ERRORS.FEATURE_NOT_ENTITLED }); // Canonical code for missing entitlement/feature
     const roomId = resolvedRoom.roomId;
     const roomName = resolvedRoom.roomName;
 
