@@ -4,7 +4,6 @@ import { firestore } from "../firebaseAdmin";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { requireAuth } from "../middleware/requireAuth";
 import type { DestinationStatus, DestinationStatusReason, ApiErrorCode, DestinationItem, DestinationsGetResponse, DestinationPostResponse, ValidateRequestBody, ValidateResponse } from "../types/streaming";
-import { LIMIT_ERRORS } from "../lib/limitErrors";
 import { decryptStreamKey, encryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
 
 const router = Router();
@@ -133,7 +132,7 @@ router.post("/", requireAuth, async (req: any, res) => {
     const enabledCount = await getEnabledCount(uid);
     const willBeEnabled = enabled === false ? false : true;
     if (willBeEnabled && planLimit !== undefined && planLimit > 0 && enabledCount >= planLimit) {
-      return res.status(409).json({ error: LIMIT_ERRORS.LIMIT_EXCEEDED as ApiErrorCode });
+      return res.status(409).json({ error: "limit_exceeded" as ApiErrorCode });
     }
 
     // Resolve encrypted key: prefer freshly provided plaintext (server-encrypted),
@@ -349,7 +348,7 @@ router.put("/:id", requireAuth, async (req: any, res) => {
     const currentEnabled = !!current.enabled;
     const nextEnabled = typeof updates.enabled === "boolean" ? !!updates.enabled : currentEnabled;
     if (!currentEnabled && nextEnabled && planLimit !== undefined && planLimit > 0 && enabledCount >= planLimit) {
-      return res.status(409).json({ error: LIMIT_ERRORS.LIMIT_EXCEEDED as ApiErrorCode });
+      return res.status(409).json({ error: "limit_exceeded" as ApiErrorCode });
     }
 
     const docData: any = {

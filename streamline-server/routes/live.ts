@@ -3,7 +3,6 @@ import { firestore } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { canAccessFeature } from "./featureAccess";
 import type { DestinationStatus, DestinationStatusReason, ApiErrorCode } from "../types/streaming";
-import { LIMIT_ERRORS } from "../lib/limitErrors";
 import { decryptStreamKey } from "../lib/crypto";
 
 const router = Router();
@@ -26,7 +25,7 @@ router.post("/preflight", requireAuth, async (req: any, res) => {
 
     const access = await canAccessFeature((req as any).account || uid, "multistream");
     if (!access.allowed) {
-      return res.status(403).json({ error: LIMIT_ERRORS.LIMIT_EXCEEDED as ApiErrorCode, details: access.reason || "Feature not available" });
+      return res.status(403).json({ error: "limit_exceeded" as ApiErrorCode, details: access.reason || "Feature not available" });
     }
 
     const destinationIds: string[] = Array.isArray(req.body?.destinationIds) ? req.body.destinationIds.map((s: any) => String(s)) : [];

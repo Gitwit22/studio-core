@@ -25,6 +25,7 @@ import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "..
 import { canAccessFeature } from "./featureAccess";
 import { clampRecordingPreset, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { LIMIT_ERRORS } from "../lib/limitErrors";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { Timestamp } from "firebase-admin/firestore";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import type { DocumentSnapshot } from "firebase-admin/firestore";
@@ -1426,7 +1427,7 @@ router.get("/:id/storage-check", requireAuth, async (req, res) => {
 
     const data = snap.data() || {};
     if (data.userId && data.userId !== uid) {
-      return res.status(403).json({ error: "Forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const objectKey = data.objectKey || data.downloadPath;
@@ -1622,7 +1623,7 @@ router.get("/:id/download", requireAuth, async (req, res) => {
 
     const data = snap.data() || {};
     if (data.userId && data.userId !== uid) {
-      return res.status(403).send("Forbidden");
+      return res.status(403).send(PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS);
     }
 
     // Redirect to download-link endpoint for proper signed URL

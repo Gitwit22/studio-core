@@ -1,3 +1,4 @@
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { Router, Request, Response } from "express";
 import { firestore as db } from "../firebaseAdmin";
 import jwt from "jsonwebtoken";
@@ -256,7 +257,7 @@ router.get("/assets/:id", authenticateToken, async (req: Request, res: Response)
 
     // Verify ownership
     if (data?.userId !== userId) {
-      return res.status(403).json({ error: "Forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.FORBIDDEN });
     }
 
     const asset = {
