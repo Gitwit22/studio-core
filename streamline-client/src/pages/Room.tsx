@@ -3,8 +3,9 @@ import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiStartRecording, apiStopRecording, apiFetch, apiFetchAuth, getAuthToken, clearAuthStorage } from "../lib/api";
-import { LiveKitRoom, VideoConference } from "@livekit/components-react";
+import { LiveKitRoom, VideoConference, useLocalParticipant, useRoomContext } from "@livekit/components-react";
 import "@livekit/components-styles";
+import { Track } from "livekit-client";
 import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
 import StreamSetupModalV2 from "../components/StreamSetupModal";
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -15,6 +16,460 @@ import { APP_BASE } from "../lib/appBase";
 import { normalizeUiRolePresetId } from "../lib/roles";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
+
+type MicReconnectErrorCode =
+  | "NotAllowedError"
+  | "NotFoundError"
+  | "NotReadableError"
+  | "OverconstrainedError"
+  | "unknown";
+
+function mapMicReconnectError(err: any): { code: MicReconnectErrorCode; message: string } {
+  const name = String(err?.name || "");
+  const code =
+    name === "NotAllowedError" || name === "NotFoundError" || name === "NotReadableError" || name === "OverconstrainedError"
+      ? (name as MicReconnectErrorCode)
+      : ("unknown" as const);
+
+  if (code === "NotAllowedError") {
+    return {
+      code,
+      message: "Microphone permission was denied. Allow mic access in your browser settings, then click Reconnect mic.",
+    };
+  }
+  if (code === "NotFoundError") {
+    return {
+      code,
+      message: "No microphone found. Plug in a mic (or select a different one), then click Reconnect mic.",
+    };
+  }
+  if (code === "OverconstrainedError") {
+    return {
+      code,
+      message: "That microphone/device constraint isn’t available. Choose a different mic and retry.",
+    };
+  }
+  if (code === "NotReadableError") {
+    return {
+      code,
+      message:
+        "Mic busy or unavailable (another app may be using it). Close Zoom/Teams/Discord, then click Reconnect mic.",
+    };
+  }
+
+  return {
+    code,
+    message: "We lost access to your microphone. Click Reconnect mic.",
+  };
+}
+
+function MicRecoveryOverlay({
+  enabled,
+  allowPublishAudio,
+}: {
+  enabled: boolean;
+  allowPublishAudio: boolean;
+}) {
+  const room = useRoomContext();
+  const { isMicrophoneEnabled, microphoneTrack } = useLocalParticipant();
+
+  const [banner, setBanner] = useState<null | { title: string; message: string; showReconnect: boolean }>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [devices, setDevices] = useState<Array<{ deviceId: string; label: string }>>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+  const lastDevicePromptAtRef = useRef<number>(0);
+  const missingTrackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const listAudioInputs = async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return all
+      .filter((d) => d.kind === "audioinput")
+      .map((d) => ({ deviceId: d.deviceId, label: d.label || "Microphone" }));
+  };
+
+  const openPicker = async () => {
+    try {
+      const list = await listAudioInputs();
+      setDevices(list);
+      if (!selectedDeviceId && list[0]?.deviceId) setSelectedDeviceId(list[0].deviceId);
+      setPickerOpen(true);
+    } catch {
+      setPickerOpen(true);
+    }
+  };
+
+  const hardStopExistingMicTracks = async () => {
+    try {
+      const pubs = Array.from(room?.localParticipant?.audioTrackPublications?.values?.() || []);
+      const micPubs = pubs.filter((p: any) => p?.source === Track.Source.Microphone);
+      for (const pub of micPubs) {
+        const t: any = pub?.track;
+        try {
+          if (t && room?.localParticipant?.unpublishTrack) {
+            // stopOnUnpublish = true (best-effort)
+            await room.localParticipant.unpublishTrack(t, true as any);
+          }
+        } catch {
+          // ignore
+        }
+        try {
+          if (t?.stop) t.stop();
+        } catch {
+          // ignore
+        }
+        try {
+          const mst = t?.mediaStreamTrack;
+          if (mst?.stop) mst.stop();
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const reconnectMic = async (opts?: { deviceId?: string }) => {
+    if (!enabled) return;
+    if (!room?.localParticipant) return;
+    setReconnecting(true);
+
+    try {
+      // Ensure any existing track is fully released.
+      await room.localParticipant.setMicrophoneEnabled(false);
+      await hardStopExistingMicTracks();
+
+      // Wait a beat for OS/browser to release the device.
+      await new Promise((r) => setTimeout(r, 200));
+
+      // If the user chose a mic, try switching first.
+      if (opts?.deviceId && room.switchActiveDevice) {
+        try {
+          await room.switchActiveDevice("audioinput", opts.deviceId);
+        } catch {
+          // ignore: we will still try to enable mic
+        }
+      }
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      setBanner(null);
+      setPickerOpen(false);
+    } catch (err: any) {
+      const mapped = mapMicReconnectError(err);
+      setBanner({ title: "Microphone issue", message: mapped.message, showReconnect: true });
+      if (mapped.code === "NotFoundError" || mapped.code === "OverconstrainedError") {
+        await openPicker();
+      }
+    } finally {
+      setReconnecting(false);
+    }
+  };
+
+  // Detect obvious dead mic conditions (ended/muted track, missing track while "enabled").
+  useEffect(() => {
+    if (!enabled) return;
+
+    if (!isMicrophoneEnabled) {
+      setBanner(null);
+      if (missingTrackTimerRef.current) {
+        clearTimeout(missingTrackTimerRef.current);
+        missingTrackTimerRef.current = null;
+      }
+      return;
+    }
+
+    // If mic is enabled but there is no underlying MediaStreamTrack yet, debounce a warning.
+    const mst: MediaStreamTrack | undefined = (microphoneTrack as any)?.mediaStreamTrack;
+    if (!mst) {
+      if (!missingTrackTimerRef.current) {
+        missingTrackTimerRef.current = setTimeout(() => {
+          setBanner({
+            title: "Microphone issue",
+            message: "Your mic looks enabled, but StreamLine isn’t receiving audio. Click Reconnect mic.",
+            showReconnect: true,
+          });
+        }, 3500);
+      }
+      return;
+    }
+
+    if (missingTrackTimerRef.current) {
+      clearTimeout(missingTrackTimerRef.current);
+      missingTrackTimerRef.current = null;
+    }
+
+    const checkEnded = () => {
+      if (mst.readyState === "ended" || (mst as any).muted === true) {
+        setBanner({
+          title: "Microphone issue",
+          message: "We lost access to your microphone. Click Reconnect mic.",
+          showReconnect: true,
+        });
+      }
+    };
+    checkEnded();
+
+    const onEnded = () => checkEnded();
+    const onMute = () => checkEnded();
+
+    try {
+      mst.addEventListener("ended", onEnded);
+      mst.addEventListener("mute", onMute);
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      try {
+        mst.removeEventListener("ended", onEnded);
+        mst.removeEventListener("mute", onMute);
+      } catch {
+        // ignore
+      }
+    };
+  }, [enabled, isMicrophoneEnabled, microphoneTrack]);
+
+  // Handle device changes (MVP: prompt once per ~10s while mic enabled).
+  useEffect(() => {
+    if (!enabled) return;
+    if (!navigator.mediaDevices?.addEventListener) return;
+
+    const onDeviceChange = async () => {
+      if (!isMicrophoneEnabled) return;
+      const now = Date.now();
+      if (now - lastDevicePromptAtRef.current < 10_000) return;
+      lastDevicePromptAtRef.current = now;
+
+      setBanner({
+        title: "Microphone changed",
+        message: "Your microphone list changed. If your audio stopped, click Reconnect mic.",
+        showReconnect: true,
+      });
+
+      // Refresh device list for the picker.
+      try {
+        const list = await listAudioInputs();
+        setDevices(list);
+        if (!selectedDeviceId && list[0]?.deviceId) setSelectedDeviceId(list[0].deviceId);
+      } catch {
+        // ignore
+      }
+    };
+
+    navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
+    };
+  }, [enabled, isMicrophoneEnabled, selectedDeviceId]);
+
+  if (!enabled) return null;
+
+  const showReconnectButton = isMicrophoneEnabled && allowPublishAudio;
+  const showBanner = !!banner && allowPublishAudio;
+
+  return (
+    <>
+      {showReconnectButton && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 84,
+            left: 16,
+            zIndex: 30,
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <button
+            onClick={() => reconnectMic()}
+            disabled={reconnecting}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: reconnecting ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.9)",
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: reconnecting ? "not-allowed" : "pointer",
+            }}
+            title="Stops and re-acquires your microphone"
+          >
+            {reconnecting ? "Reconnecting…" : "Reconnect mic"}
+          </button>
+
+          <button
+            onClick={() => openPicker()}
+            disabled={reconnecting}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(0,0,0,0.4)",
+              color: "rgba(255,255,255,0.9)",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: reconnecting ? "not-allowed" : "pointer",
+            }}
+          >
+            Choose mic
+          </button>
+        </div>
+      )}
+
+      {showBanner && (
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 40,
+            maxWidth: 720,
+            width: "calc(100% - 24px)",
+            padding: "10px 12px",
+            borderRadius: 12,
+            background: "rgba(17, 24, 39, 0.92)",
+            border: "1px solid rgba(248, 113, 113, 0.55)",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: 12, lineHeight: 1.35 }}>
+            <div style={{ fontWeight: 800, marginBottom: 2 }}>{banner.title}</div>
+            <div style={{ color: "rgba(255,255,255,0.85)" }}>{banner.message}</div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={() => reconnectMic()}
+              disabled={reconnecting}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(220,38,38,0.25)",
+                color: "#fff",
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: reconnecting ? "not-allowed" : "pointer",
+              }}
+            >
+              {reconnecting ? "Reconnecting…" : "Reconnect mic"}
+            </button>
+            <button
+              onClick={() => openPicker()}
+              disabled={reconnecting}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(0,0,0,0.35)",
+                color: "rgba(255,255,255,0.9)",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: reconnecting ? "not-allowed" : "pointer",
+              }}
+            >
+              Choose mic
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pickerOpen && allowPublishAudio && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 60,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={() => setPickerOpen(false)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              borderRadius: 14,
+              background: "rgba(17,24,39,0.96)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              padding: 14,
+              color: "#fff",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Choose a microphone</div>
+            <select
+              value={selectedDeviceId}
+              onChange={(e) => setSelectedDeviceId(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(0,0,0,0.35)",
+                color: "#fff",
+                fontSize: 12,
+              }}
+            >
+              {devices.length === 0 && <option value="">(No devices found)</option>}
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+              <button
+                onClick={() => setPickerOpen(false)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.9)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => reconnectMic({ deviceId: selectedDeviceId || undefined })}
+                disabled={reconnecting}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "rgba(59,130,246,0.25)",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: reconnecting ? "not-allowed" : "pointer",
+                }}
+              >
+                {reconnecting ? "Reconnecting…" : "Use this mic & reconnect"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 type StreamStatus = "idle" | "starting" | "live" | "stopping";
@@ -604,6 +1059,7 @@ function LiveKitShell({
       }}
     >
       <div style={{ width: "100%", height: "100%", position: "relative" }}>
+        <MicRecoveryOverlay enabled={!isViewer} allowPublishAudio={controlsAllowPublishAudio} />
         {isHost && !isViewer && (
           <div
             style={{
@@ -3144,6 +3600,7 @@ function RoomPage() {
         .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_mic"],
         .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_camera"],
         .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_screen_share"],
+        .sl-layout.sl-viewer .lk-control-bar [data-lk-button="start_audio"],
         .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Microphone"],
         .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Camera"],
         .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Screen"] {
