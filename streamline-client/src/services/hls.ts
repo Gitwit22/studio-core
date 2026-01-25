@@ -1,4 +1,5 @@
 import { API_BASE } from "../lib/apiBase";
+import { apiFetchAuth } from "../lib/api";
 
 export type HlsStatus = "idle" | "starting" | "live" | "error" | string;
 
@@ -58,7 +59,7 @@ export async function stopHls(roomId: string, roomAccessToken?: string) {
 export async function getHlsStatus(roomId: string, roomAccessToken?: string) {
   const url = `${API_BASE}/api/hls/status/${encodeURIComponent(roomId)}`;
   const headers = roomAccessToken ? { "x-room-access-token": roomAccessToken } : undefined;
-  const res = await fetch(url, { headers, credentials: "include" });
+  const res = await apiFetchAuth(url, { headers }, { allowNonOk: true });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`status_failed_${res.status}:${text}`);

@@ -587,7 +587,7 @@ export default function SettingsBilling() {
   const loadMediaPrefs = async () => {
     try {
       const [presetsRes, me] = await Promise.all([
-        fetch(`${API_BASE}/api/account/presets`, { credentials: "include" }),
+        apiFetchAuth(`${API_BASE}/api/account/presets`, {}, { allowNonOk: true }),
         getMeCached(),
       ]);
 

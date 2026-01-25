@@ -1552,7 +1552,7 @@ function RoomPage() {
     (async () => {
       try {
         const [presetsRes, meRes] = await Promise.all([
-          apiFetch("/api/account/presets"),
+          apiFetchAuth("/api/account/presets"),
           apiFetchAuth("/api/account/me"),
         ]);
 
