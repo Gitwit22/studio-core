@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../lib/api";
 
 interface UsageData {
   userId: string;
@@ -68,7 +69,7 @@ export default function AdminUsage() {
         usageUrl.searchParams.append("plan", selectedPlan);
       }
 
-      const usageRes = await fetch(usageUrl.toString());
+      const usageRes = await apiFetch(usageUrl.toString(), {}, { allowNonOk: true });
       
       if (usageRes.status === 403) {
         setError("Access denied. Admin privileges required.");
@@ -87,7 +88,7 @@ export default function AdminUsage() {
       const statsUrl = new URL(`${API_BASE}/api/admin/stats`);
       statsUrl.searchParams.append("adminUserId", adminUserId);
 
-      const statsRes = await fetch(statsUrl.toString());
+      const statsRes = await apiFetch(statsUrl.toString(), {}, { allowNonOk: true });
       if (statsRes.ok) {
         const statsJson = await statsRes.json();
         setStats(statsJson);
@@ -105,7 +106,7 @@ export default function AdminUsage() {
     if (!selectedUser || !minutesToGrant) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${selectedUser.userId}/grant-minutes`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users/${selectedUser.userId}/grant-minutes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -133,7 +134,7 @@ export default function AdminUsage() {
     if (!selectedUser) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${selectedUser.userId}/change-plan`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users/${selectedUser.userId}/change-plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -160,7 +161,7 @@ export default function AdminUsage() {
     const newState = !user.isBlocked; // Simplified for this example
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${user.userId}/toggle-billing`, {
+      const res = await apiFetch(`${API_BASE}/api/admin/users/${user.userId}/toggle-billing`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

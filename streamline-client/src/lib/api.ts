@@ -52,11 +52,6 @@ function looksLikeJwt(token: string): boolean {
  * and will be used as-is.
  */
 export async function apiFetch(path: string, init: RequestInit = {}, options?: { allowNonOk?: boolean }) {
-  let token = getAuthToken();
-  if (token && !looksLikeJwt(token)) {
-    clearAuthToken();
-    token = null;
-  }
   const headers = new Headers(init.headers || {});
 
   // Default JSON content-type when sending a body unless overridden.
@@ -64,12 +59,9 @@ export async function apiFetch(path: string, init: RequestInit = {}, options?: {
     headers.set("Content-Type", "application/json");
   }
 
-  // Header-based auth fallback: prefer explicit Authorization on init,
-  // otherwise attach the stored token if present.
-  const attachedAuthFromStorage = Boolean(token) && !headers.has("Authorization");
-  if (token && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
+  // Cookie-primary auth: always send credentials.
+  // NOTE: Do not auto-attach Authorization from localStorage here; callers
+  // that truly need header auth should set it explicitly.
 
   const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
 
@@ -78,25 +70,6 @@ export async function apiFetch(path: string, init: RequestInit = {}, options?: {
     credentials: "include",
     headers,
   });
-
-  // If the server had to ignore a bad Authorization header and fall back
-  // to a valid cookie session, quietly clear the stored token to prevent
-  // future stale-token poisoning.
-  if (
-    res.ok &&
-    attachedAuthFromStorage &&
-    (path === "/api/account/me" || path === "/api/auth/me")
-  ) {
-    const fallback = (res.headers.get("x-sl-auth-fallback") || "").toLowerCase();
-    const headerInvalid = res.headers.get("x-sl-auth-header-invalid") === "1";
-    if (fallback === "cookie" || headerInvalid) {
-      const hadStoredToken = Boolean(getAuthToken());
-      clearAuthToken();
-      if (hadStoredToken) {
-        logClearedStaleHeaderTokenOnce();
-      }
-    }
-  }
 
   if (!options?.allowNonOk && !res.ok) {
     if ((res.status === 401 || res.status === 403) && (path === "/api/account/me" || path === "/api/auth/me")) {
