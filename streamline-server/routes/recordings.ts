@@ -1460,7 +1460,7 @@ router.get("/:id", requireAuth, async (req, res) => {
 
     const data = snap.data() || {};
     if (data.userId && data.userId !== uid) {
-      return res.status(403).json({ error: "Forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     return res.json({ success: true, data: mapRecordingDoc(recordingId, data) });
@@ -1490,7 +1490,7 @@ router.get("/:id/download-link", requireAuth, async (req, res) => {
     
     // Verify ownership
     if (data.userId && data.userId !== uid) {
-      return res.status(403).json({ error: "Forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     // STRICT CHECK: Only allow download if status is exactly "ready"
@@ -1587,7 +1587,7 @@ router.post("/:id/report-download-issue", requireAuth, async (req, res) => {
 
     const data = snap.data() || {};
     if (data.userId && data.userId !== uid) {
-      return res.status(403).json({ error: "Forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     await firestore.collection("recordings").doc(recordingId).set(

@@ -4,6 +4,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 import { isAdmin } from "../middleware/adminAuth";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = Router();
 
@@ -78,7 +79,7 @@ router.put("/:roomId/active-embed", requireAuth as any, async (req: any, res) =>
     if (ownerId && ownerId !== uid) {
       const adminOk = await isAdmin(uid);
       if (!adminOk) {
-        return res.status(403).json({ error: "forbidden" });
+        return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
       }
     }
 

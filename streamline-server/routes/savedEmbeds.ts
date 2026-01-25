@@ -6,6 +6,7 @@ import { ensureRoomDoc, DEFAULT_ROOM_HLS_CONFIG, type RoomHlsConfig } from "../s
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { asOptionalBoolean, asOptionalEnum, asTrimmedString } from "../lib/inputValidation";
 import { isAdmin } from "../middleware/adminAuth";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = Router();
 
@@ -324,7 +325,7 @@ router.put("/:embedId", requireAuth as any, async (req: any, res) => {
     if (ownerId && ownerId !== uid) {
       const adminOk = await isAdmin(uid);
       if (!adminOk) {
-        return res.status(403).json({ error: "forbidden" });
+        return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
       }
     }
 

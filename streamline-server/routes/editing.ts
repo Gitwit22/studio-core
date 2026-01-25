@@ -299,7 +299,7 @@ router.delete("/assets/:id", authenticateToken, async (req: Request, res: Respon
 
     // Verify ownership
     if (data?.userId !== userId) {
-      return res.status(403).json({ error: "Forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     // Delete from Firestore
