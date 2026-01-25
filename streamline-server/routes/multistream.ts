@@ -118,7 +118,9 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
     // Destination cap enforcement (plan-based)
     const maxDestinations = await getPlanLimit(uid, "maxDestinations");
     if (maxDestinations !== undefined && maxDestinations > 0 && destIds.length > maxDestinations) {
-      return res.status(403).json({ error: "destination_limit_exceeded", limit: maxDestinations });
+      // Canonicalize: use a local constant for now, or add to LIMIT_ERRORS if desired
+      const DESTINATION_LIMIT_EXCEEDED = "destination_limit_exceeded";
+      return res.status(403).json({ error: DESTINATION_LIMIT_EXCEEDED, limit: maxDestinations });
     }
 
     // Save intent / status (optional but useful)
