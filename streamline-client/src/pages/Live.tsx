@@ -78,6 +78,29 @@ function snapToLiveEdge(video: HTMLVideoElement) {
   }
 }
 
+function withCacheBuster(url: string, nonce: number) {
+  const cleaned = String(url || "").trim();
+  if (!cleaned) return cleaned;
+  try {
+    const u = new URL(cleaned, window.location.href);
+    u.searchParams.set("ts", String(Date.now()));
+    u.searchParams.set("n", String(nonce));
+    return u.toString();
+  } catch {
+    const joiner = cleaned.includes("?") ? "&" : "?";
+    return `${cleaned}${joiner}ts=${Date.now()}&n=${nonce}`;
+  }
+}
+
+function isProbablyEmptyPlaylistText(text: string) {
+  const t = String(text || "");
+  if (!t.includes("#EXTM3U")) return false;
+  // If there are no segments/fragments in the playlist yet, treat it as "not live".
+  // Covers common cases: #EXTINF entries, .ts segments, CMAF .m4s segments.
+  const hasSegment = t.includes("#EXTINF") || t.includes(".ts") || t.includes(".m4s");
+  return !hasSegment;
+}
+
 export default function Live() {
   const params = useParams<{ savedEmbedId?: string }>();
 
@@ -101,6 +124,15 @@ export default function Live() {
   const [volume, setVolume] = useState(0.6);
   const [isRetrying, setIsRetrying] = useState(false);
   const [viewerCount, setViewerCount] = useState<number>(0);
+
+  // Playback retry UX state ("too early" / waiting).
+  const [attachNonce, setAttachNonce] = useState(0);
+  const [retryInSec, setRetryInSec] = useState<number | null>(null);
+  const [needsTapToPlay, setNeedsTapToPlay] = useState(false);
+  const retryTimerRef = useRef<number | null>(null);
+  const retryCountdownRef = useRef<number | null>(null);
+
+  const hlsRef = useRef<Hls | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -234,6 +266,74 @@ export default function Live() {
     }
   }, [roomId, playlistUrl]);
 
+  const stopRetryCountdown = useCallback(() => {
+    if (retryTimerRef.current) {
+      window.clearInterval(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    retryCountdownRef.current = null;
+    setRetryInSec(null);
+  }, []);
+
+  const scheduleSoftRetry = useCallback(
+    (delayMs?: number) => {
+      const ms = typeof delayMs === "number" && Number.isFinite(delayMs) ? Math.max(1000, delayMs) : 3500 + Math.floor(Math.random() * 1500);
+      stopRetryCountdown();
+      const totalSec = Math.max(1, Math.ceil(ms / 1000));
+      retryCountdownRef.current = totalSec;
+      setRetryInSec(totalSec);
+
+      retryTimerRef.current = window.setInterval(() => {
+        const cur = retryCountdownRef.current;
+        if (typeof cur !== "number") return;
+        const next = cur - 1;
+        retryCountdownRef.current = next;
+        setRetryInSec(next > 0 ? next : 0);
+        if (next <= 0) {
+          stopRetryCountdown();
+          setAttachNonce((n) => n + 1);
+          void fetchHlsStatus();
+        }
+      }, 1000);
+    },
+    [fetchHlsStatus, stopRetryCountdown]
+  );
+
+  const destroyPlayer = useCallback(() => {
+    try {
+      hlsRef.current?.destroy();
+    } catch {
+      // ignore
+    }
+    hlsRef.current = null;
+
+    const v = videoRef.current;
+    if (v) {
+      try {
+        v.pause();
+      } catch {
+        // ignore
+      }
+      try {
+        v.removeAttribute("src");
+        v.src = "";
+        v.load();
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  const hardRefreshPlayer = useCallback(() => {
+    stopRetryCountdown();
+    setNeedsTapToPlay(false);
+    setError(null);
+    destroyPlayer();
+    setAttachNonce((n) => n + 1);
+    void reloadViewerConfig();
+    void fetchHlsStatus();
+  }, [destroyPlayer, fetchHlsStatus, reloadViewerConfig, stopRetryCountdown]);
+
   // Poll loop
   useEffect(() => {
     const currentRoomId = (roomId || "").trim();
@@ -262,6 +362,8 @@ export default function Live() {
       }
     }
   }, [reloadViewerConfig, fetchHlsStatus]);
+
+  const effectivePlaylistUrl = playlistUrl ? withCacheBuster(playlistUrl, attachNonce) : null;
 
   // Track playback position so we can render a timeline similar to
   // a standard video player, even for live HLS with a sliding window.
@@ -322,28 +424,78 @@ export default function Live() {
   // - Chrome/Firefox/Edge: hls.js
   useEffect(() => {
     const video = videoRef.current;
-    if (!playlistUrl || !video) return;
+    if (!effectivePlaylistUrl || !video) return;
 
     // reset state for a fresh attach
     setError(null);
+    setNeedsTapToPlay(false);
 
     if (canNativeHls(video)) {
-      video.src = playlistUrl;
-      video.muted = isMuted;
-      video.volume = clampVolume(volume);
+      // Best-effort preflight to avoid scary errors when the playlist exists but is empty / too early.
+      let cancelled = false;
+      const attempt = async () => {
+        try {
+          const res = await fetch(effectivePlaylistUrl, { cache: "no-store" });
+          if (cancelled) return;
+          if (res.status === 404) {
+            if (status !== "error") setStatus("starting");
+            scheduleSoftRetry();
+            return;
+          }
+          if (res.ok) {
+            const text = await res.text().catch(() => "");
+            if (cancelled) return;
+            if (isProbablyEmptyPlaylistText(text)) {
+              if (status !== "error") setStatus("starting");
+              scheduleSoftRetry();
+              return;
+            }
+          }
+        } catch {
+          // CORS/network issues: proceed with native attach and let video element handle it.
+        }
 
-      const onMeta = () => {
-        snapToLiveEdge(video);
-        void video.play().catch(() => {
-          // autoplay might be blocked until user interacts
-        });
+        if (cancelled) return;
+        video.src = effectivePlaylistUrl;
+        video.muted = isMuted;
+        video.volume = clampVolume(volume);
+
+        let metaTimer: number | null = null;
+
+        const onMeta = () => {
+          if (metaTimer) window.clearTimeout(metaTimer);
+          snapToLiveEdge(video);
+          void video.play().catch(() => {
+            setNeedsTapToPlay(true);
+          });
+        };
+
+        const onErr = () => {
+          // If we can't load yet, treat it as "waiting" and retry.
+          if (metaTimer) window.clearTimeout(metaTimer);
+          if (status !== "error") setStatus("starting");
+          scheduleSoftRetry();
+        };
+
+        metaTimer = window.setTimeout(() => {
+          // loadedmetadata never arrived -> likely too early.
+          if (status !== "error") setStatus("starting");
+          scheduleSoftRetry();
+        }, 4500);
+
+        video.addEventListener("loadedmetadata", onMeta, { once: true });
+        video.addEventListener("error", onErr, { once: true });
       };
 
-      video.addEventListener("loadedmetadata", onMeta, { once: true });
-      return;
+      void attempt();
+
+      return () => {
+        cancelled = true;
+      };
     }
 
     if (Hls.isSupported()) {
+      destroyPlayer();
       const hls = new Hls({
         // Keep playback near the live edge with a slightly larger safety buffer.
         // This helps hide small delivery jitters.
@@ -365,21 +517,54 @@ export default function Live() {
         lowLatencyMode: true,
       });
 
-      hls.loadSource(playlistUrl);
+      hlsRef.current = hls;
+
+      let manifestTimer: number | null = null;
+      let hasManifestParsed = false;
+
+      hls.loadSource(effectivePlaylistUrl);
       hls.attachMedia(video);
 
+      // If MANIFEST_PARSED doesn't happen quickly, this is usually "too early".
+      manifestTimer = window.setTimeout(() => {
+        if (hasManifestParsed) return;
+        if (status !== "error") setStatus("starting");
+        scheduleSoftRetry();
+        try {
+          hls.destroy();
+        } catch {
+          // ignore
+        }
+        if (hlsRef.current === hls) hlsRef.current = null;
+      }, 4500);
+
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hasManifestParsed = true;
+        if (manifestTimer) window.clearTimeout(manifestTimer);
         video.muted = isMuted;
         video.volume = clampVolume(volume);
 
         const onMeta = () => {
           snapToLiveEdge(video);
           void video.play().catch(() => {
-            // autoplay blocked until user interacts
+            setNeedsTapToPlay(true);
           });
         };
 
         video.addEventListener("loadedmetadata", onMeta, { once: true });
+      });
+
+      // If the level playlist loads but contains no fragments, treat it as "not live yet".
+      hls.on(Hls.Events.LEVEL_LOADED, (_e, data) => {
+        try {
+          const frags = (data as { details?: { fragments?: unknown[] } })?.details?.fragments;
+          if (Array.isArray(frags) && frags.length === 0) {
+            if (status !== "error") setStatus("starting");
+            scheduleSoftRetry();
+          }
+        } catch {
+          // ignore
+        }
       });
 
       hls.on(Hls.Events.ERROR, (evt, data) => {
@@ -400,7 +585,28 @@ export default function Live() {
           // ignore diagnostics errors
         }
 
+        const httpCode = (data as { response?: { code?: number } })?.response?.code;
+        const details = String((data as { details?: unknown })?.details || "");
+        const isManifest404 = httpCode === 404 && details.toLowerCase().includes("manifest");
+        const isTooEarly = isManifest404 || details.toLowerCase().includes("manifest_load") || details.toLowerCase().includes("manifestload");
+
         if (data?.fatal) {
+          // When the stream isn't live yet, hls.js often reports fatal manifest load failures.
+          // Treat those as "waiting" rather than a scary hard error.
+          if (isTooEarly) {
+            if (manifestTimer) window.clearTimeout(manifestTimer);
+            if (status !== "error") setStatus("starting");
+            setError(null);
+            scheduleSoftRetry();
+            try {
+              hls.destroy();
+            } catch {
+              // ignore
+            }
+            if (hlsRef.current === hls) hlsRef.current = null;
+            return;
+          }
+
           setStatus("error");
           setError("Stream playback error");
           try {
@@ -408,6 +614,7 @@ export default function Live() {
           } catch {
             // ignore
           }
+          if (hlsRef.current === hls) hlsRef.current = null;
         }
       });
 
@@ -435,17 +642,26 @@ export default function Live() {
       });
 
       return () => {
+        if (manifestTimer) window.clearTimeout(manifestTimer);
         try {
           hls.destroy();
         } catch {
           // ignore
         }
+        if (hlsRef.current === hls) hlsRef.current = null;
       };
     } else {
       setStatus("error");
       setError("HLS not supported in this browser.");
     }
-  }, [playlistUrl]);
+  }, [attachNonce, destroyPlayer, effectivePlaylistUrl, isMuted, scheduleSoftRetry, status, volume]);
+
+  // Cleanup countdown timer on unmount.
+  useEffect(() => {
+    return () => {
+      stopRetryCountdown();
+    };
+  }, [stopRetryCountdown]);
 
   // Apply audio settings ONLY (no src/hls work here). This ensures mute/volume
   // changes never recreate the player or reload the stream.
@@ -582,7 +798,26 @@ export default function Live() {
               <div className="relative aspect-video bg-black/80 rounded-2xl overflow-hidden border border-neutral-800/50">
                 {playlistUrl && status === "live" ? (
                   <>
-                    <video ref={videoRef} className="w-full h-full object-contain" autoPlay muted={isMuted} playsInline controls={false} />
+                    <video ref={videoRef} className="w-full h-full object-contain" autoPlay muted={isMuted} playsInline controls={false} poster={displayLogoUrl || DEFAULT_LOGO_URL} />
+
+                    {needsTapToPlay && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                        <button
+                          onClick={() => {
+                            const v = videoRef.current;
+                            if (!v) return;
+                            void v.play()
+                              .then(() => setNeedsTapToPlay(false))
+                              .catch(() => {
+                                // keep showing the button
+                              });
+                          }}
+                          className="px-5 py-3 rounded-xl bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/20 hover:border-red-500/50 text-white font-semibold"
+                        >
+                          Tap to play
+                        </button>
+                      </div>
+                    )}
 
                     {/* overlay controls */}
                     <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent opacity-100 md:opacity-0 md:hover:opacity-100 transition-opacity duration-300">
@@ -623,11 +858,11 @@ export default function Live() {
 
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={handleRefreshGoLive}
+                              onClick={hardRefreshPlayer}
                               className="flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-red-500/30 backdrop-blur-sm transition-colors border border-white/10 hover:border-red-500/50 text-xs font-medium text-white"
                             >
                               <RefreshCw className="w-3 h-3" />
-                              <span>Live View</span>
+                              <span>Refresh</span>
                             </button>
 
                             <button
@@ -713,34 +948,37 @@ export default function Live() {
                     </div>
 
                     <div className="text-xl font-semibold text-white mb-2">
-                      {status === "loading" && "Connecting to stream..."}
-                      {status === "starting" && "Stream is starting..."}
-                      {status === "offline" && (ended ? "Stream ended" : "Stream is offline")}
-                      {status === "error" && "Connection Error"}
+                      {status === "error" ? "Connection Error" : "Waiting for the stream to start…"}
                     </div>
 
                     <div className="text-sm text-neutral-500 mb-6 max-w-md">
-                      {status === "loading" && "Please wait while we establish a connection."}
-                      {status === "starting" && "The broadcaster is preparing to go live."}
-                      {status === "offline" &&
-                        (ended
-                          ? "This broadcast has ended."
-                          : (viewerConfig?.offlineMessage || "").trim() || "This stream isn’t live yet. Check back in a moment.")}
-                      {status === "error" && (error || "Unable to connect to the stream.")}
+                      {status === "error"
+                        ? error || "Unable to connect to the stream."
+                        : ended
+                        ? "This broadcast has ended."
+                        : (viewerConfig?.offlineMessage || "").trim() || "We’ll keep checking and start automatically when it goes live."}
+                      {status !== "error" && typeof retryInSec === "number" && retryInSec > 0 && (
+                        <div className="mt-2 text-xs text-neutral-400">Retrying in {retryInSec}s…</div>
+                      )}
                     </div>
 
                     <button
-                      onClick={() => {
-                        void fetchHlsStatus();
-                        const v = videoRef.current;
-                        if (v) snapToLiveEdge(v);
-                      }}
+                      onClick={hardRefreshPlayer}
                       disabled={isRetrying}
                       className="group flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-medium text-sm transition-all duration-300 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 disabled:opacity-50 disabled:cursor-not-allowed border border-red-500/30"
                     >
                       <RefreshCw className={`w-4 h-4 ${isRetrying ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"}`} />
-                      {isRetrying ? "Retrying..." : "Retry Connection"}
+                      {isRetrying ? "Refreshing..." : "Refresh"}
                     </button>
+
+                    {savedEmbedId && (
+                      <button
+                        onClick={hardRefreshPlayer}
+                        className="mt-3 text-xs text-neutral-400 hover:text-neutral-200 underline"
+                      >
+                        Reload stream
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
