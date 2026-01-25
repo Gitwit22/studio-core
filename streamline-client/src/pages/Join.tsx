@@ -4,7 +4,7 @@ import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useSearchParams,} from "react-router-dom";
-import { apiFetch, clearAuthStorage } from "../lib/api";
+import { apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
 
 type SavedEmbedSummary = {
   embedId: string;
@@ -239,7 +239,7 @@ export default function Join() {
 
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/account/me`, { credentials: "include" });
+        const res = await apiFetchAuth(`${API_BASE}/api/account/me`, {}, { allowNonOk: true });
         if (!res.ok) {
           if (!cancelled) setPlatformHlsEnabled(true);
           return;
@@ -288,11 +288,10 @@ export default function Join() {
       setSavedEmbedsLoading(true);
       setSavedEmbedsError(null);
       try {
-        const res = await fetch(`${API_BASE}/api/saved-embeds`, {
+        const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds`, {
           method: "GET",
-          credentials: "include",
           cache: "no-store",
-        });
+        }, { allowNonOk: true });
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           throw new Error(payload?.error || "Failed to load Saved Rooms");
@@ -339,7 +338,7 @@ export default function Join() {
     setUsageLoading(true);
     setUsageError(null);
 
-    fetch(`${API_BASE}/api/usage/me`, { credentials: "include" })
+    apiFetchAuth(`${API_BASE}/api/usage/me`, {}, { allowNonOk: true })
   .then(async (res) => {
     if (!res.ok) {
       const text = await res.text();

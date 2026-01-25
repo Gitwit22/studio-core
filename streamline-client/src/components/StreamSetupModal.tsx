@@ -222,7 +222,7 @@ export default function StreamSetupModalV2({
     : "";
 
   const authHeaders = useMemo(() => {
-    const token = typeof window !== "undefined" ? window.localStorage.getItem("sl_token") : null;
+    const token = typeof window !== "undefined" ? window.localStorage.getItem("authToken") : null;
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 

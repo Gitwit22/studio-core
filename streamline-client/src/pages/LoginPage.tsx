@@ -1,6 +1,6 @@
 import React, { FormEvent, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { apiFetch, clearAuthStorage } from "../lib/api";
+import { apiFetchAuth, clearAuthStorage } from "../lib/api";
 
 // Email validation function
 function validateEmail(email: string): boolean {
@@ -94,17 +94,22 @@ export const LoginPage: React.FC = () => {
       }
 
       const token = (loginBody as any)?.token as string | undefined;
-      if (token) {
-        try {
-          localStorage.setItem("sl_token", token);
-        } catch {}
+      if (!token) {
+        clearAuthStorage();
+        setError("Login failed: missing token from server");
+        setLoading(false);
+        return;
       }
+
+      try {
+        localStorage.setItem("authToken", token);
+      } catch {}
 
       // Hydrate user from canonical /api/account/me. If this fails,
       // treat it as a hard error instead of redirecting into a
       // half-authed state that causes room join "blink".
       try {
-        const meRes = await apiFetch("/api/account/me");
+        const meRes = await apiFetchAuth("/api/account/me");
         const me = await meRes.json();
         try {
           localStorage.setItem("sl_user", JSON.stringify(me));

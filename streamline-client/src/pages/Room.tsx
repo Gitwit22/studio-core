@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { apiStartRecording, apiStopRecording, apiFetch, getAuthToken, clearAuthStorage } from "../lib/api";
+import { apiStartRecording, apiStopRecording, apiFetch, apiFetchAuth, getAuthToken, clearAuthStorage } from "../lib/api";
 import { LiveKitRoom, VideoConference } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
@@ -790,7 +790,7 @@ function RoomPage() {
 
   const confirmReauthed = async () => {
     try {
-      const res = await apiFetch("/api/account/me", undefined, { allowNonOk: true });
+      const res = await apiFetchAuth("/api/account/me", undefined, { allowNonOk: true });
       if (res.ok) {
         setAuthStatus("authed");
         setNeedsReauth(false);
@@ -1553,7 +1553,7 @@ function RoomPage() {
       try {
         const [presetsRes, meRes] = await Promise.all([
           apiFetch("/api/account/presets"),
-          apiFetch("/api/account/me"),
+          apiFetchAuth("/api/account/me"),
         ]);
 
         if (!cancelled && presetsRes.ok) {

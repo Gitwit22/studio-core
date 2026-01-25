@@ -7,7 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
 import SettingsDestinations from "./SettingsDestinations";
-import { apiFetch, clearAuthStorage } from "../lib/api";
+import { apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
 import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
@@ -521,7 +521,7 @@ export default function SettingsBilling() {
  
   const loadUsage = async () => {
     try {
-      const res = await apiFetch("/api/usage/me");
+      const res = await apiFetchAuth("/api/usage/me");
       const data = await res.json();
       const limits = data?.plan?.limits || {};
 

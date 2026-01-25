@@ -1,5 +1,6 @@
 import PricingExplainerPage from "./pages/PricingExplainerPage";
-import { Routes, Route } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import AdminUsage from './pages/AdminUsage';
 import AdminDashboard from './pages/AdminDashboard';
 
@@ -30,14 +31,93 @@ import BillingCanceled from "./pages/BillingCanceled";
 import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
+import { clearAuthStorage } from "./lib/api";
+
 
 // Stripe/Billing pages
 import SettingsBilling from "./pages/SettingsBilling";
 
 
 function App() {
+  const nav = useNavigate();
+  const location = useLocation();
+  const [showUnauthorized, setShowUnauthorized] = useState(false);
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      clearAuthStorage();
+      setShowUnauthorized(true);
+
+      const path = window.location.pathname || "";
+      if (path.startsWith("/login") || path.startsWith("/signup")) {
+        return;
+      }
+
+      const next = `${window.location.pathname}${window.location.search}`;
+      const sp = new URLSearchParams();
+      sp.set("next", next);
+      nav(`/login?${sp.toString()}`);
+    };
+
+    window.addEventListener("sl:unauthorized", onUnauthorized as any);
+    return () => {
+      window.removeEventListener("sl:unauthorized", onUnauthorized as any);
+    };
+  }, [nav]);
+
+  // Hide the banner once the user is on an auth route.
+  useEffect(() => {
+    if (location.pathname.startsWith("/login") || location.pathname.startsWith("/signup")) {
+      setShowUnauthorized(false);
+    }
+  }, [location.pathname]);
+
   return (
-    <Routes>
+    <>
+      {showUnauthorized && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            padding: "10px 12px",
+            background: "rgba(153, 27, 27, 0.95)",
+            borderBottom: "1px solid rgba(255,255,255,0.12)",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: 13 }}>
+            Session expired. Please sign in again.
+          </div>
+          <button
+            onClick={() => {
+              const next = `${window.location.pathname}${window.location.search}`;
+              const sp = new URLSearchParams();
+              sp.set("next", next);
+              nav(`/login?${sp.toString()}`);
+            }}
+            style={{
+              fontSize: 12,
+              padding: "6px 10px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.25)",
+              background: "rgba(0,0,0,0.25)",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            Sign in
+          </button>
+        </div>
+      )}
+
+      <Routes>
       <Route path="/learnmore" element={<LearnMore />} />
 
       <Route path="/admin/usage" element={<AdminUsage />} />
@@ -92,7 +172,8 @@ function App() {
       <Route path="/settings/billing" element={<SettingsBilling />} />
       <Route path="/pricing/explainer" element={<PricingExplainerPage />} />
       
-    </Routes>
+      </Routes>
+    </>
   );
 }
 

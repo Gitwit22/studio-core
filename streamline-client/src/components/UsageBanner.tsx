@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetchAuth } from "../lib/api";
 
 // Use relative paths - Vite proxy forwards /api/* to http://localhost:5137
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
@@ -24,8 +25,8 @@ export default function UsageBanner() {
     const load = async () => {
       try {
         const [usageRes, accountRes] = await Promise.all([
-          fetch(`${API_BASE}/api/usage/me`, { credentials: "include" }),
-          fetch(`${API_BASE}/api/account/me`, { credentials: "include" }),
+          apiFetchAuth(`${API_BASE}/api/usage/me`),
+          apiFetchAuth(`${API_BASE}/api/account/me`),
         ]);
 
         if (!usageRes.ok) throw new Error(`usage HTTP ${usageRes.status}`);

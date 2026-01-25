@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { API_BASE } from "../../lib/apiBase";
 import { S } from "../SettingsBilling.styles";
+import { apiFetchAuth } from "../../lib/api";
 
 type SavedEmbed = {
   embedId: string;
@@ -48,7 +49,7 @@ function persistCreateDraft(draft: HlsCreateDraft) {
 
 function getAuthToken(): string | null {
   try {
-    return window.localStorage.getItem("sl_token") || window.localStorage.getItem("auth_token");
+    return window.localStorage.getItem("authToken");
   } catch {
     return null;
   }
@@ -164,12 +165,12 @@ export default function SettingsHlsSetup({
     setLoadingList(true);
     setListError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/saved-embeds`, {
+      const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds`, {
         method: "GET",
         credentials: "include",
         cache: "no-store",
         headers: buildAuthHeaders(),
-      });
+      }, { allowNonOk: true });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         const code = payload?.error || "server_error";
@@ -203,12 +204,12 @@ export default function SettingsHlsSetup({
     setListMessage(null);
     setListError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embedId)}`, {
+      const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embedId)}`, {
         method: "PUT",
         credentials: "include",
         headers: buildAuthHeaders(),
         body: JSON.stringify({ archived: true }),
-      });
+      }, { allowNonOk: true });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(payload?.error || "Failed to archive");
@@ -236,12 +237,12 @@ export default function SettingsHlsSetup({
     setListMessage(null);
     setListError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embed.embedId)}`, {
+      const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embed.embedId)}`, {
         method: "PUT",
         credentials: "include",
         headers: buildAuthHeaders(),
         body: JSON.stringify({ archived: true }),
-      });
+      }, { allowNonOk: true });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(payload?.error || "Failed to delete");
@@ -300,7 +301,7 @@ export default function SettingsHlsSetup({
 
     setEditSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/saved-embeds/${encodeURIComponent(editingEmbed.embedId)}`, {
+      const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds/${encodeURIComponent(editingEmbed.embedId)}`, {
         method: "PUT",
         credentials: "include",
         headers: buildAuthHeaders(),
@@ -308,7 +309,7 @@ export default function SettingsHlsSetup({
           name,
           description: description || "",
         }),
-      });
+      }, { allowNonOk: true });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(payload?.error || "Failed to update embed");
@@ -348,7 +349,7 @@ export default function SettingsHlsSetup({
 
     setCreating(true);
     try {
-      const res = await fetch(`${API_BASE}/api/saved-embeds`, {
+      const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds`, {
         method: "POST",
         credentials: "include",
         headers: buildAuthHeaders(),
@@ -356,7 +357,7 @@ export default function SettingsHlsSetup({
           name,
           description: description || undefined,
         }),
-      });
+      }, { allowNonOk: true });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(payload?.error || "Failed to create embed");
@@ -659,14 +660,14 @@ export default function SettingsHlsSetup({
                         setListMessage(null);
                         setListError(null);
                         try {
-                          const res = await fetch(`${API_BASE}/api/saved-embeds`, {
+                          const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds`, {
                             method: "POST",
                             credentials: "include",
                             headers: buildAuthHeaders(),
                             body: JSON.stringify({
                               name: `${embed.label} (Copy)`,
                             }),
-                          });
+                          }, { allowNonOk: true });
                           const payload = await res.json().catch(() => null);
                           if (!res.ok) {
                             throw new Error(payload?.error || "Failed to duplicate embed");

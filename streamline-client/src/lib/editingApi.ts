@@ -86,7 +86,7 @@ export type ExportJob = {
 // ============================================================================
 
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('sl_token') || localStorage.getItem('auth_token');
+  const token = localStorage.getItem('authToken');
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -174,7 +174,7 @@ export const assetsApi = {
 
       xhr.open('POST', `${API_BASE}/editing/assets/upload`);
 
-      const token = localStorage.getItem('sl_token') || localStorage.getItem('auth_token');
+      const token = localStorage.getItem('authToken');
       if (token) {
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       }

@@ -9,11 +9,7 @@ import { API_BASE } from "./apiBase";
 export function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return (
-      window.localStorage.getItem("sl_token") ||
-      window.localStorage.getItem("auth_token") ||
-      null
-    );
+    return window.localStorage.getItem("authToken") || null;
   } catch {
     return null;
   }
@@ -22,8 +18,7 @@ export function getAuthToken(): string | null {
 export function clearAuthToken() {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem("sl_token");
-    window.localStorage.removeItem("auth_token");
+    window.localStorage.removeItem("authToken");
   } catch {}
 }
 
@@ -43,6 +38,30 @@ function looksLikeJwt(token: string): boolean {
   const parts = token.split(".");
   if (parts.length !== 3) return false;
   return parts.every((p) => typeof p === "string" && p.length > 0);
+}
+
+export class ApiUnauthorizedError extends Error {
+  name = "ApiUnauthorizedError";
+  status = 401;
+  constructor() {
+    super("unauthorized");
+  }
+}
+
+function emitUnauthorizedEventOnce(detail?: string) {
+  if (typeof window === "undefined") return;
+  const w = window as any;
+  const now = Date.now();
+  // Rate limit (avoid event storms if several calls fail at once)
+  if (typeof w.__sl_last_unauthorized_event_ts === "number" && now - w.__sl_last_unauthorized_event_ts < 2000) {
+    return;
+  }
+  w.__sl_last_unauthorized_event_ts = now;
+  try {
+    window.dispatchEvent(new CustomEvent("sl:unauthorized", { detail: { reason: detail || "unauthorized" } }));
+  } catch {
+    // ignore
+  }
 }
 
 /**
@@ -84,6 +103,90 @@ export async function apiFetch(path: string, init: RequestInit = {}, options?: {
       body: errBody,
     });
   }
+  return res;
+}
+
+/**
+ * Strict auth wrapper for protected endpoints.
+ * - Reads the token from localStorage at call time
+ * - Always attaches `Authorization: Bearer ...`
+ * - Still uses cookie credentials via apiFetch
+ */
+export async function apiFetchAuth(
+  path: string,
+  init: RequestInit = {},
+  options?: { allowNonOk?: boolean }
+) {
+  if (typeof window === "undefined") {
+    throw new ApiUnauthorizedError();
+  }
+
+  let token: string | null = null;
+  try {
+    token = window.localStorage.getItem("authToken");
+  } catch {}
+
+  if (!token || !looksLikeJwt(token)) {
+    clearAuthToken();
+    emitUnauthorizedEventOnce("missing_or_invalid_token");
+    throw new ApiUnauthorizedError();
+  }
+
+  const headers = new Headers(init.headers || {});
+  const hadExplicitAuthHeader = headers.has("Authorization");
+  if (!hadExplicitAuthHeader) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  // Always allow non-ok here so we can handle 401 consistently, while keeping
+  // the same thrown error shape as apiFetch for other non-ok responses.
+  const res = await apiFetch(path, { ...init, headers }, { allowNonOk: true });
+
+  if (res.status === 401) {
+    // Tiny but high ROI: a single retry can recover from multi-tab token updates
+    // or very small races where authToken was updated after this request began.
+    if (!hadExplicitAuthHeader) {
+      try {
+        const nextToken = window.localStorage.getItem("authToken");
+        if (nextToken && nextToken !== token && looksLikeJwt(nextToken)) {
+          const retryHeaders = new Headers(init.headers || {});
+          retryHeaders.set("Authorization", `Bearer ${nextToken}`);
+          const retryRes = await apiFetch(path, { ...init, headers: retryHeaders }, { allowNonOk: true });
+          if (retryRes.status !== 401) {
+            if (!options?.allowNonOk && !retryRes.ok) {
+              let errBody: any = null;
+              try {
+                errBody = await retryRes.json();
+              } catch {}
+              throw Object.assign(new Error(`HTTP ${retryRes.status}`), {
+                status: retryRes.status,
+                body: errBody,
+              });
+            }
+            return retryRes;
+          }
+        }
+      } catch {
+        // ignore retry failures; fall through to unauthorized handling
+      }
+    }
+
+    clearAuthToken();
+    emitUnauthorizedEventOnce("401");
+    throw new ApiUnauthorizedError();
+  }
+
+  if (!options?.allowNonOk && !res.ok) {
+    let errBody: any = null;
+    try {
+      errBody = await res.json();
+    } catch {}
+    throw Object.assign(new Error(`HTTP ${res.status}`), {
+      status: res.status,
+      body: errBody,
+    });
+  }
+
   return res;
 }
 

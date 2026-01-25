@@ -99,9 +99,15 @@ export const SignupPage = () => {
 
       console.log("✅ Signup successful:", data);
 
+      if (!data?.token) {
+        setError("Signup failed: missing token from server");
+        setLoading(false);
+        return;
+      }
+
       // Store user data and token in localStorage
       localStorage.setItem("sl_user", JSON.stringify(data.user));
-      localStorage.setItem("sl_token", data.token);
+      localStorage.setItem("authToken", data.token);
       localStorage.setItem("sl_userId", data.user.id || data.user.uid);
       localStorage.setItem("sl_displayName", data.user.displayName);
 
