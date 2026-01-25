@@ -12,6 +12,7 @@ import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
 import { getMeCached, clearMeCache } from "../lib/meCache";
+import { isFeatureAvailable, isPlatformEnabled } from "../lib/featureAvailability";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -215,6 +216,8 @@ export default function SettingsBilling() {
   const nav = useNavigate();
   const { user: authUser, refresh: refreshAuth } = useAuthMe();
 
+  const isAdmin = Boolean((authUser as any)?.isAdmin);
+
   const [user, setUser] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -380,10 +383,34 @@ export default function SettingsBilling() {
 
   const loadPlans = async () => {
     try {
-      const res = await apiFetchAuth(`${API_BASE}/api/plans`, {}, { allowNonOk: true });
+      // Avoid any intermediate caching; plans must reflect admin edits quickly.
+      const bust = Date.now();
+      const res = await apiFetchAuth(`${API_BASE}/api/plans?ts=${bust}`, { cache: "no-store" }, { allowNonOk: true });
       if (res.ok) {
         const data = await res.json();
         console.log("[SettingsBilling] /api/plans response:", data);
+
+        // Keep platform flags consistent with the same source as the plan grid.
+        // Default semantics: enabled when missing.
+        try {
+          const pf = (data as any)?.platformFlags || {};
+          setPlatformHlsEnabled(isPlatformEnabled(pf.hlsEnabled));
+          setPlatformRecordingEnabled(isPlatformEnabled(pf.recordingEnabled));
+          setPlatformTranscodeEnabled(isPlatformEnabled(pf.transcodeEnabled));
+          const hlsTabFlag =
+            typeof pf.hlsSettingsTab === "boolean"
+              ? pf.hlsSettingsTab
+              : typeof pf.hlsEnabled === "boolean"
+                ? pf.hlsEnabled
+                : true;
+          setPlatformHlsSettingsTabEnabled(hlsTabFlag);
+        } catch {
+          setPlatformHlsEnabled(true);
+          setPlatformRecordingEnabled(true);
+          setPlatformTranscodeEnabled(true);
+          setPlatformHlsSettingsTabEnabled(true);
+        }
+
         if (Array.isArray(data.plans) && data.plans.length) {
           // Only use plans with visibility: 'public' (backend should already filter, but double-check)
           const visiblePlans = data.plans.filter((p: any) => p.visibility === "public");
@@ -403,41 +430,8 @@ export default function SettingsBilling() {
       // Prefer canonical effectiveEntitlements from /api/account/me
       const data = await getMeCached();
 
-      try {
-        const platformFlags = (data as any)?.platformFlags || {};
-        if (typeof platformFlags.hlsEnabled === "boolean") {
-          setPlatformHlsEnabled(platformFlags.hlsEnabled);
-        } else {
-          setPlatformHlsEnabled(true);
-        }
-
-        if (typeof platformFlags.transcodeEnabled === "boolean") {
-          setPlatformTranscodeEnabled(platformFlags.transcodeEnabled);
-        } else {
-          setPlatformTranscodeEnabled(true);
-        }
-
-        if (typeof platformFlags.recordingEnabled === "boolean") {
-          setPlatformRecordingEnabled(platformFlags.recordingEnabled);
-        } else {
-          setPlatformRecordingEnabled(true);
-        }
-
-        // Settings gate: default to visible unless explicitly disabled.
-        // Prefer platformFlags.hlsSettingsTab, fall back to platformFlags.hlsEnabled.
-        const hlsTabFlag =
-          typeof platformFlags.hlsSettingsTab === "boolean"
-            ? platformFlags.hlsSettingsTab
-            : typeof platformFlags.hlsEnabled === "boolean"
-              ? platformFlags.hlsEnabled
-              : true;
-        setPlatformHlsSettingsTabEnabled(hlsTabFlag);
-      } catch {
-        setPlatformHlsEnabled(true);
-        setPlatformHlsSettingsTabEnabled(true);
-        setPlatformTranscodeEnabled(true);
-        setPlatformRecordingEnabled(true);
-      }
+      // NOTE: platform-wide flags are sourced from /api/plans to keep the plan grid
+      // 100% server-driven and to avoid stale cached values from /api/account/me.
 
       // Capture Terms of Service metadata for display and gating.
       setUser((prev) =>
@@ -1777,6 +1771,26 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             <div style={S.card}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                 <h2 style={S.cardTitle}>📊 Compare Plans</h2>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => loadPlans()}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 999,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(15,23,42,0.8)",
+                      color: "#e2e8f0",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                    title="Force refresh from /api/plans"
+                  >
+                    🔄 Refresh plans
+                  </button>
+                )}
                 <a
                   href="/pricing/explainer"
                   target="_blank"
@@ -1791,6 +1805,23 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                   Click here to get an explanation of our pricing
                 </a>
               </div>
+
+              {(!platformRecordingEnabled || !platformHlsEnabled || !platformTranscodeEnabled) && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(245,158,11,0.45)",
+                    background: "rgba(245,158,11,0.12)",
+                    color: "#fde68a",
+                    fontSize: 13,
+                    lineHeight: 1.35,
+                  }}
+                >
+                  <div style={{ fontWeight: 700 }}>Some features are temporarily unavailable platform-wide.</div>
+                </div>
+              )}
 
               <div style={S.plansGrid}>
                 {plans.map((plan) => {
@@ -1839,19 +1870,43 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       </div>
                       <ul style={S.featureList}>
                         <FeatureRow label="In-Room Minutes" value={plan.limits.monthlyMinutesIncluded} />
-                        <FeatureRow label="Streaming Minutes" value={
-                          plan.limits.transcodeMinutes > 0
-                            ? plan.limits.transcodeMinutes
-                            : "Not included"
-                        } />
+                        {platformTranscodeEnabled !== false && (
+                          <FeatureRow
+                            label="Streaming Minutes"
+                            value={
+                              plan.limits.transcodeMinutes > 0
+                                ? plan.limits.transcodeMinutes
+                                : "Not included"
+                            }
+                          />
+                        )}
                         <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
                         <FeatureRow label="Stream destinations" value={plan.limits.rtmpDestinationsMax} />
-                        {platformRecordingEnabled && (
-                          <FeatureRow label="Recording" value={plan.features.recording} />
+                        {platformRecordingEnabled !== false && (
+                          <FeatureRow
+                            label="Recording"
+                            value={Boolean((plan as any).features?.recording)}
+                            lockedText="Not included in this plan"
+                          />
                         )}
-                        <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
-                        {platformHlsEnabled && (
-                          <FeatureRow label="HLS Broadcast Page" value={platformHlsEnabled ? "Enabled" : ((plan as any).features?.canHls)} />
+                        {platformTranscodeEnabled !== false && (
+                          <FeatureRow
+                            label="Multistream"
+                            value={Boolean((plan as any).features?.multistream ?? (plan as any).multistreamEnabled)}
+                            lockedText="Not included in this plan"
+                          />
+                        )}
+                        {platformHlsEnabled !== false && (
+                          <FeatureRow
+                            label="HLS Broadcast Page"
+                            value={Boolean(
+                              (plan as any).features?.hlsCustomizationEnabled ??
+                              (plan as any).features?.canCustomizeHlsPage ??
+                              (plan as any).features?.canHls ??
+                              (plan as any).features?.hls
+                            )}
+                            lockedText="Not included in this plan"
+                          />
                         )}
                         {/* Advanced Permissions is now removed from plan marketing UI; all accounts use simple Participant/Co-host defaults. */}
                         {plan.editing?.access && (
@@ -2574,8 +2629,21 @@ function UsageBar({ label, used, limit, unit }: { label: string; used: number; l
   );
 }
 
-function FeatureRow({ label, value, pill = false, subBullets }: { label: string; value: boolean | number | string | undefined; pill?: boolean; subBullets?: string[] }) {
+function FeatureRow({
+  label,
+  value,
+  pill = false,
+  subBullets,
+  lockedText,
+}: {
+  label: string;
+  value: boolean | number | string | undefined;
+  pill?: boolean;
+  subBullets?: string[];
+  lockedText?: string;
+}) {
   const isBoolean = typeof value === "boolean";
+  const isLocked = !pill && isBoolean && value === false && !!lockedText;
   const isIncluded = isBoolean
     ? value
     : typeof value === "string"
@@ -2587,11 +2655,12 @@ function FeatureRow({ label, value, pill = false, subBullets }: { label: string;
       : false;
   const displayValue = pill
     ? (isIncluded ? "✓" : "—")
-    : (isBoolean ? (value ? "✓" : "—") : value?.toString() || "—");
+    : (isBoolean ? (value ? "✓" : (isLocked ? "🔒" : "—")) : value?.toString() || "—");
   const isEnabled = pill ? isIncluded : (value === true || (typeof value === "number" && value > 0) || (typeof value === "string" && value !== "—"));
+  const effectiveSubBullets = isLocked ? [lockedText!] : subBullets;
 
   return (
-    <li style={{ ...S.featureItem, opacity: isEnabled ? 1 : 0.5 }}>
+    <li style={{ ...S.featureItem, opacity: isEnabled ? 1 : 0.5 }} title={isLocked ? lockedText : undefined}>
       <span style={S.featureLabel}>{label}</span>
       <span
         style={
@@ -2606,9 +2675,9 @@ function FeatureRow({ label, value, pill = false, subBullets }: { label: string;
       >
         {displayValue}
       </span>
-      {subBullets && subBullets.length > 0 && (
+      {effectiveSubBullets && effectiveSubBullets.length > 0 && (
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, color: "#94a3b8", fontSize: 12, lineHeight: 1.5 }}>
-          {subBullets.map((item) => (
+          {effectiveSubBullets.map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>

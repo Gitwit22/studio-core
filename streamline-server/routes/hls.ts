@@ -109,6 +109,12 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
     }
     const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
     if (!featureAccess.allowed) {
+      if (featureAccess.code === "feature_disabled") {
+        return res.status(403).json({
+          error: featureAccess.code,
+          reason: featureAccess.reason || "HLS is temporarily disabled",
+        });
+      }
       return res.status(403).json({
         error: "hls_not_in_plan",
         reason: featureAccess.reason || "HLS is not available on your plan",
@@ -244,6 +250,12 @@ router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any,
     if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
     if (!featureAccess.allowed) {
+      if (featureAccess.code === "feature_disabled") {
+        return res.status(403).json({
+          error: featureAccess.code,
+          reason: featureAccess.reason || "HLS is temporarily disabled",
+        });
+      }
       return res.status(403).json({
         error: "hls_not_in_plan",
         reason: featureAccess.reason || "HLS is not available on your plan",
@@ -351,6 +363,12 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
     if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
     if (!featureAccess.allowed) {
+      if (featureAccess.code === "feature_disabled") {
+        return res.status(403).json({
+          error: featureAccess.code,
+          reason: featureAccess.reason || "HLS is temporarily disabled",
+        });
+      }
       return res.status(403).json({
         error: "hls_not_in_plan",
         reason: featureAccess.reason || "HLS is not available on your plan",

@@ -3,11 +3,24 @@ import { PLANS } from "../usagePlans";
 import { PLAN_IDS, PlanId, isPlanId } from "../types/plan";
 import { firestore } from "../firebaseAdmin";
 import { normalizePlan } from "../lib/normalizePlan";
+import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
 
 const router = Router();
 
 router.get("/", async (_req, res) => {
   try {
+    const [hlsUiSnap, recordingUiSnap] = await Promise.all([
+      firestore.collection("featureFlags").doc("hlsSettingsTab").get(),
+      firestore.collection("featureFlags").doc("recording").get(),
+    ]);
+
+    const hlsUiData = hlsUiSnap.exists ? ((hlsUiSnap.data() as any) || {}) : {};
+    const recordingUiData = recordingUiSnap.exists ? ((recordingUiSnap.data() as any) || {}) : {};
+
+    const hlsEnabled = hlsUiData.enabled === undefined ? true : !!hlsUiData.enabled;
+    const recordingEnabled = recordingUiData.enabled === undefined ? true : !!recordingUiData.enabled;
+    const transcodeEnabled = getPlatformTranscodeEnabled();
+
     const snap = await firestore.collection("plans").get();
     const mapped = snap.docs.map((d) => {
       const data = (d.data() as any) || {};
@@ -54,11 +67,22 @@ router.get("/", async (_req, res) => {
         },
         features: {
           recording: !!plan.features.recording,
+          dualRecording: !!(data.features?.dualRecording ?? data.dualRecordingEnabled),
           rtmp: !!plan.features.rtmp,
           multistream: !!plan.features.multistream,
           // Advanced permissions have been removed; all accounts use
           // the simple Participant/Co-host model.
           advancedPermissions: false,
+
+          // HLS flags are used by pricing/marketing UI and should reflect
+          // admin-edited plan settings.
+          canHls: !!plan.features.canHls,
+          hls: !!plan.features.hls,
+          hlsEnabled: !!plan.features.hlsEnabled,
+          hlsCustomizationEnabled: !!plan.features.hlsCustomizationEnabled,
+        },
+        caps: {
+          hlsMaxMinutesPerSession: plan.caps?.hlsMaxMinutesPerSession ?? null,
         },
         editing: {
           access: !!data.editing?.access,
@@ -84,14 +108,40 @@ router.get("/", async (_req, res) => {
     });
 
     // If no plan docs, fall back to ids
-    if (!mapped.length) return res.json({ plans: PLANS });
+    if (!mapped.length) {
+      return res.json({
+        plans: PLANS,
+        platformFlags: {
+          hlsEnabled,
+          hlsSettingsTab: hlsEnabled,
+          recordingEnabled,
+          transcodeEnabled,
+        },
+      });
+    }
 
     // If filter removed everything, fall back to mapped to avoid empty payloads
     const plansToReturn = publicPlans.length ? publicPlans : mapped;
-    return res.json({ plans: plansToReturn });
+    return res.json({
+      plans: plansToReturn,
+      platformFlags: {
+        hlsEnabled,
+        hlsSettingsTab: hlsEnabled,
+        recordingEnabled,
+        transcodeEnabled,
+      },
+    });
   } catch (err: any) {
     console.error("/api/plans failed, returning fallback IDs:", err?.message || err);
-    return res.json({ plans: PLANS });
+    return res.json({
+      plans: PLANS,
+      platformFlags: {
+        hlsEnabled: true,
+        hlsSettingsTab: true,
+        recordingEnabled: true,
+        transcodeEnabled: getPlatformTranscodeEnabled(),
+      },
+    });
   }
 });
 

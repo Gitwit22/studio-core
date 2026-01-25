@@ -1,7 +1,160 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../lib/api";
+import { formatLimitLabel } from "../lib/entitlements";
+import { isFeatureAvailable, isPlatformEnabled } from "../lib/featureAvailability";
+
+type ApiPlan = {
+  id: string;
+  name?: string;
+  visibility?: "public" | "hidden" | "admin";
+  limits?: {
+    monthlyMinutesIncluded?: number;
+    transcodeMinutes?: number;
+    rtmpDestinationsMax?: number;
+  };
+  features?: {
+    recording?: boolean;
+    multistream?: boolean;
+    canHls?: boolean;
+    hls?: boolean;
+  };
+  caps?: {
+    hlsMaxMinutesPerSession?: number | null;
+  };
+};
+
+type ApiPlatformFlags = {
+  hlsEnabled?: boolean;
+  recordingEnabled?: boolean;
+  transcodeEnabled?: boolean;
+};
+
+function canonicalPlanId(id: any): string {
+  return String(id || "").trim().toLowerCase();
+}
+
+function safeNumber(value: any): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function planHlsPlanValue(plan: ApiPlan): boolean | "limited" {
+  const canHls = Boolean(plan.features?.canHls ?? plan.features?.hls);
+  if (!canHls) return false;
+
+  // If the plan has an explicit cap, treat it as limited.
+  const cap = plan.caps?.hlsMaxMinutesPerSession;
+  if (cap !== null && cap !== undefined) return "limited";
+
+  return true;
+}
 
 export const PricingExplainerPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"inroom" | "streaming">("inroom");
+  const [plans, setPlans] = useState<ApiPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState<boolean>(false);
+  const [plansError, setPlansError] = useState<string | null>(null);
+  const [platformFlags, setPlatformFlags] = useState<ApiPlatformFlags>({
+    hlsEnabled: true,
+    recordingEnabled: true,
+    transcodeEnabled: true,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setPlansLoading(true);
+        setPlansError(null);
+
+        const res = await apiFetch("/api/plans", { cache: "no-store" });
+        const data = (await res.json()) as any;
+        const nextPlans = Array.isArray(data?.plans) ? (data.plans as ApiPlan[]) : [];
+        const nextPlatformFlags = (data?.platformFlags || {}) as ApiPlatformFlags;
+
+        if (!cancelled) {
+          setPlans(nextPlans);
+          setPlatformFlags({
+            hlsEnabled: isPlatformEnabled(nextPlatformFlags.hlsEnabled),
+            recordingEnabled: isPlatformEnabled(nextPlatformFlags.recordingEnabled),
+            transcodeEnabled: isPlatformEnabled(nextPlatformFlags.transcodeEnabled),
+          });
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setPlansError(e?.message || "Failed to load plans");
+          setPlans([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setPlansLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const planRows = useMemo(() => {
+    const byId = new Map<string, ApiPlan>();
+    for (const p of plans) {
+      byId.set(canonicalPlanId(p.id), p);
+    }
+
+    const defs: Array<{
+      id: string;
+      fallback: {
+        plan: string;
+        inRoom: string;
+        streaming: string;
+        recording: boolean;
+        multistream: boolean;
+        hls: boolean | "limited";
+        highlight?: boolean;
+      };
+    }> = [
+      { id: "free", fallback: { plan: "Free", inRoom: "Included", streaming: "Not included", recording: false, multistream: false, hls: false } },
+      { id: "basic", fallback: { plan: "Basic", inRoom: "Included", streaming: "Not included", recording: false, multistream: false, hls: false } },
+      { id: "starter", fallback: { plan: "Starter", inRoom: "Included", streaming: "60", recording: true, multistream: true, hls: "limited", highlight: true } },
+      { id: "pro", fallback: { plan: "Pro", inRoom: "Included", streaming: "300", recording: true, multistream: true, hls: true, highlight: true } },
+      { id: "enterprise", fallback: { plan: "Enterprise", inRoom: "Custom", streaming: "Custom", recording: true, multistream: true, hls: true } },
+    ];
+
+    return defs.map(({ id, fallback }) => {
+      const p = byId.get(id);
+      if (!p) {
+        return {
+          ...fallback,
+          _key: id,
+        };
+      }
+
+      const inRoomLimit = safeNumber(p.limits?.monthlyMinutesIncluded);
+      const streamingLimit = safeNumber(p.limits?.transcodeMinutes);
+      const rtmpMax = safeNumber((p.limits as any)?.rtmpDestinationsMax);
+      const multistreamByLimit = rtmpMax > 1;
+      const multistreamByFlag = typeof p.features?.multistream === "boolean" ? p.features.multistream : undefined;
+      const planAllowsMultistream = typeof multistreamByFlag === "boolean" ? multistreamByFlag : multistreamByLimit;
+
+      return {
+        _key: id,
+        plan: String(p.name || fallback.plan),
+        inRoom: formatLimitLabel(inRoomLimit),
+        streaming: formatLimitLabel(streamingLimit),
+        recording: Boolean(p.features?.recording ?? fallback.recording),
+        multistream: Boolean(planAllowsMultistream ?? fallback.multistream),
+        hls: planHlsPlanValue(p),
+        highlight: fallback.highlight,
+      };
+    });
+  }, [plans]);
+
+  const platformHlsEnabled = isPlatformEnabled(platformFlags.hlsEnabled);
+  const platformRecordingEnabled = isPlatformEnabled(platformFlags.recordingEnabled);
+  const platformTranscodeEnabled = isPlatformEnabled(platformFlags.transcodeEnabled);
 
   return (
     <div
@@ -190,6 +343,32 @@ export const PricingExplainerPage: React.FC = () => {
               border: "1px solid rgba(148, 163, 184, 0.1)",
             }}
           >
+            {(!platformRecordingEnabled || !platformHlsEnabled || !platformTranscodeEnabled) && !plansLoading && (
+              <div
+                style={{
+                  padding: "0.75rem 1rem",
+                  background: "rgba(15, 23, 42, 0.8)",
+                  borderBottom: "1px solid rgba(148, 163, 184, 0.1)",
+                  color: "#fbbf24",
+                  fontSize: "0.875rem",
+                }}
+              >
+                Some features are temporarily unavailable platform-wide.
+              </div>
+            )}
+            {(plansLoading || plansError) && (
+              <div
+                style={{
+                  padding: "0.75rem 1rem",
+                  background: "rgba(15, 23, 42, 0.8)",
+                  borderBottom: "1px solid rgba(148, 163, 184, 0.1)",
+                  color: plansError ? "#fca5a5" : "#94a3b8",
+                  fontSize: "0.875rem",
+                }}
+              >
+                {plansLoading ? "Loading latest plan details…" : `Showing defaults (plans unavailable): ${plansError}`}
+              </div>
+            )}
             <table
               style={{
                 width: "100%",
@@ -201,43 +380,29 @@ export const PricingExplainerPage: React.FC = () => {
                 <tr style={{ background: "rgba(30, 41, 59, 0.8)" }}>
                   <Th>Plan</Th>
                   <Th>In-Room Minutes</Th>
-                  <Th>Streaming Minutes</Th>
-                  <Th>HLS</Th>
+                  {platformTranscodeEnabled !== false && <Th>Streaming Minutes</Th>}
+                  {platformRecordingEnabled !== false && <Th>Recording</Th>}
+                  {platformTranscodeEnabled !== false && <Th>Multistream</Th>}
+                  {platformHlsEnabled !== false && <Th>HLS</Th>}
                 </tr>
               </thead>
               <tbody>
-                <PlanRow
-                  plan="Free"
-                  inRoom="Included"
-                  streaming="Not included"
-                  hls={false}
-                />
-                <PlanRow
-                  plan="Basic"
-                  inRoom="Included"
-                  streaming="Not included"
-                  hls={false}
-                />
-                <PlanRow
-                  plan="Starter"
-                  inRoom="Included"
-                  streaming="60"
-                  hls="limited"
-                  highlight
-                />
-                <PlanRow
-                  plan="Pro"
-                  inRoom="Included"
-                  streaming="300"
-                  hls={true}
-                  highlight
-                />
-                <PlanRow
-                  plan="Enterprise"
-                  inRoom="Custom"
-                  streaming="Custom"
-                  hls={true}
-                />
+                {planRows.map((r) => (
+                  <PlanRow
+                    key={r._key}
+                    plan={r.plan}
+                    inRoom={r.inRoom}
+                    streaming={r.streaming}
+                    recording={r.recording}
+                    multistream={r.multistream}
+                    hls={r.hls}
+                    highlight={r.highlight}
+                    showStreaming={platformTranscodeEnabled !== false}
+                    showRecording={platformRecordingEnabled !== false}
+                    showMultistream={platformTranscodeEnabled !== false}
+                    showHls={platformHlsEnabled !== false}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
@@ -579,9 +744,15 @@ const PlanRow: React.FC<{
   plan: string;
   inRoom: string;
   streaming: string;
+  recording: boolean;
+  multistream: boolean;
   hls: boolean | "limited";
   highlight?: boolean;
-}> = ({ plan, inRoom, streaming, hls, highlight }) => (
+  showStreaming: boolean;
+  showRecording: boolean;
+  showMultistream: boolean;
+  showHls: boolean;
+}> = ({ plan, inRoom, streaming, recording, multistream, hls, highlight, showStreaming, showRecording, showMultistream, showHls }) => (
   <tr
     style={{
       background: highlight ? "rgba(220, 38, 38, 0.05)" : "transparent",
@@ -590,16 +761,47 @@ const PlanRow: React.FC<{
   >
     <td style={{ padding: "0.875rem 1rem", fontWeight: 600, color: "#f1f5f9" }}>{plan}</td>
     <td style={{ padding: "0.875rem 1rem", color: "#94a3b8" }}>{inRoom}</td>
-    <td style={{ padding: "0.875rem 1rem", color: streaming === "Not included" ? "#64748b" : "#94a3b8" }}>
-      {streaming}
-    </td>
-    <td style={{ padding: "0.875rem 1rem" }}>
-      {hls === true && <span style={{ color: "#22c55e" }}>✅</span>}
-      {hls === false && <span style={{ color: "#64748b" }}>❌</span>}
-      {hls === "limited" && (
-        <span style={{ color: "#f59e0b", fontSize: "0.75rem" }}>✅ limited</span>
-      )}
-    </td>
+    {showStreaming && (
+      <td style={{ padding: "0.875rem 1rem", color: streaming === "Not included" ? "#64748b" : "#94a3b8" }}>
+        {streaming}
+      </td>
+    )}
+    {showRecording && (
+      <td style={{ padding: "0.875rem 1rem" }}>
+        {recording ? (
+          <span style={{ color: "#22c55e" }}>✅</span>
+        ) : (
+          <div style={{ color: "#64748b", lineHeight: 1.15 }}>
+            <div>🔒</div>
+            <div style={{ fontSize: "0.75rem", marginTop: 4 }}>Not included in this plan</div>
+          </div>
+        )}
+      </td>
+    )}
+    {showMultistream && (
+      <td style={{ padding: "0.875rem 1rem" }}>
+        {multistream ? (
+          <span style={{ color: "#22c55e" }}>✅</span>
+        ) : (
+          <div style={{ color: "#64748b", lineHeight: 1.15 }}>
+            <div>🔒</div>
+            <div style={{ fontSize: "0.75rem", marginTop: 4 }}>Not included in this plan</div>
+          </div>
+        )}
+      </td>
+    )}
+    {showHls && (
+      <td style={{ padding: "0.875rem 1rem" }}>
+        {hls === true && <span style={{ color: "#22c55e" }}>✅</span>}
+        {hls === false && (
+          <div style={{ color: "#64748b", lineHeight: 1.15 }}>
+            <div>🔒</div>
+            <div style={{ fontSize: "0.75rem", marginTop: 4 }}>Not included in this plan</div>
+          </div>
+        )}
+        {hls === "limited" && <span style={{ color: "#f59e0b", fontSize: "0.75rem" }}>✅ limited</span>}
+      </td>
+    )}
   </tr>
 );
 

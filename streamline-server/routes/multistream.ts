@@ -8,6 +8,7 @@ import { decryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
 import { clampPresetForPlan, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
+import { assertPlatformTranscodeEnabled } from "../lib/platformFlags";
 
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
 let _lkMod: any | null = null;
@@ -36,6 +37,11 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
     const requestStartedAt = Date.now();
     const uid = (req as any).user?.uid;
     if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+
+    // Platform-wide kill switch: multistream relies on the transcode/egress pipeline.
+    if (!assertPlatformTranscodeEnabled(res)) {
+      return;
+    }
 
     const { roomId: canonicalRoomId, livekitRoomName } = getRoomAccess(req as any);
     if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });

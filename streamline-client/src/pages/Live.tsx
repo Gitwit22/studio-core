@@ -103,6 +103,7 @@ export default function Live() {
   const [viewerCount, setViewerCount] = useState<number>(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   // Resolve savedEmbedId -> activeRoomId and basic viewer metadata
   useEffect(() => {
@@ -255,6 +256,19 @@ export default function Live() {
     const v = videoRef.current;
     if (v) {
       snapToLiveEdge(v);
+
+      // If we are using hls.js, nudge it to (re)load from the live edge.
+      // This is intentionally lightweight (no destroy/recreate) to avoid
+      // visible resets during playback.
+      const hls = hlsRef.current;
+      if (hls) {
+        try {
+          hls.startLoad(-1);
+        } catch {
+          // ignore
+        }
+      }
+
       if (v.paused) {
         void v.play().catch(() => {});
       }
@@ -310,6 +324,8 @@ export default function Live() {
         enableWorker: true,
         lowLatencyMode: true,
       });
+
+      hlsRef.current = hls;
 
       hls.loadSource(playlistUrl);
       hls.attachMedia(video);
@@ -385,6 +401,10 @@ export default function Live() {
           hls.destroy();
         } catch {
           // ignore
+        }
+
+        if (hlsRef.current === hls) {
+          hlsRef.current = null;
         }
       };
     } else {

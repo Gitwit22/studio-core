@@ -7,6 +7,7 @@ import { checkStorageLimit, updateStorageUsage } from "../usageHelper";
 import { assertPlatformTranscodeEnabled } from "../lib/platformFlags";
 import { requireAuth } from "../middleware/requireAuth";
 import { LIMIT_ERRORS } from "../lib/limitErrors";
+import { canAccessFeature } from "./featureAccess";
 
 const router = Router();
 
@@ -681,6 +682,15 @@ router.post("/create-recording", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Title is required" });
     }
 
+    // Enforce plan entitlement + platform flag (default-enabled when missing)
+    const access = await canAccessFeature(userId, "recording");
+    if (!access.allowed) {
+      return res.status(403).json({
+        error: access.code || LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
+        reason: access.reason || "Recording not available",
+      });
+    }
+
     // Create new recording document
     const recordingRef = db.collection("recordings").doc();
     const recordingData = {
@@ -733,6 +743,15 @@ router.post("/recordings/start", async (req: Request, res: Response) => {
 
     if (!roomName || !title) {
       return res.status(400).json({ error: "roomName and title required" });
+    }
+
+    // Enforce plan entitlement + platform flag (default-enabled when missing)
+    const access = await canAccessFeature(userId, "recording");
+    if (!access.allowed) {
+      return res.status(403).json({
+        error: access.code || LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
+        reason: access.reason || "Recording not available",
+      });
     }
 
     // Create recording document

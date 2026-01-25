@@ -6,6 +6,7 @@ import { apiFetchAuth } from "../lib/api";
 import { APP_BASE } from "../lib/appBase";
 import { getHlsStatus, startHls, stopHls } from "../services/hls";
 import CollapsibleSection from "./CollapsibleSection";
+import { getFeatureErrorMessage } from "../lib/featureErrors";
 
 type PlatformKey = "youtube" | "facebook" | "twitch" | "instagram" | "custom";
 
@@ -425,7 +426,11 @@ export default function StreamSetupModalV2({
               const parsed = JSON.parse(parts[1] || "{}");
               const code = String((parsed && (parsed.error || parsed.reason)) || "").trim();
               if (code === "hls_not_in_plan") {
-                friendly = "HLS Broadcast Page is not included in this plan.";
+                friendly = getFeatureErrorMessage("hls_not_in_plan", "hls");
+              } else if (code === "feature_not_entitled") {
+                friendly = getFeatureErrorMessage("feature_not_entitled", "hls");
+              } else if (code === "feature_disabled") {
+                friendly = getFeatureErrorMessage("feature_disabled", "hls");
               } else if (code === "room_mismatch") {
                 friendly = "This embed is linked to a different show. Create a new embed for this room from Settings → HLS Setup.";
               }
@@ -480,7 +485,11 @@ export default function StreamSetupModalV2({
                 const parsed = JSON.parse(parts[1] || "{}");
                 const code = String((parsed && (parsed.error || parsed.reason)) || "").trim();
                 if (code === "hls_not_in_plan") {
-                  friendly = "HLS Broadcast Page is not included in this plan.";
+                  friendly = getFeatureErrorMessage("hls_not_in_plan", "hls");
+                } else if (code === "feature_not_entitled") {
+                  friendly = getFeatureErrorMessage("feature_not_entitled", "hls");
+                } else if (code === "feature_disabled") {
+                  friendly = getFeatureErrorMessage("feature_disabled", "hls");
                 } else if (code === "room_mismatch") {
                   friendly = "This embed is linked to a different show. Create a new embed for this room from Settings → HLS Setup.";
                 }

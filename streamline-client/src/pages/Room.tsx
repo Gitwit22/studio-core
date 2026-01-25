@@ -1,3 +1,4 @@
+import { getFeatureErrorMessage } from "../lib/featureErrors";
 import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -1980,7 +1981,11 @@ function RoomPage() {
       } catch (e) {
         console.error("❌ Failed to start recording:", e);
         setRecordingStatus("error");
-        alert(`Failed to start recording: ${(e as Error).message || "Unknown error"}`);
+        const anyErr: any = e as any;
+        const body = anyErr?.body;
+        const code = String(body?.error || body?.code || "").trim();
+        const friendly = code ? getFeatureErrorMessage(code, "recording") : null;
+        alert(friendly ? `Failed to start recording: ${friendly}` : `Failed to start recording: ${anyErr?.message || "Unknown error"}`);
       } finally {
         const clearTimer = setTimeout(() => {
           setRecordingCountdown(null);
@@ -2213,8 +2218,8 @@ function RoomPage() {
         if (raw && raw.trim().length > 0) {
           try {
             data = JSON.parse(raw);
-          } catch (parseErr) {
-            console.error("start-multistream parse error", parseErr, raw);
+          } catch {
+            console.warn("start-multistream parse error");
             data = { raw };
           }
         } else {
@@ -2223,14 +2228,38 @@ function RoomPage() {
         }
         console.log("🔍 startMultistream full response:", data);
         if (!res.ok) {
-          console.error("Start multistream failed", data);
-          alert(`Failed to start streaming to Stream Destinations: ${data.error || data.message || "Unknown error"}`);
+          const code = data?.error ?? data?.code ?? data?.data?.error ?? data?.data?.code;
+          const mapped = getFeatureErrorMessage(code, code === "TRANSCODE_DISABLED" ? "transcode" : "multistream");
+          const message =
+            mapped !== "Feature unavailable."
+              ? mapped
+              : `Failed to start streaming to Stream Destinations: ${data?.message || data?.error || "Unknown error"}`;
+
+          if (code === "TRANSCODE_DISABLED") {
+            console.warn("Start multistream blocked by transcode kill-switch");
+          } else {
+            console.error("Start multistream failed", data);
+          }
+
+          alert(message);
           setStreamStatus("idle");
           return;
         }
         if (data?.success === false || data?.error) {
-          console.error("Start multistream API indicated failure", data);
-          alert(`Failed to start streaming to Stream Destinations: ${data.error || data.message || "Unknown error"}`);
+          const code = data?.error ?? data?.code ?? data?.data?.error ?? data?.data?.code;
+          const mapped = getFeatureErrorMessage(code, code === "TRANSCODE_DISABLED" ? "transcode" : "multistream");
+          const message =
+            mapped !== "Feature unavailable."
+              ? mapped
+              : `Failed to start streaming to Stream Destinations: ${data?.message || data?.error || "Unknown error"}`;
+
+          if (code === "TRANSCODE_DISABLED") {
+            console.warn("Start multistream blocked by transcode kill-switch");
+          } else {
+            console.error("Start multistream API indicated failure", data);
+          }
+
+          alert(message);
           setStreamStatus("idle");
           return;
         }

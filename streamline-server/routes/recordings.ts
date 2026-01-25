@@ -583,7 +583,7 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
     if (!featureAccess.allowed) {
       return res.status(403).json({
         success: false,
-        error: LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
+        error: featureAccess.code || LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
         reason: featureAccess.reason || "Recording requires upgrade",
       });
     }
