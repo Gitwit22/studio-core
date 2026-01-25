@@ -418,27 +418,19 @@ export default function Join() {
           return;
         }
 
-        const res = await fetch(`${API_BASE}/api/rooms/create`, {
+        const res = await apiFetchAuth(`${API_BASE}/api/rooms/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({
             livekitRoomName: roomLabel,
             roomType: "rtc",
             savedEmbedId: isUsingSaved ? selectedSavedEmbedId : undefined,
           }),
-        });
+        }, { allowNonOk: true });
 
         if (!res.ok) {
           const text = await res.text().catch(() => "");
           console.error("Failed to create room", res.status, text);
-
-          // If auth is missing/expired, send host to login with a return URL
-          if (res.status === 401 || res.status === 403) {
-            const next = `${window.location.pathname}${window.location.search}`;
-            nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
-            return;
-          }
 
           alert("Failed to create room. Please try again.");
           return;
