@@ -1852,10 +1852,19 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           </>
                         )}
                       </ul>
-                                        {/* Streaming Minutes explanation note */}
-                                        <div style={{ color: "#94a3b8", fontSize: 12, margin: "8px 0 0 0" }}>
-                                          <span style={{ color: "#60a5fa" }}>Streaming Minutes</span> are used when broadcasting outside StreamLine and are counted per destination.
-                                        </div>
+                      {(planId !== "free" && planId !== "basic") && (
+                        <div style={{ color: "#94a3b8", fontSize: 12, margin: "8px 0 0 0", lineHeight: 1.45 }}>
+                          <div>
+                            <span style={{ color: "#60a5fa" }}>Streaming Minutes</span> are consumed when StreamLine sends your live video to other platforms (like YouTube, Facebook, Twitch, etc.).
+                          </div>
+                          <div style={{ marginTop: 6 }}>
+                            They are not used when you’re just streaming inside StreamLine.
+                          </div>
+                          <div style={{ marginTop: 8 }}>
+                            They are counted per destination, per minute.
+                          </div>
+                        </div>
+                      )}
                       <div style={S.planCardAction}>
                         {isTestMode ? (
                           isCurrent ? (
@@ -2463,7 +2472,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     }}
                     disabled={!!actionLoading}
                   >
-                    {actionLoading === "starter_paid" ? "⏳ Redirecting..." : `Starter — $${starterPlan?.price ?? 15}/mo`}
+                    {actionLoading === "starter_paid" ? "⏳ Redirecting..." : `Starter — $${starterPlan?.price ?? 35}/mo`}
                   </button>
 
                   <button
