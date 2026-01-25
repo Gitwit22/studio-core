@@ -74,7 +74,9 @@ export async function apiFetch(path: string, init: RequestInit = {}, options?: {
   const headers = new Headers(init.headers || {});
 
   // Default JSON content-type when sending a body unless overridden.
-  if (init.body && !headers.has("Content-Type")) {
+  // NOTE: Only auto-set for string bodies (JSON.stringify). Do NOT set this for
+  // FormData uploads (browser must set multipart boundaries), blobs, etc.
+  if (typeof init.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -209,7 +211,7 @@ export async function apiStartRecording(
   presetId?: string,
   roomAccessToken?: string | null
 ) {
-  const res = await apiFetch("/api/recordings/start", {
+  const res = await apiFetchAuth("/api/recordings/start", {
     method: "POST",
     body: JSON.stringify({ roomId, layout, mode, presetId }),
     headers: roomAccessToken
@@ -222,7 +224,7 @@ export async function apiStartRecording(
 }
 
 export async function apiStopRecording(recordingId: string, roomAccessToken?: string | null) {
-  const res = await apiFetch("/api/recordings/stop", {
+  const res = await apiFetchAuth("/api/recordings/stop", {
     method: "POST",
     body: JSON.stringify({ recordingId }),
     headers: roomAccessToken

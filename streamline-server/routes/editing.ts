@@ -1,14 +1,20 @@
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { Router, Request, Response } from "express";
 import { firestore as db } from "../firebaseAdmin";
-import jwt from "jsonwebtoken";
 import multer from "multer";
 import { uploadVideo, getSignedDownloadUrl } from "../lib/storageClient";
 import { checkStorageLimit, updateStorageUsage } from "../usageHelper";
 import { assertPlatformTranscodeEnabled } from "../lib/platformFlags";
+import { requireAuth } from "../middleware/requireAuth";
+import { LIMIT_ERRORS } from "../lib/limitErrors";
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
+
+function getAuthedUid(req: Request): string | null {
+  const user = (req as any).user;
+  const uid = typeof user?.uid === "string" ? user.uid : null;
+  return uid;
+}
 
 // Configure multer for memory storage (files stored in RAM temporarily)
 const upload = multer({
@@ -16,38 +22,7 @@ const upload = multer({
   limits: { fileSize: 500 * 1024 * 1024 } // 500MB max
 });
 
-// ✅ FIXED AUTH MIDDLEWARE - ALLOWS DEV MODE
-const authenticateToken = (req: Request, res: Response, next: any) => {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
-
-  // Development mode: Allow requests without token
-  if (!token) {
-    console.log("⚠️ No auth token provided - using dev user");
-    req.user = { id: "dev_user_123", planId: "free" };
-    return next();
-  }
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    req.user = { id: decoded.id, planId: decoded.plan };
-    console.log("✅ Auth token valid:", req.user.id);
-    next();
-  } catch (err) {
-    console.log("⚠️ Invalid auth token - using dev user");
-    req.user = { id: "dev_user_123", planId: "free" };
-    next();
-  }
-};
-
-// Extend Request type to include user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: { id: string; planId: string };
-    }
-  }
-}
+router.use(requireAuth);
 
 // ============================================================================
 // UPLOAD ENDPOINT - ✅ FIXED WITH MULTER
@@ -55,7 +30,6 @@ declare global {
 
 router.post(
   "/upload",
-  authenticateToken,
   upload.single('video') as any, // ✅ Parse file from FormData (typed as any for TS)
   async (req: Request, res: Response) => {
     try {
@@ -67,21 +41,24 @@ router.post(
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const userId = req.user?.id;
+      const userId = getAuthedUid(req);
+      if (!userId) {
+        return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+      }
       const title = req.body.title || file.originalname.replace(/\.[^/.]+$/, "");
 
       console.log(`📹 Uploading: ${title}`);
       console.log(`📦 Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
       console.log(`👤 User: ${userId}`);
 
-      // Check storage limits (skip for dev user)
-      if (userId && userId !== "dev_user_123") {
-        try {
-          await checkStorageLimit(userId, file.size);
-        } catch (err: any) {
-          console.log("⚠️ Storage limit check:", err.message);
-          // Continue anyway for dev
-        }
+      // Check storage limits
+      try {
+        await checkStorageLimit(userId, file.size);
+      } catch (err: any) {
+        return res.status(409).json({
+          error: LIMIT_ERRORS.LIMIT_EXCEEDED,
+          details: err?.message || "Storage limit exceeded",
+        });
       }
 
       // Generate unique filename
@@ -101,13 +78,11 @@ router.post(
 
       console.log(`✅ Upload complete: ${publicUrl}`);
 
-      // Update storage usage (skip for dev user)
-      if (userId && userId !== "dev_user_123") {
-        try {
-          await updateStorageUsage(userId, file.size);
-        } catch (err) {
-          console.log("⚠️ Storage usage update failed (non-critical)");
-        }
+      // Update storage usage (best-effort)
+      try {
+        await updateStorageUsage(userId, file.size);
+      } catch (err) {
+        console.log("⚠️ Storage usage update failed (non-critical)");
       }
 
       // Create asset in Firestore
@@ -149,9 +124,9 @@ router.post(
 // ============================================================================
 
 // GET /api/editing/assets - Get all user's assets
-router.get("/assets", authenticateToken, async (req: Request, res: Response) => {
+router.get("/assets", async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
 
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
@@ -211,10 +186,13 @@ router.get("/assets", authenticateToken, async (req: Request, res: Response) => 
 });
 
 // GET /api/editing/listall - Legacy endpoint
-router.get("/listall", authenticateToken, async (req: Request, res: Response) => {
+router.get("/listall", async (req: Request, res: Response) => {
   // Same as /assets
   try {
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
     const recordingsSnap = await db.collection("recordings").where("userId", "==", userId).get();
     const uploadsSnap = await db.collection("editing_assets").where("userId", "==", userId).get();
     
@@ -238,9 +216,9 @@ router.get("/listall", authenticateToken, async (req: Request, res: Response) =>
 });
 
 // GET /api/editing/assets/:id - Get single asset by ID
-router.get("/assets/:id", authenticateToken, async (req: Request, res: Response) => {
+router.get("/assets/:id", async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
     const { id } = req.params;
 
     if (!userId) {
@@ -280,9 +258,9 @@ router.get("/assets/:id", authenticateToken, async (req: Request, res: Response)
 });
 
 // DELETE /api/editing/assets/:id - Delete an asset
-router.delete("/assets/:id", authenticateToken, async (req: Request, res: Response) => {
+router.delete("/assets/:id", async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
     const { id } = req.params;
 
     if (!userId) {
@@ -313,9 +291,9 @@ router.delete("/assets/:id", authenticateToken, async (req: Request, res: Respon
 });
 
 // POST /api/editing/assets/from-recording - Convert recording to asset
-router.post("/assets/from-recording", authenticateToken, async (req: Request, res: Response) => {
+router.post("/assets/from-recording", async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
     const { recordingId } = req.body;
 
     if (!userId) {
@@ -363,9 +341,12 @@ router.post("/assets/from-recording", authenticateToken, async (req: Request, re
 // ============================================================================
 
 // GET /api/editing/projects - List all projects
-router.get("/projects", authenticateToken, async (req: Request, res: Response) => {
+router.get("/projects", async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
     
     const projectsSnap = await db
       .collection("editing_projects")
@@ -394,10 +375,14 @@ router.get("/projects", authenticateToken, async (req: Request, res: Response) =
 });
 
 // POST /api/editing/projects - Create new project
-router.post("/projects", authenticateToken, async (req: Request, res: Response) => {
+router.post("/projects", async (req: Request, res: Response) => {
   try {
     const { name, assetId } = req.body;
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
 
     const newProject = {
       userId,
@@ -429,9 +414,14 @@ router.post("/projects", authenticateToken, async (req: Request, res: Response) 
 // ============================================================================
 
 // GET /api/editing/recordings/:id - Get recording details
-router.get("/recordings/:id", authenticateToken, async (req: Request, res: Response) => {
+router.get("/recordings/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = getAuthedUid(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
     
     const recordingDoc = await db.collection("recordings").doc(id).get();
     
@@ -440,6 +430,10 @@ router.get("/recordings/:id", authenticateToken, async (req: Request, res: Respo
     }
 
     const data = recordingDoc.data();
+
+    if (data?.userId !== userId) {
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
+    }
     res.json({
       id: recordingDoc.id,
       ...data,
@@ -454,29 +448,15 @@ router.get("/recordings/:id", authenticateToken, async (req: Request, res: Respo
 // GET /api/editing/list - Get all recordings for the authenticated user
 router.get("/list", async (req: Request, res: Response) => {
   try {
-    const authHeader = req.headers["authorization"];
-    const token = authHeader && authHeader.split(" ")[1];
-    let userId: string | null = null;
-
-    // If token provided, use it; otherwise fetch all recordings for testing
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
-        userId = decoded.id;
-      } catch (err) {
-        // Invalid token, will fetch all recordings
-        userId = null;
-      }
+    const userId = getAuthedUid(req);
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
-    let query: any = db.collection("recordings");
-    
-    // If we have a valid user ID, filter by it
-    if (userId) {
-      query = query.where("userId", "==", userId);
-    }
-
-    const recordingsSnap = await query.get();
+    const recordingsSnap = await db
+      .collection("recordings")
+      .where("userId", "==", userId)
+      .get();
 
     const recordings = recordingsSnap.docs
       .map((doc: any) => ({
@@ -498,12 +478,16 @@ router.get("/list", async (req: Request, res: Response) => {
 });
 
 // POST /api/editing/save - Save edit configuration for a recording
-router.post("/save", authenticateToken, async (req: Request, res: Response) => {
+router.post("/save", async (req: Request, res: Response) => {
   try {
     const { recordingId, editConfig } = req.body;
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
 
-    if (!userId || !recordingId) {
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!recordingId) {
       return res.status(400).json({ error: "recordingId is required" });
     }
 
@@ -533,13 +517,17 @@ router.post("/save", authenticateToken, async (req: Request, res: Response) => {
 });
 
 // PUT /api/editing/:recordingId - Update recording metadata (duration, status, viewer count)
-router.put("/:recordingId", authenticateToken, async (req: Request, res: Response) => {
+router.put("/:recordingId", async (req: Request, res: Response) => {
   try {
     const { recordingId } = req.params;
     const { duration, status, viewerCount, peakViewers } = req.body;
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
 
-    if (!userId || !recordingId) {
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!recordingId) {
       return res.status(400).json({ error: "recordingId is required" });
     }
 
@@ -578,16 +566,20 @@ router.put("/:recordingId", authenticateToken, async (req: Request, res: Respons
 });
 
 // POST /api/editing/render - Trigger render job for a recording
-router.post("/render", authenticateToken, async (req: Request, res: Response) => {
+router.post("/render", async (req: Request, res: Response) => {
   try {
     if (!assertPlatformTranscodeEnabled(res)) {
       return;
     }
 
     const { recordingId, renderedBuffer } = req.body;
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
 
-    if (!userId || !recordingId) {
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!recordingId) {
       return res.status(400).json({ error: "recordingId is required" });
     }
 
@@ -615,14 +607,25 @@ router.post("/render", authenticateToken, async (req: Request, res: Response) =>
         const buffer = Buffer.from(renderedBuffer);
         
         // Check storage limit
-        await checkStorageLimit(userId, buffer.byteLength);
+        try {
+          await checkStorageLimit(userId, buffer.byteLength);
+        } catch (err: any) {
+          return res.status(409).json({
+            error: LIMIT_ERRORS.LIMIT_EXCEEDED,
+            details: err?.message || "Storage limit exceeded",
+          });
+        }
 
         // Upload to R2
         const exportPath = `exports/${userId}/${recordingId}/${Date.now()}.mp4`;
         const publicUrl = await uploadVideo(buffer, exportPath, "video/mp4");
 
-        // Update storage usage
-        await updateStorageUsage(userId, buffer.byteLength);
+        // Update storage usage (best-effort)
+        try {
+          await updateStorageUsage(userId, buffer.byteLength);
+        } catch (err) {
+          console.log("⚠️ Storage usage update failed (non-critical)");
+        }
 
         // Update recording with rendered path and URL
         await db.collection("recordings").doc(recordingId).update({
@@ -665,10 +668,10 @@ router.post("/render", authenticateToken, async (req: Request, res: Response) =>
 });
 
 // POST /api/editing/create-recording - Create a new recording document when stream starts
-router.post("/create-recording", authenticateToken, async (req: Request, res: Response) => {
+router.post("/create-recording", async (req: Request, res: Response) => {
   try {
     const { roomName, title, viewerCount, peakViewers } = req.body;
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
 
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
@@ -719,10 +722,10 @@ router.post("/create-recording", authenticateToken, async (req: Request, res: Re
 // ============================================================================
 
 // POST /api/recordings/start - Start a new recording session
-router.post("/recordings/start", authenticateToken, async (req: Request, res: Response) => {
+router.post("/recordings/start", async (req: Request, res: Response) => {
   try {
     const { roomName, title } = req.body;
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
 
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
@@ -767,17 +770,31 @@ router.post("/recordings/start", authenticateToken, async (req: Request, res: Re
 });
 
 // POST /api/recordings/stop - Stop recording and finalize metadata
-router.post("/recordings/stop", authenticateToken, async (req: Request, res: Response) => {
+router.post("/recordings/stop", async (req: Request, res: Response) => {
   try {
     const { recordingId, duration, viewerCount, peakViewers } = req.body;
-    const userId = req.user?.id;
+    const userId = getAuthedUid(req);
 
-    if (!userId || !recordingId) {
-      return res.status(400).json({ error: "Unauthorized or missing recordingId" });
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!recordingId) {
+      return res.status(400).json({ error: "recordingId is required" });
     }
 
     // Update recording document
     const recordingRef = db.collection("recordings").doc(recordingId);
+
+    const snap = await recordingRef.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Recording not found" });
+    }
+
+    const data = snap.data() as any;
+    if (data?.userId !== userId) {
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
+    }
     
     await recordingRef.update({
       status: "ready",

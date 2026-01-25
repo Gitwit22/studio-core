@@ -380,7 +380,7 @@ export default function SettingsBilling() {
 
   const loadPlans = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/plans`, { credentials: "include" });
+      const res = await apiFetchAuth(`${API_BASE}/api/plans`, {}, { allowNonOk: true });
       if (res.ok) {
         const data = await res.json();
         console.log("[SettingsBilling] /api/plans response:", data);
@@ -494,7 +494,7 @@ export default function SettingsBilling() {
       }
 
       // Fallback: legacy usage entitlements endpoint
-      const legacyRes = await apiFetch("/api/usage/entitlements");
+      const legacyRes = await apiFetchAuth("/api/usage/entitlements", {}, { allowNonOk: true });
       if (!legacyRes.ok) throw new Error("usage/entitlements failed");
       const legacy = await legacyRes.json();
       setEntitlements({
@@ -665,7 +665,7 @@ export default function SettingsBilling() {
 
   const loadCohostProfile = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/account/cohost-profile`, { credentials: "include" });
+      const res = await apiFetchAuth(`${API_BASE}/api/account/cohost-profile`, {}, { allowNonOk: true });
       if (!res.ok) throw new Error("cohost profile endpoint failed");
       const data = await res.json();
       if (data?.profile) {
@@ -678,7 +678,7 @@ export default function SettingsBilling() {
 
   const loadRolePresets = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/account/role-presets`, { credentials: "include" });
+      const res = await apiFetchAuth(`${API_BASE}/api/account/role-presets`, {}, { allowNonOk: true });
       if (!res.ok) throw new Error("role-presets endpoint failed");
       const data = await res.json();
       if (data?.presets) {
@@ -727,12 +727,15 @@ export default function SettingsBilling() {
     setCohostSaving(true);
     setCohostMessage(null);
     try {
-      const res = await fetch(`${API_BASE}/api/account/cohost-profile`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(cohostProfile),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/account/cohost-profile`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(cohostProfile),
+        },
+        { allowNonOk: true }
+      );
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || "Failed to save co-host defaults");
@@ -752,12 +755,15 @@ export default function SettingsBilling() {
     setCohostSaving(true);
     setCohostMessage(null);
     try {
-      const res = await fetch(`${API_BASE}/api/account/cohost-profile`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(next),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/account/cohost-profile`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+        },
+        { allowNonOk: true }
+      );
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || "Failed to save co-host defaults");
@@ -776,12 +782,15 @@ export default function SettingsBilling() {
   const saveRolePreset = async (presetId: RolePresetId, patch: Partial<RolePresetDoc>) => {
     setRolePresetsSaving((prev) => ({ ...prev, [presetId]: "saving" }));
     try {
-      const res = await fetch(`${API_BASE}/api/account/role-presets/${presetId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(patch),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/account/role-presets/${presetId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        },
+        { allowNonOk: true }
+      );
       const data = await res.json().catch(() => null);
       if (!res.ok || (data as any)?.error) {
         throw new Error(((data as any)?.error as string) || "Failed to update role defaults");
@@ -817,12 +826,15 @@ export default function SettingsBilling() {
     setMediaPrefsMessage(null);
     setMediaPrefsError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/account/media-prefs`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(mediaPrefs),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/account/media-prefs`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mediaPrefs),
+        },
+        { allowNonOk: true }
+      );
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || "Failed to save media preferences");
@@ -880,10 +892,7 @@ export default function SettingsBilling() {
 
       let res: Response;
       try {
-        res = await fetch(`${API_BASE}/api/recordings/emergency-latest`, {
-          credentials: "include",
-          cache: "no-store",
-        });
+        res = await apiFetchAuth("/api/recordings/emergency-latest", { cache: "no-store" }, { allowNonOk: true });
       } catch (err) {
         console.error("Emergency download failed (network)", err);
         setEmergencyMessage("Network error. Check your connection and try again.");
@@ -943,7 +952,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   const requestId = `${plan}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
   try {
-    const res = await apiFetch("/api/billing/checkout", {
+    const res = await apiFetchAuth("/api/billing/checkout", {
       method: "POST",
       body: JSON.stringify({ plan, requestId, tosAccepted: true }),
     });
@@ -985,7 +994,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
         setActionLoading(null);
         return;
       }
-      const res = await apiFetch("/api/billing/portal", {
+      const res = await apiFetchAuth("/api/billing/portal", {
         method: "POST",
       });
       const data = await res.json();
@@ -1002,7 +1011,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setCheckoutTosSubmitting(true);
       setCheckoutTosError(null);
       try {
-        const res = await apiFetch("/api/account/accept-tos", {
+        const res = await apiFetchAuth("/api/account/accept-tos", {
           method: "POST",
         });
         const data = await res.json();
@@ -1043,7 +1052,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     setTestModeLoading(true);
     setError(null);
     try {
-      const res = await apiFetch("/api/billing/test/change-plan", {
+      const res = await apiFetchAuth("/api/billing/test/change-plan", {
         method: "POST",
         body: JSON.stringify({ newPlanId: testModeTargetPlan }),
       });

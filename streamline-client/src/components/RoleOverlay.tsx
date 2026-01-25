@@ -1,6 +1,7 @@
 import React from "react";
 import { useParticipants, useLocalParticipant } from "@livekit/components-react";
 import { normalizeUiRolePresetId } from "../lib/roles";
+import { apiFetchAuth } from "../lib/api";
 
 // Normalize API base to avoid trailing slashes that cause "//api/..." URLs
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
@@ -173,7 +174,7 @@ function HostPanel({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/roomSettings/${encodeURIComponent(roomName)}`);
+        const res = await apiFetchAuth(`${API_BASE}/api/roomSettings/${encodeURIComponent(roomName)}`, {}, { allowNonOk: true });
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setMuteLock(!!data.muteLock);
@@ -656,15 +657,18 @@ function ParticipantList({
 
 async function apiRemove(room: string, identity: string, roomAccessToken: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/roomModeration/remove`, {
+    const res = await apiFetchAuth(
+      `${API_BASE}/api/roomModeration/remove`,
+      {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-room-access-token": roomAccessToken,
       },
-      credentials: "include",
       body: JSON.stringify({ room, identity }),
-    });
+      },
+      { allowNonOk: true }
+    );
 
     let data: any = null;
     try {
@@ -688,15 +692,18 @@ async function apiRemove(room: string, identity: string, roomAccessToken: string
 
 async function apiMute(_room: string, identity: string, muted: boolean, roomAccessToken: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/roomModeration/mute`, {
+    const res = await apiFetchAuth(
+      `${API_BASE}/api/roomModeration/mute`,
+      {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-room-access-token": roomAccessToken,
       },
-      credentials: "include",
       body: JSON.stringify({ room: _room, identity, muted }),
-    });
+      },
+      { allowNonOk: true }
+    );
 
     const data = await res.json().catch(() => null);
     if (!res.ok || (data && data.error)) {
@@ -712,15 +719,18 @@ async function apiMute(_room: string, identity: string, muted: boolean, roomAcce
 
 async function apiMuteAll(_room: string, muted: boolean, roomAccessToken: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/roomModeration/mute-all`, {
+    const res = await apiFetchAuth(
+      `${API_BASE}/api/roomModeration/mute-all`,
+      {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-room-access-token": roomAccessToken,
       },
-      credentials: "include",
       body: JSON.stringify({ room: _room, muted }),
-    });
+      },
+      { allowNonOk: true }
+    );
 
     const data = await res.json().catch(() => null);
     if (!res.ok || (data && data.error)) {
@@ -740,15 +750,18 @@ async function apiSetMuteLock(
   hostIdentity: string | null,
   roomAccessToken: string,
 ): Promise<{ muteLock: boolean }> {
-  const res = await fetch(`${API_BASE}/api/roomModeration/mute-lock`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-room-access-token": roomAccessToken,
+  const res = await apiFetchAuth(
+    `${API_BASE}/api/roomModeration/mute-lock`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-room-access-token": roomAccessToken,
+      },
+      body: JSON.stringify({ room: _room, muteLock, hostIdentity }),
     },
-    credentials: "include",
-    body: JSON.stringify({ room: _room, muteLock, hostIdentity }),
-  });
+    { allowNonOk: true }
+  );
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
@@ -764,19 +777,17 @@ async function apiSetRole(
   identity: string,
   role: RolePresetId,
 ): Promise<{ roleId?: string } | null> {
-  const res = await fetch(
-    `${API_BASE}/api/rooms/${encodeURIComponent(
-      roomId,
-    )}/participants/${encodeURIComponent(identity)}/permissions`,
+  const res = await apiFetchAuth(
+    `${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(identity)}/permissions`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-room-access-token": roomAccessToken,
       },
-      credentials: "include",
       body: JSON.stringify({ roleId: role }),
     },
+    { allowNonOk: true }
   );
 
   const data = await res.json().catch(() => null);

@@ -232,9 +232,7 @@ function StreamEndedModal({
       }
 
       try {
-        const res = await fetch(`${API_BASE}/api/recordings/${recordingId}`, {
-          credentials: "include",
-        });
+        const res = await apiFetchAuth(`${API_BASE}/api/recordings/${recordingId}`, {}, { allowNonOk: true });
         if (!res.ok) throw new Error("Failed to fetch recording status");
 
         const text = await res.text();
@@ -286,9 +284,7 @@ function StreamEndedModal({
 
   const handleDownload = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link`, {
-        credentials: "include",
-      });
+      const res = await apiFetchAuth(`${API_BASE}/api/recordings/${recordingId}/download-link`, {}, { allowNonOk: true });
       if (res.status === 410) {
         alert("This recording link expired. Use Settings → Usage → Emergency Download.");
         return;
@@ -316,9 +312,7 @@ function StreamEndedModal({
 
   const handleConfirmYes = async () => {
     try {
-      await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link?confirm=true`, {
-        credentials: "include",
-      });
+      await apiFetchAuth(`${API_BASE}/api/recordings/${recordingId}/download-link?confirm=true`, {}, { allowNonOk: true });
       setConfirmMessage("Great — you're all set. Save the file somewhere safe.");
     } catch (e) {
       setConfirmMessage("Noted. Thanks for confirming.");
@@ -329,12 +323,15 @@ function StreamEndedModal({
 
   const handleConfirmNo = async () => {
     try {
-      await fetch(`${API_BASE}/api/recordings/${recordingId}/report-download-issue`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ reason: "user_reported_issue" }),
-      });
+      await apiFetchAuth(
+        `${API_BASE}/api/recordings/${recordingId}/report-download-issue`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: "user_reported_issue" }),
+        },
+        { allowNonOk: true }
+      );
     } catch {}
     setConfirmMessage("Use Settings → Usage → Emergency Download (Latest Recording) if you're having trouble.");
     setShowConfirmModal(false);
@@ -1818,12 +1815,15 @@ function RoomPage() {
     console.log("[usage] sending streamEnded", payload);
 
     try {
-      const res = await fetch(`${API_BASE}/api/usage/streamEnded`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(payload),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/usage/streamEnded`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        { allowNonOk: true }
+      );
       const text = await res.text();
       console.log("[usage] streamEnded response", { status: res.status, body: text });
     } catch (e) {
@@ -1846,15 +1846,18 @@ function RoomPage() {
     // disconnect all remaining participants from this room.
     if (isHost && effectiveRoomName && roomAccessToken) {
       try {
-        fetch(`${API_BASE}/api/roomModeration/remove-all`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-room-access-token": roomAccessToken,
+        apiFetchAuth(
+          `${API_BASE}/api/roomModeration/remove-all`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-room-access-token": roomAccessToken,
+            },
+            body: JSON.stringify({ room: effectiveRoomName }),
           },
-          credentials: "include",
-          body: JSON.stringify({ room: effectiveRoomName }),
-        }).catch(() => {
+          { allowNonOk: true }
+        ).catch(() => {
           // best-effort only
         });
       } catch {
@@ -2175,7 +2178,7 @@ function RoomPage() {
           extraDestinations: extraDestinations.length ? extraDestinations : undefined,
         };
         console.log("   Sending to API:", requestBody);
-        const res = await fetch(
+        const res = await apiFetchAuth(
           `${API_BASE}/api/multistream/${encodeURIComponent(roomId)}/start-multistream`,
           {
             method: "POST",
@@ -2184,8 +2187,8 @@ function RoomPage() {
               ...(roomAccessToken ? { "x-room-access-token": roomAccessToken } : {}),
             },
             body: JSON.stringify(requestBody),
-            credentials: "include",
-          }
+          },
+          { allowNonOk: true }
         );
         const raw = await res.text();
         let data: any = {};
@@ -2274,7 +2277,7 @@ function RoomPage() {
     }, 10000);
     try {
       setStreamStatus("stopping");
-      const res = await fetch(
+      const res = await apiFetchAuth(
         `${API_BASE}/api/multistream/${encodeURIComponent(roomId)}/stop-multistream`,
         {
           method: "POST",
@@ -2283,9 +2286,9 @@ function RoomPage() {
             ...(roomAccessToken ? { "x-room-access-token": roomAccessToken } : {}),
           },
           body: JSON.stringify({ egressId: streamEgressId }),
-          credentials: "include",
           signal: controller.signal,
-        }
+        },
+        { allowNonOk: true }
       );
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -2321,12 +2324,15 @@ function RoomPage() {
           alert("No room identity available yet");
           return;
         }
-        const res = await fetch(`${API_BASE}/api/invites/create`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ roomId: roomId || undefined, roomName: effectiveRoomName || undefined, role: _role }),
-        });
+        const res = await apiFetchAuth(
+          `${API_BASE}/api/invites/create`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ roomId: roomId || undefined, roomName: effectiveRoomName || undefined, role: _role }),
+          },
+          { allowNonOk: true }
+        );
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data?.inviteToken) {

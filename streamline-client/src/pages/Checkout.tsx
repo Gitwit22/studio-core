@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { apiFetchAuth } from "../lib/api";
 
 function useQuery() {
   return new URLSearchParams(useLocation().search);
@@ -21,10 +22,8 @@ export default function Checkout() {
       }
 
       try {
-        const res = await fetch("/api/billing/checkout", {
+        const res = await apiFetchAuth("/api/billing/checkout", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({ plan }),
         });
 

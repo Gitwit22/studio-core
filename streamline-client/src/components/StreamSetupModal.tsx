@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { type DestinationItem } from "../services/destinations";
 import { formatLimitLabel } from "../lib/entitlements";
 import { API_BASE } from "../lib/apiBase";
+import { apiFetchAuth } from "../lib/api";
 import { APP_BASE } from "../lib/appBase";
 import { getHlsStatus, startHls, stopHls } from "../services/hls";
 import CollapsibleSection from "./CollapsibleSection";
@@ -307,13 +308,16 @@ export default function StreamSetupModalV2({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(hlsRoomId)}/active-embed`, {
-          credentials: "include",
-          cache: "no-store",
-          headers: {
-            ...authHeaders,
+        const res = await apiFetchAuth(
+          `${API_BASE}/api/rooms/${encodeURIComponent(hlsRoomId)}/active-embed`,
+          {
+            cache: "no-store",
+            headers: {
+              ...authHeaders,
+            },
           },
-        });
+          { allowNonOk: true }
+        );
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           return;

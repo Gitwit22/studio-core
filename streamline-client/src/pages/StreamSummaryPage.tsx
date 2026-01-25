@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRecordingProgress } from '../hooks/useRecordingProgress';
 import { editingApi } from '../lib/editingApi';
-import { API_BASE } from '../lib/apiBase';
+import { apiFetchAuth } from '../lib/api';
 
 /**
  * STREAMLINE STREAM SUMMARY PAGE - REDESIGNED
@@ -125,9 +125,7 @@ export default function StreamSummaryPage() {
     try {
       if (!recordingId) throw new Error("Recording not ready");
 
-      const res = await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link`, {
-        credentials: "include",
-      });
+      const res = await apiFetchAuth(`/api/recordings/${recordingId}/download-link`, {}, { allowNonOk: true });
       if (res.status === 410) {
         alert("This recording link expired. Use Settings → Usage → Emergency Download.");
         return;
@@ -157,9 +155,7 @@ export default function StreamSummaryPage() {
 
   const handleConfirmYes = async () => {
     try {
-      await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link?confirm=true`, {
-        credentials: "include",
-      });
+      await apiFetchAuth(`/api/recordings/${recordingId}/download-link?confirm=true`, {}, { allowNonOk: true });
       setConfirmMessage("Great — you're all set. Save the file somewhere safe.");
     } catch (e) {
       setConfirmMessage("Noted. Thanks for confirming.");
@@ -170,12 +166,14 @@ export default function StreamSummaryPage() {
 
   const handleConfirmNo = async () => {
     try {
-      await fetch(`${API_BASE}/api/recordings/${recordingId}/report-download-issue`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ reason: "user_reported_issue" }),
-      });
+      await apiFetchAuth(
+        `/api/recordings/${recordingId}/report-download-issue`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "user_reported_issue" }),
+        },
+        { allowNonOk: true }
+      );
     } catch {}
     setConfirmMessage("Use Settings → Usage → Emergency Download (Latest Recording) if you're having trouble.");
     setShowConfirmModal(true);

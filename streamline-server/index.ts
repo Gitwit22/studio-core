@@ -25,6 +25,7 @@ import liveRoutes from "./routes/live";
 import statsRoutes from "./routes/stats";
 import telemetryRoutes from "./routes/telemetry";
 import savedEmbedsRoutes from "./routes/savedEmbeds";
+import editingRoutes from "./routes/editing";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
@@ -136,6 +137,9 @@ app.use("/api/public/hls", publicHlsRoutes);
 app.use("/api/public/rooms", publicRoomsHlsConfigRoutes);
 // Recordings API - This handles GET /:id and POST /start, /stop
 app.use("/api/recordings", recordingsRoutes);
+
+// Editing API (authenticated)
+app.use("/api/editing", editingRoutes);
 
 // Health check
 app.get("/", (_req, res) => res.send("API up"));

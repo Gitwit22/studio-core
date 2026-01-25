@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { API_BASE } from "../services/apiBase";
-import { apiFetch } from "../lib/api";
+import { apiFetchAuth } from "../lib/api";
 
 // Email validation function
 function validateEmail(email: string): boolean {
@@ -119,7 +119,7 @@ export const SignupPage = () => {
 
       // Initialize canonical account document with plan + stream defaults.
       try {
-        await apiFetch("/api/account/init", { method: "POST" });
+        await apiFetchAuth("/api/account/init", { method: "POST" });
       } catch (initErr) {
         console.warn("[Signup] account init failed", initErr);
       }

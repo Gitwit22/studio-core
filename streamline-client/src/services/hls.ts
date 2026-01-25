@@ -22,12 +22,15 @@ function buildAuthHeaders(roomAccessToken?: string): HeadersInit {
 
 export async function startHls(roomId: string, roomAccessToken?: string) {
   const url = `${API_BASE}/api/hls/start/${encodeURIComponent(roomId)}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: buildAuthHeaders(roomAccessToken),
-    credentials: "include",
-    body: JSON.stringify({ presetId: "hls_720p" }),
-  });
+  const res = await apiFetchAuth(
+    url,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(roomAccessToken),
+      body: JSON.stringify({ presetId: "hls_720p" }),
+    },
+    { allowNonOk: true }
+  );
   const data = (await res.json().catch(() => ({}))) as any;
   if (!res.ok) {
     const error = (data && (data.error || data.reason)) || `HTTP_${res.status}`;
@@ -43,11 +46,14 @@ export async function startHls(roomId: string, roomAccessToken?: string) {
 
 export async function stopHls(roomId: string, roomAccessToken?: string) {
   const url = `${API_BASE}/api/hls/stop/${encodeURIComponent(roomId)}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: roomAccessToken ? { "x-room-access-token": roomAccessToken } : undefined,
-    credentials: "include",
-  });
+  const res = await apiFetchAuth(
+    url,
+    {
+      method: "POST",
+      headers: roomAccessToken ? { "x-room-access-token": roomAccessToken } : undefined,
+    },
+    { allowNonOk: true }
+  );
   const data = (await res.json().catch(() => ({}))) as any;
   if (!res.ok) {
     const error = (data && (data.error || data.reason)) || `HTTP_${res.status}`;
