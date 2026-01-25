@@ -6,6 +6,7 @@ import { firestore } from "../firebaseAdmin";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 // Helper function to get the next reset date (start of next month)
 function getNextResetDate(): Date {
@@ -19,8 +20,7 @@ async function handleUsageSummary(req: any, res: any) {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) {
-      // Unauthorized is not a limit error, leave as is
-      return res.status(401).json({ success: false, error: "unauthorized" });
+      return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     // 1) User doc (planId + overages setting)
@@ -254,7 +254,7 @@ router.get("/me", requireAuth, handleUsageSummary);
 // Lightweight entitlements endpoint for client gating (features + limits)
 router.get("/entitlements", requireAuth, async (req, res) => {
   const uid = (req as any).user?.uid;
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   const entitlements = await getEffectiveEntitlements(uid);
   const plan = entitlements.plan;

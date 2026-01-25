@@ -2,6 +2,7 @@ import admin from "firebase-admin";
 import { randomUUID } from "node:crypto";
 import { firestore as db } from "../firebaseAdmin";
 import type { HlsPresetId } from "./livekitEgress";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 export type RoomHlsConfig = {
   enabled: boolean;
@@ -110,7 +111,7 @@ export async function getRoom(roomId: string): Promise<{
   const ref = db.collection("rooms").doc(roomId);
   const snap = await ref.get();
   if (!snap.exists) {
-    throw new Error("room_not_found");
+    throw new Error(PERMISSION_ERRORS.ROOM_NOT_FOUND);
   }
   const data = snap.data() as RoomDoc;
   return { ref, data };

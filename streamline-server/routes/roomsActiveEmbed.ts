@@ -51,7 +51,7 @@ router.put("/:roomId/active-embed", requireAuth as any, async (req: any, res) =>
 
   const uid = (req as any).user?.uid;
   if (!uid) {
-    return res.status(401).json({ error: "Unauthorized" });
+    return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
   }
 
   const embedId = normalizeId(req.body?.embedId);

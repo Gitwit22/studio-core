@@ -1,4 +1,5 @@
 import { LIMIT_ERRORS } from "../lib/limitErrors";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { Router } from "express";
 import { randomUUID } from "crypto";
 import { firestore } from "../firebaseAdmin";
@@ -62,7 +63,7 @@ function toItem(doc: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.Docume
 router.get("/", requireAuth, async (req: any, res) => {
   try {
     const uid = req.user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" as ApiErrorCode });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const platform = req.query.platform ? String(req.query.platform).trim().toLowerCase() : "";
     const includeDisabled = req.query.includeDisabled === "true" || req.query.includeDisabled === true ? true : false;
@@ -118,7 +119,7 @@ async function getEnabledCount(uid: string): Promise<number> {
 router.post("/", requireAuth, async (req: any, res) => {
   try {
     const uid = req.user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" as ApiErrorCode });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const { platform, name, rtmpUrlBase, streamKeyEnc, streamKeyPlain, enabled, mode, persistent, oauthRef } = req.body || {};
     if (!platform || !rtmpUrlBase) {
       return res.status(400).json({ error: "missing_required_fields" as ApiErrorCode, details: "platform and rtmpUrlBase are required" });
@@ -218,7 +219,7 @@ router.post("/", requireAuth, async (req: any, res) => {
 router.post("/validate", requireAuth, async (req: any, res) => {
   try {
     const uid = req.user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" as ApiErrorCode });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const body: ValidateRequestBody = req.body || ({} as any);
     if (!body.platform || !body.rtmpUrlBase) {
       return res.status(400).json({ error: "missing_required_fields" as ApiErrorCode });
@@ -248,7 +249,7 @@ router.post("/validate", requireAuth, async (req: any, res) => {
 router.post("/:id/validate", requireAuth, async (req: any, res) => {
   try {
     const uid = req.user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" as ApiErrorCode });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const id = String(req.params.id || "");
     if (!id) return res.status(400).json({ error: "invalid_query" as ApiErrorCode });
 
@@ -268,7 +269,7 @@ router.post("/:id/validate", requireAuth, async (req: any, res) => {
 router.put("/:id", requireAuth, async (req: any, res) => {
   try {
     const uid = req.user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" as ApiErrorCode });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const id = String(req.params.id || "");
     if (!id) return res.status(400).json({ error: "invalid_query" as ApiErrorCode });
     const updates = req.body || {};
@@ -379,7 +380,7 @@ router.put("/:id", requireAuth, async (req: any, res) => {
 router.delete("/:id", requireAuth, async (req: any, res) => {
   try {
     const uid = req.user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" as ApiErrorCode });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const id = String(req.params.id || "");
     if (!id) return res.status(400).json({ error: "invalid_query" as ApiErrorCode });
 

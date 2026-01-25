@@ -12,7 +12,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Set up ripgrep
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
       - name: Run enforcement drift check
-        run: bash scripts/enforcement-drift-check.sh
+        run: npm run enforcement:drift-check

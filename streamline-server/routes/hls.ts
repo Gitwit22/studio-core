@@ -8,6 +8,7 @@ import { firestore } from "../firebaseAdmin";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 import { canAccessFeature } from "./featureAccess";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 
 const router = Router();
@@ -79,8 +80,8 @@ router.get("/public/:roomId", async (req: any, res) => {
       playlistUrl: hls.playlistUrl || null,
     });
   } catch (e: any) {
-    if (e?.message === "room_not_found") {
-      return res.status(404).json({ error: "room_not_found" });
+    if (e?.message === PERMISSION_ERRORS.ROOM_NOT_FOUND) {
+      return res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
     }
     console.error("HLS public status error", e);
     return res.status(500).json({ error: "Failed to fetch HLS status" });
@@ -95,7 +96,7 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
 
   const requestedRoomId = String(req.params.roomId || "").trim();
   if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
-    return res.status(400).json({ error: "room_mismatch" });
+    return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
   }
 
   const roomId = canonicalRoomId;
@@ -104,7 +105,7 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
   try {
     const uid = (req as any).user?.uid;
     if (!uid) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
     const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
     if (!featureAccess.allowed) {
@@ -213,8 +214,8 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
       return res.status(500).json({ error: "Failed to start HLS egress", details: e?.message });
     }
   } catch (e: any) {
-    if (e?.message === "room_not_found") {
-      return res.status(404).json({ error: "room_not_found" });
+    if (e?.message === PERMISSION_ERRORS.ROOM_NOT_FOUND) {
+      return res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
     }
     if (typeof e?.message === "string" && e.message.startsWith("Missing env:")) {
       return res.status(500).json({ error: "missing_env", details: e.message });
@@ -234,15 +235,13 @@ router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any,
 
   const requestedRoomId = String(req.params.roomId || "").trim();
   if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
-    return res.status(400).json({ error: "room_mismatch" });
+    return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
   }
 
   const roomId = canonicalRoomId;
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
     if (!featureAccess.allowed) {
       return res.status(403).json({
@@ -343,15 +342,13 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
 
   const requestedRoomId = String(req.params.roomId || "").trim();
   if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
-    return res.status(400).json({ error: "room_mismatch" });
+    return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
   }
 
   const roomId = canonicalRoomId;
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const featureAccess = await canAccessFeature((req as any).account || uid, "hls");
     if (!featureAccess.allowed) {
       return res.status(403).json({
@@ -428,8 +425,8 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
 
     return res.json({ roomId, hls: updated });
   } catch (e: any) {
-    if (e?.message === "room_not_found") {
-      return res.status(404).json({ error: "room_not_found" });
+    if (e?.message === PERMISSION_ERRORS.ROOM_NOT_FOUND) {
+      return res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
     }
     console.error("HLS stop error", e);
     return res.status(500).json({ error: "Failed to stop HLS" });

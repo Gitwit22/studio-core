@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 export type RoomAccessClaims = {
   roomId: string;
@@ -33,17 +34,17 @@ export function verifyRoomAccessToken(rawToken: string): RoomAccessClaims {
 export function getRoomAccess(req: any): { access: RoomAccessClaims; roomId: string; livekitRoomName: string } {
   const access = (req as any)?.roomAccess as RoomAccessClaims | undefined;
   if (!access || !access.roomId) {
-    throw new Error("room_token_required");
+    throw new Error(PERMISSION_ERRORS.ROOM_TOKEN_REQUIRED);
   }
 
   const roomId = String(access.roomId || "").trim();
   const livekitRoomName = String(access.livekitRoomName || "").trim();
 
   if (!roomId) {
-    throw new Error("room_token_required");
+    throw new Error(PERMISSION_ERRORS.ROOM_TOKEN_REQUIRED);
   }
   if (!livekitRoomName) {
-    throw new Error("livekit_room_missing");
+    throw new Error(PERMISSION_ERRORS.LIVEKIT_ROOM_MISSING);
   }
 
   if (process.env.AUTH_DEBUG === "1") {
@@ -89,17 +90,17 @@ export function requireRoomAccessToken(req: Request, res: Response, next: NextFu
   try {
     const raw = extractRoomAccessToken(req);
     if (!raw) {
-      return res.status(401).json({ error: "room_token_required" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.ROOM_TOKEN_REQUIRED });
     }
 
     const claims = verifyRoomAccessToken(raw);
     if (!claims || !claims.roomId) {
-      return res.status(401).json({ error: "invalid_room_token" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.INVALID_ROOM_TOKEN });
     }
 
     (req as any).roomAccess = claims;
     return next();
   } catch (err) {
-    return res.status(401).json({ error: "invalid_room_token" });
+    return res.status(401).json({ error: PERMISSION_ERRORS.INVALID_ROOM_TOKEN });
   }
 }

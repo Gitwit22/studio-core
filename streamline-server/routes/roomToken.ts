@@ -1,4 +1,5 @@
 import { LIMIT_ERRORS } from "../lib/limitErrors";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 import { Router } from "express";
 import crypto from "crypto";
@@ -319,7 +320,7 @@ async function validateViewerInvite(inviteToken: string, roomId: string, session
   const doc = await firestore.collection("viewerInvites").doc(inviteToken).get();
   if (!doc.exists) return { ok: false, reason: "not_found" } as const;
   const data = doc.data() as ViewerInvite;
-  if (data.roomId !== roomId) return { ok: false, reason: "room_mismatch" } as const;
+  if (data.roomId !== roomId) return { ok: false, reason: PERMISSION_ERRORS.ROOM_MISMATCH } as const;
   if (data.revokedAt) return { ok: false, reason: "revoked" } as const;
 
   // Expiry checks
@@ -369,7 +370,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     const uid = (req as any).user?.uid as string | undefined;
     const invite = (req as any).invite as InviteClaims | undefined;
 
-    if (!uid && !invite) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid && !invite) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const trimmedRoomId = String(rawRoomId || "").trim();
     const trimmedRoomName = sanitizeDisplayName(String(rawRoomName || "")).trim();

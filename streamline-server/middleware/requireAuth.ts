@@ -2,6 +2,7 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { getUserAccount } from "../lib/userAccount";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 type AuthUser = { uid: string };
 
@@ -102,7 +103,7 @@ export function tryGetAuthUser(req: Request): AuthUser | null {
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const user = tryGetAuthUser(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    if (!user) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     // If the request included a bad/stale Authorization header but a valid
     // cookie session exists, tell the client so it can clear its cached token.
@@ -131,7 +132,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return next();
   } catch (err) {
     console.error("[requireAuth] Unauthorized:", (err as any)?.message || err);
-    return res.status(401).json({ error: "Unauthorized" });
+    return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
   }
 }
 
@@ -179,7 +180,7 @@ export function requireAuthOrInvite(req: Request, res: Response, next: NextFunct
     (req.query as any)?.inviteToken;
 
   if (!inviteToken) {
-    return res.status(401).json({ error: "Unauthorized" });
+    return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
   }
 
   try {
@@ -188,6 +189,6 @@ export function requireAuthOrInvite(req: Request, res: Response, next: NextFunct
     return next();
   } catch (err) {
     console.error("[requireAuthOrInvite] Invite token invalid:", (err as any)?.message || err);
-    return res.status(401).json({ error: "Unauthorized" });
+    return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
   }
 }

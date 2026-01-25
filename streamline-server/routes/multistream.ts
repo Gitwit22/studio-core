@@ -7,6 +7,7 @@ import type { ApiErrorCode } from "../types/streaming";
 import { decryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
 import { clampPresetForPlan, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
 let _lkMod: any | null = null;
@@ -34,14 +35,14 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
   try {
     const requestStartedAt = Date.now();
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const { roomId: canonicalRoomId, livekitRoomName } = getRoomAccess(req as any);
     if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });
 
     const requestedRoomId = String((req.params as any).roomId || "").trim();
     if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
-      return res.status(400).json({ error: "room_mismatch" });
+      return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
     }
 
     const roomId = canonicalRoomId;
@@ -341,14 +342,14 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
 router.post("/:roomId/stop-multistream", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const { roomId: canonicalRoomId, livekitRoomName } = getRoomAccess(req as any);
     if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });
 
     const requestedRoomId = String((req.params as any).roomId || "").trim();
     if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
-      return res.status(400).json({ error: "room_mismatch" });
+      return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
     }
 
     const roomId = canonicalRoomId;

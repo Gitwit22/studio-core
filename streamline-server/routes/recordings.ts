@@ -575,7 +575,7 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
   try {
     const uid = getAuthUserId(req);
     if (!uid) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     // Feature access gate
@@ -602,7 +602,7 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
 
     // If caller sent a roomId/roomName in the body, ensure it matches the token (defensive only)
     if (rawRoomId && String(rawRoomId).trim() && String(rawRoomId).trim() !== canonicalRoomId) {
-      return res.status(400).json({ error: "room_mismatch" });
+      return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
     }
 
     const roomId = canonicalRoomId;
@@ -1001,7 +1001,7 @@ router.post("/stop", requireAuth, requireRoomAccessToken as any, async (req, res
   try {
     const uid = getAuthUserId(req);
     if (!uid) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     const { recordingId } = req.body as { recordingId?: string };
@@ -1023,7 +1023,7 @@ router.post("/stop", requireAuth, requireRoomAccessToken as any, async (req, res
     // If the recording has a stored roomId, ensure it matches the caller's room
     const recordingRoomId: string | null = typeof (data as any).roomId === "string" ? (data as any).roomId.trim() : null;
     if (recordingRoomId && recordingRoomId !== canonicalRoomId) {
-      return res.status(400).json({ error: "room_mismatch" });
+      return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
     }
 
     const roomId = canonicalRoomId;
@@ -1256,7 +1256,7 @@ router.post("/stop", requireAuth, requireRoomAccessToken as any, async (req, res
 router.get("/emergency-latest", requireAuth, async (req, res) => {
   try {
     const uid = getAuthUserId(req);
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     // Prevent CDN/browser caching so this endpoint never returns a 304 with an empty body
     res.set({

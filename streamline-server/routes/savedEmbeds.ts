@@ -99,7 +99,7 @@ function parseHlsConfigOverrides(input: unknown):
 // POST /api/saved-embeds
 router.post("/", requireAuth as any, async (req: any, res) => {
   const uid = req.user?.uid;
-  if (!uid) return res.status(401).json({ error: "Unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   // Accept either the new "name" field or legacy "label".
   const nameRes = asTrimmedString(req.body?.name, { required: false, maxLen: 60 });
@@ -193,7 +193,7 @@ router.post("/", requireAuth as any, async (req: any, res) => {
 // GET /api/saved-embeds
 router.get("/", requireAuth as any, async (req: any, res) => {
   const uid = req.user?.uid;
-  if (!uid) return res.status(401).json({ error: "Unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     // Query top-level collection by owner + archived flag, then sort in memory by updatedAt desc.
@@ -288,7 +288,7 @@ router.get("/public/:savedEmbedId", async (req: any, res) => {
 // PUT /api/saved-embeds/:embedId
 router.put("/:embedId", requireAuth as any, async (req: any, res) => {
   const uid = req.user?.uid;
-  if (!uid) return res.status(401).json({ error: "Unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   const embedId = String(req.params.embedId || "").trim();
   if (!embedId) return errorResponse(res, 400, "invalid_input");

@@ -154,7 +154,7 @@ router.get("/assets", authenticateToken, async (req: Request, res: Response) => 
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     // Fetch all recordings for this user and convert to assets format
@@ -244,7 +244,7 @@ router.get("/assets/:id", authenticateToken, async (req: Request, res: Response)
     const { id } = req.params;
 
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     const recordingSnap = await db.collection("recordings").doc(id).get();
@@ -257,7 +257,7 @@ router.get("/assets/:id", authenticateToken, async (req: Request, res: Response)
 
     // Verify ownership
     if (data?.userId !== userId) {
-      return res.status(403).json({ error: PERMISSION_ERRORS.FORBIDDEN });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const asset = {
@@ -286,7 +286,7 @@ router.delete("/assets/:id", authenticateToken, async (req: Request, res: Respon
     const { id } = req.params;
 
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     const recordingSnap = await db.collection("recordings").doc(id).get();
@@ -319,7 +319,7 @@ router.post("/assets/from-recording", authenticateToken, async (req: Request, re
     const { recordingId } = req.body;
 
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     if (!recordingId) {
@@ -336,7 +336,7 @@ router.post("/assets/from-recording", authenticateToken, async (req: Request, re
 
     // Verify ownership
     if (data?.userId !== userId) {
-      return res.status(403).json({ error: "Forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const asset = {
@@ -516,7 +516,7 @@ router.post("/save", authenticateToken, async (req: Request, res: Response) => {
 
     const recordingData = recordingSnap.data() as any;
     if (recordingData.userId !== userId) {
-      return res.status(403).json({ error: "Unauthorized" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     // Save edit config
@@ -552,7 +552,7 @@ router.put("/:recordingId", authenticateToken, async (req: Request, res: Respons
 
     const recordingData = recordingSnap.data() as any;
     if (recordingData.userId !== userId) {
-      return res.status(403).json({ error: "Unauthorized" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     // Update recording metadata
@@ -600,7 +600,7 @@ router.post("/render", authenticateToken, async (req: Request, res: Response) =>
 
     const recordingData = recordingSnap.data() as any;
     if (recordingData.userId !== userId) {
-      return res.status(403).json({ error: "Unauthorized" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     // Update recording status to "rendering"
@@ -671,7 +671,7 @@ router.post("/create-recording", authenticateToken, async (req: Request, res: Re
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     if (!title) {
@@ -725,7 +725,7 @@ router.post("/recordings/start", authenticateToken, async (req: Request, res: Re
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     if (!roomName || !title) {

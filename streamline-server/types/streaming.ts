@@ -1,5 +1,8 @@
 // Centralized streaming-centric types and enums
 // Destination status and reasons
+import type { LimitErrorCode } from "../lib/limitErrors";
+import type { PermissionErrorCode } from "../lib/permissionErrors";
+
 export type DestinationStatus = "connected" | "needs_attention" | "disconnected";
 
 export type DestinationStatusReason =
@@ -10,13 +13,12 @@ export type DestinationStatusReason =
   | "unknown";
 
 // Stable API error codes used across streaming endpoints
-import { LIMIT_ERRORS, type LimitErrorCode } from "../lib/limitErrors";
-
 export type ApiErrorCode =
   | "invalid_query"
   | "invalid_body"
   | "missing_required_fields"
   | LimitErrorCode
+  | PermissionErrorCode
   | "not_found"
   | "destination_not_found"
   | "duplicate_name"

@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { firestore as db } from "../firebaseAdmin";
 import { ensureRoomDoc } from "../services/rooms";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = Router();
 
@@ -15,7 +16,7 @@ const router = Router();
  */
 router.post("/create", requireAuth as any, async (req: any, res) => {
   const uid = req.user?.uid;
-  if (!uid) return res.status(401).json({ error: "Unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   const roomType = (req.body?.roomType || "rtc") as "rtc" | "hls";
   const rawNameInput = String(req.body?.livekitRoomName || req.body?.roomName || "");

@@ -232,7 +232,7 @@ async function assertEffectiveRoomControl(
 ): Promise<void> {
   const trimmedRoomId = String(roomId || "").trim();
   if (!trimmedRoomId) {
-    throw new RoomPermissionError(400, "invalid_room", "roomId is required");
+    throw new RoomPermissionError(400, PERMISSION_ERRORS.INVALID_ROOM, "roomId is required");
   }
 
   const ctx = await assertRoomPerm(req as any, trimmedRoomId, perm);
@@ -242,7 +242,7 @@ async function assertEffectiveRoomControl(
     throw new RoomPermissionError(401, PERMISSION_ERRORS.UNAUTHORIZED);
   }
   if (access.roomId !== trimmedRoomId) {
-    throw new RoomPermissionError(403, "room_mismatch");
+    throw new RoomPermissionError(403, PERMISSION_ERRORS.ROOM_MISMATCH);
   }
 
   const role = String(access.role || "").toLowerCase();

@@ -14,6 +14,7 @@ import type { UserUsageSummary } from "../types/admin.types";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { PLAN_IDS, PlanId, isPlanId, getAllPlanIds } from "../types/plan";
 import { resolveMaxDestinations } from "../lib/planLimits";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -37,7 +38,7 @@ router.get("/env-sanity", async (req, res) => {
     const uid = adminUser?.uid;
 
     if (!uid) {
-      return res.status(401).json({ error: "unauthorized", message: "Missing admin uid" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED, message: "Missing admin uid" });
     }
 
     const userSnap = await firestore.collection("users").doc(uid).get();

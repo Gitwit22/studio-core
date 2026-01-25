@@ -158,7 +158,7 @@ export async function assertRoomPerm(
     const { data } = await getRoom(trimmedRoomId);
     roomData = data;
   } catch (err: any) {
-    if (err?.message === "room_not_found") {
+    if (err?.message === PERMISSION_ERRORS.ROOM_NOT_FOUND) {
       throw new RoomPermissionError(404, PERMISSION_ERRORS.ROOM_NOT_FOUND);
     }
     throw err;
@@ -269,7 +269,7 @@ export async function assertRoomViewer(req: Request, roomId: string): Promise<Ro
     const { data } = await getRoom(trimmedRoomId);
     roomData = data;
   } catch (err: any) {
-    if (err?.message === "room_not_found") {
+    if (err?.message === PERMISSION_ERRORS.ROOM_NOT_FOUND) {
       throw new RoomPermissionError(404, PERMISSION_ERRORS.ROOM_NOT_FOUND);
     }
     throw err;
