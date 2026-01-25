@@ -712,6 +712,10 @@ function RoomPage() {
   const [isViewer, setIsViewer] = useState(false);
   const [roomPermissions, setRoomPermissions] = useState<RoomPermissions | null>(null);
   const [needsReauth, setNeedsReauth] = useState(false);
+  const [reauthBannerText, setReauthBannerText] = useState<string>(
+    "Session expired — re-auth to enable host tools."
+  );
+  const [roomTokenMode, setRoomTokenMode] = useState<"unknown" | "auth" | "guest">("unknown");
   const roomTokenMintInFlightRef = useRef(false);
   const [controlsPanelOpen, setControlsPanelOpen] = useState(false);
   const [effectiveControls, setEffectiveControls] = useState<EffectiveControls>(() => ({
@@ -791,6 +795,7 @@ function RoomPage() {
       if (res.ok) {
         setAuthStatus("authed");
         setNeedsReauth(false);
+        setReauthBannerText("Session expired — re-auth to enable host tools.");
         return;
       }
       if (res.status === 401 || res.status === 403) {
@@ -1344,6 +1349,7 @@ function RoomPage() {
       try {
         roomTokenMintInFlightRef.current = true;
         console.log(`[Room] Fetching room token (role=${role || "host"})...`);
+        const bearerToken = getAuthToken();
         const buildRoomTokenRequest = (mode: "auth" | "guest") => {
           const endpoint = mode === "guest" ? `${API_BASE}/api/roomToken/guest` : `${API_BASE}/api/roomToken`;
           const payload: any = { identity: displayName };
@@ -1365,7 +1371,9 @@ function RoomPage() {
 
           // Tell the backend what role we want this token minted as.
           // The backend will clamp/lock it as needed.
-          payload.role = role;
+          // If we failed auth for a privileged role, always request a low-trust role
+          // for the guest fallback so the UI can honestly operate in viewer/guest mode.
+          payload.role = mode === "guest" && roleNeedsAuth ? "participant" : role;
 
           if (mode === "guest") {
             payload.displayName = displayName;
@@ -1384,11 +1392,16 @@ function RoomPage() {
           if (opts?.omitInvite) {
             delete (payload as any).inviteToken;
           }
-          // endpoint is a relative path (e.g. "/api/roomToken"); apiFetch
-          // will prepend API_BASE and attach Authorization and cookies.
+          // apiFetch always sends cookies; for /api/roomToken we also attach Bearer
+          // explicitly when available so incognito/cookie-blocked sessions can host.
+          const headers: Record<string, string> = {};
+          if (mode === "auth" && bearerToken) {
+            headers.Authorization = `Bearer ${bearerToken}`;
+          }
           const res = await apiFetch(endpoint, {
             method: "POST",
             body: JSON.stringify(payload),
+            headers,
           }, { allowNonOk: true });
           return { res, mode };
         };
@@ -1401,6 +1414,9 @@ function RoomPage() {
           if (roleNeedsAuth) {
             setNeedsReauth(true);
             setAuthStatus("guest");
+            setReauthBannerText("Host tools unavailable — sign in again in a normal window.");
+            setIsHost(false);
+            setUserRole("participant");
           }
           console.warn("[Room] auth roomToken denied; falling back to guest token", attempt.res.status);
           attempt = await tryFetch("guest");
@@ -1416,11 +1432,13 @@ function RoomPage() {
 
         const res = attempt.res;
         console.log("[Room] roomToken status:", res.status, "mode:", attempt.mode);
+        setRoomTokenMode(attempt.mode);
 
         // If an authenticated mint succeeds, we can clear the banner without probing /me in the background.
         if (res.ok && attempt.mode === "auth") {
           setAuthStatus("authed");
           setNeedsReauth(false);
+          setReauthBannerText("Session expired — re-auth to enable host tools.");
         }
 
         let data: any = null;
@@ -2564,7 +2582,7 @@ function RoomPage() {
       {!isViewer && needsReauth && (
         <div className="w-full bg-red-600 text-white text-sm font-semibold px-4 py-2 flex items-center justify-between gap-3">
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span>Session expired — re-auth to enable host tools.</span>
+            <span>{reauthBannerText}</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
@@ -2815,6 +2833,25 @@ function RoomPage() {
                   {streamStatus === "live" ? "Manage Stream" : "Setup Stream"}
                 </button>
               </>
+            )}
+
+            {!canManageStream && !isViewer && roomTokenMode === "guest" && (
+              <button
+                disabled
+                title="Host auth required"
+                style={{
+                  padding: '0.375rem 0.75rem',
+                  fontSize: '0.75rem',
+                  borderRadius: '0.375rem',
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  color: 'rgba(255, 255, 255, 0.7)',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
+                  cursor: 'not-allowed',
+                  fontWeight: '500'
+                }}
+              >
+                Setup Stream
+              </button>
             )}
           </div>
         )}

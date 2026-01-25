@@ -56,7 +56,12 @@ export function tryGetAuthUser(req: Request): AuthUser | null {
   if (headerToken) {
     try {
       const decoded = jwt.verify(headerToken, getJwtSecret()) as any;
-      const uid = typeof decoded?.uid === "string" ? decoded.uid : "";
+      const uid =
+        typeof decoded?.uid === "string"
+          ? decoded.uid
+          : typeof decoded?.id === "string"
+            ? decoded.id
+            : "";
       if (uid) {
         if (shouldLogAuthDebug(req)) {
           console.log("[auth-debug] Verified header JWT for uid", uid);
@@ -79,7 +84,12 @@ export function tryGetAuthUser(req: Request): AuthUser | null {
   if (cookieToken) {
     try {
       const decoded = jwt.verify(cookieToken, getJwtSecret()) as any;
-      const uid = typeof decoded?.uid === "string" ? decoded.uid : "";
+      const uid =
+        typeof decoded?.uid === "string"
+          ? decoded.uid
+          : typeof decoded?.id === "string"
+            ? decoded.id
+            : "";
       if (uid) {
         if (shouldLogAuthDebug(req)) {
           console.log("[auth-debug] Verified cookie JWT for uid", uid);
