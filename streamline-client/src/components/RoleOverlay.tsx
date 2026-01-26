@@ -1,6 +1,5 @@
 import React from "react";
 import { useParticipants, useLocalParticipant, useRoomContext } from "@livekit/components-react";
-import { DataPacket_Kind } from "livekit-client";
 import { normalizeUiRolePresetId } from "../lib/roles";
 import { apiFetchAuth } from "../lib/api";
 import { encodeReconnectMediaMessage, reconnectMedia } from "../lib/mediaRecovery";
@@ -232,7 +231,7 @@ function HostPanel({
       const lp: any = room?.localParticipant || localParticipant;
       if (!lp?.publishData) return;
       const data = encodeReconnectMediaMessage();
-      lp.publishData(data, DataPacket_Kind.RELIABLE, undefined, [identity]);
+      await lp.publishData(data, { reliable: true, destinationIdentities: [identity] });
     } catch {
       // ignore
     }
