@@ -1577,7 +1577,13 @@ function RoomPage() {
         if (data.effectiveEntitlements || data.platformFlags) {
           applyEntitlementsAndPlatform(data.effectiveEntitlements, data.platformFlags || {});
         }
-        const { token, serverUrl, roomId: returnedRoomId, roomAccessToken: roomAccessTokenRaw, participantIdentity: participantIdentityRaw } = data as any;
+        const {
+          token: lkToken,
+          serverUrl: serverUrlFromApi,
+          roomId: returnedRoomId,
+          roomAccessToken: roomAccessTokenRaw,
+          participantIdentity: participantIdentityRaw,
+        } = data as any;
         if (typeof returnedRoomId === "string" && returnedRoomId.trim()) {
           setFirestoreRoomId(returnedRoomId.trim());
         } else {
@@ -1594,8 +1600,9 @@ function RoomPage() {
         } else {
           setParticipantIdentity(null);
         }
-        const finalServerUrl = serverUrl || import.meta.env.VITE_LIVEKIT_URL;
-        console.log("[Room] token received:", !!token, "serverUrl:", finalServerUrl);
+        const finalServerUrl = serverUrlFromApi || import.meta.env.VITE_LIVEKIT_URL;
+        console.log("[Room] token received:", !!lkToken, "serverUrl:", finalServerUrl);
+        setToken(typeof lkToken === "string" && lkToken.trim() ? lkToken : null);
         setServerUrl(finalServerUrl || null);
         if (typeof data?.isViewer === "boolean") {
           setIsViewer(data.isViewer);
@@ -1611,12 +1618,11 @@ function RoomPage() {
           setUserRole(data.role);
           if (data.role === "viewer") setIsHost(false);
         }
-        if (!token || !finalServerUrl) {
-          console.error("[Room] Missing token or serverUrl", { token, serverUrl });
+        if (!lkToken || !finalServerUrl) {
+          console.error("[Room] Missing token or serverUrl", { token: lkToken, serverUrl: serverUrlFromApi });
         }
       } catch (err) {
         console.error("[Room] fetchToken error:", err);
-          onLeaveRequested={handleEndStream}
       } finally {
         roomTokenMintInFlightRef.current = false;
       }
