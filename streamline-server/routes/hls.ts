@@ -10,6 +10,9 @@ import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 import { canAccessFeature } from "./featureAccess";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { evaluateUsageGate } from "../lib/usageOverages";
+import { upsertUsageMonthlyOverageTotals } from "../lib/usageOveragesWriter";
+import { LIMIT_ERRORS } from "../lib/limitErrors";
 
 const router = Router();
 
@@ -128,6 +131,50 @@ router.post("/start/:roomId", requireAuth as any, requireRoomAccessToken as any,
         return res.status(err.status).json({ error: err.code });
       }
       throw err;
+    }
+
+    // Monthly usage gate (HLS consumes transcode):
+    // - Non-overage plans are blocked when over limit
+    // - Pro continues and (when exceeded) logs overage totals
+    try {
+      const entitlements = await getEffectiveEntitlements((req as any).account || uid);
+      const monthKey = getCurrentMonthKey();
+      const usageDocId = `${uid}_${monthKey}`;
+      const usageSnap = await firestore.collection("usageMonthly").doc(usageDocId).get();
+      const existing = usageSnap.exists ? (usageSnap.data() as any) : {};
+      const usage = existing.usage || {};
+
+      const decision = evaluateUsageGate({
+        allowsOverages: !!(entitlements.features as any).allowsOverages,
+        limits: {
+          participantMinutes: Number(entitlements.limits.monthlyMinutes || 0),
+          transcodeMinutes: Number(entitlements.limits.transcodeMinutes || 0),
+        },
+        usage: {
+          participantMinutes: Number(usage.participantMinutes || 0),
+          transcodeMinutes: Number(usage.transcodeMinutes || 0),
+        },
+        checkParticipant: true,
+        checkTranscode: true,
+      });
+
+      if (!decision.allowed) {
+        return res.status(403).json({
+          error: decision.reason || LIMIT_ERRORS.USAGE_EXHAUSTED,
+          reason: "Monthly usage limit reached",
+        });
+      }
+
+      if (decision.shouldLogOverages && decision.overageTotals) {
+        await upsertUsageMonthlyOverageTotals({
+          uid,
+          monthKey,
+          totals: decision.overageTotals,
+        });
+      }
+    } catch (e) {
+      // Do not block HLS start on bookkeeping failures.
+      console.error("[hls] usage gate failed", e);
     }
 
     const { ref: roomRef, data: room } = await getRoom(roomId);

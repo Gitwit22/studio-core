@@ -20,6 +20,9 @@ export type CanonicalPlan = {
     rtmp: boolean;
     multistream: boolean;
     advancedPermissions: boolean;
+    // When true, the account is allowed to continue past included monthly
+    // minutes (server will log overage totals; billing is handled elsewhere).
+    allowsOverages: boolean;
     // hlsEnabled is the canonical runtime flag (can generate/play HLS)
     hlsEnabled: boolean;
     // hlsCustomizationEnabled controls whether the user can edit the HLS broadcast page
@@ -42,6 +45,14 @@ export type CanonicalPlan = {
 function toNumber(value: any, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function firstFiniteNumber(candidates: any[], fallback = 0): number {
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
 }
 
 // Helper to coerce booleans
@@ -76,7 +87,10 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
 
   const monthlyMinutes = toNumber(rawMonthlyMinutes, 0);
 
-  const priceMonthly = toNumber(data.priceMonthly ?? data.price, 0);
+  // Price input can come from either legacy `price` or canonical `priceMonthly`.
+  // Important: if `priceMonthly` exists but is non-numeric (e.g. "$25"),
+  // we must fall back to `price` instead of zeroing out.
+  const priceMonthly = firstFiniteNumber([data.priceMonthly, data.price], 0);
 
   const rawVisibility: any =
     data.visibility ?? (data.hidden === true ? "hidden" : undefined);
@@ -170,6 +184,18 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
   const rawFeatures = features as any;
   const rawData: any = data;
 
+  // Overage capability flag (NOT billing): Pro allows overages by default.
+  // This is separate from legacy per-user toggles.
+  const allowsOverages = (() => {
+    const explicit =
+      rawFeatures.allowsOverages ??
+      rawFeatures.overagesAllowed ??
+      rawData.allowsOverages ??
+      rawData.overagesAllowed;
+    if (explicit !== undefined) return toBool(explicit);
+    return idLower === "pro";
+  })();
+
   // Derive canonical HLS feature flag with sensible defaults:
   // - Respect any explicit HLS flags on the plan document first.
   // - When no HLS-related keys are present, default based on plan id
@@ -255,6 +281,7 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
       // Advanced permissions have been removed; plans no longer toggle
       // permissions mode. Always operate in simple mode.
       advancedPermissions: false,
+      allowsOverages,
       hlsEnabled: canHls,
       hlsCustomizationEnabled,
       canHls,

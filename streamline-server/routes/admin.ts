@@ -692,6 +692,12 @@ router.get("/usage", async (req, res) => {
         const minutesUsed = Number(
           usage.participantMinutes ?? usage.streamMinutes ?? usage.minutes ?? 0
         );
+
+        const overages = (usageData.overages || {}) as any;
+        const overageParticipantMinutes = Number(overages.participantMinutes ?? 0);
+        const overageTranscodeMinutes = Number(overages.transcodeMinutes ?? 0);
+        const overageMinutesTotal = overageParticipantMinutes + overageTranscodeMinutes;
+
         const planIdRaw = userData.planId || "free";
         // Canonicalize planId using isPlanId
         const planId: PlanId | string = isPlanId(planIdRaw) ? planIdRaw : planIdRaw;
@@ -710,6 +716,9 @@ router.get("/usage", async (req, res) => {
           displayName: userData.displayName,
           planId,
           minutesUsed,
+          overageParticipantMinutes,
+          overageTranscodeMinutes,
+          overageMinutesTotal,
           bonusMinutes,
           planLimit,
           effectiveLimit,

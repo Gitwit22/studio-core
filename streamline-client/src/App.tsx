@@ -1,6 +1,6 @@
 import PricingExplainerPage from "./pages/PricingExplainerPage";
 import { useEffect, useState } from "react";
-import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AdminUsage from './pages/AdminUsage';
 import AdminDashboard from './pages/AdminDashboard';
 
@@ -14,13 +14,10 @@ import Live from "./pages/Live";
 import SettingsDestinations from "./pages/SettingsDestinations";
 import RoomExitPage from "./pages/RoomExitPage";
 import Dashboard from "./pages/Dashboard";
-import StreamSummaryPage from "./pages/StreamSummaryPage";
-import PostStreamSummary from "./pages/PostStreamSummary";
 import AssetLibrary from "./editing/AssetLibrary";
 import ProjectsDashboard from "./editing/ProjectsDashboard";
 import EditorPage from "./editing/EditorPage";
 import RenderAndUploadPage from "./editing/pages/RenderAndUploadPage";
-import ThankYou from "./pages/ThankYou";
 import EditorDisabled from "./pages/EditorDisabled";
 import LearnMore from "./pages/LearnMore";
 import Checkout from "./pages/Checkout";
@@ -152,11 +149,14 @@ function App() {
       <Route path="/room-exit/:recordingId" element={<RoomExitPage />} />
 
       {/* Stream Summary */}
-      <Route path="/stream-summary/:recordingId" element={<StreamSummaryPage />} />
-      <Route path="/editing/post-stream" element={<PostStreamSummary />} />
+      <Route path="/stream-summary/:recordingId" element={<LegacyStreamSummaryRedirect />} />
+      <Route
+        path="/editing/post-stream"
+        element={<LegacyPostStreamRedirect />}
+      />
       
       {/* Thank You / Post-Stream */}
-      <Route path="/thanks" element={<ThankYou />} />
+      <Route path="/thanks" element={<Navigate to="/room-exit/unknown" replace />} />
 
       {/* Blocked Editing Routes - Coming Soon */}
       <Route path="/edit" element={<EditorDisabled />} />
@@ -175,6 +175,19 @@ function App() {
       </Routes>
     </>
   );
+}
+
+function LegacyPostStreamRedirect() {
+  const [sp] = useSearchParams();
+  const recordingId = (sp.get('recordingId') || '').trim();
+  const target = recordingId ? `/room-exit/${encodeURIComponent(recordingId)}` : '/room-exit/unknown';
+  return <Navigate to={target} replace state={{ exitRole: 'host' }} />;
+}
+
+function LegacyStreamSummaryRedirect() {
+  const { recordingId } = useParams<{ recordingId: string }>();
+  const target = recordingId ? `/room-exit/${encodeURIComponent(recordingId)}` : '/room-exit/unknown';
+  return <Navigate to={target} replace state={{ exitRole: 'host' }} />;
 }
 
 export default App;

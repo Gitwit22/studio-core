@@ -8,6 +8,9 @@ interface UsageData {
   displayName?: string;
   planId: "free" | "starter" | "pro" | "basic" | "enterprise" | "internal_unlimited";
   minutesUsed: number;
+  overageParticipantMinutes?: number;
+  overageTranscodeMinutes?: number;
+  overageMinutesTotal?: number;
   bonusMinutes: number;
   planLimit: number;
   effectiveLimit: number;
@@ -305,6 +308,12 @@ export default function AdminUsage() {
                   <th className="px-4 py-3 text-left text-sm font-semibold">User</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Plan</th>
                   <th className="px-4 py-3 text-right text-sm font-semibold">Usage</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <div>Overage (this month)</div>
+                    <div className="text-xs font-normal text-gray-400">
+                      Minutes used beyond the plan’s included limits.
+                    </div>
+                  </th>
                   <th className="px-4 py-3 text-right text-sm font-semibold">Limit</th>
                   <th className="px-4 py-3 text-right text-sm font-semibold">Bonus</th>
                   <th className="px-4 py-3 text-center text-sm font-semibold">Status</th>
@@ -329,6 +338,12 @@ export default function AdminUsage() {
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
                       {user.minutesUsed} min
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-orange-300">
+                      {user.overageMinutesTotal ?? 0} min
+                      <div className="text-xs text-orange-200/80">
+                        P:{user.overageParticipantMinutes ?? 0} / T:{user.overageTranscodeMinutes ?? 0}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
                       {user.effectiveLimit} min

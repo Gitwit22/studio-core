@@ -31,6 +31,9 @@ import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
 import type { RoomServiceClient } from "livekit-server-sdk";
 import { getCurrentMonthKey } from "./lib/usageTracker";
+import { getEffectiveEntitlements } from "./lib/effectiveEntitlements";
+import { evaluateUsageGate } from "./lib/usageOverages";
+import { upsertUsageMonthlyOverageTotals } from "./lib/usageOveragesWriter";
 import admin from "firebase-admin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -1018,6 +1021,35 @@ app.post("/api/usage/streamEnded", async (req, res) => {
       },
       { merge: true }
     );
+
+    // Pro-only: compute and persist overage totals when the user is over limit.
+    // Best-effort: do not fail streamEnded if this bookkeeping write fails.
+    try {
+      const entitlements = await getEffectiveEntitlements(uid);
+      const decision = evaluateUsageGate({
+        allowsOverages: !!(entitlements.features as any).allowsOverages,
+        limits: {
+          participantMinutes: Number(entitlements.limits.monthlyMinutes || 0),
+          transcodeMinutes: Number(entitlements.limits.transcodeMinutes || 0),
+        },
+        usage: {
+          participantMinutes: Number(nextUsage.participantMinutes || 0),
+          transcodeMinutes: Number(nextUsage.transcodeMinutes || 0),
+        },
+        checkParticipant: true,
+        checkTranscode: true,
+      });
+
+      if (decision.shouldLogOverages && decision.overageTotals) {
+        await upsertUsageMonthlyOverageTotals({
+          uid,
+          monthKey,
+          totals: decision.overageTotals,
+        });
+      }
+    } catch (e) {
+      console.error("[usage] failed to update overage totals", e);
+    }
 
     console.log("[usage] updated usageMonthly", {
       uid,

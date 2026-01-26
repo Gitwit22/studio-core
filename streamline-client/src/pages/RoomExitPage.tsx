@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiFetchAuth } from "../lib/api";
 import { editingApi } from "../lib/editingApi";
 // downloadService no longer used for direct downloads; we rely on signed links
@@ -12,6 +12,7 @@ import { editingApi } from "../lib/editingApi";
 
 export default function RoomExitPage() {
   const nav = useNavigate();
+  const location = useLocation();
   const { recordingId } = useParams<{ recordingId: string }>();
   const [recording, setRecording] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -20,10 +21,30 @@ export default function RoomExitPage() {
   const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
   const [sessionDuration, setSessionDuration] = useState<number>(0);
   
-  const isHost = !!recordingId && recordingId !== "unknown";
+  const exitRole = (location.state as any)?.exitRole as "guest" | "host" | undefined;
+  const hasRecording = !!recordingId && recordingId !== "unknown";
+  const isHost = exitRole === "host" || hasRecording;
+
+  // Guests should be done-done: no navigation back into the app.
+  useEffect(() => {
+    if (isHost) return;
+
+    const pushState = () => {
+      try {
+        window.history.pushState(null, "", window.location.href);
+      } catch {
+        // no-op
+      }
+    };
+
+    pushState();
+    const onPopState = () => pushState();
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [isHost]);
 
   const handleDownload = async () => {
-    if (!recordingId) {
+    if (!hasRecording) {
       alert("Recording not ready for download");
       return;
     }
@@ -236,35 +257,9 @@ export default function RoomExitPage() {
             Thanks for joining!
           </h1>
           
-          <p style={{ fontSize: '16px', color: '#9ca3af', marginBottom: '40px', lineHeight: '1.6' }}>
-            The stream has ended. You can now close this window or go back to the home page.
+          <p style={{ fontSize: '16px', color: '#9ca3af', marginBottom: '0px', lineHeight: '1.6' }}>
+            The stream has ended. You can now close this tab.
           </p>
-
-          <button
-            onClick={() => nav("/join")}
-            style={{
-              padding: '16px 32px',
-              background: 'linear-gradient(to right, #dc2626, #ef4444)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              boxShadow: '0 8px 32px rgba(220, 38, 38, 0.3)',
-              transition: 'all 0.3s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'linear-gradient(to right, #ef4444, #f87171)';
-              e.currentTarget.style.transform = 'translateY(-2px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'linear-gradient(to right, #dc2626, #ef4444)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            Back to Home
-          </button>
         </div>
 
         {/* CSS ANIMATIONS */}
@@ -465,7 +460,7 @@ export default function RoomExitPage() {
           {/* Download Stream */}
           <button
             onClick={handleDownload}
-            disabled={downloading || !recording || recording.status !== 'ready'}
+            disabled={downloading || !hasRecording || !recording || recording.status !== 'ready'}
             style={{
               width: '100%',
               padding: '16px 24px',
@@ -475,12 +470,12 @@ export default function RoomExitPage() {
               borderRadius: '12px',
               fontSize: '16px',
               fontWeight: 600,
-              cursor: downloading ? 'not-allowed' : 'pointer',
+              cursor: downloading || !hasRecording ? 'not-allowed' : 'pointer',
               transition: 'all 0.3s ease',
               opacity: downloading ? 0.6 : 1,
             }}
             onMouseEnter={(e) => {
-              if (!downloading && (!recording || recording.status === 'ready')) {
+              if (hasRecording && !downloading && (!recording || recording.status === 'ready')) {
                 e.currentTarget.style.background = 'rgba(220, 38, 38, 0.3)';
                 e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.6)';
               }
@@ -495,7 +490,7 @@ export default function RoomExitPage() {
             <div style={{ marginBottom: downloading ? '0' : '4px' }}>
               {downloading ? '⬇️ Downloading...' : '🔥 Download Stream'}
             </div>
-            {!downloading && (
+            {!downloading && hasRecording && (
               <div style={{ fontSize: '11px', color: '#fca5a5' }}>
                 ⚠️ Download now or it's gone forever
               </div>
@@ -518,7 +513,7 @@ export default function RoomExitPage() {
                 <div style={{ color: '#d1d5db', fontSize: 13 }}>{confirmMessage}</div>
               )}
 
-          {/* Back to Home */}
+          {/* Back to Dashboard */}
           <button
             onClick={() => nav("/join")}
             style={{
@@ -542,7 +537,7 @@ export default function RoomExitPage() {
               e.currentTarget.style.color = '#9ca3af';
             }}
           >
-            Back to Home
+            Back to Dashboard
           </button>
         </div>
       </div>

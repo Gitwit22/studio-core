@@ -105,6 +105,7 @@ async function handleUsageSummary(req: any, res: any) {
     const ytd = usageMonthly.ytd || {};
     const usageMinutes = usage.minutes || {};
     const ytdMinutes = ytd.minutes || {};
+    const overages = usageMonthly.overages || {};
 
     const participantUsed = toNumber(usage.participantMinutes);
     const transcodeUsed = toNumber(usage.transcodeMinutes);
@@ -178,7 +179,7 @@ async function handleUsageSummary(req: any, res: any) {
         features: {
           recording: !!features.recording,
           rtmpMultistream: !!features.multistream,
-          overagesAllowed: !!(plan.raw?.features?.overagesAllowed),
+          allowsOverages: !!(features as any).allowsOverages,
         },
         limits: {
           maxDestinations: resolveMaxDestinations(plan.raw?.limits || limits),
@@ -225,6 +226,14 @@ async function handleUsageSummary(req: any, res: any) {
               lifetime: hlsLifetime,
             },
           },
+        },
+
+        // Logged overage totals (Pro-only behavior). These are totals for the month.
+        // When missing, treat as 0 for display.
+        overages: {
+          participantMinutes: toNumber(overages.participantMinutes),
+          transcodeMinutes: toNumber(overages.transcodeMinutes),
+          updatedAt: overages.updatedAt || null,
         },
       },
 
@@ -276,6 +285,7 @@ router.get("/entitlements", requireAuth, async (req, res) => {
     planName: plan.name || entitlements.planId,
     recording: !!entitlements.features.recording && recordingEnabledFlag,
     rtmpMultistream: !!entitlements.features.multistream,
+    allowsOverages: !!(entitlements.features as any).allowsOverages,
     dualRecording: !!(plan.raw?.features?.dualRecording || plan.raw?.features?.dual_recording),
     watermark: !!(plan.raw?.features?.watermarkRecordings || plan.raw?.features?.watermark),
     canHls: !!((entitlements.features as any).canHls || plan.raw?.features?.canHls || plan.raw?.features?.hls || plan.raw?.features?.hlsBroadcast),

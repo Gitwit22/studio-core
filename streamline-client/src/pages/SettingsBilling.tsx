@@ -139,6 +139,7 @@ const DEFAULT_ENTITLEMENTS = {
 const DEFAULT_USAGE = {
   streamingMinutes: { used: 0, limit: 0, lifetime: 0 },
   recordingMinutes: { used: 0, lifetime: 0 },
+  overages: { participantMinutes: 0, transcodeMinutes: 0 },
   rtmpDestinations: { used: 0, limit: 0 },
   storage: { used: 0, limit: 0 },
   projects: { used: 0, limit: 0 },
@@ -521,6 +522,7 @@ export default function SettingsBilling() {
 
       const usageMonthly = data?.usageMonthly || {};
       const usageInner = usageMonthly.usage || {};
+      const overages = usageMonthly.overages || {};
       const usageWrapper = data?.usage || {};
       const usageMinutes = usageWrapper.minutes || usageInner.minutes || {};
       // Fallback to legacy hours on user.usage if monthly doc not present
@@ -557,6 +559,10 @@ export default function SettingsBilling() {
         recordingMinutes: {
           used: recordingCurrent,
           lifetime: recordingLifetime,
+        },
+        overages: {
+          participantMinutes: Number(overages.participantMinutes ?? 0),
+          transcodeMinutes: Number(overages.transcodeMinutes ?? 0),
         },
         rtmpDestinations: {
           used: 0,
@@ -1534,7 +1540,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       </span>
                     </div>
                     <div style={S.planPrice}>
-                      <span style={S.priceAmount}>${currentPlan.price}</span>
+                      <span style={S.priceAmount}>${(currentPlan as any).priceMonthly ?? currentPlan.price}</span>
                       <span style={S.pricePeriod}>/month</span>
                     </div>
                     {currentPlan.description && (
@@ -2305,6 +2311,19 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               <div style={{ color: "#cbd5e1", marginBottom: 6 }}>
                 Recording: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.used}</span> min
               </div>
+              <div style={{ color: "#cbd5e1", marginBottom: 6 }}>
+                <div style={{ fontWeight: 700, color: "#e5e7eb", marginBottom: 2 }}>Overage (this month)</div>
+                <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 4 }}>
+                  Minutes used beyond the plan’s included limits.
+                </div>
+                <span style={{ color: "#fff", fontWeight: 700 }}>
+                  {Number(usage.overages?.participantMinutes ?? 0) + Number(usage.overages?.transcodeMinutes ?? 0)}
+                </span>
+                {" "}min
+                <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                  {" "}(live: {Number(usage.overages?.participantMinutes ?? 0)} / transcode: {Number(usage.overages?.transcodeMinutes ?? 0)})
+                </span>
+              </div>
               <div style={{ color: "#94a3b8", fontSize: 12 }}>Recording minutes are included in your total usage.</div>
               <div style={{ marginTop: 8 }}>
                 <button
@@ -2536,7 +2555,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     }}
                     disabled={!!actionLoading}
                   >
-                    {actionLoading === "starter_paid" ? "⏳ Redirecting..." : `Starter — $${starterPlan?.price ?? 35}/mo`}
+                    {actionLoading === "starter_paid"
+                      ? "⏳ Redirecting..."
+                      : `Starter — $${(starterPlan as any)?.priceMonthly ?? starterPlan?.price ?? "—"}/mo`}
                   </button>
 
                   <button
@@ -2548,7 +2569,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     }}
                     disabled={!!actionLoading}
                   >
-                    {actionLoading === "pro" ? "⏳ Redirecting..." : `Pro — $${proPlan?.price ?? 49}/mo`}
+                    {actionLoading === "pro"
+                      ? "⏳ Redirecting..."
+                      : `Pro — $${(proPlan as any)?.priceMonthly ?? proPlan?.price ?? "—"}/mo`}
                   </button>
 
                   <button

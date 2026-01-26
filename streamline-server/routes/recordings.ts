@@ -37,6 +37,8 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
+import { evaluateUsageGate } from "../lib/usageOverages";
+import { upsertUsageMonthlyOverageTotals } from "../lib/usageOveragesWriter";
 
 const router = Router();
 
@@ -624,6 +626,49 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
     const entitlements = await getEffectiveEntitlements(uid);
     const planId = entitlements.planId;
     const plan = entitlements.plan.raw || {};
+
+    // Monthly usage gate: block non-overage plans; allow Pro and log totals.
+    try {
+      const monthKey = getCurrentMonthKey();
+      const usageDocId = `${uid}_${monthKey}`;
+      const usageSnap = await firestore.collection("usageMonthly").doc(usageDocId).get();
+      const existing = usageSnap.exists ? (usageSnap.data() as any) : {};
+      const usage = existing.usage || {};
+
+      const decision = evaluateUsageGate({
+        allowsOverages: !!(entitlements.features as any).allowsOverages,
+        limits: {
+          participantMinutes: Number(entitlements.limits.monthlyMinutes || 0),
+          transcodeMinutes: Number(entitlements.limits.transcodeMinutes || 0),
+        },
+        usage: {
+          participantMinutes: Number(usage.participantMinutes || 0),
+          transcodeMinutes: Number(usage.transcodeMinutes || 0),
+        },
+        checkParticipant: true,
+        checkTranscode: true,
+      });
+
+      if (!decision.allowed) {
+        return res.status(403).json({
+          success: false,
+          error: decision.reason || LIMIT_ERRORS.USAGE_EXHAUSTED,
+          reason: "Monthly usage limit reached",
+        });
+      }
+
+      if (decision.shouldLogOverages && decision.overageTotals) {
+        await upsertUsageMonthlyOverageTotals({
+          uid,
+          monthKey,
+          totals: decision.overageTotals,
+        });
+      }
+    } catch (e) {
+      // Do not block recording start on bookkeeping failures.
+      console.error("[recordings/start] usage gate failed", e);
+    }
+
     const dualAllowed = !!(plan?.features?.dualRecording || plan?.features?.dual_recording);
     const allowHigherRecordingThanStream = !!(
       plan?.features?.allowHigherRecordingThanStream || plan?.features?.allow_higher_recording_than_stream

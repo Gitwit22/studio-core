@@ -9,6 +9,11 @@ import { clampPresetForPlan, getUserPlanId, toEncodingOptions } from "../lib/med
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { assertPlatformTranscodeEnabled } from "../lib/platformFlags";
+import { LIMIT_ERRORS } from "../lib/limitErrors";
+import { getCurrentMonthKey } from "../lib/usageTracker";
+import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { evaluateUsageGate } from "../lib/usageOverages";
+import { upsertUsageMonthlyOverageTotals } from "../lib/usageOveragesWriter";
 
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
 let _lkMod: any | null = null;
@@ -116,6 +121,45 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
     const featureAccess = await canAccessFeature((req as any).account || uid, "multistream");
     if (!featureAccess.allowed) {
       return res.status(403).json({ error: featureAccess.reason || "Multistreaming is not available on your plan" });
+    }
+
+    // Monthly usage gate: block non-overage plans; allow Pro and log totals.
+    try {
+      const entitlements = await getEffectiveEntitlements(uid);
+      const monthKey = getCurrentMonthKey();
+      const usageDocId = `${uid}_${monthKey}`;
+      const usageSnap = await firestore.collection("usageMonthly").doc(usageDocId).get();
+      const existing = usageSnap.exists ? (usageSnap.data() as any) : {};
+      const usage = existing.usage || {};
+
+      const decision = evaluateUsageGate({
+        allowsOverages: !!(entitlements.features as any).allowsOverages,
+        limits: {
+          participantMinutes: Number(entitlements.limits.monthlyMinutes || 0),
+          transcodeMinutes: Number(entitlements.limits.transcodeMinutes || 0),
+        },
+        usage: {
+          participantMinutes: Number(usage.participantMinutes || 0),
+          transcodeMinutes: Number(usage.transcodeMinutes || 0),
+        },
+        checkParticipant: true,
+        checkTranscode: true,
+      });
+
+      if (!decision.allowed) {
+        return res.status(403).json({ error: decision.reason || LIMIT_ERRORS.USAGE_EXHAUSTED });
+      }
+
+      if (decision.shouldLogOverages && decision.overageTotals) {
+        await upsertUsageMonthlyOverageTotals({
+          uid,
+          monthKey,
+          totals: decision.overageTotals,
+        });
+      }
+    } catch (e) {
+      // Do not block multistream start on bookkeeping failures.
+      console.error("[multistream:start] usage gate failed", e);
     }
 
     // Clamp preset by plan

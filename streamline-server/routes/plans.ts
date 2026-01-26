@@ -74,6 +74,11 @@ router.get("/", async (_req, res) => {
           // the simple Participant/Co-host model.
           advancedPermissions: false,
 
+          // Pro-only capability: allow actions past included minutes.
+          // Billing is not handled here; this flag only indicates that
+          // server-side overage totals may be recorded.
+          allowsOverages: !!plan.features.allowsOverages,
+
           // HLS flags are used by pricing/marketing UI and should reflect
           // admin-edited plan settings.
           canHls: !!plan.features.canHls,
