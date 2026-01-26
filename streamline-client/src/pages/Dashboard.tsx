@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { useNavigate } from "react-router-dom";
 import { editingApi } from "../lib/editingApi";
+import { usePlatformFlags } from "../hooks/usePlatformFlags";
 
 type Recording = {
   id: string;
@@ -29,6 +30,8 @@ type Project = {
 
 export default function Dashboard() {
   const nav = useNavigate();
+  const { flags: platformFlags } = usePlatformFlags();
+  const platformTranscodeEnabled = platformFlags?.transcodeEnabled === true;
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [user, setUser] = useState<any>(null);
@@ -253,8 +256,8 @@ export default function Dashboard() {
           <StatCard
             label="Projects"
             value={projects.length}
-            detail="Edited"
-            icon="✂️"
+            detail="Created"
+            icon="📁"
           />
         </div>
 
@@ -269,19 +272,21 @@ export default function Dashboard() {
             }}
           >
             <h2 style={{ fontSize: '24px', fontWeight: 700 }}>Recent Recordings</h2>
-            <button
-              onClick={() => nav("/editing/assets")}
-              style={{
-                fontSize: '14px',
-                color: '#ef4444',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: 500
-              }}
-            >
-              View All →
-            </button>
+            {platformTranscodeEnabled && (
+              <button
+                onClick={() => nav("/editing/assets")}
+                style={{
+                  fontSize: '14px',
+                  color: '#ef4444',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 500
+                }}
+              >
+                View All →
+              </button>
+            )}
           </div>
 
           {recordings.length === 0 ? (
@@ -322,6 +327,7 @@ export default function Dashboard() {
                 <RecordingCard
                   key={rec.id}
                   recording={rec}
+                  canEdit={platformTranscodeEnabled}
                   onEdit={() => nav(`/editing/editor/new?recordingId=${rec.id}`)}
                   onDelete={() => handleDeleteRecording(rec.id)}
                 />
@@ -331,6 +337,7 @@ export default function Dashboard() {
         </div>
 
         {/* RECENT PROJECTS */}
+        {platformTranscodeEnabled && (
         <div>
           <div 
             style={{
@@ -400,6 +407,7 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* CSS ANIMATIONS */}
@@ -442,7 +450,17 @@ function StatCard({ label, value, detail, icon }: { label: string; value: string
   );
 }
 
-function RecordingCard({ recording, onEdit, onDelete }: { recording: Recording; onEdit: () => void; onDelete: () => void }) {
+function RecordingCard({
+  recording,
+  onEdit,
+  onDelete,
+  canEdit,
+}: {
+  recording: Recording;
+  onEdit: () => void;
+  onDelete: () => void;
+  canEdit: boolean;
+}) {
   return (
     <div 
       style={{
@@ -521,29 +539,31 @@ function RecordingCard({ recording, onEdit, onDelete }: { recording: Recording; 
           >
             Delete
           </button>
-          <button
-            onClick={onEdit}
-            style={{
-              flex: 1,
-              padding: '10px',
-              background: '#2563eb',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '0 8px 8px 0',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#1d4ed8';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#2563eb';
-            }}
-          >
-            Edit
-          </button>
+          {canEdit && (
+            <button
+              onClick={onEdit}
+              style={{
+                flex: 1,
+                padding: '10px',
+                background: '#2563eb',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '0 8px 8px 0',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#1d4ed8';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#2563eb';
+              }}
+            >
+              Open
+            </button>
+          )}
         </div>
       </div>
     </div>

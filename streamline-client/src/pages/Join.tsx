@@ -90,7 +90,6 @@ export default function Join() {
   const [didEditDisplayName, setDidEditDisplayName] = useState(false);
   const [roomName, setRoomName] = useState("");
   const [inviteRoomId, setInviteRoomId] = useState<string | null>(null);
-  const [showEditingModal, setShowEditingModal] = useState(false);
   const [showLegacyJoinToast, setShowLegacyJoinToast] = useState(false);
   const [hideLegacyJoinToast, setHideLegacyJoinToast] = useState(() => {
     try {
@@ -795,7 +794,7 @@ export default function Join() {
 
   {/* My Content button */}
   <button
-    onClick={() => setShowEditingModal(true)}
+    onClick={() => nav("/dashboard")}
     style={{
       fontSize: "13px",
       padding: "8px 16px",
@@ -1311,93 +1310,6 @@ export default function Join() {
           >
             ×
           </button>
-        </div>
-      )}
-
-      {/* Editing Suite Coming Soon Modal */}
-      {showEditingModal && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.8)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            backdropFilter: "blur(8px)",
-          }}
-          onClick={() => setShowEditingModal(false)}
-        >
-          <div
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(20, 20, 30, 0.95), rgba(30, 30, 40, 0.95))",
-              border: "1px solid rgba(220, 38, 38, 0.3)",
-              borderRadius: "16px",
-              padding: "2rem",
-              maxWidth: "400px",
-              width: "90%",
-              textAlign: "center",
-              backdropFilter: "blur(16px)",
-              boxShadow:
-                "0 25px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1) inset",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🎬</div>
-            <h2
-              style={{
-                fontSize: "1.5rem",
-                fontWeight: "bold",
-                marginBottom: "1rem",
-                background: "linear-gradient(135deg, #ffffff, #f0f0f0)",
-                backgroundClip: "text",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
-            >
-              Editing Suite
-            </h2>
-            <p
-              style={{
-                color: "rgba(255, 255, 255, 0.8)",
-                marginBottom: "1.5rem",
-                lineHeight: "1.6",
-              }}
-            >
-              Our powerful video editing suite is coming soon! For now, you can
-              stream and download your recordings.
-            </p>
-            <button
-              onClick={() => setShowEditingModal(false)}
-              style={{
-                padding: "0.75rem 1.5rem",
-                background: "linear-gradient(135deg, #dc2626, #ef4444)",
-                border: "none",
-                borderRadius: "8px",
-                color: "#ffffff",
-                fontWeight: "600",
-                cursor: "pointer",
-                transition: "all 0.3s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background =
-                  "linear-gradient(135deg, #b91c1c, #dc2626)";
-                e.currentTarget.style.transform = "translateY(-2px)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background =
-                  "linear-gradient(135deg, #dc2626, #ef4444)";
-                e.currentTarget.style.transform = "translateY(0)";
-              }}
-            >
-              Got it!
-            </button>
-          </div>
         </div>
       )}
 

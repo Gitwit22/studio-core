@@ -231,12 +231,10 @@ function PermissionsDebugOverlay({ dashboardRole }: { dashboardRole: "host" | "p
 
 function StreamEndedModal({
   recordingId,
-  onStartEditing,
   onExitRoom,
   onStayInRoom,
 }: {
   recordingId: string;
-  onStartEditing: () => void;
   onExitRoom: () => void;
   onStayInRoom: () => void;
 }) {
@@ -398,37 +396,13 @@ function StreamEndedModal({
         {processing && (
           <div style={{ marginBottom: '1rem', fontWeight: 600, color: '#fbbf24', textAlign: 'center' }}>
             <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
-            <div>Processing recording...</div>
+            <div>Processing recording…</div>
             <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem' }}>
               This usually takes 1-2 minutes. The download button will activate when ready.
             </div>
           </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', width: '100%' }}>
-            <button
-              onClick={onStartEditing}
-              style={{
-                width: '100%',
-                padding: '1rem',
-                background: 'linear-gradient(to right, #4b5563, #374151)',
-                color: '#d1d5db',
-                border: 'none',
-                borderRadius: '0.5rem',
-                fontSize: '1rem',
-                fontWeight: '600',
-                cursor: 'not-allowed',
-                transition: 'all 0.3s ease',
-                opacity: 0.8,
-              }}
-              disabled
-            >
-              ✂️ Editing (Coming Soon)
-            </button>
-            <div style={{ fontSize: '0.8rem', color: '#9ca3af', textAlign: 'center' }}>
-              Editing suite is coming soon. Stay tuned!
-            </div>
-          </div>
           <button
             onClick={handleDownload}
             disabled={!ready}
@@ -475,7 +449,7 @@ function StreamEndedModal({
               transition: 'all 0.3s ease',
             }}
           >
-            🚪 Exit Room
+            🚪 Back to Join
           </button>
           <button
             onClick={onStayInRoom}
@@ -664,6 +638,7 @@ function LiveKitShell({
           </div>
         )}
         <div
+          style={{ width: "100%", height: "100%" }}
           onClickCapture={(e) => {
             // LiveKit prefab renders a DisconnectButton ("Leave") inside the ControlBar.
             // We intercept it so it runs the same exit flow as our app-level "Exit Room" button,
@@ -1938,12 +1913,7 @@ function RoomPage() {
       }
     }
 
-    if (isHost) {
-      const recId = recordingRef.current || recordingId || 'unknown';
-      nav(`/room-exit/${encodeURIComponent(recId)}`, { replace: true, state: { exitRole: 'host' } });
-    } else {
-      nav('/room-exit/unknown', { replace: true, state: { exitRole: 'guest' } });
-    }
+    nav('/join', { replace: true });
   };
 
   const handleHomeClick = () => {
@@ -2103,14 +2073,8 @@ function RoomPage() {
       alert("⏹️ Recording is still active. Stop the stream first.");
       return;
     }
-    // At this point stream/recording are stopped. Post usage then exit.
-    sendUsageOnExit();
-    if (isHost) {
-      const recId = recordingRef.current || recordingId || 'unknown';
-      nav(`/room-exit/${encodeURIComponent(recId)}`, { replace: true, state: { exitRole: 'host' } });
-    } else {
-      nav('/room-exit/unknown', { replace: true, state: { exitRole: 'guest' } });
-    }
+    // At this point stream/recording are stopped. Exit to Join.
+    handleLeftRoom();
   };
 
   const handleLeaveRoom = () => {
@@ -2743,7 +2707,7 @@ function RoomPage() {
 
               {needsReauth && (
                 <div style={{ marginTop: 10, fontSize: 11, color: "#fecaca" }}>
-                  Session expired — re-auth to edit.
+                  Session expired — re-auth to continue.
                 </div>
               )}
             </div>
@@ -3151,7 +3115,6 @@ function RoomPage() {
       {showStreamEndedModal && recordingId && (
         <StreamEndedModal
           recordingId={recordingId}
-          onStartEditing={() => nav('/edit', { replace: true })}
           onExitRoom={() => nav('/join', { replace: true })}
           onStayInRoom={handleStayInRoom}
         />

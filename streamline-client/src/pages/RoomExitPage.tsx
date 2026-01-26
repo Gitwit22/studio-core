@@ -366,7 +366,7 @@ export default function RoomExitPage() {
             Stream Ended
           </h1>
           <p style={{ fontSize: '15px', color: '#9ca3af', marginBottom: '24px', lineHeight: '1.6' }}>
-            Your recording is being processed. You can now edit it or save it for later.
+            Your recording is being processed. It will appear in your dashboard when ready.
           </p>
 
           {recording && (
@@ -424,78 +424,47 @@ export default function RoomExitPage() {
 
         {/* ACTION BUTTONS */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          
-          {/* Go to Editor */}
-          <button
-            onClick={() => nav(`/editing/editor/new?recordingId=${recordingId}`)}
-            style={{
-              width: '100%',
-              padding: '16px 24px',
-              background: 'linear-gradient(to right, #dc2626, #ef4444)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              boxShadow: '0 8px 32px rgba(220, 38, 38, 0.3)',
-              transition: 'all 0.3s ease',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'linear-gradient(to right, #ef4444, #f87171)';
-              e.currentTarget.style.transform = 'translateY(-2px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'linear-gradient(to right, #dc2626, #ef4444)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            ✂️ Start Editing
-          </button>
-
-          {/* Download Stream */}
-          <button
-            onClick={handleDownload}
-            disabled={downloading || !hasRecording || !recording || recording.status !== 'ready'}
-            style={{
-              width: '100%',
-              padding: '16px 24px',
-              background: downloading ? 'rgba(107, 114, 128, 0.3)' : 'rgba(220, 38, 38, 0.2)',
-              border: downloading ? '1px solid rgba(107, 114, 128, 0.4)' : '1px solid rgba(220, 38, 38, 0.4)',
-              color: downloading ? '#6b7280' : '#ffffff',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: 600,
-              cursor: downloading || !hasRecording ? 'not-allowed' : 'pointer',
-              transition: 'all 0.3s ease',
-              opacity: downloading ? 0.6 : 1,
-            }}
-            onMouseEnter={(e) => {
-              if (hasRecording && !downloading && (!recording || recording.status === 'ready')) {
-                e.currentTarget.style.background = 'rgba(220, 38, 38, 0.3)';
-                e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.6)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!downloading) {
-                e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)';
-                e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.4)';
-              }
-            }}
-          >
-            <div style={{ marginBottom: downloading ? '0' : '4px' }}>
-              {downloading ? '⬇️ Downloading...' : '🔥 Download Stream'}
-            </div>
-            {!downloading && hasRecording && (
-              <div style={{ fontSize: '11px', color: '#fca5a5' }}>
-                ⚠️ Download now or it's gone forever
+          {/* Download (only when a real recording exists) */}
+          {recordingId !== 'unknown' && hasRecording && (
+            <button
+              onClick={handleDownload}
+              disabled={downloading || !recording || recording.status !== 'ready'}
+              style={{
+                width: '100%',
+                padding: '16px 24px',
+                background: downloading ? 'rgba(107, 114, 128, 0.3)' : 'rgba(220, 38, 38, 0.2)',
+                border: downloading ? '1px solid rgba(107, 114, 128, 0.4)' : '1px solid rgba(220, 38, 38, 0.4)',
+                color: downloading ? '#6b7280' : '#ffffff',
+                borderRadius: '12px',
+                fontSize: '16px',
+                fontWeight: 600,
+                cursor: downloading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.3s ease',
+                opacity: downloading ? 0.6 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!downloading && (!recording || recording.status === 'ready')) {
+                  e.currentTarget.style.background = 'rgba(220, 38, 38, 0.3)';
+                  e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.6)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!downloading) {
+                  e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)';
+                  e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.4)';
+                }
+              }}
+            >
+              <div style={{ marginBottom: downloading ? '0' : '4px' }}>
+                {downloading ? '⬇️ Downloading…' : '⬇️ Download recording'}
               </div>
-            )}
-          </button>
+              {!downloading && (
+                <div style={{ fontSize: '11px', color: '#fca5a5' }}>
+                  ⚠️ Download now or it may expire
+                </div>
+              )}
+            </button>
+          )}
 
               {showConfirmModal && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}>
@@ -513,7 +482,7 @@ export default function RoomExitPage() {
                 <div style={{ color: '#d1d5db', fontSize: 13 }}>{confirmMessage}</div>
               )}
 
-          {/* Back to Dashboard */}
+          {/* Back to Join */}
           <button
             onClick={() => nav("/join")}
             style={{
@@ -537,7 +506,7 @@ export default function RoomExitPage() {
               e.currentTarget.style.color = '#9ca3af';
             }}
           >
-            Back to Dashboard
+            Back to Join
           </button>
         </div>
       </div>

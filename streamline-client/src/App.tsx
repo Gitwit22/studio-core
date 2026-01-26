@@ -29,6 +29,7 @@ import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 import { clearAuthStorage } from "./lib/api";
+import { usePlatformFlags } from "./hooks/usePlatformFlags";
 
 
 // Stripe/Billing pages
@@ -39,6 +40,8 @@ function App() {
   const nav = useNavigate();
   const location = useLocation();
   const [showUnauthorized, setShowUnauthorized] = useState(false);
+  const { flags: platformFlags } = usePlatformFlags();
+  const platformTranscodeEnabled = platformFlags?.transcodeEnabled === true;
 
   useEffect(() => {
     const onUnauthorized = () => {
@@ -163,10 +166,22 @@ function App() {
       <Route path="/edit/:id" element={<EditorDisabled />} />
       <Route path="/editor" element={<EditorDisabled />} />
       <Route path="/editor/:id" element={<EditorDisabled />} />
-      <Route path="/editing/assets" element={<EditorDisabled />} />
-      <Route path="/editing/projects" element={<EditorDisabled />} />
-      <Route path="/editing/editor/:projectId" element={<EditorDisabled />} />
-      <Route path="/editing/export/:projectId" element={<EditorDisabled />} />
+      <Route
+        path="/editing/assets"
+        element={platformTranscodeEnabled ? <AssetLibrary /> : <EditorDisabled />}
+      />
+      <Route
+        path="/editing/projects"
+        element={platformTranscodeEnabled ? <ProjectsDashboard /> : <EditorDisabled />}
+      />
+      <Route
+        path="/editing/editor/:projectId"
+        element={platformTranscodeEnabled ? <EditorPage /> : <EditorDisabled />}
+      />
+      <Route
+        path="/editing/export/:projectId"
+        element={platformTranscodeEnabled ? <RenderAndUploadPage /> : <EditorDisabled />}
+      />
 
       {/* Stripe/Billing routes */}
       <Route path="/settings/billing" element={<SettingsBilling />} />
