@@ -602,6 +602,8 @@ function LiveKitShell({
       token={token}
       serverUrl={serverUrl}
       connect={true}
+      audio={!isViewer}
+      video={!isViewer}
       connectOptions={isViewer ? { autoSubscribe: true } : undefined}
       onDisconnected={onDisconnected}
       style={{
@@ -657,7 +659,55 @@ function LiveKitShell({
             }
           }}
         >
-          <VideoConference />
+          <ErrorBoundary
+            fallback={
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "24px",
+                  textAlign: "center",
+                  color: "#fff",
+                  background: "#000",
+                }}
+              >
+                <div style={{ maxWidth: 520 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+                    Live room failed to load
+                  </div>
+                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", marginBottom: 14, lineHeight: 1.5 }}>
+                    Refresh the page. If it keeps happening, open the browser console and send the error.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        window.location.reload();
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#fff",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+            }
+          >
+            <VideoConference />
+          </ErrorBoundary>
         </div>
         {watermarkEnabled && (
           <img
@@ -3153,6 +3203,15 @@ function RoomPage() {
           20% { opacity: 1; transform: scale(1); }
           80% { opacity: 1; transform: scale(1); }
           100% { opacity: 0; transform: scale(0.94); }
+        }
+
+        /* Ensure LiveKit prefab fills the available room height */
+        .sl-layout .lk-video-conference,
+        .sl-layout .lk-video-conference-inner,
+        .sl-layout .lk-grid-layout-wrapper,
+        .sl-layout .lk-focus-layout-wrapper {
+          height: 100% !important;
+          min-height: 0 !important;
         }
 
         ${isViewer ? `
