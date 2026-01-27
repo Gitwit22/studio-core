@@ -11,6 +11,69 @@ import { canAccessFeature } from "./featureAccess";
 
 const router = Router();
 
+type SegmentedPlatformFlags = {
+  contentLibraryEnabled: boolean;
+  projectsEnabled: boolean;
+  editorEnabled: boolean;
+};
+
+let cachedSegmentedFlags: SegmentedPlatformFlags | null = null;
+let cachedSegmentedFlagsAt = 0;
+const SEGMENTED_FLAGS_TTL_MS = 30 * 1000;
+
+async function getSegmentedPlatformFlags(): Promise<SegmentedPlatformFlags> {
+  const now = Date.now();
+  if (cachedSegmentedFlags && now - cachedSegmentedFlagsAt < SEGMENTED_FLAGS_TTL_MS) {
+    return cachedSegmentedFlags;
+  }
+
+  try {
+    const [contentLibrarySnap, projectsSnap, editorSnap] = await Promise.all([
+      db.collection("featureFlags").doc("contentLibraryEnabled").get(),
+      db.collection("featureFlags").doc("projectsEnabled").get(),
+      db.collection("featureFlags").doc("editorEnabled").get(),
+    ]);
+
+    const contentLibraryData = contentLibrarySnap.exists
+      ? ((contentLibrarySnap.data() as any) || {})
+      : {};
+    const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
+    const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
+
+    cachedSegmentedFlags = {
+      // New segmented flags default to DISABLED when missing.
+      contentLibraryEnabled: contentLibraryData.enabled === true,
+      projectsEnabled: projectsData.enabled === true,
+      editorEnabled: editorData.enabled === true,
+    };
+    cachedSegmentedFlagsAt = now;
+    return cachedSegmentedFlags;
+  } catch (err) {
+    console.error("[editing] failed to load segmented platform flags", err);
+    cachedSegmentedFlags = {
+      contentLibraryEnabled: false,
+      projectsEnabled: false,
+      editorEnabled: false,
+    };
+    cachedSegmentedFlagsAt = now;
+    return cachedSegmentedFlags;
+  }
+}
+
+async function assertSegmentEnabled(
+  res: Response,
+  key: keyof SegmentedPlatformFlags,
+): Promise<boolean> {
+  const flags = await getSegmentedPlatformFlags();
+  if (flags[key]) return true;
+  res.status(403).json({
+    error: LIMIT_ERRORS.FEATURE_DISABLED,
+    feature: key,
+    reason: "Feature disabled platform-wide",
+  });
+  return false;
+}
+
 function getAuthedUid(req: Request): string | null {
   const user = (req as any).user;
   const uid = typeof user?.uid === "string" ? user.uid : null;
@@ -45,6 +108,10 @@ router.post(
       const userId = getAuthedUid(req);
       if (!userId) {
         return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+      }
+
+      if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+        return;
       }
       const title = req.body.title || file.originalname.replace(/\.[^/.]+$/, "");
 
@@ -133,6 +200,10 @@ router.get("/assets", async (req: Request, res: Response) => {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+      return;
+    }
+
     // Fetch all recordings for this user and convert to assets format
     const recordingsSnap = await db
       .collection("recordings")
@@ -194,6 +265,10 @@ router.get("/listall", async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
+
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+      return;
+    }
     const recordingsSnap = await db.collection("recordings").where("userId", "==", userId).get();
     const uploadsSnap = await db.collection("editing_assets").where("userId", "==", userId).get();
     
@@ -224,6 +299,10 @@ router.get("/assets/:id", async (req: Request, res: Response) => {
 
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+      return;
     }
 
     const recordingSnap = await db.collection("recordings").doc(id).get();
@@ -268,6 +347,10 @@ router.delete("/assets/:id", async (req: Request, res: Response) => {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+      return;
+    }
+
     const recordingSnap = await db.collection("recordings").doc(id).get();
 
     if (!recordingSnap.exists) {
@@ -299,6 +382,10 @@ router.post("/assets/from-recording", async (req: Request, res: Response) => {
 
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+      return;
     }
 
     if (!recordingId) {
@@ -348,6 +435,10 @@ router.get("/projects", async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
+
+    if (!(await assertSegmentEnabled(res, "projectsEnabled"))) {
+      return;
+    }
     
     const projectsSnap = await db
       .collection("editing_projects")
@@ -383,6 +474,14 @@ router.post("/projects", async (req: Request, res: Response) => {
 
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    // Creating projects requires the editor surface.
+    if (!(await assertSegmentEnabled(res, "projectsEnabled"))) {
+      return;
+    }
+    if (!(await assertSegmentEnabled(res, "editorEnabled"))) {
+      return;
     }
 
     const newProject = {
@@ -423,6 +522,10 @@ router.get("/recordings/:id", async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
+
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+      return;
+    }
     
     const recordingDoc = await db.collection("recordings").doc(id).get();
     
@@ -452,6 +555,10 @@ router.get("/list", async (req: Request, res: Response) => {
     const userId = getAuthedUid(req);
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+      return;
     }
 
     const recordingsSnap = await db
@@ -486,6 +593,10 @@ router.post("/save", async (req: Request, res: Response) => {
 
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!(await assertSegmentEnabled(res, "editorEnabled"))) {
+      return;
     }
 
     if (!recordingId) {
@@ -526,6 +637,10 @@ router.put("/:recordingId", async (req: Request, res: Response) => {
 
     if (!userId) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!(await assertSegmentEnabled(res, "editorEnabled"))) {
+      return;
     }
 
     if (!recordingId) {
@@ -569,6 +684,9 @@ router.put("/:recordingId", async (req: Request, res: Response) => {
 // POST /api/editing/render - Trigger render job for a recording
 router.post("/render", async (req: Request, res: Response) => {
   try {
+    if (!(await assertSegmentEnabled(res, "editorEnabled"))) {
+      return;
+    }
     if (!assertPlatformTranscodeEnabled(res)) {
       return;
     }

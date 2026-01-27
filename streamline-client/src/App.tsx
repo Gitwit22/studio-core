@@ -29,7 +29,8 @@ import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 import { clearAuthStorage } from "./lib/api";
-import { usePlatformFlags } from "./hooks/usePlatformFlags";
+import { useFeatureAccess } from "./hooks/useFeatureAccess";
+import { useEffectiveEntitlements } from "./hooks/useEffectiveEntitlements";
 
 
 // Stripe/Billing pages
@@ -40,8 +41,12 @@ function App() {
   const nav = useNavigate();
   const location = useLocation();
   const [showUnauthorized, setShowUnauthorized] = useState(false);
-  const { flags: platformFlags } = usePlatformFlags();
-  const platformTranscodeEnabled = platformFlags?.transcodeEnabled === true;
+  const { effectiveEntitlements } = useEffectiveEntitlements();
+  const { access } = useFeatureAccess(effectiveEntitlements);
+
+  const canContentLibrary = access.contentLibrary.allowed;
+  const canProjects = access.projects.allowed;
+  const canEditor = access.editor.allowed;
 
   useEffect(() => {
     const onUnauthorized = () => {
@@ -166,21 +171,37 @@ function App() {
       <Route path="/edit/:id" element={<EditorDisabled />} />
       <Route path="/editor" element={<EditorDisabled />} />
       <Route path="/editor/:id" element={<EditorDisabled />} />
+
+      {/* Segmented feature routes */}
+      <Route
+        path="/content"
+        element={canContentLibrary ? <AssetLibrary /> : <Navigate to="/dashboard" replace />}
+      />
+      <Route
+        path="/dashboard/content"
+        element={canContentLibrary ? <AssetLibrary /> : <Navigate to="/dashboard" replace />}
+      />
+      <Route
+        path="/projects"
+        element={canProjects ? <ProjectsDashboard /> : <Navigate to="/dashboard" replace />}
+      />
+
+      {/* Legacy aliases */}
       <Route
         path="/editing/assets"
-        element={platformTranscodeEnabled ? <AssetLibrary /> : <EditorDisabled />}
+        element={canContentLibrary ? <Navigate to="/content" replace /> : <Navigate to="/dashboard" replace />}
       />
       <Route
         path="/editing/projects"
-        element={platformTranscodeEnabled ? <ProjectsDashboard /> : <EditorDisabled />}
+        element={canProjects ? <Navigate to="/projects" replace /> : <Navigate to="/dashboard" replace />}
       />
       <Route
         path="/editing/editor/:projectId"
-        element={platformTranscodeEnabled ? <EditorPage /> : <EditorDisabled />}
+        element={canEditor ? <EditorPage /> : <EditorDisabled />}
       />
       <Route
         path="/editing/export/:projectId"
-        element={platformTranscodeEnabled ? <RenderAndUploadPage /> : <EditorDisabled />}
+        element={canEditor ? <RenderAndUploadPage /> : <EditorDisabled />}
       />
 
       {/* Stripe/Billing routes */}

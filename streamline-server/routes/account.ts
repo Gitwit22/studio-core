@@ -205,6 +205,24 @@ async function getNormalizedMediaPrefs(uid: string) {
   return { mediaPrefs: normalizeMediaPrefs((data as any).mediaPrefs, planId), planId };
 }
 
+  async function getSegmentedUiFlags() {
+    const [contentLibrarySnap, projectsSnap, editorSnap] = await Promise.all([
+      firestore.collection("featureFlags").doc("contentLibraryEnabled").get(),
+      firestore.collection("featureFlags").doc("projectsEnabled").get(),
+      firestore.collection("featureFlags").doc("editorEnabled").get(),
+    ]);
+
+    const contentLibraryData = contentLibrarySnap.exists ? ((contentLibrarySnap.data() as any) || {}) : {};
+    const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
+    const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
+
+    // New segmented flags default to DISABLED when missing.
+    return {
+      contentLibraryEnabled: contentLibraryData.enabled === true,
+      projectsEnabled: projectsData.enabled === true,
+      editorEnabled: editorData.enabled === true,
+    };
+  }
 // Advanced permissions have been fully removed in favor of a single,
 // simple permissions mode. Keep a minimal helper that always reports
 // advanced permissions as disabled so existing callers continue to
@@ -618,6 +636,7 @@ router.get("/me", async (req, res) => {
         hlsSettingsTab: hlsUi.enabled,
         transcodeEnabled: platformTranscodeEnabled,
         recordingEnabled: recordingUi.enabled,
+          ...await getSegmentedUiFlags(),
       },
       planId: effectiveEntitlements?.planId ?? entitlements.planId,
       effectiveEntitlements,

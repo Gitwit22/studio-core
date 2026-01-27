@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiFetchAuth } from "../lib/api";
 import { editingApi } from "../lib/editingApi";
+import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
+import { useFeatureAccess } from "../hooks/useFeatureAccess";
 // downloadService no longer used for direct downloads; we rely on signed links
 
 /**
@@ -14,6 +16,9 @@ export default function RoomExitPage() {
   const nav = useNavigate();
   const location = useLocation();
   const { recordingId } = useParams<{ recordingId: string }>();
+  const { effectiveEntitlements } = useEffectiveEntitlements();
+  const { access } = useFeatureAccess(effectiveEntitlements);
+  const canContentLibrary = access.contentLibrary.allowed;
   const [recording, setRecording] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -366,7 +371,9 @@ export default function RoomExitPage() {
             Stream Ended
           </h1>
           <p style={{ fontSize: '15px', color: '#9ca3af', marginBottom: '24px', lineHeight: '1.6' }}>
-            Your recording is being processed. It will appear in your dashboard when ready.
+            {canContentLibrary
+              ? 'Your recording is being processed. It will appear in My Content when ready.'
+              : 'Your recording is being processed. The download button will activate when ready.'}
           </p>
 
           {recording && (
@@ -424,6 +431,35 @@ export default function RoomExitPage() {
 
         {/* ACTION BUTTONS */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {/* View in My Content (only when content library is allowed) */}
+          {canContentLibrary && (
+            <button
+              onClick={() => nav('/content')}
+              style={{
+                width: '100%',
+                padding: '16px 24px',
+                background: 'rgba(34, 197, 94, 0.18)',
+                border: '1px solid rgba(34, 197, 94, 0.35)',
+                color: '#ffffff',
+                borderRadius: '12px',
+                fontSize: '16px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(34, 197, 94, 0.28)';
+                e.currentTarget.style.borderColor = 'rgba(34, 197, 94, 0.55)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(34, 197, 94, 0.18)';
+                e.currentTarget.style.borderColor = 'rgba(34, 197, 94, 0.35)';
+              }}
+            >
+              📁 View in My Content
+            </button>
+          )}
+
           {/* Download (only when a real recording exists) */}
           {recordingId !== 'unknown' && hasRecording && (
             <button

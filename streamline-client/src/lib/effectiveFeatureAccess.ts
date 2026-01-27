@@ -12,7 +12,38 @@ export type PlatformFlagsLike = {
   hlsSettingsTab?: unknown;
   transcodeEnabled?: unknown;
   recordingEnabled?: unknown;
+
+  // Segmented, safety-first platform switches:
+  // - Missing/undefined => disabled (must be explicitly enabled)
+  contentLibraryEnabled?: unknown;
+  libraryEnabled?: unknown;
+  projectsEnabled?: unknown;
+  editorEnabled?: unknown;
 };
+
+function isNewPlatformFlagEnabled(value: unknown): boolean {
+  // Safety-first: new segmented flags default to disabled when missing.
+  return value === true;
+}
+
+function resolveEntitlementBoolean(features: Record<string, unknown> | null | undefined, keys: string[]): boolean {
+  const f: any = features || {};
+  for (const key of keys) {
+    if (typeof f[key] === "boolean") return f[key];
+  }
+  // Safety-first: new entitlements default to disabled when missing.
+  return false;
+}
+
+function resolveEditingAccess(features: Record<string, unknown> | null | undefined): boolean {
+  const f: any = features || {};
+  // Default: enabled unless explicitly disabled by plan.
+  // (Server does not currently send a dedicated editing entitlement, but this
+  // keeps the door open for future plan-based gating.)
+  const explicit = f.editing ?? f.editingEnabled ?? f.postProduction;
+  if (typeof explicit === "boolean") return explicit;
+  return true;
+}
 
 function resolveRtmpDestinationsMax(effectiveEntitlements: EffectiveEntitlementsLike | null | undefined): number {
   const limits = (effectiveEntitlements && effectiveEntitlements.limits) || {};
@@ -56,12 +87,25 @@ export function computeEffectiveFeatureAccess(input: {
     hlsSetup: boolean;
     destinations: boolean;
     multistream: boolean;
+    editing: boolean;
   };
   canUse: {
     hlsRuntime: boolean;
     hlsSetup: boolean;
     destinations: boolean;
     multistream: boolean;
+  };
+  editing: {
+    allowed: boolean;
+  };
+  contentLibrary: {
+    allowed: boolean;
+  };
+  projects: {
+    allowed: boolean;
+  };
+  editor: {
+    allowed: boolean;
   };
 } {
   const eff = input.effectiveEntitlements || {};
@@ -72,11 +116,24 @@ export function computeEffectiveFeatureAccess(input: {
   const platformTranscodeEnabled = isPlatformEnabled((pf as any).transcodeEnabled);
   const platformRecordingEnabled = isPlatformEnabled((pf as any).recordingEnabled);
 
+  // New segmented flags: missing => disabled.
+  const platformContentLibraryEnabled = isNewPlatformFlagEnabled(
+    (pf as any).contentLibraryEnabled ?? (pf as any).libraryEnabled
+  );
+  const platformProjectsEnabled = isNewPlatformFlagEnabled((pf as any).projectsEnabled);
+  const platformEditorEnabled = isNewPlatformFlagEnabled((pf as any).editorEnabled);
+
   const features = (eff as any).features || {};
   const rtmpDestinationsMax = resolveRtmpDestinationsMax(eff as any);
 
   const planHlsRuntime = resolveCanHlsRuntime(features);
   const planHlsSetup = resolveCanHlsSetup(features);
+
+  const planEditing = resolveEditingAccess(features);
+
+  const planContentLibrary = resolveEntitlementBoolean(features, ["contentLibrary", "library"]);
+  const planProjects = resolveEntitlementBoolean(features, ["projects"]);
+  const planEditor = resolveEntitlementBoolean(features, ["editor"]);
 
   // Numeric RTMP destinations cap is canonical for availability.
   const planDestinations = rtmpDestinationsMax >= 1;
@@ -94,12 +151,29 @@ export function computeEffectiveFeatureAccess(input: {
       hlsSetup: planHlsSetup,
       destinations: planDestinations,
       multistream: planMultistream,
+      editing: planEditing,
     },
     canUse: {
       hlsRuntime: isFeatureAvailable(planHlsRuntime, platformHlsEnabled),
       hlsSetup: isFeatureAvailable(planHlsSetup, platformHlsEnabled),
       destinations: isFeatureAvailable(planDestinations, platformTranscodeEnabled),
       multistream: isFeatureAvailable(planMultistream, platformTranscodeEnabled),
+    },
+    editing: {
+      // Legacy: keep for backwards compatibility (now mapped to editor rules)
+      allowed: isFeatureAvailable(planEditor || planEditing, platformEditorEnabled && platformTranscodeEnabled),
+    },
+    contentLibrary: {
+      allowed: isFeatureAvailable(planContentLibrary, platformContentLibraryEnabled),
+    },
+    projects: {
+      // Derived: editor implies projects, but projects do not imply editor.
+      allowed:
+        isFeatureAvailable(planProjects, platformProjectsEnabled) ||
+        isFeatureAvailable(planEditor, platformEditorEnabled && platformTranscodeEnabled),
+    },
+    editor: {
+      allowed: isFeatureAvailable(planEditor, platformEditorEnabled && platformTranscodeEnabled),
     },
   };
 }

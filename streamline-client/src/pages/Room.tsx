@@ -21,6 +21,8 @@ import { APP_BASE } from "../lib/appBase";
 import { normalizeUiRolePresetId } from "../lib/roles";
 import { computeEffectiveFeatureAccess } from "../lib/effectiveFeatureAccess";
 import { usePlatformFlags } from "../hooks/usePlatformFlags";
+import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
+import { useFeatureAccess } from "../hooks/useFeatureAccess";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
@@ -240,6 +242,11 @@ function StreamEndedModal({
   onExitRoom: () => void;
   onStayInRoom: () => void;
 }) {
+  const nav = useNavigate();
+  const { effectiveEntitlements } = useEffectiveEntitlements();
+  const { access } = useFeatureAccess(effectiveEntitlements);
+  const canContentLibrary = access.contentLibrary.allowed;
+
   const [processing, setProcessing] = useState(true);
   const [ready, setReady] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -400,30 +407,71 @@ function StreamEndedModal({
             <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
             <div>Processing recording…</div>
             <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-              This usually takes 1-2 minutes. The download button will activate when ready.
+              This usually takes 1-2 minutes. {canContentLibrary ? 'It will appear in My Content when ready.' : 'The download button will activate when ready.'}
             </div>
           </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <button
-            onClick={handleDownload}
-            disabled={!ready}
-            style={{
-              width: "100%",
-              padding: "12px 16px",
-              borderRadius: "8px",
-              border: "none",
-              fontSize: "14px",
-              fontWeight: 600,
-              cursor: !ready ? "not-allowed" : "pointer",
-              opacity: !ready ? 0.6 : 1,
-              transition: "all 0.3s ease",
-              background: ready ? "#16a34a" : "#374151",
-              color: "#fff",
-            }}
-          >
-            {ready ? "⬇️ Download Recording" : "⏳ Processing..."}
-          </button>
+          {canContentLibrary ? (
+            <>
+              <button
+                onClick={() => nav('/content', { replace: true })}
+                style={{
+                  width: "100%",
+                  padding: "12px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  transition: "all 0.3s ease",
+                  background: "#16a34a",
+                  color: "#fff",
+                }}
+              >
+                📁 View in My Content
+              </button>
+              <button
+                onClick={handleDownload}
+                disabled={!ready}
+                style={{
+                  width: "100%",
+                  padding: "12px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  cursor: !ready ? "not-allowed" : "pointer",
+                  opacity: !ready ? 0.6 : 1,
+                  transition: "all 0.3s ease",
+                  background: ready ? "rgba(255,255,255,0.12)" : "#374151",
+                  color: "#fff",
+                }}
+              >
+                {ready ? "⬇️ Download Recording" : "⏳ Processing..."}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handleDownload}
+              disabled={!ready}
+              style={{
+                width: "100%",
+                padding: "12px 16px",
+                borderRadius: "8px",
+                border: "none",
+                fontSize: "14px",
+                fontWeight: 600,
+                cursor: !ready ? "not-allowed" : "pointer",
+                opacity: !ready ? 0.6 : 1,
+                transition: "all 0.3s ease",
+                background: ready ? "#16a34a" : "#374151",
+                color: "#fff",
+              }}
+            >
+              {ready ? "⬇️ Download Recording" : "⏳ Processing..."}
+            </button>
+          )}
           {confirmMessage && (
             <div
               style={{

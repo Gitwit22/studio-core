@@ -9,17 +9,28 @@ const router = Router();
 
 router.get("/", async (_req, res) => {
   try {
-    const [hlsUiSnap, recordingUiSnap] = await Promise.all([
+    const [hlsUiSnap, recordingUiSnap, contentLibrarySnap, projectsSnap, editorSnap] = await Promise.all([
       firestore.collection("featureFlags").doc("hlsSettingsTab").get(),
       firestore.collection("featureFlags").doc("recording").get(),
+      firestore.collection("featureFlags").doc("contentLibraryEnabled").get(),
+      firestore.collection("featureFlags").doc("projectsEnabled").get(),
+      firestore.collection("featureFlags").doc("editorEnabled").get(),
     ]);
 
     const hlsUiData = hlsUiSnap.exists ? ((hlsUiSnap.data() as any) || {}) : {};
     const recordingUiData = recordingUiSnap.exists ? ((recordingUiSnap.data() as any) || {}) : {};
+    const contentLibraryData = contentLibrarySnap.exists ? ((contentLibrarySnap.data() as any) || {}) : {};
+    const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
+    const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
 
     const hlsEnabled = hlsUiData.enabled === undefined ? true : !!hlsUiData.enabled;
     const recordingEnabled = recordingUiData.enabled === undefined ? true : !!recordingUiData.enabled;
     const transcodeEnabled = getPlatformTranscodeEnabled();
+
+    // New segmented flags default to DISABLED when missing.
+    const contentLibraryEnabled = contentLibraryData.enabled === true;
+    const projectsEnabled = projectsData.enabled === true;
+    const editorEnabled = editorData.enabled === true;
 
     const snap = await firestore.collection("plans").get();
     const mapped = snap.docs.map((d) => {
@@ -121,6 +132,9 @@ router.get("/", async (_req, res) => {
           hlsSettingsTab: hlsEnabled,
           recordingEnabled,
           transcodeEnabled,
+          contentLibraryEnabled,
+          projectsEnabled,
+          editorEnabled,
         },
       });
     }
@@ -134,6 +148,9 @@ router.get("/", async (_req, res) => {
         hlsSettingsTab: hlsEnabled,
         recordingEnabled,
         transcodeEnabled,
+        contentLibraryEnabled,
+        projectsEnabled,
+        editorEnabled,
       },
     });
   } catch (err: any) {
@@ -145,6 +162,9 @@ router.get("/", async (_req, res) => {
         hlsSettingsTab: true,
         recordingEnabled: true,
         transcodeEnabled: getPlatformTranscodeEnabled(),
+        contentLibraryEnabled: false,
+        projectsEnabled: false,
+        editorEnabled: false,
       },
     });
   }

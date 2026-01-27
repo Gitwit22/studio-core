@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
+import { PlanId, isPlanId } from "../lib/planIds";
 import { useNavigate } from "react-router-dom";
 import { editingApi } from "../lib/editingApi";
-import { usePlatformFlags } from "../hooks/usePlatformFlags";
+import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 
 type Recording = {
   id: string;
@@ -30,8 +31,11 @@ type Project = {
 
 export default function Dashboard() {
   const nav = useNavigate();
-  const { flags: platformFlags } = usePlatformFlags();
-  const platformTranscodeEnabled = platformFlags?.transcodeEnabled === true;
+  const { effectiveEntitlements } = useEffectiveEntitlements();
+  const { access } = useFeatureAccess(effectiveEntitlements);
+  const canContentLibrary = access.contentLibrary.allowed;
+  const canProjects = access.projects.allowed;
+  const canEditor = access.editor.allowed;
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [user, setUser] = useState<any>(null);
@@ -163,31 +167,7 @@ export default function Dashboard() {
             >
               ⚙️ Settings & Billing
             </button>
-            {/* Content and New Stream buttons (right side) */}
-            <button
-              onClick={() => nav("/join")}
-              style={{
-                padding: '12px 24px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                color: '#ffffff',
-                borderRadius: '12px',
-                fontSize: '15px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.3s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-                e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.6)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-              }}
-            >
-              🎬 My Content
-            </button>
+            {/* New Stream button (right side) */}
             <button
               onClick={() => nav("/join")}
               style={{
@@ -235,12 +215,14 @@ export default function Dashboard() {
             marginBottom: '40px'
           }}
         >
-          <StatCard
-            label="Recordings"
-            value={recordings.length}
-            detail={`${readyRecordings.length} ready`}
-            icon="🎬"
-          />
+          {canContentLibrary && (
+            <StatCard
+              label="Recordings"
+              value={recordings.length}
+              detail={`${readyRecordings.length} ready`}
+              icon="🎬"
+            />
+          )}
           <StatCard
             label="Total Viewers"
             value={totalViewers.toLocaleString()}
@@ -253,15 +235,18 @@ export default function Dashboard() {
             detail="Streamed"
             icon="⏱️"
           />
-          <StatCard
-            label="Projects"
-            value={projects.length}
-            detail="Created"
-            icon="📁"
-          />
+          {canProjects && (
+            <StatCard
+              label="Projects"
+              value={projects.length}
+              detail="Created"
+              icon="📁"
+            />
+          )}
         </div>
 
-        {/* RECENT RECORDINGS */}
+        {/* RECENT RECORDINGS (Content Library) */}
+        {canContentLibrary && (
         <div style={{ marginBottom: '40px' }}>
           <div 
             style={{
@@ -272,21 +257,19 @@ export default function Dashboard() {
             }}
           >
             <h2 style={{ fontSize: '24px', fontWeight: 700 }}>Recent Recordings</h2>
-            {platformTranscodeEnabled && (
-              <button
-                onClick={() => nav("/editing/assets")}
-                style={{
-                  fontSize: '14px',
-                  color: '#ef4444',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontWeight: 500
-                }}
-              >
-                View All →
-              </button>
-            )}
+            <button
+              onClick={() => nav("/content")}
+              style={{
+                fontSize: '14px',
+                color: '#ef4444',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 500
+              }}
+            >
+              View All →
+            </button>
           </div>
 
           {recordings.length === 0 ? (
@@ -327,7 +310,7 @@ export default function Dashboard() {
                 <RecordingCard
                   key={rec.id}
                   recording={rec}
-                  canEdit={platformTranscodeEnabled}
+                  canEdit={canEditor}
                   onEdit={() => nav(`/editing/editor/new?recordingId=${rec.id}`)}
                   onDelete={() => handleDeleteRecording(rec.id)}
                 />
@@ -335,9 +318,10 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        )}
 
         {/* RECENT PROJECTS */}
-        {platformTranscodeEnabled && (
+        {canProjects && (
         <div>
           <div 
             style={{
@@ -349,7 +333,7 @@ export default function Dashboard() {
           >
             <h2 style={{ fontSize: '24px', fontWeight: 700 }}>Recent Projects</h2>
             <button
-              onClick={() => nav("/editing/projects")}
+              onClick={() => nav("/projects")}
               style={{
                 fontSize: '14px',
                 color: '#ef4444',
@@ -376,7 +360,7 @@ export default function Dashboard() {
             >
               <p style={{ color: '#9ca3af', marginBottom: '20px' }}>No projects yet</p>
               <button
-                onClick={() => nav("/editing/assets")}
+                onClick={() => nav("/projects")}
                 style={{
                   padding: '12px 24px',
                   background: 'rgba(255, 255, 255, 0.05)',
@@ -401,6 +385,7 @@ export default function Dashboard() {
                 <ProjectCard
                   key={proj.id}
                   project={proj}
+                  canOpen={canEditor}
                   onEdit={() => nav(`/editing/editor/${proj.id}`)}
                 />
               ))}
@@ -570,7 +555,15 @@ function RecordingCard({
   );
 }
 
-function ProjectCard({ project, onEdit }: { project: Project; onEdit: () => void }) {
+function ProjectCard({
+  project,
+  onEdit,
+  canOpen,
+}: {
+  project: Project;
+  onEdit: () => void;
+  canOpen: boolean;
+}) {
   return (
     <div 
       style={{
@@ -610,20 +603,24 @@ function ProjectCard({ project, onEdit }: { project: Project; onEdit: () => void
           {new Date(project.createdAt).toLocaleDateString()}
         </p>
         <button
-          onClick={onEdit}
+          onClick={() => {
+            if (!canOpen) return;
+            onEdit();
+          }}
+          disabled={!canOpen}
           style={{
             width: '100%',
             padding: '10px',
-            background: 'rgba(255, 255, 255, 0.05)',
-            color: '#ffffff',
+            background: canOpen ? 'rgba(255, 255, 255, 0.05)' : 'rgba(107, 114, 128, 0.15)',
+            color: canOpen ? '#ffffff' : '#9ca3af',
             border: '1px solid rgba(255, 255, 255, 0.1)',
             borderRadius: '8px',
             fontSize: '13px',
             fontWeight: 600,
-            cursor: 'pointer'
+            cursor: canOpen ? 'pointer' : 'not-allowed',
           }}
         >
-          Open
+          {canOpen ? 'Open' : 'Editor disabled'}
         </button>
       </div>
     </div>

@@ -2,10 +2,16 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { editingApi, type Recording } from "../lib/editingApi";
 import VideoUploadModal from "../components/VideoUploadModal";
+import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
+import { useFeatureAccess } from "../hooks/useFeatureAccess";
 
 export default function AssetLibrary() {
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
+  const { effectiveEntitlements } = useEffectiveEntitlements();
+  const { access } = useFeatureAccess(effectiveEntitlements);
+  const canProjects = access.projects.allowed;
+  const canEditor = access.editor.allowed;
   const [assets, setAssets] = useState<Awaited<ReturnType<typeof editingApi.getAssets>>>([]);
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,24 +192,30 @@ export default function AssetLibrary() {
             ⬆️ Upload Video
           </button>
           <button
-            onClick={() => nav('/editing/projects')}
+            onClick={() => {
+              if (!canProjects) return;
+              nav('/projects');
+            }}
+            disabled={!canProjects}
             style={{
               padding: '0.75rem 1.5rem',
               background: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid rgba(255, 255, 255, 0.2)',
               borderRadius: '0.75rem',
-              color: '#ffffff',
+              color: canProjects ? '#ffffff' : '#9ca3af',
               fontWeight: '600',
-              cursor: 'pointer',
+              cursor: canProjects ? 'pointer' : 'not-allowed',
               transition: 'all 0.3s ease',
               backdropFilter: 'blur(10px)'
             }}
             onMouseEnter={(e) => {
+              if (!canProjects) return;
               const target = e.target as HTMLButtonElement;
               target.style.background = 'rgba(255, 255, 255, 0.1)';
               target.style.borderColor = 'rgba(220, 38, 38, 0.5)';
             }}
             onMouseLeave={(e) => {
+              if (!canProjects) return;
               const target = e.target as HTMLButtonElement;
               target.style.background = 'rgba(255, 255, 255, 0.05)';
               target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
@@ -321,9 +333,13 @@ export default function AssetLibrary() {
                   key={recording.id}
                   recording={recording}
                   id={`recording-${recording.id}`}
-                  onCreateProject={() =>
-                    nav(`/editing/editor/new?recordingId=${recording.id}`)
-                  }
+                  onCreateProject={() => {
+                    if (!canEditor) {
+                      alert("Editor is currently disabled.");
+                      return;
+                    }
+                    nav(`/editing/editor/new?recordingId=${recording.id}`);
+                  }}
                 />
               ))}
             </div>
@@ -387,9 +403,13 @@ export default function AssetLibrary() {
                   <AssetCard
                     key={asset.id}
                     asset={asset}
-                    onCreateProject={() =>
-                      nav(`/editing/editor/new?assetId=${asset.id}`)
-                    }
+                    onCreateProject={() => {
+                      if (!canEditor) {
+                        alert("Editor is currently disabled.");
+                        return;
+                      }
+                      nav(`/editing/editor/new?assetId=${asset.id}`);
+                    }}
                   />
                 ))}
               </div>

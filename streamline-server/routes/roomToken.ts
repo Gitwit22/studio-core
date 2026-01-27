@@ -50,6 +50,25 @@ async function getRecordingUiFlag() {
   };
 }
 
+async function getSegmentedUiFlags() {
+  const [contentLibrarySnap, projectsSnap, editorSnap] = await Promise.all([
+    firestore.collection("featureFlags").doc("contentLibraryEnabled").get(),
+    firestore.collection("featureFlags").doc("projectsEnabled").get(),
+    firestore.collection("featureFlags").doc("editorEnabled").get(),
+  ]);
+
+  const contentLibraryData = contentLibrarySnap.exists ? ((contentLibrarySnap.data() as any) || {}) : {};
+  const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
+  const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
+
+  // New segmented flags default to DISABLED when missing.
+  return {
+    contentLibraryEnabled: contentLibraryData.enabled === true,
+    projectsEnabled: projectsData.enabled === true,
+    editorEnabled: editorData.enabled === true,
+  };
+}
+
 function deriveServiceUrl(): string | null {
   const raw = process.env.LIVEKIT_URL || "";
   if (!raw) return null;
@@ -508,10 +527,11 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       }
 
       try {
-        const [entitlements, hlsUi, recordingUi] = await Promise.all([
+        const [entitlements, hlsUi, recordingUi, segmentedUiFlags] = await Promise.all([
           getEffectiveEntitlements(entitlementsUid),
           getHlsUiFlag(),
           getRecordingUiFlag(),
+          getSegmentedUiFlags(),
         ]);
 
         const plan = entitlements.plan;
@@ -580,6 +600,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
           hlsSettingsTab: hlsUi.enabled,
           transcodeEnabled: platformTranscodeEnabled,
           recordingEnabled: recordingUi.enabled,
+          ...segmentedUiFlags,
         };
       } catch (err) {
         console.error("[roomToken] failed to compute effectiveEntitlements", err);

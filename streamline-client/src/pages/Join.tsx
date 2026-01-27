@@ -5,6 +5,8 @@ import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useSearchParams,} from "react-router-dom";
 import { apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
+import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 
 type SavedEmbedSummary = {
   embedId: string;
@@ -72,6 +74,9 @@ export default function Join() {
   useEffect(() => { logAuthDebugContext("Arrive Join Page"); }, []);
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
+  const { effectiveEntitlements } = useEffectiveEntitlements();
+  const { access } = useFeatureAccess(effectiveEntitlements);
+  const canContentLibrary = access.contentLibrary.allowed;
 
   const [displayName, setDisplayName] = useState(() => {
     // Prefer profile displayName if available, then fall back to cached value
@@ -794,7 +799,7 @@ export default function Join() {
 
   {/* My Content button */}
   <button
-    onClick={() => nav("/dashboard")}
+    onClick={() => nav(canContentLibrary ? "/content" : "/dashboard")}
     style={{
       fontSize: "13px",
       padding: "8px 16px",
@@ -816,7 +821,7 @@ export default function Join() {
       e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.4)";
     }}
   >
-    🎬 My Content
+    {canContentLibrary ? "🎬 My Content" : "📊 Dashboard"}
   </button>
 </div>
 
