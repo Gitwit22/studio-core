@@ -7,7 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
 import SettingsDestinations from "./SettingsDestinations";
-import { apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
+import { ApiUnauthorizedError, apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
 import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
@@ -15,6 +15,19 @@ import { getMeCached, clearMeCache } from "../lib/meCache";
 import { isFeatureAvailable, isPlatformEnabled } from "../lib/featureAvailability";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+
+async function apiFetchWithCookieFallback(path: string, init: RequestInit = {}) {
+  try {
+    return await apiFetchAuth(path, init);
+  } catch (err: any) {
+    // In cookie-auth setups (Admin flow), we may not have a localStorage JWT.
+    // Fall back to cookie-based auth so test-mode plan switching works.
+    if (err instanceof ApiUnauthorizedError) {
+      return await apiFetch(path, init);
+    }
+    throw err;
+  }
+}
 
 type RolePresetId = "participant" | "cohost";
 
@@ -1022,7 +1035,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   const requestId = `${plan}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
   try {
-    const res = await apiFetchAuth("/api/billing/checkout", {
+    const res = await apiFetchWithCookieFallback("/api/billing/checkout", {
       method: "POST",
       body: JSON.stringify({ plan, requestId, tosAccepted: true }),
     });
@@ -1064,7 +1077,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
         setActionLoading(null);
         return;
       }
-      const res = await apiFetchAuth("/api/billing/portal", {
+      const res = await apiFetchWithCookieFallback("/api/billing/portal", {
         method: "POST",
       });
       const data = await res.json();
@@ -1081,7 +1094,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setCheckoutTosSubmitting(true);
       setCheckoutTosError(null);
       try {
-        const res = await apiFetchAuth("/api/account/accept-tos", {
+        const res = await apiFetchWithCookieFallback("/api/account/accept-tos", {
           method: "POST",
         });
         const data = await res.json();
@@ -1122,7 +1135,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     setTestModeLoading(true);
     setError(null);
     try {
-      const res = await apiFetchAuth("/api/billing/test/change-plan", {
+      const res = await apiFetchWithCookieFallback("/api/billing/test/change-plan", {
         method: "POST",
         body: JSON.stringify({ newPlanId: testModeTargetPlan }),
       });

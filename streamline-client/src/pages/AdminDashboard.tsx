@@ -31,6 +31,20 @@ async function apiFetch(path: string, init: RequestInit = {}) {
     },
   });
 }
+
+async function describeNonOkResponse(res: Response): Promise<string> {
+  try {
+    const body: any = await res.json();
+    const code = body?.error ?? body?.code ?? body?.message;
+    const details = body?.details ?? body?.reason;
+    if (code && details) return `${String(code)}: ${String(details)}`;
+    if (code) return String(code);
+    if (details) return String(details);
+    return `HTTP ${res.status}`;
+  } catch {
+    return `HTTP ${res.status}`;
+  }
+}
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -562,7 +576,7 @@ export default function AdminDashboard() {
       showToast(`Plan changed to ${newPlan}`);
       await loadUsers();
     } else {
-      showToast("Plan change failed");
+      showToast(`Plan change failed: ${await describeNonOkResponse(res)}`);
     }
   };
 
@@ -577,7 +591,7 @@ export default function AdminDashboard() {
       setSelectedUser(null);
       await loadUsers();
     } else {
-      showToast("Grant failed");
+      showToast(`Grant failed: ${await describeNonOkResponse(res)}`);
     }
   };
 
@@ -591,7 +605,7 @@ export default function AdminDashboard() {
       showToast(`Billing ${enabled ? "enabled" : "disabled"}`);
       await loadUsers();
     } else {
-      showToast("Billing toggle failed");
+      showToast(`Billing toggle failed: ${await describeNonOkResponse(res)}`);
     }
   };
 
@@ -666,7 +680,7 @@ export default function AdminDashboard() {
         await loadUsers();
         setSelectedUserIds((ids) => ids.filter((id) => id !== userId));
       } else {
-        showToast("Delete failed");
+        showToast(`Delete failed: ${await describeNonOkResponse(res)}`);
       }
     } finally {
       setDeleteLoading(false);
