@@ -1048,6 +1048,7 @@ export default function StreamSetupModalV2({
           )}
 
           {/* SECTION 1: STREAM PLATFORMS */}
+          {rtmpDestinationsAllowed && (
           <CollapsibleSection
             id="destinations"
             title="Stream Destinations"
@@ -1392,6 +1393,7 @@ export default function StreamSetupModalV2({
             </div>
           </div>
           </CollapsibleSection>
+          )}
 
           {/* SECTION 2: RECORDING CONTROL */}
           {showRecordingControls && (

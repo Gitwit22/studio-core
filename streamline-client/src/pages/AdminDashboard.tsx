@@ -160,6 +160,24 @@ function resolvePlanMaxDestinations(limits: Plan["limits"]): number {
     0
   );
 }
+
+function resolvePlanMonthlyMinutes(limits: Plan["limits"]): number {
+  if (!limits) return 0;
+  const raw =
+    (limits as any).monthlyMinutesIncluded ??
+    (limits as any).monthlyMinutes ??
+    (limits as any).participantMinutes ??
+    0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function computeMaxHoursPerMonthFromMinutes(minutes: number): number {
+  const mins = Number(minutes);
+  if (!Number.isFinite(mins) || mins <= 0) return 0;
+  // Use ceil so hour-based caps never undercut the minute-based cap.
+  return Math.ceil(mins / 60);
+}
 const PLAN_COLORS: Record<string, string> = {
   free: "#6b7280",
   basic: "#3b82f6",
@@ -592,11 +610,20 @@ export default function AdminDashboard() {
         }
         obj[keys[keys.length - 1]] = value;
 
-        // Auto-populate maxHoursPerMonth when monthlyMinutesIncluded is changed
-        if (path === "limits.monthlyMinutesIncluded") {
+        // Keep minute fields in sync. These keys have been renamed over time,
+        // and mismatches here can make the admin editor and pricing cards
+        // appear inconsistent.
+        if (
+          path === "limits.monthlyMinutesIncluded" ||
+          path === "limits.monthlyMinutes" ||
+          path === "limits.participantMinutes"
+        ) {
           const mins = Number(value);
-          if (!isNaN(mins)) {
-            updated.limits.maxHoursPerMonth = Math.round(mins / 60);
+          if (Number.isFinite(mins)) {
+            updated.limits.monthlyMinutesIncluded = mins;
+            (updated.limits as any).monthlyMinutes = mins;
+            (updated.limits as any).participantMinutes = mins;
+            updated.limits.maxHoursPerMonth = computeMaxHoursPerMonthFromMinutes(mins);
           }
         }
 
@@ -1270,12 +1297,12 @@ export default function AdminDashboard() {
                             >
                               <EditRow
                                 label="Monthly Minutes"
-                                value={plan.limits?.monthlyMinutesIncluded || 0}
+                                value={resolvePlanMonthlyMinutes(plan.limits) || 0}
                                 onChange={(v) => updatePlanField(plan.id, "limits.monthlyMinutesIncluded", Number(v))}
                               />
                               <EditRow
                                 label="Participant Minutes"
-                                value={plan.limits?.participantMinutes || 0}
+                                value={resolvePlanMonthlyMinutes(plan.limits) || 0}
                                 onChange={(v) => updatePlanField(plan.id, "limits.participantMinutes", Number(v))}
                               />
                               <EditRow
@@ -1328,7 +1355,20 @@ export default function AdminDashboard() {
                                   updatePlanField(plan.id, "features.rtmpMultistream", v);
                                 }}
                               />
-                              <ToggleRow label="Stream Destinations (RTMP)" value={plan.features?.rtmp} onChange={(v) => updatePlanField(plan.id, "features.rtmp", v)} />
+                              <ToggleRow
+                                label="Stream Destinations (RTMP)"
+                                value={plan.features?.rtmp}
+                                onChange={(v) => {
+                                  updatePlanField(plan.id, "features.rtmp", v);
+                                  if (!v) {
+                                    // Zero caps when RTMP is disabled so Basic doesn't
+                                    // show phantom destinations and enforcement stays consistent.
+                                    updatePlanField(plan.id, "limits.maxDestinations", 0);
+                                    updatePlanField(plan.id, "limits.rtmpDestinationsMax", 0);
+                                    updatePlanField(plan.id, "limits.rtmpDestinations", 0);
+                                  }
+                                }}
+                              />
                               {platformHlsEnabled && (
                                 <>
                                   <ToggleRow

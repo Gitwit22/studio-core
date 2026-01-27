@@ -624,15 +624,21 @@ router.post("/feature-flags/billing", async (req, res) => {
         ? beforeData.billingSystemEnabled
         : true;
 
-    await docRef.set(
-      {
-        billingSystemEnabled: enabled,
-        updatedAt: now,
-        updatedBy: req.adminUser!.uid,
-        reason: typeof reason === "string" ? reason : undefined,
-      },
-      { merge: true }
-    );
+    // Firestore rejects `undefined` values unless ignoreUndefinedProperties is enabled.
+    // Build the payload explicitly to avoid accidentally writing `reason: undefined`.
+    const update: any = {
+      billingSystemEnabled: enabled,
+      updatedAt: now,
+      updatedBy: req.adminUser!.uid,
+    };
+    if (typeof reason === "string") {
+      update.reason = reason;
+    } else if (enabled === true) {
+      // Clear any previous disable reason when billing is enabled.
+      update.reason = null;
+    }
+
+    await docRef.set(update, { merge: true });
 
     // Invalidate in-memory cache so the new value is visible immediately
     // from subsequent getUserAccount() calls on this instance.

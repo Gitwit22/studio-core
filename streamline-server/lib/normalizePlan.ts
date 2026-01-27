@@ -76,6 +76,8 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
   const caps = (data.caps || {}) as any;
   const idLower = String(id).toLowerCase();
 
+  const rtmpEnabled = toBool(features.rtmp ?? data.rtmpEnabled);
+
   const rawMonthlyMinutes =
     limits.monthlyMinutesIncluded ??
     limits.participantMinutes ??
@@ -159,10 +161,19 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
     }
   }
 
+  // RTMP destinations are only meaningful when RTMP itself is enabled.
+  // This avoids “phantom” destination counts (e.g., Basic showing 1)
+  // when a leftover numeric cap exists but RTMP is turned off.
+  if (!rtmpEnabled) {
+    rtmpDestinationsMax = 0;
+  }
+
   const maxHoursPerMonth = (() => {
     const explicit = limits.maxHoursPerMonth ?? data.maxHoursPerMonth;
     if (explicit !== undefined && explicit !== null) return toNumber(explicit, 0);
-    if (monthlyMinutes > 0) return Math.floor(monthlyMinutes / 60);
+    // Use ceil so hour-based caps never undercut minute-based caps.
+    // Example: 2000 minutes => 33h 20m, so we need 34 hours to cover all minutes.
+    if (monthlyMinutes > 0) return Math.ceil(monthlyMinutes / 60);
     return 0;
   })();
 
@@ -273,11 +284,11 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
     },
     features: {
       recording: toBool(features.recording ?? data.recordingEnabled),
-      rtmp: toBool(features.rtmp ?? data.rtmpEnabled),
+      rtmp: rtmpEnabled,
       // Multistream is enabled when either the explicit feature flag
       // is set or the numeric destination cap allows more than one
       // RTMP destination.
-      multistream: multistreamFeature || rtmpDestinationsMax > 1,
+      multistream: rtmpEnabled && (multistreamFeature || rtmpDestinationsMax > 1),
       // Advanced permissions have been removed; plans no longer toggle
       // permissions mode. Always operate in simple mode.
       advancedPermissions: false,

@@ -285,6 +285,8 @@ export default function SettingsBilling() {
   const [toast, setToast] = useState<string | null>(null);
   const [emergencyLoading, setEmergencyLoading] = useState(false);
   const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
+  const [emergencyExpiresAtMs, setEmergencyExpiresAtMs] = useState<number | null>(null);
+  const [emergencyCountdown, setEmergencyCountdown] = useState<string | null>(null);
 
   const [actionLoading, setActionLoading] = useState<CheckoutPlanVariant | "portal" | null>(null);
 
@@ -302,7 +304,69 @@ export default function SettingsBilling() {
 
   const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles">("plan");
 
+  // If a platform-wide feature is disabled, avoid landing on a hidden tab.
+  useEffect(() => {
+    if (activeTab === "destinations" && platformTranscodeEnabled === false) {
+      setActiveTab("plan");
+    }
+    if (activeTab === "hls" && platformHlsSettingsTabEnabled === false) {
+      setActiveTab("plan");
+    }
+  }, [activeTab, platformTranscodeEnabled, platformHlsSettingsTabEnabled]);
+
   const simpleMode = advancedPermissions.effectivePermissionsMode !== "advanced";
+
+  const formatEmergencyCountdown = (msRemaining: number): string => {
+    if (!Number.isFinite(msRemaining) || msRemaining <= 0) return "0m";
+    const totalMinutes = Math.ceil(msRemaining / 60_000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours <= 0) return `${minutes}m`;
+    return `${hours}h ${minutes}m`;
+  };
+
+  useEffect(() => {
+    if (!emergencyExpiresAtMs) {
+      setEmergencyCountdown(null);
+      return;
+    }
+
+    const tick = () => {
+      const diff = emergencyExpiresAtMs - Date.now();
+      setEmergencyCountdown(formatEmergencyCountdown(diff));
+    };
+
+    tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, [emergencyExpiresAtMs]);
+
+  useEffect(() => {
+    if (activeTab !== "usage") return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetchAuth("/api/recordings/emergency-status", { cache: "no-store" }, { allowNonOk: true });
+        if (!res.ok) return;
+        const { json } = await safeReadJson(res);
+        const expiresAt = (json as any)?.data?.expiresAt;
+        if (cancelled) return;
+        if (typeof expiresAt === "string" && expiresAt) {
+          const ms = Date.parse(expiresAt);
+          setEmergencyExpiresAtMs(Number.isFinite(ms) ? ms : null);
+        } else {
+          setEmergencyExpiresAtMs(null);
+        }
+      } catch {
+        // Silent: countdown is non-critical UI.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
 
   // If billing is active or trialing, ensure pendingPlan is cleared to avoid stuck UI
   useEffect(() => {
@@ -911,10 +975,16 @@ export default function SettingsBilling() {
       }
 
       const url = (json as any)?.url || (json as any)?.data?.url;
+      const expiresAt = (json as any)?.expiresAt || (json as any)?.data?.expiresAt;
       if (!url) {
         console.error("Emergency download failed (shape)", { body: json ?? text });
         setEmergencyMessage("Recording URL missing. Contact support.");
         return;
+      }
+
+      if (typeof expiresAt === "string" && expiresAt) {
+        const ms = Date.parse(expiresAt);
+        setEmergencyExpiresAtMs(Number.isFinite(ms) ? ms : null);
       }
 
       window.open(url, "_blank");
@@ -1278,13 +1348,15 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           >
             Usage
           </button>
-          <button
-            type="button"
-            style={activeTab === "destinations" ? { ...S.tab, ...S.tabActive } : S.tab}
-            onClick={() => setActiveTab("destinations")}
-          >
-            Stream Keys
-          </button>
+          {platformTranscodeEnabled !== false && (
+            <button
+              type="button"
+              style={activeTab === "destinations" ? { ...S.tab, ...S.tabActive } : S.tab}
+              onClick={() => setActiveTab("destinations")}
+            >
+              Stream Keys
+            </button>
+          )}
           {platformHlsSettingsTabEnabled !== false && (
             <button
               type="button"
@@ -2411,6 +2483,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </button>
               </div>
               <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
+                Only one emergency recording is stored at a time.
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "#9ca3af" }}>
+                Expires in {emergencyCountdown || "—"}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
                 Use this if your in-room download didn’t work. Downloads are available for a limited time.
               </div>
               {emergencyMessage && (
@@ -2423,9 +2501,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         {/* ================================================================ */}
         {/* SECTION 4: DESTINATIONS / STREAM KEYS */}
         {/* ================================================================ */}
-        {activeTab === "destinations" && (
+        {activeTab === "destinations" && platformTranscodeEnabled !== false && (
           <div style={{ marginTop: 16 }}>
-            <SettingsDestinations />
+            <SettingsDestinations
+              locked={Number(entitlements.maxDestinations ?? 0) < 1}
+              lockReason="Stream Destinations are not included in your current plan."
+              onUpgrade={() => setActiveTab("plan")}
+            />
           </div>
         )}
       </div>

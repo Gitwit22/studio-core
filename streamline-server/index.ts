@@ -26,6 +26,7 @@ import statsRoutes from "./routes/stats";
 import telemetryRoutes from "./routes/telemetry";
 import savedEmbedsRoutes from "./routes/savedEmbeds";
 import editingRoutes from "./routes/editing";
+import maintenanceRoutes from "./routes/maintenance";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
@@ -114,6 +115,9 @@ app.use("/api/account", accountRoutes);
 
 // Admin routes
 app.use("/api/admin", adminRoutes);
+
+// Maintenance routes (admin-only)
+app.use("/api/maintenance", maintenanceRoutes);
 
 
 // Health endpoint
