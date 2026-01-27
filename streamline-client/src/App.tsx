@@ -34,6 +34,7 @@ import { useEffectiveEntitlements } from "./hooks/useEffectiveEntitlements";
 
 // Stripe/Billing pages
 import SettingsBilling from "./pages/SettingsBilling";
+import MyContentDisabled from "./pages/MyContentDisabled";
 
 
 function App() {
@@ -46,6 +47,14 @@ function App() {
   const canContentLibrary = access.contentLibrary.allowed;
   const canProjects = access.projects.allowed;
   const canEditor = access.editor.allowed;
+  const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
+  const canMyContent = !!access?.myContent?.allowed;
+
+  const myContentTarget = canProjects
+    ? "/projects"
+    : (canContentLibrary || canMyContentRecordings)
+      ? "/content"
+      : null;
 
   useEffect(() => {
     const onUnauthorized = () => {
@@ -143,6 +152,10 @@ function App() {
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
       {/* Streaming flow */}
       <Route path="/join" element={<Join />} />
+      <Route
+        path="/my-content"
+        element={canMyContent && myContentTarget ? <Navigate to={myContentTarget} replace /> : <MyContentDisabled />}
+      />
       <Route path="/room" element={<Room />} />
       <Route path="/room/:roomName" element={<Room />} />
       <Route path="/live" element={<Live />} />
@@ -170,7 +183,7 @@ function App() {
       {/* Segmented feature routes */}
       <Route
         path="/content"
-        element={canContentLibrary ? <AssetLibrary /> : <Navigate to="/join" replace />}
+        element={(canContentLibrary || canMyContentRecordings) ? <AssetLibrary /> : <Navigate to="/join" replace />}
       />
       <Route
         path="/projects"
@@ -180,7 +193,7 @@ function App() {
       {/* Legacy aliases */}
       <Route
         path="/editing/assets"
-        element={canContentLibrary ? <Navigate to="/content" replace /> : <Navigate to="/join" replace />}
+        element={(canContentLibrary || canMyContentRecordings) ? <Navigate to="/content" replace /> : <Navigate to="/join" replace />}
       />
       <Route
         path="/editing/projects"

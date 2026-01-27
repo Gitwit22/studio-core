@@ -10,6 +10,8 @@ export default function AssetLibrary() {
   const [searchParams] = useSearchParams();
   const { effectiveEntitlements } = useEffectiveEntitlements();
   const { access } = useFeatureAccess(effectiveEntitlements);
+  const canAssets = access.contentLibrary.allowed;
+  const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
   const canProjects = access.projects.allowed;
   const canEditor = access.editor.allowed;
   const [assets, setAssets] = useState<Awaited<ReturnType<typeof editingApi.getAssets>>>([]);
@@ -21,8 +23,8 @@ export default function AssetLibrary() {
 
   const loadData = async () => {
     const [assetsData, recordingsData] = await Promise.all([
-      editingApi.getAssets(),
-      editingApi.getRecordings(),
+      canAssets ? editingApi.getAssets() : Promise.resolve([]),
+      canMyContentRecordings ? editingApi.getRecordings() : Promise.resolve([]),
     ]);
     setAssets(assetsData);
     setRecordings(recordingsData.filter((r) => r.status === 'ready'));
@@ -49,6 +51,12 @@ export default function AssetLibrary() {
       }, 500);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!canAssets && canMyContentRecordings && filter !== 'recordings') {
+      setFilter('recordings');
+    }
+  }, [canAssets, canMyContentRecordings, filter]);
 
   const filtered = assets.filter((a) => {
     if (filter !== 'all' && a.source !== filter) return false;
@@ -163,34 +171,36 @@ export default function AssetLibrary() {
           marginBottom: '2rem',
           flexWrap: 'wrap'
         }}>
-          <button
-            onClick={() => setShowUploadModal(true)}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: 'linear-gradient(135deg, #dc2626, #ef4444)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '0.75rem',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              boxShadow: '0 8px 16px rgba(220, 38, 38, 0.2)'
-            }}
-            onMouseEnter={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
-              target.style.boxShadow = '0 12px 24px rgba(220, 38, 38, 0.3)';
-              target.style.transform = 'translateY(-2px)';
-            }}
-            onMouseLeave={(e) => {
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
-              target.style.boxShadow = '0 8px 16px rgba(220, 38, 38, 0.2)';
-              target.style.transform = 'translateY(0)';
-            }}
-          >
-            ⬆️ Upload Video
-          </button>
+          {canAssets && (
+            <button
+              onClick={() => setShowUploadModal(true)}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '0.75rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                boxShadow: '0 8px 16px rgba(220, 38, 38, 0.2)'
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+                target.style.boxShadow = '0 12px 24px rgba(220, 38, 38, 0.3)';
+                target.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+                target.style.boxShadow = '0 8px 16px rgba(220, 38, 38, 0.2)';
+                target.style.transform = 'translateY(0)';
+              }}
+            >
+              ⬆️ Upload Video
+            </button>
+          )}
           <button
             onClick={() => {
               if (!canProjects) return;
@@ -235,12 +245,23 @@ export default function AssetLibrary() {
           borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
         }}>
           {(
-            [
-              ['all', 'All Assets'],
-              ['stream', 'From Streams'],
-              ['upload', 'Uploads'],
-              ['recordings', `Recent Streams (${recordings.length})`],
-            ] as const
+            (() => {
+              const tabs: Array<[typeof filter, string]> = [];
+              if (canAssets && canMyContentRecordings) {
+                tabs.push(['all', 'All Assets']);
+              }
+              if (canAssets) {
+                tabs.push(['stream', 'From Streams']);
+                tabs.push(['upload', 'Uploads']);
+              }
+              if (canMyContentRecordings) {
+                tabs.push(['recordings', `Recent Streams (${recordings.length})`]);
+              }
+              if (tabs.length === 0) {
+                tabs.push(['all', 'All']);
+              }
+              return tabs;
+            })() as const
           ).map(([f, label]) => (
             <button
               key={f}

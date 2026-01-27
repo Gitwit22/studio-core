@@ -9,12 +9,22 @@ const router = Router();
 
 router.get("/", async (_req, res) => {
   try {
-    const [hlsUiSnap, recordingUiSnap, contentLibrarySnap, projectsSnap, editorSnap] = await Promise.all([
+    const [
+      hlsUiSnap,
+      recordingUiSnap,
+      contentLibrarySnap,
+      projectsSnap,
+      editorSnap,
+      myContentSnap,
+      myContentRecordingsSnap,
+    ] = await Promise.all([
       firestore.collection("featureFlags").doc("hlsSettingsTab").get(),
       firestore.collection("featureFlags").doc("recording").get(),
       firestore.collection("featureFlags").doc("contentLibraryEnabled").get(),
       firestore.collection("featureFlags").doc("projectsEnabled").get(),
       firestore.collection("featureFlags").doc("editorEnabled").get(),
+      firestore.collection("featureFlags").doc("myContentEnabled").get(),
+      firestore.collection("featureFlags").doc("myContentRecordingsEnabled").get(),
     ]);
 
     const hlsUiData = hlsUiSnap.exists ? ((hlsUiSnap.data() as any) || {}) : {};
@@ -22,6 +32,10 @@ router.get("/", async (_req, res) => {
     const contentLibraryData = contentLibrarySnap.exists ? ((contentLibrarySnap.data() as any) || {}) : {};
     const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
     const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
+    const myContentData = myContentSnap.exists ? ((myContentSnap.data() as any) || {}) : {};
+    const myContentRecordingsData = myContentRecordingsSnap.exists
+      ? ((myContentRecordingsSnap.data() as any) || {})
+      : {};
 
     const hlsEnabled = hlsUiData.enabled === undefined ? true : !!hlsUiData.enabled;
     const recordingEnabled = recordingUiData.enabled === undefined ? true : !!recordingUiData.enabled;
@@ -31,6 +45,10 @@ router.get("/", async (_req, res) => {
     const contentLibraryEnabled = contentLibraryData.enabled === true;
     const projectsEnabled = projectsData.enabled === true;
     const editorEnabled = editorData.enabled === true;
+
+    // My Content umbrella + sub-feature flags default to DISABLED when missing.
+    const myContentEnabled = myContentData.enabled === true;
+    const myContentRecordingsEnabled = myContentRecordingsData.enabled === true;
 
     const snap = await firestore.collection("plans").get();
     const mapped = snap.docs.map((d) => {
@@ -135,6 +153,8 @@ router.get("/", async (_req, res) => {
           contentLibraryEnabled,
           projectsEnabled,
           editorEnabled,
+          myContentEnabled,
+          myContentRecordingsEnabled,
         },
       });
     }
@@ -151,6 +171,8 @@ router.get("/", async (_req, res) => {
         contentLibraryEnabled,
         projectsEnabled,
         editorEnabled,
+        myContentEnabled,
+        myContentRecordingsEnabled,
       },
     });
   } catch (err: any) {
@@ -165,6 +187,8 @@ router.get("/", async (_req, res) => {
         contentLibraryEnabled: false,
         projectsEnabled: false,
         editorEnabled: false,
+        myContentEnabled: false,
+        myContentRecordingsEnabled: false,
       },
     });
   }

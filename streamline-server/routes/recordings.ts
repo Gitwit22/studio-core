@@ -43,6 +43,68 @@ import { deleteFiles, deletePrefix } from "../lib/storageClient";
 
 const router = Router();
 
+type MyContentPlatformFlags = {
+  myContentEnabled: boolean;
+  myContentRecordingsEnabled: boolean;
+};
+
+let cachedMyContentFlags: MyContentPlatformFlags | null = null;
+let cachedMyContentFlagsAt = 0;
+const MY_CONTENT_FLAGS_TTL_MS = 30 * 1000;
+
+async function getMyContentPlatformFlags(): Promise<MyContentPlatformFlags> {
+  const now = Date.now();
+  if (cachedMyContentFlags && now - cachedMyContentFlagsAt < MY_CONTENT_FLAGS_TTL_MS) {
+    return cachedMyContentFlags;
+  }
+
+  try {
+    const [myContentSnap, myContentRecordingsSnap] = await Promise.all([
+      firestore.collection("featureFlags").doc("myContentEnabled").get(),
+      firestore.collection("featureFlags").doc("myContentRecordingsEnabled").get(),
+    ]);
+
+    const myContentData = myContentSnap.exists ? ((myContentSnap.data() as any) || {}) : {};
+    const myContentRecordingsData = myContentRecordingsSnap.exists
+      ? ((myContentRecordingsSnap.data() as any) || {})
+      : {};
+
+    cachedMyContentFlags = {
+      // Safety-first: missing => disabled.
+      myContentEnabled: myContentData.enabled === true,
+      myContentRecordingsEnabled: myContentRecordingsData.enabled === true,
+    };
+    cachedMyContentFlagsAt = now;
+    return cachedMyContentFlags;
+  } catch (err) {
+    console.error("[recordings] failed to load My Content platform flags", err);
+    cachedMyContentFlags = {
+      myContentEnabled: false,
+      myContentRecordingsEnabled: false,
+    };
+    cachedMyContentFlagsAt = now;
+    return cachedMyContentFlags;
+  }
+}
+
+async function assertMyContentRecordingsEnabled(res: any): Promise<boolean> {
+  const flags = await getMyContentPlatformFlags();
+  if (flags.myContentEnabled && flags.myContentRecordingsEnabled) return true;
+
+  res.status(403).json({
+    error: LIMIT_ERRORS.FEATURE_DISABLED,
+    feature: "myContentRecordingsEnabled",
+    reason: "My Content recordings are disabled platform-wide",
+    platformFlags: flags,
+  });
+  return false;
+}
+
+async function requireMyContentRecordingsEnabled(req: any, res: any, next: any) {
+  if (!(await assertMyContentRecordingsEnabled(res))) return;
+  return next();
+}
+
 const EMERGENCY_RETENTION_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 type EmergencyCurrentDoc = {
@@ -590,7 +652,12 @@ async function stopRecordingInternal(options: {
 // POST /start - Start Recording
 // =============================================================================
 
-router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, res) => {
+router.post(
+  "/start",
+  requireAuth,
+  requireMyContentRecordingsEnabled as any,
+  requireRoomAccessToken as any,
+  async (req, res) => {
   const startTime = Date.now();
   console.log("[recordings/start] Request received");
 
@@ -1108,7 +1175,8 @@ router.post("/start", requireAuth, requireRoomAccessToken as any, async (req, re
       details: err?.message,
     });
   }
-});
+  }
+);
 
 // =============================================================================
 // POST /sweep - Stop overdue recordings based on autoStopAt
@@ -1158,7 +1226,12 @@ router.post("/sweep", async (_req, res) => {
 // POST /stop - Stop Recording
 // =============================================================================
 
-router.post("/stop", requireAuth, requireRoomAccessToken as any, async (req, res) => {
+router.post(
+  "/stop",
+  requireAuth,
+  requireMyContentRecordingsEnabled as any,
+  requireRoomAccessToken as any,
+  async (req, res) => {
   console.log("[recordings/stop] Request received");
 
   try {
@@ -1409,7 +1482,8 @@ router.post("/stop", requireAuth, requireRoomAccessToken as any, async (req, res
     console.error("[recordings/stop] Error:", err);
     return res.status(500).json({ error: "Failed to stop recording" });
   }
-});
+  }
+);
 
 // =============================================================================
 // GET /emergency-latest - Get latest ready recording for user
@@ -1420,7 +1494,7 @@ router.post("/stop", requireAuth, requireRoomAccessToken as any, async (req, res
 // GET /emergency-status - Get emergency retention status (for UI countdown)
 // =============================================================================
 
-router.get("/emergency-status", requireAuth, async (req, res) => {
+router.get("/emergency-status", requireAuth, requireMyContentRecordingsEnabled as any, async (req, res) => {
   try {
     const uid = getAuthUserId(req);
     if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
@@ -1459,7 +1533,7 @@ router.get("/emergency-status", requireAuth, async (req, res) => {
   }
 });
 
-router.get("/emergency-latest", requireAuth, async (req, res) => {
+router.get("/emergency-latest", requireAuth, requireMyContentRecordingsEnabled as any, async (req, res) => {
   try {
     const uid = getAuthUserId(req);
     if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
@@ -1679,7 +1753,7 @@ router.get("/emergency-latest", requireAuth, async (req, res) => {
 // GET /:id/storage-check - Debug: verify object exists in R2
 // =============================================================================
 
-router.get("/:id/storage-check", requireAuth, async (req, res) => {
+router.get("/:id/storage-check", requireAuth, requireMyContentRecordingsEnabled as any, async (req, res) => {
   try {
     const uid = getAuthUserId(req);
     const recordingId = req.params.id;
@@ -1712,7 +1786,7 @@ router.get("/:id/storage-check", requireAuth, async (req, res) => {
 // GET /:id - Get recording status
 // =============================================================================
 
-router.get("/:id", requireAuth, async (req, res) => {
+router.get("/:id", requireAuth, requireMyContentRecordingsEnabled as any, async (req, res) => {
   try {
     const uid = getAuthUserId(req);
     const recordingId = req.params.id;
@@ -1740,7 +1814,7 @@ router.get("/:id", requireAuth, async (req, res) => {
 // Per spec: 15-minute TTL, strict status === "ready" check
 // =============================================================================
 
-router.get("/:id/download-link", requireAuth, async (req, res) => {
+router.get("/:id/download-link", requireAuth, requireMyContentRecordingsEnabled as any, async (req, res) => {
   try {
     const uid = getAuthUserId(req);
     const recordingId = req.params.id;
@@ -1839,7 +1913,7 @@ router.get("/:id/download-link", requireAuth, async (req, res) => {
 // POST /:id/report-download-issue - Report download problems
 // =============================================================================
 
-router.post("/:id/report-download-issue", requireAuth, async (req, res) => {
+router.post("/:id/report-download-issue", requireAuth, requireMyContentRecordingsEnabled as any, async (req, res) => {
   try {
     const uid = getAuthUserId(req);
     const recordingId = req.params.id;
@@ -1875,7 +1949,7 @@ router.post("/:id/report-download-issue", requireAuth, async (req, res) => {
 // GET /:id/download - Legacy direct download (placeholder)
 // =============================================================================
 
-router.get("/:id/download", requireAuth, async (req, res) => {
+router.get("/:id/download", requireAuth, requireMyContentRecordingsEnabled as any, async (req, res) => {
   try {
     const uid = getAuthUserId(req);
     const recordingId = req.params.id;

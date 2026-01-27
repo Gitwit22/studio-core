@@ -19,6 +19,12 @@ export type PlatformFlagsLike = {
   libraryEnabled?: unknown;
   projectsEnabled?: unknown;
   editorEnabled?: unknown;
+
+  // My Content umbrella + sub-features:
+  // - Missing/undefined => fall back to legacy behavior (older servers)
+  // - Present but false => disabled (must be explicitly enabled)
+  myContentEnabled?: unknown;
+  myContentRecordingsEnabled?: unknown;
 };
 
 function isNewPlatformFlagEnabled(value: unknown): boolean {
@@ -43,6 +49,14 @@ function resolveEditingAccess(features: Record<string, unknown> | null | undefin
   const explicit = f.editing ?? f.editingEnabled ?? f.postProduction;
   if (typeof explicit === "boolean") return explicit;
   return true;
+}
+
+function resolveLegacyEditingPlatformEnabled(platformFlags: Record<string, unknown> | null | undefined): boolean {
+  const f: any = platformFlags || {};
+  // Safety-first: only opt-in when explicitly enabled.
+  const explicit = f.editing ?? f.editingEnabled ?? f.postProduction;
+  if (typeof explicit === "boolean") return explicit;
+  return false;
 }
 
 function resolveRtmpDestinationsMax(effectiveEntitlements: EffectiveEntitlementsLike | null | undefined): number {
@@ -107,9 +121,17 @@ export function computeEffectiveFeatureAccess(input: {
   editor: {
     allowed: boolean;
   };
+  myContent: {
+    allowed: boolean;
+  };
+  myContentRecordings: {
+    allowed: boolean;
+  };
 } {
   const eff = input.effectiveEntitlements || {};
   const pf = (input.platformFlags && typeof input.platformFlags === "object") ? input.platformFlags : {};
+
+  const platformLegacyEditingEnabled = resolveLegacyEditingPlatformEnabled(pf as any);
 
   // Prefer explicit platform kill-switches; default to enabled when missing.
   const platformHlsEnabled = isPlatformEnabled((pf as any).hlsEnabled ?? (pf as any).hlsSettingsTab);
@@ -119,9 +141,20 @@ export function computeEffectiveFeatureAccess(input: {
   // New segmented flags: missing => disabled.
   const platformContentLibraryEnabled = isNewPlatformFlagEnabled(
     (pf as any).contentLibraryEnabled ?? (pf as any).libraryEnabled
-  );
-  const platformProjectsEnabled = isNewPlatformFlagEnabled((pf as any).projectsEnabled);
-  const platformEditorEnabled = isNewPlatformFlagEnabled((pf as any).editorEnabled);
+  ) || platformLegacyEditingEnabled;
+  const platformProjectsEnabled = isNewPlatformFlagEnabled((pf as any).projectsEnabled) || platformLegacyEditingEnabled;
+  const platformEditorEnabled = isNewPlatformFlagEnabled((pf as any).editorEnabled) || platformLegacyEditingEnabled;
+
+  // My Content: prefer explicit flags when present; otherwise fall back to legacy behavior.
+  const hasMyContentEnabledFlag = Object.prototype.hasOwnProperty.call(pf, "myContentEnabled");
+  const platformMyContentEnabled = hasMyContentEnabledFlag
+    ? isNewPlatformFlagEnabled((pf as any).myContentEnabled)
+    : (platformContentLibraryEnabled || platformProjectsEnabled || platformEditorEnabled || platformLegacyEditingEnabled);
+
+  const hasMyContentRecordingsEnabledFlag = Object.prototype.hasOwnProperty.call(pf, "myContentRecordingsEnabled");
+  const platformMyContentRecordingsEnabled = hasMyContentRecordingsEnabledFlag
+    ? isNewPlatformFlagEnabled((pf as any).myContentRecordingsEnabled)
+    : platformMyContentEnabled;
 
   const features = (eff as any).features || {};
   const rtmpDestinationsMax = resolveRtmpDestinationsMax(eff as any);
@@ -134,6 +167,12 @@ export function computeEffectiveFeatureAccess(input: {
   const planContentLibrary = resolveEntitlementBoolean(features, ["contentLibrary", "library"]);
   const planProjects = resolveEntitlementBoolean(features, ["projects"]);
   const planEditor = resolveEntitlementBoolean(features, ["editor"]);
+
+  // Back-compat: legacy plan-level editing access implies all segmented editing capabilities
+  // until explicit segmented entitlements are provided.
+  const effectivePlanContentLibrary = planContentLibrary || planEditing;
+  const effectivePlanProjects = planProjects || planEditing;
+  const effectivePlanEditor = planEditor || planEditing;
 
   // Numeric RTMP destinations cap is canonical for availability.
   const planDestinations = rtmpDestinationsMax >= 1;
@@ -161,19 +200,25 @@ export function computeEffectiveFeatureAccess(input: {
     },
     editing: {
       // Legacy: keep for backwards compatibility (now mapped to editor rules)
-      allowed: isFeatureAvailable(planEditor || planEditing, platformEditorEnabled && platformTranscodeEnabled),
+      allowed: isFeatureAvailable(effectivePlanEditor, platformEditorEnabled && platformTranscodeEnabled),
     },
     contentLibrary: {
-      allowed: isFeatureAvailable(planContentLibrary, platformContentLibraryEnabled),
+      allowed: isFeatureAvailable(effectivePlanContentLibrary, platformContentLibraryEnabled),
     },
     projects: {
       // Derived: editor implies projects, but projects do not imply editor.
       allowed:
-        isFeatureAvailable(planProjects, platformProjectsEnabled) ||
-        isFeatureAvailable(planEditor, platformEditorEnabled && platformTranscodeEnabled),
+        isFeatureAvailable(effectivePlanProjects, platformProjectsEnabled) ||
+        isFeatureAvailable(effectivePlanEditor, platformEditorEnabled && platformTranscodeEnabled),
     },
     editor: {
-      allowed: isFeatureAvailable(planEditor, platformEditorEnabled && platformTranscodeEnabled),
+      allowed: isFeatureAvailable(effectivePlanEditor, platformEditorEnabled && platformTranscodeEnabled),
+    },
+    myContent: {
+      allowed: platformMyContentEnabled,
+    },
+    myContentRecordings: {
+      allowed: platformMyContentEnabled && platformMyContentRecordingsEnabled,
     },
   };
 }

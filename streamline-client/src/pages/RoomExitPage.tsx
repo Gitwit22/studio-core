@@ -18,7 +18,7 @@ export default function RoomExitPage() {
   const { recordingId } = useParams<{ recordingId: string }>();
   const { effectiveEntitlements } = useEffectiveEntitlements();
   const { access } = useFeatureAccess(effectiveEntitlements);
-  const canContentLibrary = access.contentLibrary.allowed;
+  const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
   const [recording, setRecording] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -431,8 +431,8 @@ export default function RoomExitPage() {
 
         {/* ACTION BUTTONS */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* View in My Content (only when content library is allowed) */}
-          {canContentLibrary && (
+          {/* View in My Content */}
+          {canMyContentRecordings && (
             <button
               onClick={() => nav('/content')}
               style={{

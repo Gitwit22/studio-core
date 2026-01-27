@@ -51,21 +51,35 @@ async function getRecordingUiFlag() {
 }
 
 async function getSegmentedUiFlags() {
-  const [contentLibrarySnap, projectsSnap, editorSnap] = await Promise.all([
+  const [
+    contentLibrarySnap,
+    projectsSnap,
+    editorSnap,
+    myContentSnap,
+    myContentRecordingsSnap,
+  ] = await Promise.all([
     firestore.collection("featureFlags").doc("contentLibraryEnabled").get(),
     firestore.collection("featureFlags").doc("projectsEnabled").get(),
     firestore.collection("featureFlags").doc("editorEnabled").get(),
+    firestore.collection("featureFlags").doc("myContentEnabled").get(),
+    firestore.collection("featureFlags").doc("myContentRecordingsEnabled").get(),
   ]);
 
   const contentLibraryData = contentLibrarySnap.exists ? ((contentLibrarySnap.data() as any) || {}) : {};
   const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
   const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
+  const myContentData = myContentSnap.exists ? ((myContentSnap.data() as any) || {}) : {};
+  const myContentRecordingsData = myContentRecordingsSnap.exists
+    ? ((myContentRecordingsSnap.data() as any) || {})
+    : {};
 
   // New segmented flags default to DISABLED when missing.
   return {
     contentLibraryEnabled: contentLibraryData.enabled === true,
     projectsEnabled: projectsData.enabled === true,
     editorEnabled: editorData.enabled === true,
+    myContentEnabled: myContentData.enabled === true,
+    myContentRecordingsEnabled: myContentRecordingsData.enabled === true,
   };
 }
 

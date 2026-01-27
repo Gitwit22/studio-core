@@ -23,6 +23,7 @@ import { computeEffectiveFeatureAccess } from "../lib/effectiveFeatureAccess";
 import { usePlatformFlags } from "../hooks/usePlatformFlags";
 import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
@@ -245,7 +246,7 @@ function StreamEndedModal({
   const nav = useNavigate();
   const { effectiveEntitlements } = useEffectiveEntitlements();
   const { access } = useFeatureAccess(effectiveEntitlements);
-  const canContentLibrary = access.contentLibrary.allowed;
+  const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
 
   const [processing, setProcessing] = useState(true);
   const [ready, setReady] = useState(false);
@@ -407,12 +408,12 @@ function StreamEndedModal({
             <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
             <div>Processing recording…</div>
             <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-              This usually takes 1-2 minutes. {canContentLibrary ? 'It will appear in My Content when ready.' : 'The download button will activate when ready.'}
+              This usually takes 1-2 minutes. {canMyContentRecordings ? 'It will appear in My Content when ready.' : 'The download button will activate when ready.'}
             </div>
           </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {canContentLibrary ? (
+          {canMyContentRecordings ? (
             <>
               <button
                 onClick={() => nav('/content', { replace: true })}
@@ -1325,6 +1326,9 @@ function RoomPage() {
 
   const applyEntitlementsAndPlatform = (eff: any, platformFlags: any) => {
     const platform = platformFlags && typeof platformFlags === "object" ? platformFlags : {};
+
+    // Publish roomToken-provided flags to the shared store (most recent fetch wins).
+    setPlatformFlagsValue(platform as any);
 
     if (platform && Object.prototype.hasOwnProperty.call(platform, "hlsEnabled")) {
       if (typeof (platform as any).hlsEnabled === "boolean") {

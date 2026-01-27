@@ -15,6 +15,8 @@ type SegmentedPlatformFlags = {
   contentLibraryEnabled: boolean;
   projectsEnabled: boolean;
   editorEnabled: boolean;
+  myContentEnabled: boolean;
+  myContentRecordingsEnabled: boolean;
 };
 
 let cachedSegmentedFlags: SegmentedPlatformFlags | null = null;
@@ -28,10 +30,12 @@ async function getSegmentedPlatformFlags(): Promise<SegmentedPlatformFlags> {
   }
 
   try {
-    const [contentLibrarySnap, projectsSnap, editorSnap] = await Promise.all([
+    const [contentLibrarySnap, projectsSnap, editorSnap, myContentSnap, myContentRecordingsSnap] = await Promise.all([
       db.collection("featureFlags").doc("contentLibraryEnabled").get(),
       db.collection("featureFlags").doc("projectsEnabled").get(),
       db.collection("featureFlags").doc("editorEnabled").get(),
+      db.collection("featureFlags").doc("myContentEnabled").get(),
+      db.collection("featureFlags").doc("myContentRecordingsEnabled").get(),
     ]);
 
     const contentLibraryData = contentLibrarySnap.exists
@@ -39,12 +43,18 @@ async function getSegmentedPlatformFlags(): Promise<SegmentedPlatformFlags> {
       : {};
     const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
     const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
+    const myContentData = myContentSnap.exists ? ((myContentSnap.data() as any) || {}) : {};
+    const myContentRecordingsData = myContentRecordingsSnap.exists
+      ? ((myContentRecordingsSnap.data() as any) || {})
+      : {};
 
     cachedSegmentedFlags = {
       // New segmented flags default to DISABLED when missing.
       contentLibraryEnabled: contentLibraryData.enabled === true,
       projectsEnabled: projectsData.enabled === true,
       editorEnabled: editorData.enabled === true,
+      myContentEnabled: myContentData.enabled === true,
+      myContentRecordingsEnabled: myContentRecordingsData.enabled === true,
     };
     cachedSegmentedFlagsAt = now;
     return cachedSegmentedFlags;
@@ -54,6 +64,8 @@ async function getSegmentedPlatformFlags(): Promise<SegmentedPlatformFlags> {
       contentLibraryEnabled: false,
       projectsEnabled: false,
       editorEnabled: false,
+      myContentEnabled: false,
+      myContentRecordingsEnabled: false,
     };
     cachedSegmentedFlagsAt = now;
     return cachedSegmentedFlags;
@@ -70,6 +82,17 @@ async function assertSegmentEnabled(
     error: LIMIT_ERRORS.FEATURE_DISABLED,
     feature: key,
     reason: "Feature disabled platform-wide",
+  });
+  return false;
+}
+
+async function assertMyContentRecordingsEnabled(res: Response): Promise<boolean> {
+  const flags = await getSegmentedPlatformFlags();
+  if (flags.myContentEnabled && flags.myContentRecordingsEnabled) return true;
+  res.status(403).json({
+    error: LIMIT_ERRORS.FEATURE_DISABLED,
+    feature: "myContentRecordingsEnabled",
+    reason: "My Content recordings are disabled platform-wide",
   });
   return false;
 }
@@ -200,7 +223,7 @@ router.get("/assets", async (req: Request, res: Response) => {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
-    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+    if (!(await assertMyContentRecordingsEnabled(res))) {
       return;
     }
 
@@ -266,7 +289,7 @@ router.get("/listall", async (req: Request, res: Response) => {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
-    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) {
+    if (!(await assertMyContentRecordingsEnabled(res))) {
       return;
     }
     const recordingsSnap = await db.collection("recordings").where("userId", "==", userId).get();

@@ -78,10 +78,15 @@ export default function Join() {
   const { access } = useFeatureAccess(effectiveEntitlements);
   const canContentLibrary = !!access?.contentLibrary?.allowed;
   const canProjects = !!access?.projects?.allowed;
-  const canEditor = !!access?.editor?.allowed;
+  const canMyContent = !!access?.myContent?.allowed;
+  const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
 
-  const myContentTarget = canProjects ? "/projects" : canContentLibrary ? "/content" : null;
-  const showMyContentButton = !!myContentTarget && (canContentLibrary || canProjects || canEditor);
+  const myContentTarget = canProjects
+    ? "/projects"
+    : (canContentLibrary || canMyContentRecordings)
+      ? "/content"
+      : null;
+  const showMyContentButton = !!myContentTarget && canMyContent;
 
   const [displayName, setDisplayName] = useState(() => {
     // Prefer profile displayName if available, then fall back to cached value
