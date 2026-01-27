@@ -423,13 +423,6 @@ router.post("/test/change-plan", requireAuth, async (req, res) => {
 
     const account = (req as any).account || await getUserAccount(uid);
 
-    // Security freeze: never allow a /test endpoint to be used by non-admins in production.
-    // This prevents accidental exposure if billing is disabled platform-wide.
-    const isProd = process.env.NODE_ENV === "production";
-    if (isProd && !account.isAdmin) {
-      return res.status(403).json({ success: false, error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
-    }
-
     // Only allowed when billing is effectively disabled (platform-wide or per-user)
     if (account.effectiveBillingEnabled !== false) {
       return res
@@ -437,18 +430,18 @@ router.post("/test/change-plan", requireAuth, async (req, res) => {
         .json({ success: false, error: "billing_live" });
     }
 
+    const isProd = process.env.NODE_ENV === "production";
     const platformDisabled = account.platformBillingEnabled === false;
     const userDisabled = account.billingEnabled === false;
 
-    // Optional safety rail:
-    // - If billing is disabled platform-wide, treat it as an intentional test/staging mode and allow.
-    // - If only the user is in test mode while platform billing is enabled, require explicit tester flag in production.
+    // Safety rails (especially for production):
+    // - If billing is disabled platform-wide, treat it as an intentional test/staging mode and allow self-service.
+    // - If only the user is in test mode while platform billing is enabled, require explicit tester flag in prod.
+    // - Admins are always allowed.
     const raw = account.rawUser || {};
     const isTester = !!(raw.tester || raw.isTester);
-    if (isProd && !platformDisabled && userDisabled && !isTester) {
-      return res
-        .status(403)
-        .json({ success: false, error: "test_mode_disabled" });
+    if (isProd && !account.isAdmin && !platformDisabled && userDisabled && !isTester) {
+      return res.status(403).json({ success: false, error: "test_mode_disabled" });
     }
 
     const planIdCandidate = newPlanId as PlanId;

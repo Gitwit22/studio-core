@@ -1161,7 +1161,15 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       if (code === "billing_live") {
         setError("Live billing is enabled on this account. Test Mode switching is disabled.");
       } else if (code === "test_mode_disabled") {
-        setError("Test Mode plan switching is disabled for this account.");
+        setError(
+          "Test Mode plan switching isn’t enabled for your user. This is a setting/permission: ask an admin to mark your account as a tester (tester=true) or enable platform-wide Test Mode (disable billing system)."
+        );
+      } else if (code === "insufficient_permissions") {
+        setError(
+          "You don’t have permission to switch plans in Test Mode. This is a setting/permission: ask an admin to grant tester access or switch this environment into platform-wide Test Mode."
+        );
+      } else if (code === "unauthorized") {
+        setError("You’re not signed in (or your session expired). Please sign in again and retry.");
       } else if (code === "too_many_requests") {
         setError("Please wait a moment before switching plans again.");
       } else if (code === "invalid_plan") {
