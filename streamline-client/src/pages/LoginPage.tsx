@@ -123,9 +123,6 @@ export const LoginPage: React.FC = () => {
       }
 
       setLoading(false);
-      if (typeof document !== "undefined") {
-        console.log("[Login] Cookies after login:", document.cookie);
-      }
       nav(nextUrl || "/join");
     } catch (err) {
       console.error(err);

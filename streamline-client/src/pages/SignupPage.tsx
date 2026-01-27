@@ -79,8 +79,6 @@ export const SignupPage = () => {
         tosAccepted: true,
       };
 
-      console.log("📤 Sending signup request:", { email, displayName });
-
       const res = await fetch(`${API_BASE}/api/auth/signup`, {
         method: "POST",
         headers: {
@@ -97,8 +95,6 @@ export const SignupPage = () => {
         return;
       }
 
-      console.log("✅ Signup successful:", data);
-
       if (!data?.token) {
         setError("Signup failed: missing token from server");
         setLoading(false);
@@ -114,7 +110,6 @@ export const SignupPage = () => {
       // Fallback: Set JWT as a non-httpOnly cookie for backend auth (for local dev)
       if (typeof document !== "undefined" && data.token) {
         document.cookie = `token=${data.token}; path=/; max-age=${60 * 60 * 24 * 7}`;
-        console.log("[Signup] Cookies after signup:", document.cookie);
       }
 
       // Initialize canonical account document with plan + stream defaults.

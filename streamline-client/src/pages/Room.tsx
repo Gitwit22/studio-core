@@ -19,6 +19,8 @@ import { RoleChangeToast } from "../components/RoleChangeToast";
 import { API_BASE } from "../lib/apiBase";
 import { APP_BASE } from "../lib/appBase";
 import { normalizeUiRolePresetId } from "../lib/roles";
+import { computeEffectiveFeatureAccess } from "../lib/effectiveFeatureAccess";
+import { usePlatformFlags } from "../hooks/usePlatformFlags";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
@@ -745,6 +747,7 @@ function LiveKitShell({
 function RoomPage() {
   const location = useLocation();
   const nav = useNavigate();
+  const { flags: platformFlags } = usePlatformFlags();
   const { roomName: routeRoomNameParam } = useParams();
   const routeRoomId = routeRoomNameParam ? decodeURIComponent(routeRoomNameParam) : null;
   const [searchParams] = useSearchParams();
@@ -2276,7 +2279,6 @@ function RoomPage() {
           presetId: selectedPresetId,
           extraDestinations: extraDestinations.length ? extraDestinations : undefined,
         };
-        console.log("   Sending to API:", requestBody);
         const res = await apiFetchAuth(
           `${API_BASE}/api/multistream/${encodeURIComponent(roomId)}/start-multistream`,
           {
@@ -2302,7 +2304,6 @@ function RoomPage() {
           console.warn("start-multistream empty response body");
           data = { raw: "" };
         }
-        console.log("🔍 startMultistream full response:", data);
         if (!res.ok) {
           const code = data?.error ?? data?.code ?? data?.data?.error ?? data?.data?.code;
           const mapped = getFeatureErrorMessage(code, code === "TRANSCODE_DISABLED" ? "transcode" : "multistream");
@@ -2656,6 +2657,23 @@ function RoomPage() {
 
   const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
   const rtmpCap = planRtmpDestinationsMax ?? 0;
+  const featureAccess = computeEffectiveFeatureAccess({
+    effectiveEntitlements: {
+      features: {
+        hls: planHlsEnabled,
+        hlsCustomizationEnabled: planHlsCustomizationEnabled,
+      },
+      limits: {
+        rtmpDestinationsMax: rtmpCap,
+      },
+    },
+    platformFlags: {
+      hlsEnabled: platformHlsEnabled,
+      transcodeEnabled: platformFlags?.transcodeEnabled,
+      recordingEnabled: platformRecordingEnabled,
+    },
+  });
+
   const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • RTMP:${rtmpCap === 0 ? "off" : rtmpCap === 1 ? "1" : `up to ${rtmpCap}`} • HLS:${planHlsEnabled ? "on" : "off"} • HLS Setup:${planHlsCustomizationEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
   const recordingEnabled =
     planRecordingEnabled &&
@@ -2663,11 +2681,12 @@ function RoomPage() {
     !needsReauth &&
     !isViewer &&
     (isHost || can("canRecord") || !!effectiveControls.canStartStopRecording);
-  const canMultistream = (rtmpCap > 0) && !needsReauth && !isViewer && (isHost || can("canDestinations") || !!effectiveControls.canManageDestinations);
-  const hlsAvailable =
-    planHlsEnabled &&
-    platformHlsEnabled &&
-    !needsReauth;
+  const canMultistream =
+    featureAccess.canUse.destinations &&
+    !needsReauth &&
+    !isViewer &&
+    (isHost || can("canDestinations") || !!effectiveControls.canManageDestinations);
+  const hlsAvailable = featureAccess.canUse.hlsRuntime && !needsReauth;
   const canStartStopHls =
     !isViewer &&
     (isHost || can("canStream") || !!effectiveControls.canStartStopStream);
@@ -3139,7 +3158,7 @@ function RoomPage() {
           rtmpDestinationsMax={planRtmpDestinationsMax ?? undefined}
           multistreamAllowed={canMultistream}
           hlsEnabled={hlsAvailable}
-          hlsCustomizationEnabled={planHlsCustomizationEnabled && (isHost || can("canLayout"))}
+          hlsCustomizationEnabled={featureAccess.canUse.hlsSetup && (isHost || can("canLayout"))}
           showHlsSection={hlsAvailable}
           canStartStopHls={canStartStopHls}
           entitlementsReady={entitlementsReady}

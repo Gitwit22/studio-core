@@ -120,7 +120,10 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
 
     const featureAccess = await canAccessFeature((req as any).account || uid, "multistream");
     if (!featureAccess.allowed) {
-      return res.status(403).json({ error: featureAccess.reason || "Multistreaming is not available on your plan" });
+      return res.status(403).json({
+        error: (featureAccess.code as any) || LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
+        reason: featureAccess.reason || undefined,
+      });
     }
 
     // Monthly usage gate: block non-overage plans; allow Pro and log totals.

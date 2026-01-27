@@ -47,6 +47,8 @@ import { assertRoomPerm, RoomPermissionError } from "./lib/rolePermissions";
 import { PERMISSION_ERRORS } from "./lib/permissionErrors";
 import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "./middleware/roomAccessToken";
 
+import { requireAdmin } from "./middleware/adminAuth";
+
 
 import { uploadVideo } from "./lib/storageClient";
 
@@ -81,8 +83,10 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
+    // Note: for disallowed browser origins, do NOT throw (which becomes a 500).
+    // Instead, disable CORS for that request (no ACAO header) and let the browser block it.
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`Not allowed by CORS: ${origin}`));
+    return callback(null, false);
   },
   credentials: true,
   methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
@@ -96,6 +100,7 @@ app.use(cors({
     "X-Room-Access-Token",
   ],
   exposedHeaders: ["x-sl-auth-fallback", "x-sl-auth-header-invalid"],
+  optionsSuccessStatus: 204,
 }));
 
 
@@ -195,7 +200,7 @@ app.use("/api/telemetry", telemetryRoutes);
 
 
 // Storage test route
-app.get("/api/storage/test", async (req, res) => {
+app.get("/api/storage/test", requireAdmin, async (req, res) => {
   try {
     const testContent = `StreamLine Storage Test - ${new Date().toISOString()}`;
     const testBuffer = Buffer.from(testContent);
