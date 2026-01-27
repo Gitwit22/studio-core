@@ -76,7 +76,12 @@ export default function Join() {
   const [searchParams] = useSearchParams();
   const { effectiveEntitlements } = useEffectiveEntitlements();
   const { access } = useFeatureAccess(effectiveEntitlements);
-  const canContentLibrary = access.contentLibrary.allowed;
+  const canContentLibrary = !!access?.contentLibrary?.allowed;
+  const canProjects = !!access?.projects?.allowed;
+  const canEditor = !!access?.editor?.allowed;
+
+  const myContentTarget = canProjects ? "/projects" : canContentLibrary ? "/content" : null;
+  const showMyContentButton = !!myContentTarget && (canContentLibrary || canProjects || canEditor);
 
   const [displayName, setDisplayName] = useState(() => {
     // Prefer profile displayName if available, then fall back to cached value
@@ -749,81 +754,82 @@ export default function Join() {
             </div>
 
             {/* Right side actions */}
-<div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-  {/* Settings & Billing button, always visible to logged-in users */}
-  <button
-    onClick={() => nav("/settings/billing")}
-    style={{
-      fontSize: "13px",
-      padding: "8px 16px",
-      background: "rgba(255,255,255,0.05)",
-      border: "1px solid rgba(255,255,255,0.2)",
-      color: "#fff",
-      borderRadius: "8px",
-      fontWeight: 600,
-      cursor: "pointer",
-      whiteSpace: "nowrap",
-      transition: "all 0.3s ease",
-    }}
-    onMouseEnter={e => {
-      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-      e.currentTarget.style.borderColor = 'rgba(34,197,94,0.6)';
-    }}
-    onMouseLeave={e => {
-      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
-    }}
-  >
-    ⚙️ Settings & Billing
-  </button>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              {/* Settings & Billing button, always visible to logged-in users */}
+              <button
+                onClick={() => nav("/settings/billing")}
+                style={{
+                  fontSize: "13px",
+                  padding: "8px 16px",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  color: "#fff",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "all 0.3s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                  e.currentTarget.style.borderColor = "rgba(34,197,94,0.6)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)";
+                }}
+              >
+                ⚙️ Settings & Billing
+              </button>
 
-  {/* Admin Dashboard button (admin, internal, or test-mode) */}
-  {showAdminUi && (
-    <button
-      onClick={() => nav("/admin/dashboard")}
-      style={{
-        fontSize: "13px",
-        padding: "8px 16px",
-        background: "rgba(220, 38, 38, 0.15)",
-        border: "1px solid rgba(220, 38, 38, 0.5)",
-        borderRadius: "8px",
-        color: "#ef4444",
-        cursor: "pointer",
-        fontWeight: 600,
-        whiteSpace: "nowrap",
-      }}
-    >
-      🛠 Admin Dashboard
-    </button>
-  )}
+              {showMyContentButton && (
+                <button
+                  onClick={() => nav(myContentTarget)}
+                  title="Open your content"
+                  style={{
+                    fontSize: "13px",
+                    padding: "8px 16px",
+                    background: "rgba(220, 38, 38, 0.1)",
+                    border: "1px solid rgba(220, 38, 38, 0.4)",
+                    borderRadius: "8px",
+                    color: "#ef4444",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    transition: "all 0.3s ease",
+                    fontWeight: 500,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(220, 38, 38, 0.2)";
+                    e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.8)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(220, 38, 38, 0.1)";
+                    e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.4)";
+                  }}
+                >
+                  🎬 My Content
+                </button>
+              )}
 
-  {/* My Content button */}
-  <button
-    onClick={() => nav(canContentLibrary ? "/content" : "/dashboard")}
-    style={{
-      fontSize: "13px",
-      padding: "8px 16px",
-      background: "rgba(220, 38, 38, 0.1)",
-      border: "1px solid rgba(220, 38, 38, 0.4)",
-      borderRadius: "8px",
-      color: "#ef4444",
-      cursor: "pointer",
-      whiteSpace: "nowrap",
-      transition: "all 0.3s ease",
-      fontWeight: 500,
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.background = "rgba(220, 38, 38, 0.2)";
-      e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.8)";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.background = "rgba(220, 38, 38, 0.1)";
-      e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.4)";
-    }}
-  >
-    {canContentLibrary ? "🎬 My Content" : "📊 Dashboard"}
-  </button>
-</div>
+              {isAdmin && (
+                <button
+                  onClick={() => nav("/admin/dashboard")}
+                  style={{
+                    fontSize: "13px",
+                    padding: "8px 16px",
+                    background: "rgba(220, 38, 38, 0.15)",
+                    border: "1px solid rgba(220, 38, 38, 0.5)",
+                    borderRadius: "8px",
+                    color: "#ef4444",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  🛠 Admin Dashboard
+                </button>
+              )}
+            </div>
 
               
       </div>

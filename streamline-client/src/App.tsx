@@ -13,7 +13,6 @@ import InviteLanding from "./pages/InviteLanding";
 import Live from "./pages/Live";
 import SettingsDestinations from "./pages/SettingsDestinations";
 import RoomExitPage from "./pages/RoomExitPage";
-import Dashboard from "./pages/Dashboard";
 import AssetLibrary from "./editing/AssetLibrary";
 import ProjectsDashboard from "./editing/ProjectsDashboard";
 import EditorPage from "./editing/EditorPage";
@@ -141,10 +140,6 @@ function App() {
       {/* Stripe Checkout return routes */}
       <Route path="/billing/canceled" element={<BillingCanceled />} />
       <Route path="/billing/success" element={<BillingSuccess />} />
-
-
-      {/* User dashboard */}
-      <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
       {/* Streaming flow */}
       <Route path="/join" element={<Join />} />
@@ -175,25 +170,21 @@ function App() {
       {/* Segmented feature routes */}
       <Route
         path="/content"
-        element={canContentLibrary ? <AssetLibrary /> : <Navigate to="/dashboard" replace />}
-      />
-      <Route
-        path="/dashboard/content"
-        element={canContentLibrary ? <AssetLibrary /> : <Navigate to="/dashboard" replace />}
+        element={canContentLibrary ? <AssetLibrary /> : <Navigate to="/join" replace />}
       />
       <Route
         path="/projects"
-        element={canProjects ? <ProjectsDashboard /> : <Navigate to="/dashboard" replace />}
+        element={canProjects ? <ProjectsDashboard /> : <Navigate to="/join" replace />}
       />
 
       {/* Legacy aliases */}
       <Route
         path="/editing/assets"
-        element={canContentLibrary ? <Navigate to="/content" replace /> : <Navigate to="/dashboard" replace />}
+        element={canContentLibrary ? <Navigate to="/content" replace /> : <Navigate to="/join" replace />}
       />
       <Route
         path="/editing/projects"
-        element={canProjects ? <Navigate to="/projects" replace /> : <Navigate to="/dashboard" replace />}
+        element={canProjects ? <Navigate to="/projects" replace /> : <Navigate to="/join" replace />}
       />
       <Route
         path="/editing/editor/:projectId"

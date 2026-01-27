@@ -212,10 +212,10 @@ export default function AdminUsage() {
         <div className="text-center">
           <div className="text-2xl text-red-500 mb-4">❌ {error}</div>
           <button
-            onClick={() => nav("/dashboard")}
+            onClick={() => nav("/admin/dashboard")}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
           >
-            Back to Dashboard
+            Back to Admin Dashboard
           </button>
         </div>
       </div>
@@ -232,7 +232,7 @@ export default function AdminUsage() {
             <p className="text-gray-400">Manage users, plans, and feature flags</p>
           </div>
           <button
-            onClick={() => nav("/dashboard")}
+            onClick={() => nav("/admin/dashboard")}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded transition"
           >
             ← Back

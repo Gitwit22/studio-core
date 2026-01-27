@@ -181,7 +181,7 @@ export default function StreamSummaryPage() {
         
         {/* BACK BUTTON */}
         <button
-          onClick={() => nav('/dashboard')}
+          onClick={() => nav('/join')}
           style={{
             marginBottom: '32px',
             padding: '10px 20px',
@@ -201,7 +201,7 @@ export default function StreamSummaryPage() {
             e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)';
           }}
         >
-          ← Back to Dashboard
+          ← Back
         </button>
 
         {/* TITLE */}
