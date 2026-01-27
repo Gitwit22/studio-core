@@ -6,6 +6,7 @@ import { clampPresetForPlan, getPresetById, getUserPlanId, MEDIA_PRESETS, MediaP
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import crypto from "crypto";
 import { CURRENT_TOS_VERSION } from "../lib/tos";
 import {
@@ -204,6 +205,38 @@ async function getNormalizedMediaPrefs(uid: string) {
   return { mediaPrefs: normalizeMediaPrefs((data as any).mediaPrefs, planId), planId };
 }
 
+async function getSegmentedUiFlags() {
+  const [
+    contentLibrarySnap,
+    projectsSnap,
+    editorSnap,
+    myContentSnap,
+    myContentRecordingsSnap,
+  ] = await Promise.all([
+    firestore.collection("featureFlags").doc("contentLibraryEnabled").get(),
+    firestore.collection("featureFlags").doc("projectsEnabled").get(),
+    firestore.collection("featureFlags").doc("editorEnabled").get(),
+    firestore.collection("featureFlags").doc("myContentEnabled").get(),
+    firestore.collection("featureFlags").doc("myContentRecordingsEnabled").get(),
+  ]);
+
+  const contentLibraryData = contentLibrarySnap.exists ? ((contentLibrarySnap.data() as any) || {}) : {};
+  const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
+  const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
+  const myContentData = myContentSnap.exists ? ((myContentSnap.data() as any) || {}) : {};
+  const myContentRecordingsData = myContentRecordingsSnap.exists
+    ? ((myContentRecordingsSnap.data() as any) || {})
+    : {};
+
+  // New flags default to DISABLED when missing.
+  return {
+    contentLibraryEnabled: contentLibraryData.enabled === true,
+    projectsEnabled: projectsData.enabled === true,
+    editorEnabled: editorData.enabled === true,
+    myContentEnabled: myContentData.enabled === true,
+    myContentRecordingsEnabled: myContentRecordingsData.enabled === true,
+  };
+}
 // Advanced permissions have been fully removed in favor of a single,
 // simple permissions mode. Keep a minimal helper that always reports
 // advanced permissions as disabled so existing callers continue to
@@ -411,7 +444,7 @@ router.post("/init", async (req, res) => {
     const uid: string | undefined = user.uid;
 
     if (!uid) {
-      return res.status(401).json({ error: "unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     const accountsRef = firestore.collection("accounts").doc(uid);
@@ -465,7 +498,7 @@ router.post("/init", async (req, res) => {
 router.get("/me", async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const snap = await firestore.collection("users").doc(uid).get();
     if (!snap.exists) return res.status(404).json({ error: "user_not_found" });
@@ -617,6 +650,7 @@ router.get("/me", async (req, res) => {
         hlsSettingsTab: hlsUi.enabled,
         transcodeEnabled: platformTranscodeEnabled,
         recordingEnabled: recordingUi.enabled,
+          ...await getSegmentedUiFlags(),
       },
       planId: effectiveEntitlements?.planId ?? entitlements.planId,
       effectiveEntitlements,
@@ -650,7 +684,7 @@ router.get("/presets", (_req, res) => {
 router.patch("/media-prefs", async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const planId = await getUserPlanId(uid);
     const body = req.body || {};
     const updates: any = {};
@@ -699,7 +733,7 @@ router.patch("/media-prefs", async (req, res) => {
 router.post("/accept-tos", async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const userRef = firestore.collection("users").doc(uid);
     const existing = await userRef.get();
@@ -733,7 +767,7 @@ router.post("/accept-tos", async (req, res) => {
 router.get("/cohost-profile", async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const { mediaPrefs } = await getNormalizedMediaPrefs(uid);
     const adv = await getAdvancedPermissionsEnabled(uid);
@@ -762,7 +796,7 @@ router.get("/cohost-profile", async (req, res) => {
 router.get("/role-presets", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     // Role defaults are now locked to two templates: participant and cohost.
     // Any legacy moderator data is ignored for new writes and UI, but can
@@ -791,7 +825,7 @@ router.get("/role-presets", requireAuth, async (req, res) => {
 router.patch("/role-presets/:presetId", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const presetId = parseRolePresetId(req.params.presetId);
     if (!presetId) return res.status(400).json({ error: "invalid_presetId" });
@@ -847,7 +881,7 @@ router.patch("/role-presets/:presetId", requireAuth, async (req, res) => {
 router.patch("/cohost-profile", async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const { mediaPrefs } = await getNormalizedMediaPrefs(uid);
     const adv = await getAdvancedPermissionsEnabled(uid);

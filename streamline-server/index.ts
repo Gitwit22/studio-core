@@ -25,11 +25,16 @@ import liveRoutes from "./routes/live";
 import statsRoutes from "./routes/stats";
 import telemetryRoutes from "./routes/telemetry";
 import savedEmbedsRoutes from "./routes/savedEmbeds";
+import editingRoutes from "./routes/editing";
+import maintenanceRoutes from "./routes/maintenance";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
 import type { RoomServiceClient } from "livekit-server-sdk";
 import { getCurrentMonthKey } from "./lib/usageTracker";
+import { getEffectiveEntitlements } from "./lib/effectiveEntitlements";
+import { evaluateUsageGate } from "./lib/usageOverages";
+import { upsertUsageMonthlyOverageTotals } from "./lib/usageOveragesWriter";
 import admin from "firebase-admin";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -39,7 +44,10 @@ import publicRoomsHlsConfigRoutes from "./routes/publicRoomsHlsConfig";
 import { sanitizeDisplayName } from "./lib/sanitizeDisplayName";
 import { resolveRoomIdentity } from "./lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "./lib/rolePermissions";
+import { PERMISSION_ERRORS } from "./lib/permissionErrors";
 import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "./middleware/roomAccessToken";
+
+import { requireAdmin } from "./middleware/adminAuth";
 
 
 import { uploadVideo } from "./lib/storageClient";
@@ -75,8 +83,10 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
+    // Note: for disallowed browser origins, do NOT throw (which becomes a 500).
+    // Instead, disable CORS for that request (no ACAO header) and let the browser block it.
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`Not allowed by CORS: ${origin}`));
+    return callback(null, false);
   },
   credentials: true,
   methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
@@ -90,6 +100,7 @@ app.use(cors({
     "X-Room-Access-Token",
   ],
   exposedHeaders: ["x-sl-auth-fallback", "x-sl-auth-header-invalid"],
+  optionsSuccessStatus: 204,
 }));
 
 
@@ -109,6 +120,9 @@ app.use("/api/account", accountRoutes);
 
 // Admin routes
 app.use("/api/admin", adminRoutes);
+
+// Maintenance routes (admin-only)
+app.use("/api/maintenance", maintenanceRoutes);
 
 
 // Health endpoint
@@ -135,6 +149,9 @@ app.use("/api/public/hls", publicHlsRoutes);
 app.use("/api/public/rooms", publicRoomsHlsConfigRoutes);
 // Recordings API - This handles GET /:id and POST /start, /stop
 app.use("/api/recordings", recordingsRoutes);
+
+// Editing API (authenticated)
+app.use("/api/editing", editingRoutes);
 
 // Health check
 app.get("/", (_req, res) => res.send("API up"));
@@ -183,7 +200,7 @@ app.use("/api/telemetry", telemetryRoutes);
 
 
 // Storage test route
-app.get("/api/storage/test", async (req, res) => {
+app.get("/api/storage/test", requireAdmin, async (req, res) => {
   try {
     const testContent = `StreamLine Storage Test - ${new Date().toISOString()}`;
     const testBuffer = Buffer.from(testContent);
@@ -231,17 +248,17 @@ async function assertEffectiveRoomControl(
 ): Promise<void> {
   const trimmedRoomId = String(roomId || "").trim();
   if (!trimmedRoomId) {
-    throw new RoomPermissionError(400, "invalid_room", "roomId is required");
+    throw new RoomPermissionError(400, PERMISSION_ERRORS.INVALID_ROOM, "roomId is required");
   }
 
   const ctx = await assertRoomPerm(req as any, trimmedRoomId, perm);
   const access = ctx.roomAccess as RoomAccessClaims | undefined;
 
   if (!access || !access.roomId) {
-    throw new RoomPermissionError(401, "room_token_required");
+    throw new RoomPermissionError(401, PERMISSION_ERRORS.UNAUTHORIZED);
   }
   if (access.roomId !== trimmedRoomId) {
-    throw new RoomPermissionError(403, "room_mismatch");
+    throw new RoomPermissionError(403, PERMISSION_ERRORS.ROOM_MISMATCH);
   }
 
   const role = String(access.role || "").toLowerCase();
@@ -257,7 +274,7 @@ async function assertEffectiveRoomControl(
   // Updated policy: only hosts can use roomModeration endpoints.
   // Non-hosts are blocked here regardless of controls docs.
   if (!roleOk) {
-    throw new RoomPermissionError(403, "insufficient_role");
+    throw new RoomPermissionError(403, PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS);
   }
 }
 
@@ -1013,6 +1030,35 @@ app.post("/api/usage/streamEnded", async (req, res) => {
       },
       { merge: true }
     );
+
+    // Pro-only: compute and persist overage totals when the user is over limit.
+    // Best-effort: do not fail streamEnded if this bookkeeping write fails.
+    try {
+      const entitlements = await getEffectiveEntitlements(uid);
+      const decision = evaluateUsageGate({
+        allowsOverages: !!(entitlements.features as any).allowsOverages,
+        limits: {
+          participantMinutes: Number(entitlements.limits.monthlyMinutes || 0),
+          transcodeMinutes: Number(entitlements.limits.transcodeMinutes || 0),
+        },
+        usage: {
+          participantMinutes: Number(nextUsage.participantMinutes || 0),
+          transcodeMinutes: Number(nextUsage.transcodeMinutes || 0),
+        },
+        checkParticipant: true,
+        checkTranscode: true,
+      });
+
+      if (decision.shouldLogOverages && decision.overageTotals) {
+        await upsertUsageMonthlyOverageTotals({
+          uid,
+          monthKey,
+          totals: decision.overageTotals,
+        });
+      }
+    } catch (e) {
+      console.error("[usage] failed to update overage totals", e);
+    }
 
     console.log("[usage] updated usageMonthly", {
       uid,

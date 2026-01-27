@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { type DestinationItem } from "../services/destinations";
 import { formatLimitLabel } from "../lib/entitlements";
 import { API_BASE } from "../lib/apiBase";
+import { apiFetchAuth } from "../lib/api";
 import { APP_BASE } from "../lib/appBase";
 import { getHlsStatus, startHls, stopHls } from "../services/hls";
 import CollapsibleSection from "./CollapsibleSection";
+import { getFeatureErrorMessage } from "../lib/featureErrors";
 
 type PlatformKey = "youtube" | "facebook" | "twitch" | "instagram" | "custom";
 
@@ -222,7 +224,7 @@ export default function StreamSetupModalV2({
     : "";
 
   const authHeaders = useMemo(() => {
-    const token = typeof window !== "undefined" ? window.localStorage.getItem("sl_token") : null;
+    const token = typeof window !== "undefined" ? window.localStorage.getItem("authToken") : null;
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
@@ -307,13 +309,16 @@ export default function StreamSetupModalV2({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(hlsRoomId)}/active-embed`, {
-          credentials: "include",
-          cache: "no-store",
-          headers: {
-            ...authHeaders,
+        const res = await apiFetchAuth(
+          `${API_BASE}/api/rooms/${encodeURIComponent(hlsRoomId)}/active-embed`,
+          {
+            cache: "no-store",
+            headers: {
+              ...authHeaders,
+            },
           },
-        });
+          { allowNonOk: true }
+        );
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           return;
@@ -421,7 +426,11 @@ export default function StreamSetupModalV2({
               const parsed = JSON.parse(parts[1] || "{}");
               const code = String((parsed && (parsed.error || parsed.reason)) || "").trim();
               if (code === "hls_not_in_plan") {
-                friendly = "HLS Broadcast Page is not included in this plan.";
+                friendly = getFeatureErrorMessage("hls_not_in_plan", "hls");
+              } else if (code === "feature_not_entitled") {
+                friendly = getFeatureErrorMessage("feature_not_entitled", "hls");
+              } else if (code === "feature_disabled") {
+                friendly = getFeatureErrorMessage("feature_disabled", "hls");
               } else if (code === "room_mismatch") {
                 friendly = "This embed is linked to a different show. Create a new embed for this room from Settings → HLS Setup.";
               }
@@ -476,7 +485,11 @@ export default function StreamSetupModalV2({
                 const parsed = JSON.parse(parts[1] || "{}");
                 const code = String((parsed && (parsed.error || parsed.reason)) || "").trim();
                 if (code === "hls_not_in_plan") {
-                  friendly = "HLS Broadcast Page is not included in this plan.";
+                  friendly = getFeatureErrorMessage("hls_not_in_plan", "hls");
+                } else if (code === "feature_not_entitled") {
+                  friendly = getFeatureErrorMessage("feature_not_entitled", "hls");
+                } else if (code === "feature_disabled") {
+                  friendly = getFeatureErrorMessage("feature_disabled", "hls");
                 } else if (code === "room_mismatch") {
                   friendly = "This embed is linked to a different show. Create a new embed for this room from Settings → HLS Setup.";
                 }
@@ -1035,6 +1048,7 @@ export default function StreamSetupModalV2({
           )}
 
           {/* SECTION 1: STREAM PLATFORMS */}
+          {rtmpDestinationsAllowed && (
           <CollapsibleSection
             id="destinations"
             title="Stream Destinations"
@@ -1379,6 +1393,7 @@ export default function StreamSetupModalV2({
             </div>
           </div>
           </CollapsibleSection>
+          )}
 
           {/* SECTION 2: RECORDING CONTROL */}
           {showRecordingControls && (
@@ -1577,8 +1592,8 @@ export default function StreamSetupModalV2({
           )}
 
             {/* HLS Broadcast section (runtime start/stop).
-              Gated by platform-level flag via showHlsSection. */}
-            {showHlsSection && (
+              Gated by platform-level flag via showHlsSection and plan via hlsAllowed. */}
+            {showHlsSection && hlsAllowed && (
             <CollapsibleSection
               id="hls"
               title="HLS Broadcast"

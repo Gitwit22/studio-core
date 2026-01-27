@@ -7,6 +7,13 @@ import type { ApiErrorCode } from "../types/streaming";
 import { decryptStreamKey, normalizeRtmpBase } from "../lib/crypto";
 import { clampPresetForPlan, getUserPlanId, toEncodingOptions } from "../lib/mediaPresets";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
+import { assertPlatformTranscodeEnabled } from "../lib/platformFlags";
+import { LIMIT_ERRORS } from "../lib/limitErrors";
+import { getCurrentMonthKey } from "../lib/usageTracker";
+import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { evaluateUsageGate } from "../lib/usageOverages";
+import { upsertUsageMonthlyOverageTotals } from "../lib/usageOveragesWriter";
 
 // livekit-server-sdk is ESM; use dynamic import so CommonJS builds work on Render
 let _lkMod: any | null = null;
@@ -34,14 +41,19 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
   try {
     const requestStartedAt = Date.now();
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+
+    // Platform-wide kill switch: multistream relies on the transcode/egress pipeline.
+    if (!assertPlatformTranscodeEnabled(res)) {
+      return;
+    }
 
     const { roomId: canonicalRoomId, livekitRoomName } = getRoomAccess(req as any);
     if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });
 
     const requestedRoomId = String((req.params as any).roomId || "").trim();
     if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
-      return res.status(400).json({ error: "room_mismatch" });
+      return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
     }
 
     const roomId = canonicalRoomId;
@@ -108,7 +120,49 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
 
     const featureAccess = await canAccessFeature((req as any).account || uid, "multistream");
     if (!featureAccess.allowed) {
-      return res.status(403).json({ error: featureAccess.reason || "Multistreaming is not available on your plan" });
+      return res.status(403).json({
+        error: (featureAccess.code as any) || LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
+        reason: featureAccess.reason || undefined,
+      });
+    }
+
+    // Monthly usage gate: block non-overage plans; allow Pro and log totals.
+    try {
+      const entitlements = await getEffectiveEntitlements(uid);
+      const monthKey = getCurrentMonthKey();
+      const usageDocId = `${uid}_${monthKey}`;
+      const usageSnap = await firestore.collection("usageMonthly").doc(usageDocId).get();
+      const existing = usageSnap.exists ? (usageSnap.data() as any) : {};
+      const usage = existing.usage || {};
+
+      const decision = evaluateUsageGate({
+        allowsOverages: !!(entitlements.features as any).allowsOverages,
+        limits: {
+          participantMinutes: Number(entitlements.limits.monthlyMinutes || 0),
+          transcodeMinutes: Number(entitlements.limits.transcodeMinutes || 0),
+        },
+        usage: {
+          participantMinutes: Number(usage.participantMinutes || 0),
+          transcodeMinutes: Number(usage.transcodeMinutes || 0),
+        },
+        checkParticipant: true,
+        checkTranscode: true,
+      });
+
+      if (!decision.allowed) {
+        return res.status(403).json({ error: decision.reason || LIMIT_ERRORS.USAGE_EXHAUSTED });
+      }
+
+      if (decision.shouldLogOverages && decision.overageTotals) {
+        await upsertUsageMonthlyOverageTotals({
+          uid,
+          monthKey,
+          totals: decision.overageTotals,
+        });
+      }
+    } catch (e) {
+      // Do not block multistream start on bookkeeping failures.
+      console.error("[multistream:start] usage gate failed", e);
     }
 
     // Clamp preset by plan
@@ -118,7 +172,9 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
     // Destination cap enforcement (plan-based)
     const maxDestinations = await getPlanLimit(uid, "maxDestinations");
     if (maxDestinations !== undefined && maxDestinations > 0 && destIds.length > maxDestinations) {
-      return res.status(403).json({ error: "destination_limit_exceeded", limit: maxDestinations });
+      // Canonicalize: use a local constant for now, or add to LIMIT_ERRORS if desired
+      const DESTINATION_LIMIT_EXCEEDED = "destination_limit_exceeded";
+      return res.status(403).json({ error: DESTINATION_LIMIT_EXCEEDED, limit: maxDestinations });
     }
 
     // Save intent / status (optional but useful)
@@ -339,14 +395,14 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
 router.post("/:roomId/stop-multistream", requireAuth, requireRoomAccessToken as any, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const { roomId: canonicalRoomId, livekitRoomName } = getRoomAccess(req as any);
     if (!canonicalRoomId) return res.status(400).json({ error: "Missing roomId" });
 
     const requestedRoomId = String((req.params as any).roomId || "").trim();
     if (requestedRoomId && requestedRoomId !== canonicalRoomId) {
-      return res.status(400).json({ error: "room_mismatch" });
+      return res.status(400).json({ error: PERMISSION_ERRORS.ROOM_MISMATCH });
     }
 
     const roomId = canonicalRoomId;

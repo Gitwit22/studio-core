@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { firestore as db } from "../firebaseAdmin";
 import { getUserAccount } from "../lib/userAccount";
 import { CURRENT_TOS_VERSION } from "../lib/tos";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 console.log("✅ auth router loaded");
 
@@ -66,7 +67,7 @@ router.get("/me", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user || {};
     const userId = user.id || user.uid;
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (!userId) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const account = (req as any).account || await getUserAccount(userId);
 
     // Load the latest Firestore snapshot so we can strip sensitive fields

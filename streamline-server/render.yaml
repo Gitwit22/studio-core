@@ -13,6 +13,8 @@ projects:
       envVars:
       - key: GOOGLE_APPLICATION_CREDENTIALS
         sync: false
+      - key: MAINTENANCE_KEY
+        sync: false
       - key: R2_ENDPOINT
         sync: false
       - key: R2_BUCKET_NAME
@@ -44,3 +46,19 @@ projects:
       startCommand: npm run start
       autoDeployTrigger: checksPass
       rootDir: streamline-server
+
+    - type: cron
+      name: streamline-expire-emergency-recordings
+      runtime: node
+      repo: https://github.com/Gitwit22/streamline-platform
+      plan: free
+      region: ohio
+      rootDir: streamline-server
+      buildCommand: npm install && npm run build
+      schedule: "*/10 * * * *"
+      command: npm run cron:expire-emergency
+      envVars:
+      - key: MAINTENANCE_EXPIRE_URL
+        sync: false
+      - key: MAINTENANCE_KEY
+        sync: false

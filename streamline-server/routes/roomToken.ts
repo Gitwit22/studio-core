@@ -1,3 +1,5 @@
+import { LIMIT_ERRORS } from "../lib/limitErrors";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 import { Router } from "express";
 import crypto from "crypto";
@@ -45,6 +47,39 @@ async function getRecordingUiFlag() {
   return {
     enabled,
     reason: typeof data.reason === "string" ? data.reason : undefined,
+  };
+}
+
+async function getSegmentedUiFlags() {
+  const [
+    contentLibrarySnap,
+    projectsSnap,
+    editorSnap,
+    myContentSnap,
+    myContentRecordingsSnap,
+  ] = await Promise.all([
+    firestore.collection("featureFlags").doc("contentLibraryEnabled").get(),
+    firestore.collection("featureFlags").doc("projectsEnabled").get(),
+    firestore.collection("featureFlags").doc("editorEnabled").get(),
+    firestore.collection("featureFlags").doc("myContentEnabled").get(),
+    firestore.collection("featureFlags").doc("myContentRecordingsEnabled").get(),
+  ]);
+
+  const contentLibraryData = contentLibrarySnap.exists ? ((contentLibrarySnap.data() as any) || {}) : {};
+  const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
+  const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
+  const myContentData = myContentSnap.exists ? ((myContentSnap.data() as any) || {}) : {};
+  const myContentRecordingsData = myContentRecordingsSnap.exists
+    ? ((myContentRecordingsSnap.data() as any) || {})
+    : {};
+
+  // New segmented flags default to DISABLED when missing.
+  return {
+    contentLibraryEnabled: contentLibraryData.enabled === true,
+    projectsEnabled: projectsData.enabled === true,
+    editorEnabled: editorData.enabled === true,
+    myContentEnabled: myContentData.enabled === true,
+    myContentRecordingsEnabled: myContentRecordingsData.enabled === true,
   };
 }
 
@@ -318,7 +353,7 @@ async function validateViewerInvite(inviteToken: string, roomId: string, session
   const doc = await firestore.collection("viewerInvites").doc(inviteToken).get();
   if (!doc.exists) return { ok: false, reason: "not_found" } as const;
   const data = doc.data() as ViewerInvite;
-  if (data.roomId !== roomId) return { ok: false, reason: "room_mismatch" } as const;
+  if (data.roomId !== roomId) return { ok: false, reason: PERMISSION_ERRORS.ROOM_MISMATCH } as const;
   if (data.revokedAt) return { ok: false, reason: "revoked" } as const;
 
   // Expiry checks
@@ -368,7 +403,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     const uid = (req as any).user?.uid as string | undefined;
     const invite = (req as any).invite as InviteClaims | undefined;
 
-    if (!uid && !invite) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid && !invite) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const trimmedRoomId = String(rawRoomId || "").trim();
     const trimmedRoomName = sanitizeDisplayName(String(rawRoomName || "")).trim();
@@ -408,7 +443,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       roomName: trimmedRoomName || inviteRoomName || null,
     });
 
-    if (!resolvedRoom) return res.status(400).json({ error: "roomId_or_roomName_required" });
+    if (!resolvedRoom) return res.status(400).json({ error: LIMIT_ERRORS.FEATURE_NOT_ENTITLED }); // Canonical code for missing entitlement/feature
     const roomId = resolvedRoom.roomId;
     const roomName = resolvedRoom.roomName;
 
@@ -506,10 +541,11 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       }
 
       try {
-        const [entitlements, hlsUi, recordingUi] = await Promise.all([
+        const [entitlements, hlsUi, recordingUi, segmentedUiFlags] = await Promise.all([
           getEffectiveEntitlements(entitlementsUid),
           getHlsUiFlag(),
           getRecordingUiFlag(),
+          getSegmentedUiFlags(),
         ]);
 
         const plan = entitlements.plan;
@@ -578,6 +614,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
           hlsSettingsTab: hlsUi.enabled,
           transcodeEnabled: platformTranscodeEnabled,
           recordingEnabled: recordingUi.enabled,
+          ...segmentedUiFlags,
         };
       } catch (err) {
         console.error("[roomToken] failed to compute effectiveEntitlements", err);

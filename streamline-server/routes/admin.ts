@@ -14,6 +14,7 @@ import type { UserUsageSummary } from "../types/admin.types";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { PLAN_IDS, PlanId, isPlanId, getAllPlanIds } from "../types/plan";
 import { resolveMaxDestinations } from "../lib/planLimits";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -37,7 +38,7 @@ router.get("/env-sanity", async (req, res) => {
     const uid = adminUser?.uid;
 
     if (!uid) {
-      return res.status(401).json({ error: "unauthorized", message: "Missing admin uid" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED, message: "Missing admin uid" });
     }
 
     const userSnap = await firestore.collection("users").doc(uid).get();
@@ -623,15 +624,21 @@ router.post("/feature-flags/billing", async (req, res) => {
         ? beforeData.billingSystemEnabled
         : true;
 
-    await docRef.set(
-      {
-        billingSystemEnabled: enabled,
-        updatedAt: now,
-        updatedBy: req.adminUser!.uid,
-        reason: typeof reason === "string" ? reason : undefined,
-      },
-      { merge: true }
-    );
+    // Firestore rejects `undefined` values unless ignoreUndefinedProperties is enabled.
+    // Build the payload explicitly to avoid accidentally writing `reason: undefined`.
+    const update: any = {
+      billingSystemEnabled: enabled,
+      updatedAt: now,
+      updatedBy: req.adminUser!.uid,
+    };
+    if (typeof reason === "string") {
+      update.reason = reason;
+    } else if (enabled === true) {
+      // Clear any previous disable reason when billing is enabled.
+      update.reason = null;
+    }
+
+    await docRef.set(update, { merge: true });
 
     // Invalidate in-memory cache so the new value is visible immediately
     // from subsequent getUserAccount() calls on this instance.
@@ -691,6 +698,12 @@ router.get("/usage", async (req, res) => {
         const minutesUsed = Number(
           usage.participantMinutes ?? usage.streamMinutes ?? usage.minutes ?? 0
         );
+
+        const overages = (usageData.overages || {}) as any;
+        const overageParticipantMinutes = Number(overages.participantMinutes ?? 0);
+        const overageTranscodeMinutes = Number(overages.transcodeMinutes ?? 0);
+        const overageMinutesTotal = overageParticipantMinutes + overageTranscodeMinutes;
+
         const planIdRaw = userData.planId || "free";
         // Canonicalize planId using isPlanId
         const planId: PlanId | string = isPlanId(planIdRaw) ? planIdRaw : planIdRaw;
@@ -709,6 +722,9 @@ router.get("/usage", async (req, res) => {
           displayName: userData.displayName,
           planId,
           minutesUsed,
+          overageParticipantMinutes,
+          overageTranscodeMinutes,
+          overageMinutesTotal,
           bonusMinutes,
           planLimit,
           effectiveLimit,

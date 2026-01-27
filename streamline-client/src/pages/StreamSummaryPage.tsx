@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRecordingProgress } from '../hooks/useRecordingProgress';
 import { editingApi } from '../lib/editingApi';
-import { API_BASE } from '../lib/apiBase';
+import { apiFetchAuth } from '../lib/api';
 
 /**
  * STREAMLINE STREAM SUMMARY PAGE - REDESIGNED
@@ -32,103 +32,15 @@ export default function StreamSummaryPage() {
           justifyContent: 'center',
           backgroundColor: '#000000',
           color: '#ffffff'
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <div 
-            style={{
-              width: '48px',
-              height: '48px',
-              border: '4px solid rgba(220, 38, 38, 0.3)',
-              borderTop: '4px solid #ef4444',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              margin: '0 auto 16px'
-            }}
-          />
-          <p style={{ color: '#9ca3af' }}>Loading summary...</p>
-        </div>
-        <style>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    );
-  }
+        import { Navigate, useParams } from 'react-router-dom';
 
-  if (!recording) {
-    return (
-      <div 
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: '#000000',
-          color: '#ffffff'
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <p style={{ color: '#ef4444', marginBottom: '16px', fontSize: '16px' }}>
-            ❌ Recording not found
-          </p>
-          <button
-            onClick={() => nav('/join')}
-            style={{
-              padding: '12px 24px',
-              background: 'linear-gradient(to right, #dc2626, #ef4444)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '10px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const handleOpenMetadataEditor = () => {
-    setEditTitle(recording.title);
-    setEditDescription((recording as any).description || '');
-    setEditPrivacy((recording as any).privacy || 'public');
-    setShowMetadataEditor(true);
-  };
-
-  const handleSaveMetadata = () => {
-    const updatedRecording = {
-      ...recording,
-      title: editTitle,
-      description: editDescription,
-      privacy: editPrivacy,
-    };
-
-    const recordings = JSON.parse(localStorage.getItem('sl_recordings') || '[]');
-    const idx = recordings.findIndex((r: any) => r.id === recording.id);
-    if (idx !== -1) {
-      recordings[idx] = updatedRecording;
-      localStorage.setItem('sl_recordings', JSON.stringify(recordings));
-    }
-
-    setShowMetadataEditor(false);
-    window.location.reload();
-  };
-
-  const handleDownload = async () => {
-    if (isDownloading) return;
-    setIsDownloading(true);
-    try {
-      if (!recordingId) throw new Error("Recording not ready");
-
-      const res = await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link`, {
-        credentials: "include",
-      });
-      if (res.status === 410) {
+        // Legacy page. Kept as a redirect so any old links/bookmarks land on the
+        // canonical host post-stream summary page.
+        export default function StreamSummaryPage() {
+          const { recordingId } = useParams<{ recordingId: string }>();
+          const target = recordingId ? `/room-exit/${encodeURIComponent(recordingId)}` : '/room-exit/unknown';
+          return <Navigate to={target} replace state={{ exitRole: 'host' }} />;
+        }
         alert("This recording link expired. Use Settings → Usage → Emergency Download.");
         return;
       }
@@ -157,9 +69,7 @@ export default function StreamSummaryPage() {
 
   const handleConfirmYes = async () => {
     try {
-      await fetch(`${API_BASE}/api/recordings/${recordingId}/download-link?confirm=true`, {
-        credentials: "include",
-      });
+      await apiFetchAuth(`/api/recordings/${recordingId}/download-link?confirm=true`, {}, { allowNonOk: true });
       setConfirmMessage("Great — you're all set. Save the file somewhere safe.");
     } catch (e) {
       setConfirmMessage("Noted. Thanks for confirming.");
@@ -170,12 +80,14 @@ export default function StreamSummaryPage() {
 
   const handleConfirmNo = async () => {
     try {
-      await fetch(`${API_BASE}/api/recordings/${recordingId}/report-download-issue`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ reason: "user_reported_issue" }),
-      });
+      await apiFetchAuth(
+        `/api/recordings/${recordingId}/report-download-issue`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "user_reported_issue" }),
+        },
+        { allowNonOk: true }
+      );
     } catch {}
     setConfirmMessage("Use Settings → Usage → Emergency Download (Latest Recording) if you're having trouble.");
     setShowConfirmModal(true);
@@ -269,7 +181,7 @@ export default function StreamSummaryPage() {
         
         {/* BACK BUTTON */}
         <button
-          onClick={() => nav('/dashboard')}
+          onClick={() => nav('/join')}
           style={{
             marginBottom: '32px',
             padding: '10px 20px',
@@ -289,7 +201,7 @@ export default function StreamSummaryPage() {
             e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)';
           }}
         >
-          ← Back to Dashboard
+          ← Back
         </button>
 
         {/* TITLE */}

@@ -1,6 +1,8 @@
 import React from "react";
-import { useParticipants, useLocalParticipant } from "@livekit/components-react";
+import { useParticipants, useLocalParticipant, useRoomContext } from "@livekit/components-react";
 import { normalizeUiRolePresetId } from "../lib/roles";
+import { apiFetchAuth } from "../lib/api";
+import { encodeReconnectMediaMessage, reconnectMedia } from "../lib/mediaRecovery";
 
 // Normalize API base to avoid trailing slashes that cause "//api/..." URLs
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
@@ -161,19 +163,86 @@ function HostPanel({
 }) {
   const parts = useParticipants();
   const { localParticipant } = useLocalParticipant();
+  const room = useRoomContext();
   const [muteLock, setMuteLock] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [mediaBusy, setMediaBusy] = React.useState(false);
   const [roleToast, setRoleToast] = React.useState<string | null>(null);
   const roleToastTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [roleByIdentity, setRoleByIdentity] = React.useState<Record<string, RolePresetId>>({});
   const [roleStatus, setRoleStatus] = React.useState<Record<string, "saving" | "saved">>({});
+
+  const [deviceModalOpen, setDeviceModalOpen] = React.useState(false);
+  const [audioInputs, setAudioInputs] = React.useState<Array<{ deviceId: string; label: string }>>([]);
+  const [videoInputs, setVideoInputs] = React.useState<Array<{ deviceId: string; label: string }>>([]);
+  const [selectedAudioDeviceId, setSelectedAudioDeviceId] = React.useState<string>("");
+  const [selectedVideoDeviceId, setSelectedVideoDeviceId] = React.useState<string>("");
+
+  const loadDevices = React.useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const mics = all
+      .filter((d) => d.kind === "audioinput")
+      .map((d) => ({ deviceId: d.deviceId, label: d.label || "Microphone" }));
+    const cams = all
+      .filter((d) => d.kind === "videoinput")
+      .map((d) => ({ deviceId: d.deviceId, label: d.label || "Camera" }));
+    setAudioInputs(mics);
+    setVideoInputs(cams);
+    if (!selectedAudioDeviceId && mics[0]?.deviceId) setSelectedAudioDeviceId(mics[0].deviceId);
+    if (!selectedVideoDeviceId && cams[0]?.deviceId) setSelectedVideoDeviceId(cams[0].deviceId);
+  }, [selectedAudioDeviceId, selectedVideoDeviceId]);
+
+  const handleReconnectSelf = async () => {
+    if (!room) return;
+    setMediaBusy(true);
+    try {
+      await reconnectMedia(room);
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+
+  const handleOpenDeviceModal = async () => {
+    try {
+      await loadDevices();
+    } catch {
+      // ignore
+    }
+    setDeviceModalOpen(true);
+  };
+
+  const handleReconnectWithDevices = async () => {
+    if (!room) return;
+    setMediaBusy(true);
+    try {
+      await reconnectMedia(room, {
+        audioDeviceId: selectedAudioDeviceId || undefined,
+        videoDeviceId: selectedVideoDeviceId || undefined,
+      });
+      setDeviceModalOpen(false);
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+
+  const handleReconnectGuest = async (identity: string) => {
+    try {
+      const lp: any = room?.localParticipant || localParticipant;
+      if (!lp?.publishData) return;
+      const data = encodeReconnectMediaMessage();
+      await lp.publishData(data, { reliable: true, destinationIdentities: [identity] });
+    } catch {
+      // ignore
+    }
+  };
 
   // Load initial muteLock state for this room
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/roomSettings/${encodeURIComponent(roomName)}`);
+        const res = await apiFetchAuth(`${API_BASE}/api/roomSettings/${encodeURIComponent(roomName)}`, {}, { allowNonOk: true });
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setMuteLock(!!data.muteLock);
@@ -271,6 +340,49 @@ function HostPanel({
   };
   return (
     <>
+      <Section title="Audio & Video">
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            onClick={handleReconnectSelf}
+            disabled={mediaBusy}
+            style={{
+              flex: 1,
+              borderRadius: '0.375rem',
+              border: '1px solid rgba(220, 38, 38, 0.6)',
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.75rem',
+              background: mediaBusy ? 'rgba(220, 38, 38, 0.4)' : 'linear-gradient(135deg, #dc2626, #b91c1c)',
+              color: '#ffffff',
+              cursor: mediaBusy ? 'not-allowed' : 'pointer',
+              fontWeight: 700,
+            }}
+            title="Stops and re-acquires your mic/cam (manual control)"
+          >
+            {mediaBusy ? 'Reconnecting…' : 'Reconnect media'}
+          </button>
+          <button
+            onClick={handleOpenDeviceModal}
+            disabled={mediaBusy}
+            style={{
+              borderRadius: '0.375rem',
+              border: '1px solid rgba(148, 163, 184, 0.6)',
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.75rem',
+              background: 'rgba(31, 41, 55, 0.9)',
+              color: '#e5e7eb',
+              cursor: mediaBusy ? 'not-allowed' : 'pointer',
+              fontWeight: 600,
+              opacity: mediaBusy ? 0.6 : 1,
+            }}
+          >
+            Choose device
+          </button>
+        </div>
+        <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'rgba(248, 250, 252, 0.7)', lineHeight: 1.45 }}>
+          Manual-only. No room overlays or banners.
+        </p>
+      </Section>
+
       <Section title="Live Participants">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', gap: '0.5rem' }}>
           <button
@@ -320,6 +432,7 @@ function HostPanel({
           participants={parts}
           onRemove={(id) => apiRemove(roomName, id, roomAccessToken)}
           onMute={(id, muted) => apiMute(roomName, id, muted, roomAccessToken)}
+          onReconnectGuest={handleReconnectGuest}
           canModerate={!!canModerate}
           muteLock={muteLock}
           localIdentity={localParticipant?.identity || null}
@@ -421,6 +534,123 @@ function HostPanel({
           </div>
         </Section>
       )}
+
+      {deviceModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => setDeviceModalOpen(false)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 560,
+              borderRadius: 14,
+              background: 'rgba(17,24,39,0.96)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              padding: 14,
+              color: '#fff',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: '0.9rem', fontWeight: 800, marginBottom: 10, color: '#ef4444' }}>
+              Choose device
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <div style={{ fontSize: '0.75rem', opacity: 0.8, marginBottom: 6 }}>Microphone</div>
+                <select
+                  value={selectedAudioDeviceId}
+                  onChange={(e) => setSelectedAudioDeviceId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.14)',
+                    background: 'rgba(0,0,0,0.35)',
+                    color: '#fff',
+                    fontSize: 12,
+                  }}
+                >
+                  {audioInputs.length === 0 && <option value="">(No microphones found)</option>}
+                  {audioInputs.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '0.75rem', opacity: 0.8, marginBottom: 6 }}>Camera</div>
+                <select
+                  value={selectedVideoDeviceId}
+                  onChange={(e) => setSelectedVideoDeviceId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.14)',
+                    background: 'rgba(0,0,0,0.35)',
+                    color: '#fff',
+                    fontSize: 12,
+                  }}
+                >
+                  {videoInputs.length === 0 && <option value="">(No cameras found)</option>}
+                  {videoInputs.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button
+                onClick={() => setDeviceModalOpen(false)}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(255,255,255,0.14)',
+                  background: 'rgba(255,255,255,0.06)',
+                  color: 'rgba(255,255,255,0.9)',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReconnectWithDevices}
+                disabled={mediaBusy}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(255,255,255,0.18)',
+                  background: 'rgba(59,130,246,0.25)',
+                  color: '#fff',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: mediaBusy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {mediaBusy ? 'Reconnecting…' : 'Use selected & reconnect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -478,6 +708,7 @@ function ParticipantList({
   canModerate,
   onRemove,
   onMute,
+  onReconnectGuest,
   muteLock,
   localIdentity,
   canMuteGuests,
@@ -491,6 +722,7 @@ function ParticipantList({
   canModerate?: boolean;
   onRemove?: (identity: string) => void;
   onMute?: (identity: string, muted: boolean) => void;
+  onReconnectGuest?: (identity: string) => void;
   muteLock?: boolean;
   localIdentity?: string | null;
   canMuteGuests?: boolean;
@@ -586,6 +818,25 @@ function ParticipantList({
                   </div>
                 )}
               <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
+                {onReconnectGuest && localIdentity && p.identity !== localIdentity && (
+                  <button
+                    style={{
+                      borderRadius: '0.25rem',
+                      border: '1px solid rgba(148, 163, 184, 0.6)',
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.7rem',
+                      background: 'rgba(17, 24, 39, 0.6)',
+                      color: '#e5e7eb',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      fontWeight: '600',
+                    }}
+                    onClick={() => onReconnectGuest(p.identity)}
+                    title="Asks this guest to re-acquire their devices"
+                  >
+                    Reconnect
+                  </button>
+                )}
                 {canMuteGuests !== false && (() => {
                   const micEnabled = (p as any).isMicrophoneEnabled as boolean | undefined;
                   const isMuted = micEnabled === false;
@@ -656,15 +907,18 @@ function ParticipantList({
 
 async function apiRemove(room: string, identity: string, roomAccessToken: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/roomModeration/remove`, {
+    const res = await apiFetchAuth(
+      `${API_BASE}/api/roomModeration/remove`,
+      {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-room-access-token": roomAccessToken,
       },
-      credentials: "include",
       body: JSON.stringify({ room, identity }),
-    });
+      },
+      { allowNonOk: true }
+    );
 
     let data: any = null;
     try {
@@ -688,15 +942,18 @@ async function apiRemove(room: string, identity: string, roomAccessToken: string
 
 async function apiMute(_room: string, identity: string, muted: boolean, roomAccessToken: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/roomModeration/mute`, {
+    const res = await apiFetchAuth(
+      `${API_BASE}/api/roomModeration/mute`,
+      {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-room-access-token": roomAccessToken,
       },
-      credentials: "include",
       body: JSON.stringify({ room: _room, identity, muted }),
-    });
+      },
+      { allowNonOk: true }
+    );
 
     const data = await res.json().catch(() => null);
     if (!res.ok || (data && data.error)) {
@@ -712,15 +969,18 @@ async function apiMute(_room: string, identity: string, muted: boolean, roomAcce
 
 async function apiMuteAll(_room: string, muted: boolean, roomAccessToken: string) {
   try {
-    const res = await fetch(`${API_BASE}/api/roomModeration/mute-all`, {
+    const res = await apiFetchAuth(
+      `${API_BASE}/api/roomModeration/mute-all`,
+      {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-room-access-token": roomAccessToken,
       },
-      credentials: "include",
       body: JSON.stringify({ room: _room, muted }),
-    });
+      },
+      { allowNonOk: true }
+    );
 
     const data = await res.json().catch(() => null);
     if (!res.ok || (data && data.error)) {
@@ -740,15 +1000,18 @@ async function apiSetMuteLock(
   hostIdentity: string | null,
   roomAccessToken: string,
 ): Promise<{ muteLock: boolean }> {
-  const res = await fetch(`${API_BASE}/api/roomModeration/mute-lock`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-room-access-token": roomAccessToken,
+  const res = await apiFetchAuth(
+    `${API_BASE}/api/roomModeration/mute-lock`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-room-access-token": roomAccessToken,
+      },
+      body: JSON.stringify({ room: _room, muteLock, hostIdentity }),
     },
-    credentials: "include",
-    body: JSON.stringify({ room: _room, muteLock, hostIdentity }),
-  });
+    { allowNonOk: true }
+  );
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
@@ -764,19 +1027,17 @@ async function apiSetRole(
   identity: string,
   role: RolePresetId,
 ): Promise<{ roleId?: string } | null> {
-  const res = await fetch(
-    `${API_BASE}/api/rooms/${encodeURIComponent(
-      roomId,
-    )}/participants/${encodeURIComponent(identity)}/permissions`,
+  const res = await apiFetchAuth(
+    `${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(identity)}/permissions`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-room-access-token": roomAccessToken,
       },
-      credentials: "include",
       body: JSON.stringify({ roleId: role }),
     },
+    { allowNonOk: true }
   );
 
   const data = await res.json().catch(() => null);

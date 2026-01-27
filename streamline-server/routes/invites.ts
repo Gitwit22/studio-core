@@ -4,6 +4,7 @@ import { firestore } from "../firebaseAdmin";
 import { requireAuth, tryGetAuthUser, verifyInviteToken } from "../middleware/requireAuth";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 type InviteRole = "guest" | "cohost";
 
@@ -57,7 +58,7 @@ const router = Router();
 router.post("/create", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user as { uid: string } | undefined;
-    if (!user?.uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!user?.uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const requestedRoomId = normalizeRoomId((req.body as any)?.roomId);
     const role = normalizeRole((req.body as any)?.role);

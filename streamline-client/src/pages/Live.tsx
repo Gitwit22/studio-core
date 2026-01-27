@@ -103,8 +103,7 @@ export default function Live() {
   const [viewerCount, setViewerCount] = useState<number>(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const hlsRef = useRef<Hls | null>(null);
 
   // Resolve savedEmbedId -> activeRoomId and basic viewer metadata
   useEffect(() => {
@@ -257,63 +256,24 @@ export default function Live() {
     const v = videoRef.current;
     if (v) {
       snapToLiveEdge(v);
+
+      // If we are using hls.js, nudge it to (re)load from the live edge.
+      // This is intentionally lightweight (no destroy/recreate) to avoid
+      // visible resets during playback.
+      const hls = hlsRef.current;
+      if (hls) {
+        try {
+          hls.startLoad(-1);
+        } catch {
+          // ignore
+        }
+      }
+
       if (v.paused) {
         void v.play().catch(() => {});
       }
     }
   }, [reloadViewerConfig, fetchHlsStatus]);
-
-  // Track playback position so we can render a timeline similar to
-  // a standard video player, even for live HLS with a sliding window.
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!playlistUrl || !v) return;
-
-    const updateTime = () => {
-      const video = videoRef.current;
-      if (!video) return;
-
-      const seekable = video.seekable;
-      const buffered = video.buffered;
-      let effectiveDuration = video.duration;
-      let position = video.currentTime;
-
-      // For live HLS, duration is often Infinity. In that case, use the
-      // current seekable window and treat position as offset from the start
-      // of that window so the slider stays bounded.
-      if (!Number.isFinite(effectiveDuration) || effectiveDuration <= 0) {
-        if (seekable && seekable.length) {
-          const start = seekable.start(0);
-          const end = seekable.end(seekable.length - 1);
-          effectiveDuration = Math.max(0, end - start);
-          position = Math.max(0, Math.min(effectiveDuration, video.currentTime - start));
-        } else if (buffered && buffered.length) {
-          const start = buffered.start(0);
-          const end = buffered.end(buffered.length - 1);
-          effectiveDuration = Math.max(0, end - start);
-          position = Math.max(0, Math.min(effectiveDuration, video.currentTime - start));
-        } else {
-          effectiveDuration = 0;
-          position = 0;
-        }
-      } else if (seekable && seekable.length) {
-        const start = seekable.start(0);
-        position = Math.max(0, Math.min(effectiveDuration, video.currentTime - start));
-      }
-
-      setDuration(effectiveDuration || 0);
-      setCurrentTime(position || 0);
-    };
-
-    updateTime();
-    v.addEventListener("timeupdate", updateTime);
-    v.addEventListener("progress", updateTime);
-
-    return () => {
-      v.removeEventListener("timeupdate", updateTime);
-      v.removeEventListener("progress", updateTime);
-    };
-  }, [playlistUrl]);
 
   // Attach HLS playback (source + player wiring) once per playlist URL.
   // Mute/volume are applied in a separate effect so toggling audio does
@@ -364,6 +324,8 @@ export default function Live() {
         enableWorker: true,
         lowLatencyMode: true,
       });
+
+      hlsRef.current = hls;
 
       hls.loadSource(playlistUrl);
       hls.attachMedia(video);
@@ -439,6 +401,10 @@ export default function Live() {
           hls.destroy();
         } catch {
           // ignore
+        }
+
+        if (hlsRef.current === hls) {
+          hlsRef.current = null;
         }
       };
     } else {
@@ -640,40 +606,6 @@ export default function Live() {
                           </div>
                         </div>
 
-                        {/* Timeline */}
-                        <div className="flex items-center gap-3 px-1">
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            step={0.1}
-                            value={duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0}
-                            onChange={(e) => {
-                              const pct = Number(e.target.value);
-                              const v = videoRef.current;
-                              if (!v || !Number.isFinite(pct) || duration <= 0) return;
-
-                              const seekable = v.seekable;
-                              let targetOffset = (pct / 100) * duration;
-
-                              if (seekable && seekable.length) {
-                                const start = seekable.start(0);
-                                const end = seekable.end(seekable.length - 1);
-                                const windowDuration = Math.max(0, end - start);
-                                if (windowDuration > 0) {
-                                  targetOffset = (pct / 100) * windowDuration;
-                                  v.currentTime = start + targetOffset;
-                                }
-                              } else {
-                                v.currentTime = targetOffset;
-                              }
-
-                              void v.play().catch(() => {});
-                            }}
-                            className="w-full h-1 rounded-full bg-neutral-700 accent-red-500 cursor-pointer"
-                            aria-label="Playback position"
-                          />
-                        </div>
                       </div>
                     </div>
 

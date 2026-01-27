@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiFetchAuth } from "../lib/api";
 
 interface UsageData {
   userId: string;
@@ -7,6 +8,9 @@ interface UsageData {
   displayName?: string;
   planId: "free" | "starter" | "pro" | "basic" | "enterprise" | "internal_unlimited";
   minutesUsed: number;
+  overageParticipantMinutes?: number;
+  overageTranscodeMinutes?: number;
+  overageMinutesTotal?: number;
   bonusMinutes: number;
   planLimit: number;
   effectiveLimit: number;
@@ -68,7 +72,7 @@ export default function AdminUsage() {
         usageUrl.searchParams.append("plan", selectedPlan);
       }
 
-      const usageRes = await fetch(usageUrl.toString());
+      const usageRes = await apiFetchAuth(usageUrl.toString(), {}, { allowNonOk: true });
       
       if (usageRes.status === 403) {
         setError("Access denied. Admin privileges required.");
@@ -87,7 +91,7 @@ export default function AdminUsage() {
       const statsUrl = new URL(`${API_BASE}/api/admin/stats`);
       statsUrl.searchParams.append("adminUserId", adminUserId);
 
-      const statsRes = await fetch(statsUrl.toString());
+      const statsRes = await apiFetchAuth(statsUrl.toString(), {}, { allowNonOk: true });
       if (statsRes.ok) {
         const statsJson = await statsRes.json();
         setStats(statsJson);
@@ -105,7 +109,7 @@ export default function AdminUsage() {
     if (!selectedUser || !minutesToGrant) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${selectedUser.userId}/grant-minutes`, {
+      const res = await apiFetchAuth(`${API_BASE}/api/admin/users/${selectedUser.userId}/grant-minutes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -133,7 +137,7 @@ export default function AdminUsage() {
     if (!selectedUser) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${selectedUser.userId}/change-plan`, {
+      const res = await apiFetchAuth(`${API_BASE}/api/admin/users/${selectedUser.userId}/change-plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -160,7 +164,7 @@ export default function AdminUsage() {
     const newState = !user.isBlocked; // Simplified for this example
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${user.userId}/toggle-billing`, {
+      const res = await apiFetchAuth(`${API_BASE}/api/admin/users/${user.userId}/toggle-billing`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -208,10 +212,10 @@ export default function AdminUsage() {
         <div className="text-center">
           <div className="text-2xl text-red-500 mb-4">❌ {error}</div>
           <button
-            onClick={() => nav("/dashboard")}
+            onClick={() => nav("/admin/dashboard")}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
           >
-            Back to Dashboard
+            Back to Admin Dashboard
           </button>
         </div>
       </div>
@@ -228,7 +232,7 @@ export default function AdminUsage() {
             <p className="text-gray-400">Manage users, plans, and feature flags</p>
           </div>
           <button
-            onClick={() => nav("/dashboard")}
+            onClick={() => nav("/admin/dashboard")}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded transition"
           >
             ← Back
@@ -304,6 +308,12 @@ export default function AdminUsage() {
                   <th className="px-4 py-3 text-left text-sm font-semibold">User</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Plan</th>
                   <th className="px-4 py-3 text-right text-sm font-semibold">Usage</th>
+                  <th className="px-4 py-3 text-right text-sm font-semibold">
+                    <div>Overage (this month)</div>
+                    <div className="text-xs font-normal text-gray-400">
+                      Minutes used beyond the plan’s included limits.
+                    </div>
+                  </th>
                   <th className="px-4 py-3 text-right text-sm font-semibold">Limit</th>
                   <th className="px-4 py-3 text-right text-sm font-semibold">Bonus</th>
                   <th className="px-4 py-3 text-center text-sm font-semibold">Status</th>
@@ -328,6 +338,12 @@ export default function AdminUsage() {
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
                       {user.minutesUsed} min
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-orange-300">
+                      {user.overageMinutesTotal ?? 0} min
+                      <div className="text-xs text-orange-200/80">
+                        P:{user.overageParticipantMinutes ?? 0} / T:{user.overageTranscodeMinutes ?? 0}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
                       {user.effectiveLimit} min

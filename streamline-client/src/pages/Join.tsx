@@ -4,7 +4,9 @@ import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
 import { API_BASE } from "../lib/apiBase";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useNavigate, useSearchParams,} from "react-router-dom";
-import { apiFetch, clearAuthStorage } from "../lib/api";
+import { apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
+import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 
 type SavedEmbedSummary = {
   embedId: string;
@@ -72,6 +74,19 @@ export default function Join() {
   useEffect(() => { logAuthDebugContext("Arrive Join Page"); }, []);
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
+  const { effectiveEntitlements } = useEffectiveEntitlements();
+  const { access } = useFeatureAccess(effectiveEntitlements);
+  const canContentLibrary = !!access?.contentLibrary?.allowed;
+  const canProjects = !!access?.projects?.allowed;
+  const canMyContent = !!access?.myContent?.allowed;
+  const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
+
+  const myContentTarget = canProjects
+    ? "/projects"
+    : (canContentLibrary || canMyContentRecordings)
+      ? "/content"
+      : null;
+  const showMyContentButton = !!myContentTarget && canMyContent;
 
   const [displayName, setDisplayName] = useState(() => {
     // Prefer profile displayName if available, then fall back to cached value
@@ -90,7 +105,6 @@ export default function Join() {
   const [didEditDisplayName, setDidEditDisplayName] = useState(false);
   const [roomName, setRoomName] = useState("");
   const [inviteRoomId, setInviteRoomId] = useState<string | null>(null);
-  const [showEditingModal, setShowEditingModal] = useState(false);
   const [showLegacyJoinToast, setShowLegacyJoinToast] = useState(false);
   const [hideLegacyJoinToast, setHideLegacyJoinToast] = useState(() => {
     try {
@@ -239,7 +253,7 @@ export default function Join() {
 
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/account/me`, { credentials: "include" });
+        const res = await apiFetchAuth(`${API_BASE}/api/account/me`, {}, { allowNonOk: true });
         if (!res.ok) {
           if (!cancelled) setPlatformHlsEnabled(true);
           return;
@@ -288,11 +302,10 @@ export default function Join() {
       setSavedEmbedsLoading(true);
       setSavedEmbedsError(null);
       try {
-        const res = await fetch(`${API_BASE}/api/saved-embeds`, {
+        const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds`, {
           method: "GET",
-          credentials: "include",
           cache: "no-store",
-        });
+        }, { allowNonOk: true });
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           throw new Error(payload?.error || "Failed to load Saved Rooms");
@@ -339,7 +352,7 @@ export default function Join() {
     setUsageLoading(true);
     setUsageError(null);
 
-    fetch(`${API_BASE}/api/usage/me`, { credentials: "include" })
+    apiFetchAuth(`${API_BASE}/api/usage/me`, {}, { allowNonOk: true })
   .then(async (res) => {
     if (!res.ok) {
       const text = await res.text();
@@ -419,27 +432,19 @@ export default function Join() {
           return;
         }
 
-        const res = await fetch(`${API_BASE}/api/rooms/create`, {
+        const res = await apiFetchAuth(`${API_BASE}/api/rooms/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({
             livekitRoomName: roomLabel,
             roomType: "rtc",
             savedEmbedId: isUsingSaved ? selectedSavedEmbedId : undefined,
           }),
-        });
+        }, { allowNonOk: true });
 
         if (!res.ok) {
           const text = await res.text().catch(() => "");
           console.error("Failed to create room", res.status, text);
-
-          // If auth is missing/expired, send host to login with a return URL
-          if (res.status === 401 || res.status === 403) {
-            const next = `${window.location.pathname}${window.location.search}`;
-            nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
-            return;
-          }
 
           alert("Failed to create room. Please try again.");
           return;
@@ -754,81 +759,82 @@ export default function Join() {
             </div>
 
             {/* Right side actions */}
-<div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-  {/* Settings & Billing button, always visible to logged-in users */}
-  <button
-    onClick={() => nav("/settings/billing")}
-    style={{
-      fontSize: "13px",
-      padding: "8px 16px",
-      background: "rgba(255,255,255,0.05)",
-      border: "1px solid rgba(255,255,255,0.2)",
-      color: "#fff",
-      borderRadius: "8px",
-      fontWeight: 600,
-      cursor: "pointer",
-      whiteSpace: "nowrap",
-      transition: "all 0.3s ease",
-    }}
-    onMouseEnter={e => {
-      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-      e.currentTarget.style.borderColor = 'rgba(34,197,94,0.6)';
-    }}
-    onMouseLeave={e => {
-      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-      e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
-    }}
-  >
-    ⚙️ Settings & Billing
-  </button>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              {/* Settings & Billing button, always visible to logged-in users */}
+              <button
+                onClick={() => nav("/settings/billing")}
+                style={{
+                  fontSize: "13px",
+                  padding: "8px 16px",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  color: "#fff",
+                  borderRadius: "8px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "all 0.3s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                  e.currentTarget.style.borderColor = "rgba(34,197,94,0.6)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)";
+                }}
+              >
+                ⚙️ Settings & Billing
+              </button>
 
-  {/* Admin Dashboard button (admin, internal, or test-mode) */}
-  {showAdminUi && (
-    <button
-      onClick={() => nav("/admin/dashboard")}
-      style={{
-        fontSize: "13px",
-        padding: "8px 16px",
-        background: "rgba(220, 38, 38, 0.15)",
-        border: "1px solid rgba(220, 38, 38, 0.5)",
-        borderRadius: "8px",
-        color: "#ef4444",
-        cursor: "pointer",
-        fontWeight: 600,
-        whiteSpace: "nowrap",
-      }}
-    >
-      🛠 Admin Dashboard
-    </button>
-  )}
+              {showMyContentButton && (
+                <button
+                  onClick={() => nav(myContentTarget)}
+                  title="Open your content"
+                  style={{
+                    fontSize: "13px",
+                    padding: "8px 16px",
+                    background: "rgba(220, 38, 38, 0.1)",
+                    border: "1px solid rgba(220, 38, 38, 0.4)",
+                    borderRadius: "8px",
+                    color: "#ef4444",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    transition: "all 0.3s ease",
+                    fontWeight: 500,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(220, 38, 38, 0.2)";
+                    e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.8)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(220, 38, 38, 0.1)";
+                    e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.4)";
+                  }}
+                >
+                  🎬 My Content
+                </button>
+              )}
 
-  {/* My Content button */}
-  <button
-    onClick={() => setShowEditingModal(true)}
-    style={{
-      fontSize: "13px",
-      padding: "8px 16px",
-      background: "rgba(220, 38, 38, 0.1)",
-      border: "1px solid rgba(220, 38, 38, 0.4)",
-      borderRadius: "8px",
-      color: "#ef4444",
-      cursor: "pointer",
-      whiteSpace: "nowrap",
-      transition: "all 0.3s ease",
-      fontWeight: 500,
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.background = "rgba(220, 38, 38, 0.2)";
-      e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.8)";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.background = "rgba(220, 38, 38, 0.1)";
-      e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.4)";
-    }}
-  >
-    🎬 My Content
-  </button>
-</div>
+              {isAdmin && (
+                <button
+                  onClick={() => nav("/admin/dashboard")}
+                  style={{
+                    fontSize: "13px",
+                    padding: "8px 16px",
+                    background: "rgba(220, 38, 38, 0.15)",
+                    border: "1px solid rgba(220, 38, 38, 0.5)",
+                    borderRadius: "8px",
+                    color: "#ef4444",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  🛠 Admin Dashboard
+                </button>
+              )}
+            </div>
 
               
       </div>
@@ -1320,93 +1326,6 @@ export default function Join() {
           >
             ×
           </button>
-        </div>
-      )}
-
-      {/* Editing Suite Coming Soon Modal */}
-      {showEditingModal && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.8)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            backdropFilter: "blur(8px)",
-          }}
-          onClick={() => setShowEditingModal(false)}
-        >
-          <div
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(20, 20, 30, 0.95), rgba(30, 30, 40, 0.95))",
-              border: "1px solid rgba(220, 38, 38, 0.3)",
-              borderRadius: "16px",
-              padding: "2rem",
-              maxWidth: "400px",
-              width: "90%",
-              textAlign: "center",
-              backdropFilter: "blur(16px)",
-              boxShadow:
-                "0 25px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1) inset",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🎬</div>
-            <h2
-              style={{
-                fontSize: "1.5rem",
-                fontWeight: "bold",
-                marginBottom: "1rem",
-                background: "linear-gradient(135deg, #ffffff, #f0f0f0)",
-                backgroundClip: "text",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
-            >
-              Editing Suite
-            </h2>
-            <p
-              style={{
-                color: "rgba(255, 255, 255, 0.8)",
-                marginBottom: "1.5rem",
-                lineHeight: "1.6",
-              }}
-            >
-              Our powerful video editing suite is coming soon! For now, you can
-              stream and download your recordings.
-            </p>
-            <button
-              onClick={() => setShowEditingModal(false)}
-              style={{
-                padding: "0.75rem 1.5rem",
-                background: "linear-gradient(135deg, #dc2626, #ef4444)",
-                border: "none",
-                borderRadius: "8px",
-                color: "#ffffff",
-                fontWeight: "600",
-                cursor: "pointer",
-                transition: "all 0.3s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background =
-                  "linear-gradient(135deg, #b91c1c, #dc2626)";
-                e.currentTarget.style.transform = "translateY(-2px)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background =
-                  "linear-gradient(135deg, #dc2626, #ef4444)";
-                e.currentTarget.style.transform = "translateY(0)";
-              }}
-            >
-              Got it!
-            </button>
-          </div>
         </div>
       )}
 

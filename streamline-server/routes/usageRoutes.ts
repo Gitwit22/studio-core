@@ -6,6 +6,7 @@ import { firestore } from "../firebaseAdmin";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 // Helper function to get the next reset date (start of next month)
 function getNextResetDate(): Date {
@@ -19,7 +20,7 @@ async function handleUsageSummary(req: any, res: any) {
   try {
     const uid = (req as any).user?.uid;
     if (!uid) {
-      return res.status(401).json({ success: false, error: "unauthorized" });
+      return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     // 1) User doc (planId + overages setting)
@@ -27,6 +28,7 @@ async function handleUsageSummary(req: any, res: any) {
     const userSnap = await userRef.get();
 
     if (!userSnap.exists) {
+      // Not a limit error, leave as is
       return res.status(404).json({ success: false, error: "user not found" });
     }
 
@@ -103,6 +105,7 @@ async function handleUsageSummary(req: any, res: any) {
     const ytd = usageMonthly.ytd || {};
     const usageMinutes = usage.minutes || {};
     const ytdMinutes = ytd.minutes || {};
+    const overages = usageMonthly.overages || {};
 
     const participantUsed = toNumber(usage.participantMinutes);
     const transcodeUsed = toNumber(usage.transcodeMinutes);
@@ -176,7 +179,7 @@ async function handleUsageSummary(req: any, res: any) {
         features: {
           recording: !!features.recording,
           rtmpMultistream: !!features.multistream,
-          overagesAllowed: !!(plan.raw?.features?.overagesAllowed),
+          allowsOverages: !!(features as any).allowsOverages,
         },
         limits: {
           maxDestinations: resolveMaxDestinations(plan.raw?.limits || limits),
@@ -224,6 +227,14 @@ async function handleUsageSummary(req: any, res: any) {
             },
           },
         },
+
+        // Logged overage totals (Pro-only behavior). These are totals for the month.
+        // When missing, treat as 0 for display.
+        overages: {
+          participantMinutes: toNumber(overages.participantMinutes),
+          transcodeMinutes: toNumber(overages.transcodeMinutes),
+          updatedAt: overages.updatedAt || null,
+        },
       },
 
       computed: {
@@ -252,7 +263,7 @@ router.get("/me", requireAuth, handleUsageSummary);
 // Lightweight entitlements endpoint for client gating (features + limits)
 router.get("/entitlements", requireAuth, async (req, res) => {
   const uid = (req as any).user?.uid;
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   const entitlements = await getEffectiveEntitlements(uid);
   const plan = entitlements.plan;
@@ -274,6 +285,7 @@ router.get("/entitlements", requireAuth, async (req, res) => {
     planName: plan.name || entitlements.planId,
     recording: !!entitlements.features.recording && recordingEnabledFlag,
     rtmpMultistream: !!entitlements.features.multistream,
+    allowsOverages: !!(entitlements.features as any).allowsOverages,
     dualRecording: !!(plan.raw?.features?.dualRecording || plan.raw?.features?.dual_recording),
     watermark: !!(plan.raw?.features?.watermarkRecordings || plan.raw?.features?.watermark),
     canHls: !!((entitlements.features as any).canHls || plan.raw?.features?.canHls || plan.raw?.features?.hls || plan.raw?.features?.hlsBroadcast),

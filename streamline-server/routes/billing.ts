@@ -7,6 +7,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { PLAN_IDS, PlanId, isPlanId } from "../types/plan";
 import { getUserAccount } from "../lib/userAccount";
 import { CURRENT_TOS_VERSION, hasAcceptedCurrentTos } from "../lib/tos";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 // Plan change guardrails
 const PLAN_CHANGE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
@@ -155,7 +156,7 @@ function getPlanRank(planId?: string | null): number {
 router.post("/checkout", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const { plan, requestId, tosAccepted } = (req.body || {}) as {
       plan?: CheckoutPlanVariant;
@@ -377,7 +378,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
 router.post("/portal", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
     const account = (req as any).account || await getUserAccount(uid);
     if (account.effectiveBillingEnabled === false) {
       // Billing is disabled (Test Mode). Do not talk to Stripe; instead signal
@@ -413,7 +414,7 @@ router.post("/portal", requireAuth, async (req, res) => {
 router.post("/test/change-plan", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const { newPlanId } = (req.body || {}) as { newPlanId?: string };
     if (!newPlanId || typeof newPlanId !== "string") {
@@ -429,19 +430,18 @@ router.post("/test/change-plan", requireAuth, async (req, res) => {
         .json({ success: false, error: "billing_live" });
     }
 
+    const isProd = process.env.NODE_ENV === "production";
     const platformDisabled = account.platformBillingEnabled === false;
     const userDisabled = account.billingEnabled === false;
 
-    // Optional safety rail:
-    // - If billing is disabled platform-wide, treat it as an intentional test/staging mode and allow.
-    // - If only the user is in test mode while platform billing is enabled, require explicit tester flag in production.
-    const isProd = process.env.NODE_ENV === "production";
+    // Safety rails (especially for production):
+    // - If billing is disabled platform-wide, treat it as an intentional test/staging mode and allow self-service.
+    // - If only the user is in test mode while platform billing is enabled, require explicit tester flag in prod.
+    // - Admins are always allowed.
     const raw = account.rawUser || {};
     const isTester = !!(raw.tester || raw.isTester);
-    if (isProd && !platformDisabled && userDisabled && !isTester) {
-      return res
-        .status(403)
-        .json({ success: false, error: "test_mode_disabled" });
+    if (isProd && !account.isAdmin && !platformDisabled && userDisabled && !isTester) {
+      return res.status(403).json({ success: false, error: "test_mode_disabled" });
     }
 
     const planIdCandidate = newPlanId as PlanId;
@@ -499,7 +499,7 @@ router.post("/test/change-plan", requireAuth, async (req, res) => {
 router.post("/clear-pending", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ success: false, error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
     await getUserRef(uid).set({ pendingPlan: null }, { merge: true });
     return res.json({ success: true });
   } catch (err: any) {
@@ -511,7 +511,7 @@ router.post("/clear-pending", requireAuth, async (req, res) => {
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const account = (req as any).account || await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();
@@ -536,7 +536,7 @@ router.get("/me", requireAuth, async (req, res) => {
 router.get("/pending-change", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const account = (req as any).account || await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();
@@ -617,7 +617,7 @@ router.get("/pending-change", requireAuth, async (req, res) => {
 router.get("/status", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     const account = (req as any).account || await getUserAccount(uid);
 
     const snap = await getUserRef(uid).get();

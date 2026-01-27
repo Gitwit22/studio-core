@@ -7,13 +7,27 @@ import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
 import SettingsDestinations from "./SettingsDestinations";
-import { apiFetch, clearAuthStorage } from "../lib/api";
+import { ApiUnauthorizedError, apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
 import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
 import { getMeCached, clearMeCache } from "../lib/meCache";
+import { isFeatureAvailable, isPlatformEnabled } from "../lib/featureAvailability";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+
+async function apiFetchWithCookieFallback(path: string, init: RequestInit = {}) {
+  try {
+    return await apiFetchAuth(path, init);
+  } catch (err: any) {
+    // In cookie-auth setups (Admin flow), we may not have a localStorage JWT.
+    // Fall back to cookie-based auth so test-mode plan switching works.
+    if (err instanceof ApiUnauthorizedError) {
+      return await apiFetch(path, init);
+    }
+    throw err;
+  }
+}
 
 type RolePresetId = "participant" | "cohost";
 
@@ -138,6 +152,7 @@ const DEFAULT_ENTITLEMENTS = {
 const DEFAULT_USAGE = {
   streamingMinutes: { used: 0, limit: 0, lifetime: 0 },
   recordingMinutes: { used: 0, lifetime: 0 },
+  overages: { participantMinutes: 0, transcodeMinutes: 0 },
   rtmpDestinations: { used: 0, limit: 0 },
   storage: { used: 0, limit: 0 },
   projects: { used: 0, limit: 0 },
@@ -215,6 +230,8 @@ export default function SettingsBilling() {
   const nav = useNavigate();
   const { user: authUser, refresh: refreshAuth } = useAuthMe();
 
+  const isAdmin = Boolean((authUser as any)?.isAdmin);
+
   const [user, setUser] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +243,7 @@ export default function SettingsBilling() {
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(true);
   const [platformTranscodeEnabled, setPlatformTranscodeEnabled] = useState<boolean>(true);
   const [platformHlsSettingsTabEnabled, setPlatformHlsSettingsTabEnabled] = useState<boolean>(true);
+  const [platformRecordingEnabled, setPlatformRecordingEnabled] = useState<boolean>(true);
 
   const [mediaPrefs, setMediaPrefs] = useState<typeof DEFAULT_MEDIA_PREFS>(DEFAULT_MEDIA_PREFS);
   const [presetOptions, setPresetOptions] = useState<Array<{ id: string; label: string }>>([]);
@@ -280,6 +298,8 @@ export default function SettingsBilling() {
   const [toast, setToast] = useState<string | null>(null);
   const [emergencyLoading, setEmergencyLoading] = useState(false);
   const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
+  const [emergencyExpiresAtMs, setEmergencyExpiresAtMs] = useState<number | null>(null);
+  const [emergencyCountdown, setEmergencyCountdown] = useState<string | null>(null);
 
   const [actionLoading, setActionLoading] = useState<CheckoutPlanVariant | "portal" | null>(null);
 
@@ -297,7 +317,69 @@ export default function SettingsBilling() {
 
   const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles">("plan");
 
+  // If a platform-wide feature is disabled, avoid landing on a hidden tab.
+  useEffect(() => {
+    if (activeTab === "destinations" && platformTranscodeEnabled === false) {
+      setActiveTab("plan");
+    }
+    if (activeTab === "hls" && platformHlsSettingsTabEnabled === false) {
+      setActiveTab("plan");
+    }
+  }, [activeTab, platformTranscodeEnabled, platformHlsSettingsTabEnabled]);
+
   const simpleMode = advancedPermissions.effectivePermissionsMode !== "advanced";
+
+  const formatEmergencyCountdown = (msRemaining: number): string => {
+    if (!Number.isFinite(msRemaining) || msRemaining <= 0) return "0m";
+    const totalMinutes = Math.ceil(msRemaining / 60_000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours <= 0) return `${minutes}m`;
+    return `${hours}h ${minutes}m`;
+  };
+
+  useEffect(() => {
+    if (!emergencyExpiresAtMs) {
+      setEmergencyCountdown(null);
+      return;
+    }
+
+    const tick = () => {
+      const diff = emergencyExpiresAtMs - Date.now();
+      setEmergencyCountdown(formatEmergencyCountdown(diff));
+    };
+
+    tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, [emergencyExpiresAtMs]);
+
+  useEffect(() => {
+    if (activeTab !== "usage") return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetchAuth("/api/recordings/emergency-status", { cache: "no-store" }, { allowNonOk: true });
+        if (!res.ok) return;
+        const { json } = await safeReadJson(res);
+        const expiresAt = (json as any)?.data?.expiresAt;
+        if (cancelled) return;
+        if (typeof expiresAt === "string" && expiresAt) {
+          const ms = Date.parse(expiresAt);
+          setEmergencyExpiresAtMs(Number.isFinite(ms) ? ms : null);
+        } else {
+          setEmergencyExpiresAtMs(null);
+        }
+      } catch {
+        // Silent: countdown is non-critical UI.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
 
   // If billing is active or trialing, ensure pendingPlan is cleared to avoid stuck UI
   useEffect(() => {
@@ -379,9 +461,34 @@ export default function SettingsBilling() {
 
   const loadPlans = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/plans`, { credentials: "include" });
+      // Avoid any intermediate caching; plans must reflect admin edits quickly.
+      const bust = Date.now();
+      const res = await apiFetchAuth(`${API_BASE}/api/plans?ts=${bust}`, { cache: "no-store" }, { allowNonOk: true });
       if (res.ok) {
         const data = await res.json();
+        console.log("[SettingsBilling] /api/plans response:", data);
+
+        // Keep platform flags consistent with the same source as the plan grid.
+        // Default semantics: enabled when missing.
+        try {
+          const pf = (data as any)?.platformFlags || {};
+          setPlatformHlsEnabled(isPlatformEnabled(pf.hlsEnabled));
+          setPlatformRecordingEnabled(isPlatformEnabled(pf.recordingEnabled));
+          setPlatformTranscodeEnabled(isPlatformEnabled(pf.transcodeEnabled));
+          const hlsTabFlag =
+            typeof pf.hlsSettingsTab === "boolean"
+              ? pf.hlsSettingsTab
+              : typeof pf.hlsEnabled === "boolean"
+                ? pf.hlsEnabled
+                : true;
+          setPlatformHlsSettingsTabEnabled(hlsTabFlag);
+        } catch {
+          setPlatformHlsEnabled(true);
+          setPlatformRecordingEnabled(true);
+          setPlatformTranscodeEnabled(true);
+          setPlatformHlsSettingsTabEnabled(true);
+        }
+
         if (Array.isArray(data.plans) && data.plans.length) {
           // Only use plans with visibility: 'public' (backend should already filter, but double-check)
           const visiblePlans = data.plans.filter((p: any) => p.visibility === "public");
@@ -401,34 +508,8 @@ export default function SettingsBilling() {
       // Prefer canonical effectiveEntitlements from /api/account/me
       const data = await getMeCached();
 
-      try {
-        const platformFlags = (data as any)?.platformFlags || {};
-        if (typeof platformFlags.hlsEnabled === "boolean") {
-          setPlatformHlsEnabled(platformFlags.hlsEnabled);
-        } else {
-          setPlatformHlsEnabled(true);
-        }
-
-        if (typeof platformFlags.transcodeEnabled === "boolean") {
-          setPlatformTranscodeEnabled(platformFlags.transcodeEnabled);
-        } else {
-          setPlatformTranscodeEnabled(true);
-        }
-
-        // Settings gate: default to visible unless explicitly disabled.
-        // Prefer platformFlags.hlsSettingsTab, fall back to platformFlags.hlsEnabled.
-        const hlsTabFlag =
-          typeof platformFlags.hlsSettingsTab === "boolean"
-            ? platformFlags.hlsSettingsTab
-            : typeof platformFlags.hlsEnabled === "boolean"
-              ? platformFlags.hlsEnabled
-              : true;
-        setPlatformHlsSettingsTabEnabled(hlsTabFlag);
-      } catch {
-        setPlatformHlsEnabled(true);
-        setPlatformHlsSettingsTabEnabled(true);
-        setPlatformTranscodeEnabled(true);
-      }
+      // NOTE: platform-wide flags are sourced from /api/plans to keep the plan grid
+      // 100% server-driven and to avoid stale cached values from /api/account/me.
 
       // Capture Terms of Service metadata for display and gating.
       setUser((prev) =>
@@ -485,7 +566,7 @@ export default function SettingsBilling() {
       }
 
       // Fallback: legacy usage entitlements endpoint
-      const legacyRes = await apiFetch("/api/usage/entitlements");
+      const legacyRes = await apiFetchAuth("/api/usage/entitlements", {}, { allowNonOk: true });
       if (!legacyRes.ok) throw new Error("usage/entitlements failed");
       const legacy = await legacyRes.json();
       setEntitlements({
@@ -512,12 +593,13 @@ export default function SettingsBilling() {
  
   const loadUsage = async () => {
     try {
-      const res = await apiFetch("/api/usage/me");
+      const res = await apiFetchAuth("/api/usage/me");
       const data = await res.json();
       const limits = data?.plan?.limits || {};
 
       const usageMonthly = data?.usageMonthly || {};
       const usageInner = usageMonthly.usage || {};
+      const overages = usageMonthly.overages || {};
       const usageWrapper = data?.usage || {};
       const usageMinutes = usageWrapper.minutes || usageInner.minutes || {};
       // Fallback to legacy hours on user.usage if monthly doc not present
@@ -555,6 +637,10 @@ export default function SettingsBilling() {
           used: recordingCurrent,
           lifetime: recordingLifetime,
         },
+        overages: {
+          participantMinutes: Number(overages.participantMinutes ?? 0),
+          transcodeMinutes: Number(overages.transcodeMinutes ?? 0),
+        },
         rtmpDestinations: {
           used: 0,
           // Destination caps are resolved on the server; 0 = "no numeric cap".
@@ -578,7 +664,7 @@ export default function SettingsBilling() {
   const loadMediaPrefs = async () => {
     try {
       const [presetsRes, me] = await Promise.all([
-        fetch(`${API_BASE}/api/account/presets`, { credentials: "include" }),
+        apiFetchAuth(`${API_BASE}/api/account/presets`, {}, { allowNonOk: true }),
         getMeCached(),
       ]);
 
@@ -656,7 +742,7 @@ export default function SettingsBilling() {
 
   const loadCohostProfile = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/account/cohost-profile`, { credentials: "include" });
+      const res = await apiFetchAuth(`${API_BASE}/api/account/cohost-profile`, {}, { allowNonOk: true });
       if (!res.ok) throw new Error("cohost profile endpoint failed");
       const data = await res.json();
       if (data?.profile) {
@@ -669,7 +755,7 @@ export default function SettingsBilling() {
 
   const loadRolePresets = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/account/role-presets`, { credentials: "include" });
+      const res = await apiFetchAuth(`${API_BASE}/api/account/role-presets`, {}, { allowNonOk: true });
       if (!res.ok) throw new Error("role-presets endpoint failed");
       const data = await res.json();
       if (data?.presets) {
@@ -718,12 +804,15 @@ export default function SettingsBilling() {
     setCohostSaving(true);
     setCohostMessage(null);
     try {
-      const res = await fetch(`${API_BASE}/api/account/cohost-profile`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(cohostProfile),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/account/cohost-profile`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(cohostProfile),
+        },
+        { allowNonOk: true }
+      );
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || "Failed to save co-host defaults");
@@ -743,12 +832,15 @@ export default function SettingsBilling() {
     setCohostSaving(true);
     setCohostMessage(null);
     try {
-      const res = await fetch(`${API_BASE}/api/account/cohost-profile`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(next),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/account/cohost-profile`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+        },
+        { allowNonOk: true }
+      );
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || "Failed to save co-host defaults");
@@ -767,12 +859,15 @@ export default function SettingsBilling() {
   const saveRolePreset = async (presetId: RolePresetId, patch: Partial<RolePresetDoc>) => {
     setRolePresetsSaving((prev) => ({ ...prev, [presetId]: "saving" }));
     try {
-      const res = await fetch(`${API_BASE}/api/account/role-presets/${presetId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(patch),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/account/role-presets/${presetId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        },
+        { allowNonOk: true }
+      );
       const data = await res.json().catch(() => null);
       if (!res.ok || (data as any)?.error) {
         throw new Error(((data as any)?.error as string) || "Failed to update role defaults");
@@ -808,12 +903,15 @@ export default function SettingsBilling() {
     setMediaPrefsMessage(null);
     setMediaPrefsError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/account/media-prefs`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(mediaPrefs),
-      });
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/account/media-prefs`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mediaPrefs),
+        },
+        { allowNonOk: true }
+      );
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || "Failed to save media preferences");
@@ -871,10 +969,7 @@ export default function SettingsBilling() {
 
       let res: Response;
       try {
-        res = await fetch(`${API_BASE}/api/recordings/emergency-latest`, {
-          credentials: "include",
-          cache: "no-store",
-        });
+        res = await apiFetchAuth("/api/recordings/emergency-latest", { cache: "no-store" }, { allowNonOk: true });
       } catch (err) {
         console.error("Emergency download failed (network)", err);
         setEmergencyMessage("Network error. Check your connection and try again.");
@@ -893,10 +988,16 @@ export default function SettingsBilling() {
       }
 
       const url = (json as any)?.url || (json as any)?.data?.url;
+      const expiresAt = (json as any)?.expiresAt || (json as any)?.data?.expiresAt;
       if (!url) {
         console.error("Emergency download failed (shape)", { body: json ?? text });
         setEmergencyMessage("Recording URL missing. Contact support.");
         return;
+      }
+
+      if (typeof expiresAt === "string" && expiresAt) {
+        const ms = Date.parse(expiresAt);
+        setEmergencyExpiresAtMs(Number.isFinite(ms) ? ms : null);
       }
 
       window.open(url, "_blank");
@@ -934,7 +1035,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   const requestId = `${plan}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
   try {
-    const res = await apiFetch("/api/billing/checkout", {
+    const res = await apiFetchWithCookieFallback("/api/billing/checkout", {
       method: "POST",
       body: JSON.stringify({ plan, requestId, tosAccepted: true }),
     });
@@ -976,7 +1077,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
         setActionLoading(null);
         return;
       }
-      const res = await apiFetch("/api/billing/portal", {
+      const res = await apiFetchWithCookieFallback("/api/billing/portal", {
         method: "POST",
       });
       const data = await res.json();
@@ -993,7 +1094,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setCheckoutTosSubmitting(true);
       setCheckoutTosError(null);
       try {
-        const res = await apiFetch("/api/account/accept-tos", {
+        const res = await apiFetchWithCookieFallback("/api/account/accept-tos", {
           method: "POST",
         });
         const data = await res.json();
@@ -1034,7 +1135,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     setTestModeLoading(true);
     setError(null);
     try {
-      const res = await apiFetch("/api/billing/test/change-plan", {
+      const res = await apiFetchWithCookieFallback("/api/billing/test/change-plan", {
         method: "POST",
         body: JSON.stringify({ newPlanId: testModeTargetPlan }),
       });
@@ -1060,7 +1161,15 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       if (code === "billing_live") {
         setError("Live billing is enabled on this account. Test Mode switching is disabled.");
       } else if (code === "test_mode_disabled") {
-        setError("Test Mode plan switching is disabled for this account.");
+        setError(
+          "Test Mode plan switching isn’t enabled for your user. This is a setting/permission: ask an admin to mark your account as a tester (tester=true) or enable platform-wide Test Mode (disable billing system)."
+        );
+      } else if (code === "insufficient_permissions") {
+        setError(
+          "You don’t have permission to switch plans in Test Mode. This is a setting/permission: ask an admin to grant tester access or switch this environment into platform-wide Test Mode."
+        );
+      } else if (code === "unauthorized") {
+        setError("You’re not signed in (or your session expired). Please sign in again and retry.");
       } else if (code === "too_many_requests") {
         setError("Please wait a moment before switching plans again.");
       } else if (code === "invalid_plan") {
@@ -1260,13 +1369,15 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           >
             Usage
           </button>
-          <button
-            type="button"
-            style={activeTab === "destinations" ? { ...S.tab, ...S.tabActive } : S.tab}
-            onClick={() => setActiveTab("destinations")}
-          >
-            Stream Keys
-          </button>
+          {platformTranscodeEnabled !== false && (
+            <button
+              type="button"
+              style={activeTab === "destinations" ? { ...S.tab, ...S.tabActive } : S.tab}
+              onClick={() => setActiveTab("destinations")}
+            >
+              Stream Keys
+            </button>
+          )}
           {platformHlsSettingsTabEnabled !== false && (
             <button
               type="button"
@@ -1522,7 +1633,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       </span>
                     </div>
                     <div style={S.planPrice}>
-                      <span style={S.priceAmount}>${currentPlan.price}</span>
+                      <span style={S.priceAmount}>${(currentPlan as any).priceMonthly ?? currentPlan.price}</span>
                       <span style={S.pricePeriod}>/month</span>
                     </div>
                     {currentPlan.description && (
@@ -1755,8 +1866,61 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             {/* ================================================================ */}
             {/* SECTION 4: PLAN COMPARISON */}
             {/* ================================================================ */}
+
             <div style={S.card}>
-              <h2 style={S.cardTitle}>📊 Compare Plans</h2>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <h2 style={S.cardTitle}>📊 Compare Plans</h2>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => loadPlans()}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 999,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(15,23,42,0.8)",
+                      color: "#e2e8f0",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                    title="Force refresh from /api/plans"
+                  >
+                    🔄 Refresh plans
+                  </button>
+                )}
+                <a
+                  href="/pricing/explainer"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: "#60a5fa",
+                    fontSize: 13,
+                    textDecoration: "underline",
+                    fontWeight: 500,
+                  }}
+                >
+                  Click here to get an explanation of our pricing
+                </a>
+              </div>
+
+              {(!platformRecordingEnabled || !platformHlsEnabled || !platformTranscodeEnabled) && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(245,158,11,0.45)",
+                    background: "rgba(245,158,11,0.12)",
+                    color: "#fde68a",
+                    fontSize: 13,
+                    lineHeight: 1.35,
+                  }}
+                >
+                  <div style={{ fontWeight: 700 }}>Some features are temporarily unavailable platform-wide.</div>
+                </div>
+              )}
 
               <div style={S.plansGrid}>
                 {plans.map((plan) => {
@@ -1794,7 +1958,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       <div style={S.planCardHeader}>
                         <h3 style={{ ...S.planCardName, color }}>{plan.name}</h3>
                         <div style={S.planCardPrice}>
-                          <span style={S.planCardAmount}>${plan.price}</span>
+                          <span style={S.planCardAmount}>${plan.priceMonthly ?? plan.price}</span>
                           <span style={S.planCardPeriod}>/mo</span>
                         </div>
                         {plan.description && (
@@ -1804,14 +1968,45 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         )}
                       </div>
                       <ul style={S.featureList}>
-                        <FeatureRow label="Monthly minutes" value={plan.limits.monthlyMinutesIncluded} />
+                        <FeatureRow label="In-Room Minutes" value={plan.limits.monthlyMinutesIncluded} />
+                        {platformTranscodeEnabled !== false && (
+                          <FeatureRow
+                            label="Streaming Minutes"
+                            value={
+                              plan.limits.transcodeMinutes > 0
+                                ? plan.limits.transcodeMinutes
+                                : "Not included"
+                            }
+                          />
+                        )}
                         <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
                         <FeatureRow label="Stream destinations" value={plan.limits.rtmpDestinationsMax} />
-                        {entitlements.recording && (
-                          <FeatureRow label="Recording" value={plan.features.recording} />
+                        {platformRecordingEnabled !== false && (
+                          <FeatureRow
+                            label="Recording"
+                            value={Boolean((plan as any).features?.recording)}
+                            lockedText="Not included in this plan"
+                          />
                         )}
-                        <FeatureRow label="Multistream" value={(plan as any).features?.multistream ?? (plan as any).multistreamEnabled} />
-                        {platformHlsEnabled ? <FeatureRow label="HLS Broadcast Page" value={(plan as any).features?.canHls} /> : null}
+                        {platformTranscodeEnabled !== false && (
+                          <FeatureRow
+                            label="Multistream"
+                            value={Boolean((plan as any).features?.multistream ?? (plan as any).multistreamEnabled)}
+                            lockedText="Not included in this plan"
+                          />
+                        )}
+                        {platformHlsEnabled !== false && (
+                          <FeatureRow
+                            label="HLS Broadcast Page"
+                            value={Boolean(
+                              (plan as any).features?.hlsCustomizationEnabled ??
+                              (plan as any).features?.canCustomizeHlsPage ??
+                              (plan as any).features?.canHls ??
+                              (plan as any).features?.hls
+                            )}
+                            lockedText="Not included in this plan"
+                          />
+                        )}
                         {/* Advanced Permissions is now removed from plan marketing UI; all accounts use simple Participant/Co-host defaults. */}
                         {plan.editing?.access && (
                           <>
@@ -1820,6 +2015,19 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                           </>
                         )}
                       </ul>
+                      {(planId !== "free" && planId !== "basic") && (
+                        <div style={{ color: "#94a3b8", fontSize: 12, margin: "8px 0 0 0", lineHeight: 1.45 }}>
+                          <div>
+                            <span style={{ color: "#60a5fa" }}>Streaming Minutes</span> are consumed when StreamLine sends your live video to other platforms (like YouTube, Facebook, Twitch, etc.).
+                          </div>
+                          <div style={{ marginTop: 6 }}>
+                            They are not used when you’re just streaming inside StreamLine.
+                          </div>
+                          <div style={{ marginTop: 8 }}>
+                            They are counted per destination, per minute.
+                          </div>
+                        </div>
+                      )}
                       <div style={S.planCardAction}>
                         {isTestMode ? (
                           isCurrent ? (
@@ -2196,6 +2404,19 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               <div style={{ color: "#cbd5e1", marginBottom: 6 }}>
                 Recording: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.used}</span> min
               </div>
+              <div style={{ color: "#cbd5e1", marginBottom: 6 }}>
+                <div style={{ fontWeight: 700, color: "#e5e7eb", marginBottom: 2 }}>Overage (this month)</div>
+                <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 4 }}>
+                  Minutes used beyond the plan’s included limits.
+                </div>
+                <span style={{ color: "#fff", fontWeight: 700 }}>
+                  {Number(usage.overages?.participantMinutes ?? 0) + Number(usage.overages?.transcodeMinutes ?? 0)}
+                </span>
+                {" "}min
+                <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                  {" "}(live: {Number(usage.overages?.participantMinutes ?? 0)} / transcode: {Number(usage.overages?.transcodeMinutes ?? 0)})
+                </span>
+              </div>
               <div style={{ color: "#94a3b8", fontSize: 12 }}>Recording minutes are included in your total usage.</div>
               <div style={{ marginTop: 8 }}>
                 <button
@@ -2283,6 +2504,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </button>
               </div>
               <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
+                Only one emergency recording is stored at a time.
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "#9ca3af" }}>
+                Expires in {emergencyCountdown || "—"}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
                 Use this if your in-room download didn’t work. Downloads are available for a limited time.
               </div>
               {emergencyMessage && (
@@ -2295,9 +2522,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         {/* ================================================================ */}
         {/* SECTION 4: DESTINATIONS / STREAM KEYS */}
         {/* ================================================================ */}
-        {activeTab === "destinations" && (
+        {activeTab === "destinations" && platformTranscodeEnabled !== false && (
           <div style={{ marginTop: 16 }}>
-            <SettingsDestinations />
+            <SettingsDestinations
+              locked={Number(entitlements.maxDestinations ?? 0) < 1}
+              lockReason="Stream Destinations are not included in your current plan."
+              onUpgrade={() => setActiveTab("plan")}
+            />
           </div>
         )}
       </div>
@@ -2427,7 +2658,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     }}
                     disabled={!!actionLoading}
                   >
-                    {actionLoading === "starter_paid" ? "⏳ Redirecting..." : `Starter — $${starterPlan?.price ?? 15}/mo`}
+                    {actionLoading === "starter_paid"
+                      ? "⏳ Redirecting..."
+                      : `Starter — $${(starterPlan as any)?.priceMonthly ?? starterPlan?.price ?? "—"}/mo`}
                   </button>
 
                   <button
@@ -2439,7 +2672,9 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     }}
                     disabled={!!actionLoading}
                   >
-                    {actionLoading === "pro" ? "⏳ Redirecting..." : `Pro — $${proPlan?.price ?? 49}/mo`}
+                    {actionLoading === "pro"
+                      ? "⏳ Redirecting..."
+                      : `Pro — $${(proPlan as any)?.priceMonthly ?? proPlan?.price ?? "—"}/mo`}
                   </button>
 
                   <button
@@ -2520,8 +2755,21 @@ function UsageBar({ label, used, limit, unit }: { label: string; used: number; l
   );
 }
 
-function FeatureRow({ label, value, pill = false, subBullets }: { label: string; value: boolean | number | string | undefined; pill?: boolean; subBullets?: string[] }) {
+function FeatureRow({
+  label,
+  value,
+  pill = false,
+  subBullets,
+  lockedText,
+}: {
+  label: string;
+  value: boolean | number | string | undefined;
+  pill?: boolean;
+  subBullets?: string[];
+  lockedText?: string;
+}) {
   const isBoolean = typeof value === "boolean";
+  const isLocked = !pill && isBoolean && value === false && !!lockedText;
   const isIncluded = isBoolean
     ? value
     : typeof value === "string"
@@ -2533,11 +2781,12 @@ function FeatureRow({ label, value, pill = false, subBullets }: { label: string;
       : false;
   const displayValue = pill
     ? (isIncluded ? "✓" : "—")
-    : (isBoolean ? (value ? "✓" : "—") : value?.toString() || "—");
+    : (isBoolean ? (value ? "✓" : (isLocked ? "🔒" : "—")) : value?.toString() || "—");
   const isEnabled = pill ? isIncluded : (value === true || (typeof value === "number" && value > 0) || (typeof value === "string" && value !== "—"));
+  const effectiveSubBullets = isLocked ? [lockedText!] : subBullets;
 
   return (
-    <li style={{ ...S.featureItem, opacity: isEnabled ? 1 : 0.5 }}>
+    <li style={{ ...S.featureItem, opacity: isEnabled ? 1 : 0.5 }} title={isLocked ? lockedText : undefined}>
       <span style={S.featureLabel}>{label}</span>
       <span
         style={
@@ -2552,9 +2801,9 @@ function FeatureRow({ label, value, pill = false, subBullets }: { label: string;
       >
         {displayValue}
       </span>
-      {subBullets && subBullets.length > 0 && (
+      {effectiveSubBullets && effectiveSubBullets.length > 0 && (
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, color: "#94a3b8", fontSize: 12, lineHeight: 1.5 }}>
-          {subBullets.map((item) => (
+          {effectiveSubBullets.map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>
