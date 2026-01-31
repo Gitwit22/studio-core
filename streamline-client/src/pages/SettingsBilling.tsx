@@ -206,8 +206,17 @@ function getStatusBadge(status: string | undefined, cancelAtPeriodEnd?: boolean)
   return { text: status, icon: "ℹ️", color: "#6b7280", bg: "rgba(55,65,81,0.35)" };
 }
 
-function getPlanActionLabel(current: PlanId, target: PlanId, isProcessing: boolean): string {
-  if (isProcessing) return "Pending change";
+function getPlanActionLabel(
+  current: PlanId,
+  target: PlanId,
+  params: { isProcessing: boolean; pendingPlan?: string | null }
+): string {
+  const pendingPlan = String(params.pendingPlan || "").trim();
+
+  // Only show "Pending" on the target plan, not every card.
+  if (pendingPlan && target === (pendingPlan as any)) return "Pending change";
+
+  if (params.isProcessing) return "Processing…";
   if (current === target) return "Current plan";
   const order: PlanId[] = ["free", "basic", "starter", "pro"];
   const curIdx = order.indexOf(current);
@@ -442,6 +451,17 @@ export default function SettingsBilling() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefreshStatus = async () => {
+    try {
+      // Try to reconcile Stripe -> Firestore (self-heals when webhooks lag/miss)
+      await apiFetchWithCookieFallback("/api/billing/refresh", { method: "POST" });
+      clearMeCache();
+    } catch {
+      // ignore; still allow the user to refresh local state
+    }
+    await loadAllData();
   };
 
   useEffect(() => {
@@ -1935,7 +1955,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
                     {/* Processing */}
                     {isProcessing && (
-                      <button onClick={loadAllData} style={S.secondaryBtn}>
+                      <button onClick={handleRefreshStatus} style={S.secondaryBtn}>
                         🔄 Refresh Status
                       </button>
                     )}
@@ -2136,7 +2156,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             }}
                             disabled={!!actionLoading || isBlocked || isProcessing}
                           >
-                            {actionLoading === "basic" ? "⏳..." : getPlanActionLabel(userPlan, "basic" as any, isProcessing)}
+                            {actionLoading === "basic"
+                              ? "⏳..."
+                              : getPlanActionLabel(userPlan, "basic" as any, {
+                                  isProcessing,
+                                  pendingPlan: user?.pendingPlan,
+                                })}
                           </button>
                         ) : planId === "starter" && (userPlan === "free" || userPlan === "basic") ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -2148,7 +2173,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                               }}
                               disabled={!!actionLoading || isBlocked || isProcessing}
                             >
-                              {actionLoading === "starter_paid" ? "⏳..." : getPlanActionLabel(userPlan, "starter", isProcessing)}
+                              {actionLoading === "starter_paid"
+                                ? "⏳..."
+                                : getPlanActionLabel(userPlan, "starter", {
+                                    isProcessing,
+                                    pendingPlan: user?.pendingPlan,
+                                  })}
                             </button>
                             <button
                               onClick={() => startCheckout("starter_trial")}
@@ -2170,7 +2200,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             }}
                             disabled={!!actionLoading || isBlocked || isProcessing}
                           >
-                            {actionLoading === "pro" ? "⏳..." : getPlanActionLabel(userPlan, "pro", isProcessing)}
+                            {actionLoading === "pro"
+                              ? "⏳..."
+                              : getPlanActionLabel(userPlan, "pro", {
+                                  isProcessing,
+                                  pendingPlan: user?.pendingPlan,
+                                })}
                           </button>
                         ) : planId === "free" && (userPlan === "starter" || userPlan === "pro" || userPlan === "basic") ? (
                           <button
@@ -2194,7 +2229,10 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             }}
                             disabled={!!actionLoading || isBlocked}
                           >
-                            {getPlanActionLabel(userPlan, planId as any, isProcessing)}
+                            {getPlanActionLabel(userPlan, planId as any, {
+                              isProcessing,
+                              pendingPlan: user?.pendingPlan,
+                            })}
                           </button>
                         )}
                       </div>

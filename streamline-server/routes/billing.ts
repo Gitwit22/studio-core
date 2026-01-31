@@ -153,6 +153,22 @@ function getPlanRank(planId?: string | null): number {
   return PLAN_RANKS[planId] ?? 0;
 }
 
+function planIdFromStripeSubscription(sub: any): PlanId {
+  const metaPlan = String(sub?.metadata?.plan || "").trim();
+  if (isPlanId(metaPlan as any)) return metaPlan as PlanId;
+
+  const planVariant = String(sub?.metadata?.planVariant || "").trim();
+  if (planVariant === "pro") return "pro";
+  if (planVariant === "basic") return "basic";
+  if (planVariant.startsWith("starter")) return "starter";
+
+  const priceId = sub?.items?.data?.[0]?.price?.id;
+  if (priceId === process.env.STRIPE_PRICE_STARTER) return "starter";
+  if (priceId === process.env.STRIPE_PRICE_BASIC) return "basic";
+  if (priceId === process.env.STRIPE_PRICE_PRO) return "pro";
+  return "free";
+}
+
 router.post("/checkout", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
@@ -504,6 +520,99 @@ router.post("/clear-pending", requireAuth, async (req, res) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error("POST /api/billing/clear-pending failed:", err?.message || err);
+    return res.status(500).json({ success: false, error: err?.message || "Server error" });
+  }
+});
+
+// Self-healing reconcile: if webhooks lag/miss, fetch Stripe subscription state and
+// update planId + clear pendingPlan when the subscription is active/trialing.
+router.post("/refresh", requireAuth, async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
+
+    const account = (req as any).account || await getUserAccount(uid);
+    if (account.effectiveBillingEnabled === false) {
+      return res.json({ success: false, error: "billing_disabled" });
+    }
+
+    const userRef = getUserRef(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) return res.status(404).json({ success: false, error: "User not found" });
+    const user = snap.data() as any;
+
+    const subscriptionId: string | undefined = user?.billing?.subscriptionId || user?.stripeSubscriptionId;
+    const customerId: string | undefined = user?.stripeCustomerId || user?.billing?.customerId;
+    if (!subscriptionId && !customerId) {
+      return res.status(400).json({ success: false, error: "no_stripe_customer" });
+    }
+
+    let sub: any = null;
+    if (subscriptionId) {
+      sub = await stripe.subscriptions.retrieve(subscriptionId);
+    } else if (customerId) {
+      const list = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 10 });
+      const data = Array.isArray((list as any)?.data) ? (list as any).data : [];
+      sub =
+        data.find((s: any) => s?.status === "active" || s?.status === "trialing") ||
+        data[0] ||
+        null;
+    }
+
+    if (!sub) {
+      return res.status(404).json({ success: false, error: "no_subscription" });
+    }
+
+    const nextPlan = planIdFromStripeSubscription(sub);
+    const billingStatus = String(sub.status || "none");
+    const billingActive = billingStatus === "active" || billingStatus === "trialing";
+    const currentPeriodEndSec = (sub as any).current_period_end as number | undefined;
+    const currentPeriodEnd = typeof currentPeriodEndSec === "number" ? currentPeriodEndSec * 1000 : null;
+    const priceId = sub?.items?.data?.[0]?.price?.id ?? null;
+
+    const prevPlan = (user?.planId as PlanId) || "free";
+    const now = Date.now();
+    const history = sanitizeHistory(user?.planChangeHistory);
+    const nextHistory =
+      prevPlan === nextPlan
+        ? history
+        : [...history, { at: now, fromPlan: prevPlan, toPlan: nextPlan, source: "billing_refresh" }].slice(-10);
+
+    await userRef.set(
+      {
+        planId: billingActive ? nextPlan : "free",
+        pendingPlan: billingActive ? null : (user?.pendingPlan ?? null),
+        planChangeHistory: nextHistory,
+        planChangeCooldownUntil: billingActive ? null : (user?.planChangeCooldownUntil ?? null),
+        planChangeLock: null,
+        planChangeRequestId: null,
+        planChangeRequestResult: null,
+        billingActive,
+        billingStatus,
+        billing: {
+          ...(user?.billing || {}),
+          provider: "stripe",
+          customerId: customerId ?? sub.customer ?? null,
+          subscriptionId: sub.id ?? subscriptionId ?? null,
+          priceId,
+          cancelAtPeriodEnd: !!sub.cancel_at_period_end,
+          currentPeriodEnd,
+          updatedAt: now,
+        },
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    return res.json({
+      success: true,
+      planId: billingActive ? nextPlan : "free",
+      billingStatus,
+      billingActive,
+      pendingPlanCleared: billingActive,
+    });
+  } catch (err: any) {
+    console.error("POST /api/billing/refresh failed:", err?.message || err);
     return res.status(500).json({ success: false, error: err?.message || "Server error" });
   }
 });

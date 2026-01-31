@@ -92,6 +92,24 @@ function planIdFromPrice(priceId?: string) {
   if (!priceId) return "free";
   if (priceId === process.env.STRIPE_PRICE_STARTER) return "starter";
   if (priceId === process.env.STRIPE_PRICE_PRO) return "pro";
+  if (priceId === process.env.STRIPE_PRICE_BASIC) return "basic";
+  return "free";
+}
+
+function canonicalPlanFromSubscription(subscription: any): "free" | "starter" | "basic" | "pro" {
+  const metaPlan = String(subscription?.metadata?.plan || "").trim();
+  if (metaPlan === "free" || metaPlan === "starter" || metaPlan === "basic" || metaPlan === "pro") {
+    return metaPlan;
+  }
+
+  const planVariant = String(subscription?.metadata?.planVariant || "").trim();
+  if (planVariant === "pro") return "pro";
+  if (planVariant === "basic") return "basic";
+  if (planVariant.startsWith("starter")) return "starter";
+
+  const priceId = subscription?.items?.data?.[0]?.price?.id;
+  const fromPrice = planIdFromPrice(priceId);
+  if (fromPrice === "starter" || fromPrice === "basic" || fromPrice === "pro") return fromPrice;
   return "free";
 }
 
@@ -188,7 +206,7 @@ router.post(
           }
 
           const planVariant = subscription?.metadata?.planVariant;
-          const canonicalPlan = planVariant === "pro" ? "pro" : "starter";
+          const canonicalPlan = canonicalPlanFromSubscription(subscription);
           const isActive =
             subscription.status === "active" || subscription.status === "trialing";
 
@@ -205,7 +223,7 @@ router.post(
 
           await getUserRef(uid).set(
             {
-              planId: canonicalPlan,
+              planId: isActive ? canonicalPlan : "free",
               pendingPlan: null,
               planChangeHistory: nextHistory,
               planChangeCooldownUntil: null,
@@ -262,6 +280,8 @@ router.post(
           const planVariant = sub?.metadata?.planVariant;
           if (planVariant === "starter_trial" || planVariant === "starter_paid") {
             planId = "starter";
+          } else if (planVariant === "basic") {
+            planId = "basic";
           } else if (planVariant === "pro") {
             planId = "pro";
           }
@@ -281,12 +301,29 @@ router.post(
           const setHasHadTrial =
             planVariant === "starter_trial" ? { hasHadTrial: true } : {};
 
+          const userSnap = await getUserRef(uid).get();
+          const user = userSnap.exists ? userSnap.data() : {};
+          const currentPlan = (user as any)?.planId || "free";
+          const now = Date.now();
+          const history = sanitizeHistory((user as any)?.planChangeHistory);
+          const nextHistory =
+            currentPlan === planId
+              ? history
+              : [...history, { at: now, fromPlan: currentPlan, toPlan: planId, source: "stripe_webhook" }].slice(-10);
+
           await getUserRef(uid).set(
             {
               planId: billingActive ? planId : "free",
+              pendingPlan: null,
+              planChangeHistory: nextHistory,
+              planChangeCooldownUntil: null,
+              planChangeLock: null,
+              planChangeRequestId: null,
+              planChangeRequestResult: null,
               billingActive,
               billingStatus,
               billing: {
+                ...(((user as any)?.billing) || {}),
                 provider: "stripe",
                 customerId: customerId ?? sub.customer,
                 subscriptionId: sub.id,
@@ -297,6 +334,7 @@ router.post(
                 ...setHasHadTrial,
               },
               ...(planVariant === "starter_trial" ? { hasHadTrial: true } : {}),
+              updatedAt: Date.now(),
             },
             { merge: true }
           );
