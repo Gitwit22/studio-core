@@ -172,6 +172,11 @@ const DEFAULT_MEDIA_PREFS = {
 
 type CheckoutPlanVariant = "starter_trial" | "starter_paid" | "basic" | "pro";
 
+function checkoutVariantToPlanId(plan: CheckoutPlanVariant): PlanId {
+  if (plan === "starter_paid" || plan === "starter_trial") return "starter";
+  return plan;
+}
+
 function formatDate(input: any): string {
   if (!input) return "—";
   const d = new Date(input);
@@ -471,6 +476,78 @@ export default function SettingsBilling() {
     }
   };
 
+  const finalizeBillingAfterPlanChange = async (params?: {
+    expectedPlanId?: PlanId;
+    expectedDowngradeScheduled?: boolean;
+    maxPollAttempts?: number;
+    pollIntervalMs?: number;
+  }) => {
+    const maxAttempts = Math.max(1, Math.min(5, params?.maxPollAttempts ?? 5));
+    const intervalMs = Math.max(400, Math.min(4000, params?.pollIntervalMs ?? 1200));
+
+    const shouldStop = (me: any | null) => {
+      if (!me) return false;
+
+      if (params?.expectedPlanId) {
+        const planId = canonicalPlanId(me?.effectiveEntitlements?.planId ?? me?.planId);
+        if (planId === params.expectedPlanId) return true;
+      }
+
+      if (params?.expectedDowngradeScheduled) {
+        const scheduled = (me as any)?.scheduledPlanChange;
+        const ok =
+          scheduled &&
+          scheduled.type === "downgrade" &&
+          typeof scheduled.effectiveAtMs === "number" &&
+          scheduled.effectiveAtMs > Date.now();
+        if (ok) return true;
+      }
+
+      // If we don't know what to expect, just do a single refresh pass.
+      if (!params?.expectedPlanId && !params?.expectedDowngradeScheduled) return true;
+
+      return false;
+    };
+
+    // Make sure any in-memory cache is invalidated first.
+    clearMeCache();
+
+    // Kick Stripe->DB reconciliation; ignore failures (user may still get updated via webhooks).
+    try {
+      await apiFetchWithCookieFallback("/api/billing/refresh", { method: "POST" });
+    } catch {
+      // ignore
+    }
+
+    // Force-refresh the local sources of truth the page actually reads.
+    try {
+      await refreshAuth();
+    } catch {
+      // ignore
+    }
+
+    let me: any | null = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        me = await loadUser({ forceRefresh: true });
+      } catch {
+        me = null;
+      }
+
+      try {
+        await Promise.all([loadEntitlements(), loadUsage(), loadBillingStatus()]);
+      } catch {
+        // ignore
+      }
+
+      if (shouldStop(me)) return me;
+      await new Promise((r) => window.setTimeout(r, intervalMs));
+    }
+
+    return me;
+  };
+
   const handleRefreshStatus = async () => {
     try {
       // Try to reconcile Stripe -> Firestore (self-heals when webhooks lag/miss)
@@ -486,6 +563,37 @@ export default function SettingsBilling() {
     }
     await loadAllData();
   };
+
+  // Post-Stripe return polish: if we land here with a processing hint, auto-sync
+  // plan state so the page feels instant once webhooks/refresh apply.
+  useEffect(() => {
+    if (!upgradeProcessing) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const expectedFromState = (location.state as any)?.expectedPlanId;
+      const expectedPlanId: PlanId | undefined = isPlanId(expectedFromState)
+        ? (expectedFromState as PlanId)
+        : "pro";
+
+      await finalizeBillingAfterPlanChange({ expectedPlanId, maxPollAttempts: 5, pollIntervalMs: 1200 });
+
+      if (cancelled) return;
+
+      setUpgradeProcessing(false);
+      try {
+        // Remove the router state so refresh doesn't keep the banner.
+        nav(location.pathname, { replace: true, state: {} });
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [upgradeProcessing, location.pathname, location.state, nav]);
 
   useEffect(() => {
     loadAllData();
@@ -1162,10 +1270,11 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setToast("Plan updated");
       setActionLoading(null);
       try {
-        clearMeCache();
-        const me = await loadUser({ forceRefresh: true });
-        await loadEntitlements();
-        setUser(me);
+        await finalizeBillingAfterPlanChange({
+          expectedPlanId: checkoutVariantToPlanId(plan),
+          maxPollAttempts: 5,
+          pollIntervalMs: 1200,
+        });
       } catch {}
       return;
     }
@@ -1176,10 +1285,11 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setToast(`Downgrade scheduled for ${dateLabel}`);
       setActionLoading(null);
       try {
-        clearMeCache();
-        const me = await loadUser({ forceRefresh: true });
-        await loadEntitlements();
-        setUser(me);
+        await finalizeBillingAfterPlanChange({
+          expectedDowngradeScheduled: true,
+          maxPollAttempts: 5,
+          pollIntervalMs: 1200,
+        });
       } catch {}
       return;
     }
@@ -1358,57 +1468,6 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
 
       const planMeta = plans.find((p) => canonicalPlanId(p.id) === newPlanId);
       const name = planMeta?.name || newPlanId;
-
-    // Post-success polish: if Stripe redirects back before webhooks apply, auto-refetch /me
-    // a few times so the page feels instant once entitlements flip.
-    useEffect(() => {
-      if (!upgradeProcessing) return;
-
-      let cancelled = false;
-      let attempts = 0;
-      const maxAttempts = 5; // ~20s at 4s interval
-      const intervalMs = 4000;
-
-      async function tick() {
-        attempts++;
-
-        try {
-          // Force a network fetch (don't let SPA cache lie)
-          const me = await loadUser({ forceRefresh: true });
-          await loadEntitlements();
-
-          const planId = me?.effectiveEntitlements?.planId ?? me?.planId;
-          const canHls = me?.effectiveEntitlements?.features?.canHls ?? me?.effectiveEntitlements?.features?.hlsEnabled;
-
-          const flipped = planId === "pro" || canHls === true;
-
-          if (flipped) {
-            if (!cancelled) {
-              setUpgradeProcessing(false);
-              try {
-                // Remove the router state so refresh doesn't keep the banner.
-                nav(location.pathname, { replace: true, state: {} });
-              } catch {}
-            }
-            return;
-          }
-        } catch {
-          // ignore; keep polling
-        }
-
-        if (!cancelled && attempts < maxAttempts) {
-          setTimeout(tick, intervalMs);
-        } else if (!cancelled) {
-          // Stop polling after the cap; banner can remain until manual refresh.
-          // (User requested we don't block navigation.)
-        }
-      }
-
-      tick();
-      return () => {
-        cancelled = true;
-      };
-    }, [upgradeProcessing, nav, location.pathname]);
       setTestModeSummary(`You are now simulating the ${name} plan. Limits and gates below use this plan.`);
       showToast("Plan switched (Test Mode)");
 
