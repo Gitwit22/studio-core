@@ -1063,6 +1063,12 @@ export default function SettingsBilling() {
 
       const { json, text } = await safeReadJson(res);
 
+      if (res.status === 410) {
+        setEmergencyExpiresAtMs(null);
+        setEmergencyMessage("This emergency download link expired. After 1 hour, the recording is automatically deleted.");
+        return;
+      }
+
       if (!res.ok) {
         console.error("Emergency download failed (http)", {
           status: res.status,
@@ -1074,13 +1080,16 @@ export default function SettingsBilling() {
 
       const url = (json as any)?.url || (json as any)?.data?.url;
       const expiresAt = (json as any)?.expiresAt || (json as any)?.data?.expiresAt;
+      const expiresAtMs = (json as any)?.expiresAtMs || (json as any)?.data?.expiresAtMs;
       if (!url) {
         console.error("Emergency download failed (shape)", { body: json ?? text });
         setEmergencyMessage("Recording URL missing. Contact support.");
         return;
       }
 
-      if (typeof expiresAt === "string" && expiresAt) {
+      if (typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs)) {
+        setEmergencyExpiresAtMs(expiresAtMs);
+      } else if (typeof expiresAt === "string" && expiresAt) {
         const ms = Date.parse(expiresAt);
         setEmergencyExpiresAtMs(Number.isFinite(ms) ? ms : null);
       }
@@ -2848,7 +2857,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 Expires in {emergencyCountdown || "—"}
               </div>
               <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
-                Use this if your in-room download didn’t work. Downloads are available for a limited time.
+                This emergency download link expires in 1 hour. After that, the recording is automatically deleted.
               </div>
               {emergencyMessage && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>{emergencyMessage}</div>

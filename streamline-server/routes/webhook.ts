@@ -12,6 +12,8 @@
 
 import express from "express";
 import crypto from "crypto";
+import { deletePrefix } from "../lib/storageClient";
+import { setHlsIdle } from "../services/rooms";
 import Stripe from "stripe";
 import { firestore as db } from "../firebaseAdmin";
 import { stripe } from "../lib/stripe";
@@ -470,6 +472,39 @@ router.post("/livekit", express.raw({ type: "*/*" }), async (req, res) => {
     if (!egressId) {
       console.error("[livekit-webhook] CRITICAL: Missing egressId in egress_ended event");
       return res.status(400).json({ ok: false, error: "Missing egressId" });
+    }
+
+    // If this egressId belongs to an HLS session (rooms.hls.egressId), do an
+    // immediate best-effort cleanup so segments don't linger after the stream ends.
+    try {
+      const roomSnap = await db
+        .collection("rooms")
+        .where("hls.egressId", "==", egressId)
+        .limit(1)
+        .get();
+
+      if (!roomSnap.empty) {
+        const roomDoc = roomSnap.docs[0];
+        const roomData = (roomDoc.data() || {}) as any;
+        const prefix = String(roomData?.hls?.prefix || `hls/${roomDoc.id}/`).trim();
+
+        try {
+          await deletePrefix(prefix);
+        } catch (e: any) {
+          console.warn("[livekit-webhook] HLS deletePrefix failed", { roomId: roomDoc.id, prefix, error: e?.message || e });
+        }
+
+        try {
+          await setHlsIdle(roomDoc.ref);
+        } catch (e: any) {
+          console.warn("[livekit-webhook] setHlsIdle failed", { roomId: roomDoc.id, error: e?.message || e });
+        }
+
+        return res.status(200).json({ ok: true, handled: "hls_cleanup", roomId: roomDoc.id, prefix });
+      }
+    } catch (e: any) {
+      // Continue into recording flow if HLS lookup fails.
+      console.warn("[livekit-webhook] HLS lookup failed", e?.message || e);
     }
 
     // =========================================================================

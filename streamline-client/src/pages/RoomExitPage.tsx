@@ -371,7 +371,7 @@ export default function RoomExitPage() {
             Stream Ended
           </h1>
           <p style={{ fontSize: '15px', color: '#9ca3af', marginBottom: '24px', lineHeight: '1.6' }}>
-            {canContentLibrary
+            {canMyContentRecordings
               ? 'Your recording is being processed. It will appear in My Content when ready.'
               : 'Your recording is being processed. The download button will activate when ready.'}
           </p>
@@ -496,7 +496,7 @@ export default function RoomExitPage() {
               </div>
               {!downloading && (
                 <div style={{ fontSize: '11px', color: '#fca5a5' }}>
-                  ⚠️ Download now or it may expire
+                  This emergency download link expires in 1 hour. After that, the recording is automatically deleted.
                 </div>
               )}
             </button>

@@ -2,6 +2,8 @@ import { Router } from "express";
 import { firestore } from "../firebaseAdmin";
 import { requireAdmin } from "../middleware/adminAuth";
 import { deleteFiles, deletePrefix } from "../lib/storageClient";
+import { stopEgress } from "../services/livekitEgress";
+import { setHlsIdle } from "../services/rooms";
 
 const router = Router();
 
@@ -209,15 +211,170 @@ async function purgeDeletedAccounts(now: Date): Promise<{ purgedCount: number }>
   return { purgedCount };
 }
 
+async function purgeExpiredRecordings(now: Date, opts?: { limit?: number }): Promise<{ deletedCount: number }> {
+  const nowMs = now.getTime();
+  const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit)
+    ? Math.max(1, Math.min(500, opts.limit))
+    : 200;
+
+  // Only recordings with a deleteAfterMs field are eligible.
+  // This is intended for emergency recordings (1-hour retention).
+  const snap = await firestore
+    .collection("recordings")
+    .where("deleteAfterMs", "<=", nowMs)
+    .limit(limit)
+    .get();
+
+  let deletedCount = 0;
+
+  for (const doc of snap.docs) {
+    const data = (doc.data() || {}) as any;
+    const status = String(data.status || "").toLowerCase();
+    if (status === "deleted") continue;
+
+    const objectKey: string | null = (data.objectKey as string | undefined) || (data.downloadPath as string | undefined) || null;
+    if (!objectKey) {
+      // If we can't find the object, still mark the doc deleted so we don't churn.
+      try {
+        await doc.ref.set({ status: "deleted", deleteReason: "expired_retention", deletedAt: now, updatedAt: now }, { merge: true });
+        deletedCount += 1;
+      } catch (e: any) {
+        console.warn("[maintenance/purge-expired-recordings] failed to mark deleted", { recordingId: doc.id, error: e?.message || e });
+      }
+      continue;
+    }
+
+    try {
+      await deleteFiles([objectKey]);
+    } catch (e: any) {
+      console.warn("[maintenance/purge-expired-recordings] deleteFiles failed", { recordingId: doc.id, objectKey, error: e?.message || e });
+    }
+
+    try {
+      await doc.ref.set(
+        { status: "deleted", deleteReason: "expired_retention", deletedAt: now, updatedAt: now },
+        { merge: true }
+      );
+      deletedCount += 1;
+    } catch (e: any) {
+      console.warn("[maintenance/purge-expired-recordings] failed to update recording", { recordingId: doc.id, error: e?.message || e });
+    }
+  }
+
+  return { deletedCount };
+}
+
+async function purgeStaleHls(now: Date, opts?: { ttlMinutes?: number; limit?: number }) {
+  const ttlMinutes = typeof opts?.ttlMinutes === "number" && Number.isFinite(opts.ttlMinutes) ? opts.ttlMinutes : 180;
+  const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit) ? Math.max(1, Math.min(500, opts.limit)) : 100;
+  const cutoffMs = now.getTime() - ttlMinutes * 60 * 1000;
+
+  let purgedCount = 0;
+  let considered = 0;
+
+  // Prefer a targeted query; if Firestore complains about indexes, fall back to a bounded scan.
+  let docs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+  try {
+    const snap = await firestore
+      .collection("rooms")
+      .where("hls.status", "in", ["starting", "live", "error"])
+      .limit(limit)
+      .get();
+    docs = snap.docs;
+  } catch (e) {
+    const snap = await firestore
+      .collection("rooms")
+      .orderBy("updatedAt", "desc")
+      .limit(Math.max(limit, 200))
+      .get();
+    docs = snap.docs;
+  }
+
+  for (const doc of docs) {
+    const data = (doc.data() || {}) as any;
+    const hls = data.hls || {};
+    const status = String(hls.status || "idle").toLowerCase();
+    if (status !== "starting" && status !== "live" && status !== "error") continue;
+
+    considered += 1;
+
+    // Determine staleness from Firestore timestamps when available.
+    let updatedAtMs: number | null = null;
+    const updatedAt = hls.updatedAt;
+    try {
+      if (updatedAt?.toDate) updatedAtMs = updatedAt.toDate().getTime();
+      else if (updatedAt instanceof Date) updatedAtMs = updatedAt.getTime();
+      else if (typeof updatedAt === "number") updatedAtMs = updatedAt;
+    } catch {
+      updatedAtMs = null;
+    }
+    if (updatedAtMs && updatedAtMs > cutoffMs) continue;
+
+    const roomId = doc.id;
+    const prefix = String(hls.prefix || `hls/${roomId}/`).trim();
+    const egressId = typeof hls.egressId === "string" ? hls.egressId : null;
+
+    try {
+      if (egressId) {
+        try {
+          await stopEgress(egressId);
+        } catch (e: any) {
+          console.warn("[maintenance/purge-stale-hls] stopEgress failed", { roomId, egressId, error: e?.message || e });
+        }
+      }
+
+      try {
+        await deletePrefix(prefix);
+      } catch (e: any) {
+        console.warn("[maintenance/purge-stale-hls] deletePrefix failed", { roomId, prefix, error: e?.message || e });
+      }
+
+      try {
+        await setHlsIdle(doc.ref);
+      } catch (e: any) {
+        console.warn("[maintenance/purge-stale-hls] setHlsIdle failed", { roomId, error: e?.message || e });
+      }
+
+      purgedCount += 1;
+    } catch (e: any) {
+      console.warn("[maintenance/purge-stale-hls] failed", { roomId, error: e?.message || e });
+    }
+  }
+
+  return { ok: true, purgedCount, considered, ttlMinutes, limit };
+}
+
 router.get("/expire-emergency-recordings", async (_req, res) => {
   const now = new Date();
-  const { deletedCount } = await expireEmergencyRecordings(now);
-  return res.json({ ok: true, deletedCount });
+  const [{ deletedCount }, { deletedCount: purgedRecordingsCount }] = await Promise.all([
+    expireEmergencyRecordings(now),
+    purgeExpiredRecordings(now),
+  ]);
+  return res.json({ ok: true, deletedCount, purgedRecordingsCount });
 });
 
 router.post("/expire-emergency-recordings", async (_req, res) => {
   const now = new Date();
-  const { deletedCount } = await expireEmergencyRecordings(now);
+  const [{ deletedCount }, { deletedCount: purgedRecordingsCount }] = await Promise.all([
+    expireEmergencyRecordings(now),
+    purgeExpiredRecordings(now),
+  ]);
+  return res.json({ ok: true, deletedCount, purgedRecordingsCount });
+});
+
+// Deletes expired recording objects whose deleteAfterMs has passed.
+// POST/GET /api/maintenance/purge-expired-recordings?limit=200
+router.get("/purge-expired-recordings", async (req, res) => {
+  const now = new Date();
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const { deletedCount } = await purgeExpiredRecordings(now, { limit });
+  return res.json({ ok: true, deletedCount });
+});
+
+router.post("/purge-expired-recordings", async (req, res) => {
+  const now = new Date();
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const { deletedCount } = await purgeExpiredRecordings(now, { limit });
   return res.json({ ok: true, deletedCount });
 });
 
@@ -231,6 +388,24 @@ router.post("/purge-deleted-accounts", async (_req, res) => {
   const now = new Date();
   const { purgedCount } = await purgeDeletedAccounts(now);
   return res.json({ ok: true, purgedCount });
+});
+
+// Best-effort safety net for orphaned HLS sessions.
+// POST/GET /api/maintenance/purge-stale-hls?ttlMinutes=180&limit=100
+router.get("/purge-stale-hls", async (req, res) => {
+  const now = new Date();
+  const ttlMinutes = req.query.ttlMinutes ? Number(req.query.ttlMinutes) : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const result = await purgeStaleHls(now, { ttlMinutes, limit });
+  return res.json(result);
+});
+
+router.post("/purge-stale-hls", async (req, res) => {
+  const now = new Date();
+  const ttlMinutes = req.query.ttlMinutes ? Number(req.query.ttlMinutes) : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const result = await purgeStaleHls(now, { ttlMinutes, limit });
+  return res.json(result);
 });
 
 export default router;
