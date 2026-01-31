@@ -25,7 +25,7 @@ export async function getMeCached(): Promise<any | null> {
   if (!inFlightMe) {
     inFlightMe = (async () => {
       try {
-        const res = await apiFetchAuth("/api/account/me");
+        const res = await apiFetchAuth("/api/account/me", { cache: "no-store" });
         const data = await res.json();
         cachedMe = data;
         if (data && typeof data === "object" && (data as any).platformFlags) {

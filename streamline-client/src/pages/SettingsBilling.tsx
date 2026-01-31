@@ -227,6 +227,7 @@ function checkoutPlanForResubscribe(user: any): CheckoutPlanVariant {
 }
 
 export default function SettingsBilling() {
+  const location = useLocation();
   const nav = useNavigate();
   const { user: authUser, refresh: refreshAuth } = useAuthMe();
 
@@ -235,6 +236,19 @@ export default function SettingsBilling() {
   const [user, setUser] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Stripe can redirect back before webhooks apply the new plan.
+  // BillingSuccess may navigate here with a hint so we can show a calm "processing" banner.
+  const [upgradeProcessing, setUpgradeProcessing] = useState<boolean>(
+    Boolean((location.state as any)?.upgradeProcessing)
+  );
+
+  // If we ever arrive here again with the flag set, re-enable the banner.
+  useEffect(() => {
+    if ((location.state as any)?.upgradeProcessing) {
+      setUpgradeProcessing(true);
+    }
+  }, [location.state]);
 
   const [plans, setPlans] = useState<any[]>([]);
   const [entitlements, setEntitlements] = useState<typeof DEFAULT_ENTITLEMENTS>(DEFAULT_ENTITLEMENTS);
@@ -434,7 +448,7 @@ export default function SettingsBilling() {
     loadAllData();
   }, []);
 
-  const loadUser = async (opts?: { forceRefresh?: boolean }) => {
+  const loadUser = async (opts?: { forceRefresh?: boolean }): Promise<any | null> => {
     try {
       if (opts?.forceRefresh) {
         clearMeCache();
@@ -450,6 +464,7 @@ export default function SettingsBilling() {
           }
         }
       } catch {}
+      return data;
     } catch (err: any) {
       if (err?.status === 401 || err?.status === 403) {
         clearAuthStorage();
@@ -1016,7 +1031,19 @@ export default function SettingsBilling() {
 const startCheckout = async (plan: CheckoutPlanVariant) => {
   // In test mode, Stripe checkout is disabled in favor of test-mode plan switching.
   if (isTestMode) {
-    setError("Billing is disabled in Test Mode. Use 'Switch Plan (Test Mode)' below instead.");
+    const platformDisabled = user?.platformBillingEnabled === false;
+    const userDisabled = user?.billingEnabled === false;
+    if (platformDisabled) {
+      setError(
+        "Stripe checkout is disabled because Platform Billing is OFF. Enable Platform Billing in the Admin Dashboard, then retry."
+      );
+    } else if (userDisabled) {
+      setError(
+        "Stripe checkout is disabled for your account because billing is turned OFF for this user. An admin must enable billing for your user, then retry."
+      );
+    } else {
+      setError("Billing is disabled in Test Mode. Use 'Switch Plan (Test Mode)' below instead.");
+    }
     setActionLoading(null);
     return;
   }
@@ -1151,6 +1178,57 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
 
       const planMeta = plans.find((p) => canonicalPlanId(p.id) === newPlanId);
       const name = planMeta?.name || newPlanId;
+
+    // Post-success polish: if Stripe redirects back before webhooks apply, auto-refetch /me
+    // a few times so the page feels instant once entitlements flip.
+    useEffect(() => {
+      if (!upgradeProcessing) return;
+
+      let cancelled = false;
+      let attempts = 0;
+      const maxAttempts = 5; // ~20s at 4s interval
+      const intervalMs = 4000;
+
+      async function tick() {
+        attempts++;
+
+        try {
+          // Force a network fetch (don't let SPA cache lie)
+          const me = await loadUser({ forceRefresh: true });
+          await loadEntitlements();
+
+          const planId = me?.effectiveEntitlements?.planId ?? me?.planId;
+          const canHls = me?.effectiveEntitlements?.features?.canHls ?? me?.effectiveEntitlements?.features?.hlsEnabled;
+
+          const flipped = planId === "pro" || canHls === true;
+
+          if (flipped) {
+            if (!cancelled) {
+              setUpgradeProcessing(false);
+              try {
+                // Remove the router state so refresh doesn't keep the banner.
+                nav(location.pathname, { replace: true, state: {} });
+              } catch {}
+            }
+            return;
+          }
+        } catch {
+          // ignore; keep polling
+        }
+
+        if (!cancelled && attempts < maxAttempts) {
+          setTimeout(tick, intervalMs);
+        } else if (!cancelled) {
+          // Stop polling after the cap; banner can remain until manual refresh.
+          // (User requested we don't block navigation.)
+        }
+      }
+
+      tick();
+      return () => {
+        cancelled = true;
+      };
+    }, [upgradeProcessing, nav, location.pathname]);
       setTestModeSummary(`You are now simulating the ${name} plan. Limits and gates below use this plan.`);
       showToast("Plan switched (Test Mode)");
 
@@ -1218,8 +1296,9 @@ const isPaidPlan = userPlanId === "starter" || userPlanId === "pro" || userPlanI
 const isBlocked = isPaidPlan && (status === "past_due" || status === "unpaid");
 const isPaidValid = status === "active" || status === "trialing";
 
-// Only treat pendingPlan as processing for paid plans; always consider active action loads
-const isProcessing = !!actionLoading || (userPlanId !== "free" && !!user?.pendingPlan);
+// Only treat pendingPlan as processing for paid plans; always consider active action loads.
+// Also consider the explicit Stripe-return hint to cover free->paid upgrades.
+const isProcessing = !!actionLoading || (userPlanId !== "free" && !!user?.pendingPlan) || upgradeProcessing;
 
 const statusBadge = getStatusBadge(status, user?.billing?.cancelAtPeriodEnd);
 const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
@@ -1616,9 +1695,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 <h2 style={S.cardTitle}>Your Plan</h2>
                 {isProcessing && (
                   <span style={S.processingBadge}>
-                    {user?.billing?.cancelAtPeriodEnd
-                      ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
-                      : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
+                    {upgradeProcessing
+                      ? "Upgrade processing — this can take a few seconds."
+                      : user?.billing?.cancelAtPeriodEnd
+                        ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
+                        : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
                   </span>
                 )}
               </div>

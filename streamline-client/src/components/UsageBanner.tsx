@@ -73,7 +73,7 @@ export default function UsageBanner() {
         const maxGuests = Number(
           (limits as any).maxGuests ??
             usageJson?.plan?.limits?.maxGuests ??
-            (planId === "pro" ? 10 : planId === "starter" ? 2 : 1)
+            1
         );
 
         const displayName = (accountJson as any)?.displayName || "";

@@ -3056,6 +3056,9 @@ function RoomPage() {
           dashboardGreenroomEnabled={dashboardGreenroomEnabled}
           dashboardOverlaysEnabled={dashboardOverlaysEnabled}
           dashboardRole={isHost ? "host" : "participant"}
+          onLeaveRequested={() => {
+            void handleEndStream();
+          }}
           onDisconnected={handleLeftRoom}
         />
       )}

@@ -7,6 +7,9 @@ interface UsageData {
   email: string;
   displayName?: string;
   planId: "free" | "starter" | "pro" | "basic" | "enterprise" | "internal_unlimited";
+  billingEnabled?: boolean;
+  platformBillingEnabled?: boolean;
+  effectiveBillingEnabled?: boolean;
   minutesUsed: number;
   overageParticipantMinutes?: number;
   overageTranscodeMinutes?: number;
@@ -161,7 +164,9 @@ export default function AdminUsage() {
   };
 
   const handleToggleBilling = async (user: UsageData) => {
-    const newState = !user.isBlocked; // Simplified for this example
+    // billingEnabled is tri-state in Firestore; missing => true.
+    const current = user.billingEnabled !== false;
+    const newState = !current;
 
     try {
       const res = await apiFetchAuth(`${API_BASE}/api/admin/users/${user.userId}/toggle-billing`, {
@@ -384,6 +389,21 @@ export default function AdminUsage() {
                           title="Change plan"
                         >
                           Change Plan
+                        </button>
+                        <button
+                          onClick={() => handleToggleBilling(user)}
+                          className={`px-3 py-1 rounded text-xs transition ${
+                            user.billingEnabled === false
+                              ? "bg-gray-700 hover:bg-gray-600"
+                              : "bg-purple-600 hover:bg-purple-500"
+                          }`}
+                          title={
+                            user.billingEnabled === false
+                              ? "Enable billing for this user (Stripe live)"
+                              : "Disable billing for this user (Test Mode)"
+                          }
+                        >
+                          {user.billingEnabled === false ? "Billing: OFF" : "Billing: ON"}
                         </button>
                       </div>
                     </td>
