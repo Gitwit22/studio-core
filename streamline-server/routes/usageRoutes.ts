@@ -36,7 +36,10 @@ async function handleUsageSummary(req: any, res: any) {
     const entitlements = await getEffectiveEntitlements(uid);
     const plan = entitlements.plan;
     const planId = entitlements.planId;
-    const overagesEnabled = !!userData.overagesEnabled;
+    const overagesEnabled =
+      (userData as any)?.billingSettings?.overagesEnabled === true ||
+      (userData as any)?.billing?.overagesEnabled === true ||
+      (userData as any)?.overagesEnabled === true;
 
     const features = plan.features;
     const limits = plan.limits as any;

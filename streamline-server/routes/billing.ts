@@ -17,6 +17,7 @@ import {
   normalizeBillingGuards,
   type BillingGuards,
 } from "../lib/billingGuards";
+import { createOveragesEndpointHandler } from "../lib/overagesEndpoint";
 
 const PLAN_CHANGE_LOCK_TTL_MS = 60 * 1000; // 60 seconds
 
@@ -854,6 +855,31 @@ router.post("/refresh", requireAuth, async (req, res) => {
     return res.status(500).json({ success: false, error: err?.message || "Server error" });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Overages toggle (Pro-only)
+// POST /api/billing/overages
+// Body: { enabled: boolean }
+// - When enabling, requires Stripe readiness (customer + default payment method)
+// - Persists billingSettings.overagesEnabled (plus legacy mirrors)
+// ---------------------------------------------------------------------------
+
+router.post(
+  "/overages",
+  requireAuth,
+  createOveragesEndpointHandler({
+    getAccount: async (uid) => await getUserAccount(uid),
+    getUserDoc: async (uid) => {
+      const snap = await getUserRef(uid).get();
+      return snap.exists ? ((snap.data() as any) || {}) : null;
+    },
+    patchUserDoc: async (uid, patch) => {
+      await getUserRef(uid).set(patch, { merge: true });
+    },
+    retrieveStripeCustomer: async (customerId) => await stripe.customers.retrieve(customerId),
+    now: () => Date.now(),
+  })
+);
 
 router.get("/me", requireAuth, async (req, res) => {
   try {

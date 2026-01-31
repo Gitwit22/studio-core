@@ -346,6 +346,9 @@ export default function SettingsBilling() {
   const [showManagePicker, setShowManagePicker] = useState(false);
   const [showLifetimeDetails, setShowLifetimeDetails] = useState(false);
 
+  const [overagesToggleSaving, setOveragesToggleSaving] = useState(false);
+  const [overagesToggleMessage, setOveragesToggleMessage] = useState<string | null>(null);
+
   const [billingStatusSnapshot, setBillingStatusSnapshot] = useState<any | null>(null);
 
   const [closeCancelLoading, setCloseCancelLoading] = useState(false);
@@ -1133,6 +1136,88 @@ export default function SettingsBilling() {
   const showToast = (msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast(null), 3000);
+  };
+
+  const setOveragesEnabled = async (nextEnabled: boolean) => {
+    setOveragesToggleSaving(true);
+    setOveragesToggleMessage(null);
+
+    const prevEnabled = Boolean((user as any)?.billingSettings?.overagesEnabled);
+
+    // Optimistic UI (will be corrected by /me refetch).
+    setUser((prev: any) =>
+      prev
+        ? {
+            ...prev,
+            billingSettings: {
+              ...(prev.billingSettings || {}),
+              overagesEnabled: nextEnabled,
+            },
+          }
+        : prev
+    );
+
+    try {
+      const res = await apiFetchWithCookieFallback("/api/billing/overages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+
+      const { json, text } = await safeReadJson(res);
+
+      if (!res.ok) {
+        const err = String((json as any)?.error || "").trim();
+        if (res.status === 409 && err === "payment_method_required") {
+          setOveragesToggleMessage("Add a default payment method to enable overages.");
+
+          // Ensure toggle stays OFF.
+          setUser((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  billingSettings: {
+                    ...(prev.billingSettings || {}),
+                    overagesEnabled: false,
+                  },
+                }
+              : prev
+          );
+        } else if (res.status === 403 && err === "overages_not_allowed") {
+          setOveragesToggleMessage(null);
+        } else {
+          setOveragesToggleMessage(
+            (text && text.length < 140 ? text : null) || "Could not update overages. Please try again."
+          );
+        }
+      } else {
+        showToast(nextEnabled ? "Overages enabled" : "Overages disabled");
+      }
+    } catch (err: any) {
+      setOveragesToggleMessage(err?.message || "Could not update overages. Please try again.");
+
+      // Revert optimistic state if we couldn't reach the server.
+      setUser((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              billingSettings: {
+                ...(prev.billingSettings || {}),
+                overagesEnabled: prevEnabled,
+              },
+            }
+          : prev
+      );
+    } finally {
+      // Always refresh /me so UI matches server truth.
+      try {
+        clearMeCache();
+        await loadUser({ forceRefresh: true });
+      } catch {
+        // ignore
+      }
+      setOveragesToggleSaving(false);
+    }
   };
 
   const scheduleCohostProfileSave = (nextProfile: any) => {
@@ -2837,6 +2922,60 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </div>
               )}
             </div>
+
+            {(() => {
+              const eff = (user as any)?.effectiveEntitlements;
+              const planId = String(eff?.planId || "").trim();
+              const overagesAllowed = eff?.features?.overagesAllowed === true;
+              const canShowOveragesToggle = planId === "pro" || overagesAllowed;
+              if (!canShowOveragesToggle) return null;
+
+              const enabled = Boolean((user as any)?.billingSettings?.overagesEnabled);
+
+              return (
+                <div style={{
+                  marginTop: 8,
+                  marginBottom: 12,
+                  padding: 12,
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  borderRadius: 12,
+                  background: "rgba(255,255,255,0.02)",
+                }}>
+                  <div style={{ fontWeight: 800, color: "#e5e7eb", marginBottom: 4 }}>Overages</div>
+                  <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 10 }}>
+                    $10 per additional 100 minutes — billed automatically after your stream ends.
+                  </div>
+
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 700, color: "#e5e7eb" }}>
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      disabled={overagesToggleSaving}
+                      onChange={(e) => setOveragesEnabled(e.target.checked)}
+                    />
+                    <span>{enabled ? "Enabled" : "Disabled"}</span>
+                  </label>
+
+                  <div style={{ marginTop: 6, color: "#94a3b8", fontSize: 12 }}>
+                    Applies to in-room minutes over your plan limit.
+                  </div>
+
+                  {overagesToggleMessage && (
+                    <div style={{
+                      marginTop: 10,
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid rgba(239,68,68,0.4)",
+                      background: "rgba(239,68,68,0.12)",
+                      color: "#fecdd3",
+                      fontSize: 13,
+                    }}>
+                      {overagesToggleMessage}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div style={S.usageGrid}>
               <UsageBar

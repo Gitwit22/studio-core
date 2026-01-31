@@ -608,6 +608,9 @@ router.get("/me", async (req, res) => {
           hlsEnabled: canHls,
           hlsCustomizationEnabled,
           canCustomizeHlsPage: hlsCustomizationEnabled,
+
+          // Optional: surface for client gating (e.g. Overages toggle).
+          overagesAllowed: !!(features as any).overagesAllowed,
         },
         limits: {
           // Canonical numeric usage/feature caps
@@ -652,6 +655,12 @@ router.get("/me", async (req, res) => {
       email: data.email || null,
       displayName: data.displayName || null,
       billingTruth,
+      billingSettings: {
+        overagesEnabled:
+          ((data as any)?.billingSettings?.overagesEnabled ??
+            (data as any)?.billing?.overagesEnabled ??
+            (data as any)?.overagesEnabled) === true,
+      },
       permissionsMode: mediaPrefs.permissionsMode,
       advancedPermissions: {
         enabled: false,
