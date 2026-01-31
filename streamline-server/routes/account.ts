@@ -16,6 +16,7 @@ import {
 } from "../lib/permissions/defaultRoleProfiles";
 import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
 import { stripe } from "../lib/stripe";
+import { computeAccountMeBillingFields } from "../lib/billingTruth";
 
 const router = Router();
 
@@ -628,17 +629,25 @@ router.get("/me", async (req, res) => {
 
     const platformTranscodeEnabled = getPlatformTranscodeEnabled();
 
-    const billingTruth = {
-      status: typeof (data as any).billingStatus === "string" ? (data as any).billingStatus : null,
-      currentPeriodEndMs:
-        typeof (data as any)?.billing?.currentPeriodEnd === "number" ? (data as any).billing.currentPeriodEnd : null,
-      cancelAtPeriodEnd: !!(data as any)?.billing?.cancelAtPeriodEnd,
-      planId: typeof (data as any).planId === "string" ? (data as any).planId : null,
-      pendingPlan: typeof (data as any).pendingPlan === "string" ? (data as any).pendingPlan : null,
-      scheduledPlanChange: (data as any).scheduledPlanChange ?? null,
-    };
+      const responsePlanId = effectiveEntitlements?.planId ?? entitlements.planId;
+      const { planId: normalizedPlanId, billingTruth } = computeAccountMeBillingFields(data, responsePlanId, Date.now());
 
-    return res.json({
+        // Lightweight backfill for legacy users that predate billingTruth.
+        // Only write when missing to avoid turning /me into a write-heavy endpoint.
+        try {
+          const planIdMissing = typeof (data as any).planId !== "string" || !String((data as any).planId).trim();
+          const billingTruthMissing = !(data as any).billingTruth;
+          if (planIdMissing || billingTruthMissing) {
+            const patch: any = { updatedAt: Date.now() };
+            if (planIdMissing) patch.planId = "free";
+            if (billingTruthMissing) patch.billingTruth = billingTruth;
+            firestore.collection("users").doc(uid).set(patch, { merge: true }).catch(() => {});
+          }
+        } catch {
+          // non-fatal
+        }
+
+    const payload = {
       id: uid,
       email: data.email || null,
       displayName: data.displayName || null,
@@ -671,7 +680,7 @@ router.get("/me", async (req, res) => {
         recordingEnabled: recordingUi.enabled,
           ...await getSegmentedUiFlags(),
       },
-      planId: effectiveEntitlements?.planId ?? entitlements.planId,
+            planId: normalizedPlanId,
       effectiveEntitlements,
       usage: {
         minutes: {
@@ -702,7 +711,9 @@ router.get("/me", async (req, res) => {
           },
         },
       },
-    });
+    } satisfies { planId: string; billingTruth: unknown; [k: string]: unknown };
+
+    return res.json(payload);
   } catch (err: any) {
     console.error("[account/me] error", err);
     return res.status(500).json({ error: "internal_error" });

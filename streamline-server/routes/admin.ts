@@ -15,6 +15,7 @@ import { getCurrentMonthKey } from "../lib/usageTracker";
 import { PLAN_IDS, PlanId, isPlanId, getAllPlanIds } from "../types/plan";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
+import { normalizeBillingTruthFromUser } from "../lib/billingTruth";
 
 const router = express.Router();
 
@@ -167,10 +168,21 @@ router.get("/users", async (req, res) => {
 
     const snapshot = await query.limit(limit).offset(offset).get();
 
-    const users = snapshot.docs.map((doc) => ({
-      uid: doc.id,
-      ...doc.data(),
-    }));
+    const now = Date.now();
+
+    const users = snapshot.docs.map((doc) => {
+      const raw = doc.data() || {};
+      const planId = typeof (raw as any).planId === "string" && String((raw as any).planId).trim() ? (raw as any).planId : "free";
+      const billingTruth = normalizeBillingTruthFromUser({ ...raw, planId }, now);
+      return {
+        uid: doc.id,
+        ...raw,
+        planId,
+        billingTruth,
+        billingReady: true,
+        stripeConnected: Boolean(billingTruth.stripeCustomerId),
+      };
+    });
 
     const filteredUsers = includeDeleted
       ? users.map((u: any) => {
@@ -756,11 +768,16 @@ router.get("/usage", async (req, res) => {
         const billingEnabled = userData.billingEnabled === false ? false : true;
         const effectiveBillingEnabled = platformBillingEnabled && billingEnabled;
 
+        const billingTruth = normalizeBillingTruthFromUser(userData, Date.now());
+
         return {
           userId,
           email: userData.email,
           displayName: userData.displayName,
           planId,
+          billingTruthStatus: billingTruth.status,
+          stripeConnected: Boolean(billingTruth.stripeCustomerId),
+          stripeCustomerId: billingTruth.stripeCustomerId,
           billingEnabled,
           platformBillingEnabled,
           effectiveBillingEnabled,

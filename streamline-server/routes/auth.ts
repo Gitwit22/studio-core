@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { requireAuth } from "../middleware/requireAuth";
 import { firestore as db } from "../firebaseAdmin";
 import { getUserAccount } from "../lib/userAccount";
+import { normalizeBillingTruthFromUser } from "../lib/billingTruth";
 import { CURRENT_TOS_VERSION } from "../lib/tos";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
@@ -73,6 +74,29 @@ router.get("/me", requireAuth, async (req, res) => {
     // Load the latest Firestore snapshot so we can strip sensitive fields
     const snap = await db.collection("users").doc(userId).get();
     const raw = stripSensitiveUserFields(snap.data() || account.rawUser || {});
+
+    // Ensure billingTruth/planId are present for legacy docs.
+    // This keeps admin + client display consistent even for free users.
+    try {
+      const planIdMissing = typeof (raw as any).planId !== "string" || !String((raw as any).planId).trim();
+      const billingTruthMissing = !(raw as any).billingTruth;
+
+      if (planIdMissing || billingTruthMissing) {
+        const now = Date.now();
+        const nextPlanId = planIdMissing ? "free" : (raw as any).planId;
+        const patch: any = { updatedAt: now };
+        if (planIdMissing) patch.planId = "free";
+        if (billingTruthMissing) {
+          patch.billingTruth = normalizeBillingTruthFromUser({ ...raw, planId: nextPlanId }, now);
+        }
+        await db.collection("users").doc(userId).set(patch, { merge: true });
+        // Keep response in sync without requiring another round-trip.
+        if (planIdMissing) (raw as any).planId = "free";
+        if (billingTruthMissing) (raw as any).billingTruth = patch.billingTruth;
+      }
+    } catch {
+      // non-fatal
+    }
 
     const body = {
       id: userId,
@@ -196,6 +220,7 @@ router.post("/signup", async (req, res) => {
       displayName: displayName ? String(displayName) : "",
       passwordHash,
       planId: "free",
+      billingTruth: normalizeBillingTruthFromUser({ planId: "free" }, now),
       billingActive: false,
       billingStatus: "none",
       createdAt: now,
