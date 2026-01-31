@@ -674,6 +674,19 @@ router.get("/usage", async (req, res) => {
     const planFilter = req.query.plan as PlanId | undefined;
     const monthKey = getCurrentMonthKey();
 
+    // Load platform billing flag once so the admin UI can accurately show
+    // whether Stripe is globally enabled.
+    let platformBillingEnabled = true;
+    try {
+      const featuresSnap = await firestore.collection("config").doc("features").get();
+      const features = featuresSnap.exists ? (featuresSnap.data() as any) : {};
+      if (typeof features?.billingSystemEnabled === "boolean") {
+        platformBillingEnabled = features.billingSystemEnabled;
+      }
+    } catch {
+      // default true
+    }
+
     // Get all users
     let usersQuery = firestore.collection("users");
     if (planFilter) {
@@ -716,11 +729,18 @@ router.get("/usage", async (req, res) => {
         const bonusMinutes = userData.bonusMinutes || 0;
         const effectiveLimit = planLimit + bonusMinutes;
 
+        // billingEnabled is tri-state in Firestore; missing => true.
+        const billingEnabled = userData.billingEnabled === false ? false : true;
+        const effectiveBillingEnabled = platformBillingEnabled && billingEnabled;
+
         return {
           userId,
           email: userData.email,
           displayName: userData.displayName,
           planId,
+          billingEnabled,
+          platformBillingEnabled,
+          effectiveBillingEnabled,
           minutesUsed,
           overageParticipantMinutes,
           overageTranscodeMinutes,
