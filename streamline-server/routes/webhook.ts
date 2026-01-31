@@ -213,8 +213,23 @@ router.post(
           const userSnap = await getUserRef(uid).get();
           const user = userSnap.exists ? userSnap.data() : {};
 
-          const currentPlan = user?.planId || "free";
+          const scheduledPlanChange = (user as any)?.scheduledPlanChange || null;
           const now = Date.now();
+          const preservePendingPlan =
+            scheduledPlanChange &&
+            scheduledPlanChange.type === "downgrade" &&
+            typeof scheduledPlanChange.effectiveAtMs === "number" &&
+            scheduledPlanChange.effectiveAtMs > now;
+
+          const shouldClearScheduledPlanChange =
+            scheduledPlanChange &&
+            scheduledPlanChange.type === "downgrade" &&
+            typeof scheduledPlanChange.effectiveAtMs === "number" &&
+            scheduledPlanChange.effectiveAtMs <= now &&
+            typeof scheduledPlanChange.targetPlanId === "string" &&
+            scheduledPlanChange.targetPlanId === canonicalPlan;
+
+          const currentPlan = user?.planId || "free";
           const history = sanitizeHistory((user as any)?.planChangeHistory);
           const nextHistory =
             currentPlan === canonicalPlan
@@ -224,7 +239,8 @@ router.post(
           await getUserRef(uid).set(
             {
               planId: isActive ? canonicalPlan : "free",
-              pendingPlan: null,
+              pendingPlan: preservePendingPlan ? ((user as any)?.pendingPlan ?? null) : null,
+              ...(shouldClearScheduledPlanChange ? { scheduledPlanChange: null } : {}),
               planChangeHistory: nextHistory,
               planChangeCooldownUntil: null,
               planChangeLock: null,

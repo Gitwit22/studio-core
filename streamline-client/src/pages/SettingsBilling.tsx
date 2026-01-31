@@ -338,7 +338,14 @@ export default function SettingsBilling() {
   const [showManagePicker, setShowManagePicker] = useState(false);
   const [showLifetimeDetails, setShowLifetimeDetails] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles">("plan");
+  const [billingStatusSnapshot, setBillingStatusSnapshot] = useState<any | null>(null);
+
+  const [closeCancelLoading, setCloseCancelLoading] = useState(false);
+  const [closeDeleteLoading, setCloseDeleteLoading] = useState(false);
+  const [closeDeleteConfirmed, setCloseDeleteConfirmed] = useState(false);
+  const [closeDeleteText, setCloseDeleteText] = useState("");
+
+  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles" | "close">("plan");
 
   // If a platform-wide feature is disabled, avoid landing on a hidden tab.
   useEffect(() => {
@@ -407,10 +414,17 @@ export default function SettingsBilling() {
   // If billing is active or trialing, ensure pendingPlan is cleared to avoid stuck UI
   useEffect(() => {
     if (!user) return;
-    if ((user.billingStatus === "active" || user.billingStatus === "trialing") && user.pendingPlan) {
+    const scheduled = (user as any)?.scheduledPlanChange;
+    const hasFutureScheduledDowngrade =
+      scheduled &&
+      scheduled.type === "downgrade" &&
+      typeof scheduled.effectiveAtMs === "number" &&
+      scheduled.effectiveAtMs > Date.now();
+
+    if (!hasFutureScheduledDowngrade && (user.billingStatus === "active" || user.billingStatus === "trialing") && user.pendingPlan) {
       setUser((prev: any) => (prev ? { ...prev, pendingPlan: null } : prev));
     }
-  }, [user?.billingStatus, user?.pendingPlan]);
+  }, [user?.billingStatus, user?.pendingPlan, (user as any)?.scheduledPlanChange?.effectiveAtMs, (user as any)?.scheduledPlanChange?.type]);
 
   // Reset transient actionLoading when page regains visibility (e.g., returning from Stripe)
   useEffect(() => {
@@ -442,6 +456,7 @@ export default function SettingsBilling() {
         loadPlans(),
         loadUsage(),
         loadEntitlements(),
+        loadBillingStatus(),
         loadMediaPrefs(),
         loadCohostProfile(),
         loadRolePresets(),
@@ -456,7 +471,12 @@ export default function SettingsBilling() {
   const handleRefreshStatus = async () => {
     try {
       // Try to reconcile Stripe -> Firestore (self-heals when webhooks lag/miss)
-      await apiFetchWithCookieFallback("/api/billing/refresh", { method: "POST" });
+      const res = await apiFetchWithCookieFallback("/api/billing/refresh", { method: "POST" });
+      const { json } = await safeReadJson(res);
+      const changed = Boolean((json as any)?.changed);
+      if (res.ok) {
+        showToast(changed ? "Status refreshed." : "No changes found.");
+      }
       clearMeCache();
     } catch {
       // ignore; still allow the user to refresh local state
@@ -491,6 +511,19 @@ export default function SettingsBilling() {
         setUser(null);
       }
       throw err;
+    }
+  };
+
+  const loadBillingStatus = async () => {
+    try {
+      const res = await apiFetchWithCookieFallback("/api/billing/status", { method: "GET" });
+      const { json } = await safeReadJson(res);
+      if (!res.ok) return;
+      if ((json as any)?.success) {
+        setBillingStatusSnapshot(json);
+      }
+    } catch {
+      // Non-critical UI. Billing page should still work without this.
     }
   };
 
@@ -1088,18 +1121,62 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     });
 
     const data = await res.json();
-    if (!data.success || !data.url) {
-      throw new Error(data.error || "Checkout failed");
+    if (!data.success) {
+      throw Object.assign(new Error(data.error || "Checkout failed"), { status: res.status, body: data });
     }
 
-    window.location.href = data.url;
+    // First-time paid subscription flow (Stripe Checkout)
+    if (data.url) {
+      window.location.href = data.url;
+      return;
+    }
+
+    // Existing subscriber flow: server may apply upgrade immediately or schedule downgrade.
+    if (data.mode === "upgrade") {
+      setToast("Plan updated");
+      setActionLoading(null);
+      try {
+        clearMeCache();
+        const me = await loadUser({ forceRefresh: true });
+        await loadEntitlements();
+        setUser(me);
+      } catch {}
+      return;
+    }
+
+    if (data.mode === "downgrade_scheduled") {
+      const effectiveAtMs = typeof data.effectiveAtMs === "number" ? data.effectiveAtMs : null;
+      const dateLabel = effectiveAtMs ? new Date(effectiveAtMs).toLocaleString() : "your renewal date";
+      setToast(`Downgrade scheduled for ${dateLabel}`);
+      setActionLoading(null);
+      try {
+        clearMeCache();
+        const me = await loadUser({ forceRefresh: true });
+        await loadEntitlements();
+        setUser(me);
+      } catch {}
+      return;
+    }
+
+    setToast("Plan change requested");
+    setActionLoading(null);
   } catch (err: any) {
-    if (err?.status === 403 && err?.body?.error === "billing_disabled") {
+    const bodyError = err?.body?.error;
+    const retryAfterMs = typeof err?.body?.retryAfterMs === "number" ? err.body.retryAfterMs : null;
+
+    if (bodyError === "plan_change_limit_daily") {
+      const hours = retryAfterMs ? Math.max(1, Math.ceil(retryAfterMs / 3600000)) : 24;
+      setError(`You can change plans again in ${hours} hour${hours === 1 ? "" : "s"}.`);
+    } else if (bodyError === "downgrade_limit_monthly") {
+      const date = retryAfterMs ? new Date(Date.now() + retryAfterMs) : null;
+      const label = date ? date.toLocaleDateString() : "later";
+      setError(`You can downgrade again on ${label}.`);
+    } else if (err?.status === 403 && bodyError === "billing_disabled") {
       setError("Billing is disabled for this account. Use Test Mode plan switching instead.");
-    } else if (err?.status === 403 && err?.body?.error === "tos_not_accepted") {
+    } else if (err?.status === 403 && bodyError === "tos_not_accepted") {
       setCheckoutTosError("You must agree to the Terms of Service before changing plans.");
-    } else if (err?.body?.error) {
-      setError(err.body.error);
+    } else if (bodyError) {
+      setError(bodyError);
     } else {
       setError(err.message || "Failed to start checkout. Please try again.");
     }
@@ -1107,6 +1184,62 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
   }
 };
+
+  const cancelSubscription = async () => {
+    if (closeCancelLoading) return;
+    setCloseCancelLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetchWithCookieFallback("/api/account/close", {
+        method: "POST",
+        body: JSON.stringify({ mode: "cancel_only" }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) {
+        throw Object.assign(new Error(data?.error || "Cancel failed"), { status: res.status, body: data });
+      }
+      setToast("Subscription will cancel at period end");
+      try {
+        clearMeCache();
+        const me = await loadUser({ forceRefresh: true });
+        await loadEntitlements();
+        setUser(me);
+      } catch {}
+    } catch (err: any) {
+      setError(err?.body?.error || err?.message || "Failed to cancel subscription");
+    } finally {
+      setCloseCancelLoading(false);
+    }
+  };
+
+  const deleteAccount = async () => {
+    if (closeDeleteLoading) return;
+    if (!closeDeleteConfirmed || closeDeleteText.trim().toUpperCase() !== "DELETE") {
+      setError("Confirm deletion by checking the box and typing DELETE.");
+      return;
+    }
+    setCloseDeleteLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetchWithCookieFallback("/api/account/close", {
+        method: "POST",
+        body: JSON.stringify({ mode: "delete" }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) {
+        throw Object.assign(new Error(data?.error || "Delete failed"), { status: res.status, body: data });
+      }
+
+      clearAuthStorage();
+      clearMeCache();
+      setToast("Account deletion requested");
+      nav("/join", { replace: true });
+    } catch (err: any) {
+      setError(err?.body?.error || err?.message || "Failed to delete account");
+    } finally {
+      setCloseDeleteLoading(false);
+    }
+  };
 
 
 
@@ -1500,6 +1633,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           >
             Mod/Guest Setup
           </button>
+          <button
+            type="button"
+            style={activeTab === "close" ? { ...S.tab, ...S.tabActive } : S.tab}
+            onClick={() => setActiveTab("close")}
+          >
+            Close Account
+          </button>
         </div>
 
         {/* ================================================================ */}
@@ -1686,6 +1826,43 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         {/* ================================================================ */}
         {activeTab === "plan" && (
           <>
+            {(() => {
+              const remaining = (billingStatusSnapshot as any)?.daily?.remaining;
+              const retryAfterMs = (billingStatusSnapshot as any)?.daily?.retryAfterMs;
+              if (typeof remaining !== "number") return null;
+              const hours = typeof retryAfterMs === "number" && retryAfterMs > 0
+                ? Math.max(1, Math.ceil(retryAfterMs / 3600000))
+                : 0;
+              return (
+                <div
+                  style={{
+                    marginBottom: 14,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: "1px solid rgba(148,163,184,0.22)",
+                    background: "rgba(148,163,184,0.06)",
+                    color: "#e5e7eb",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    Plan changes available (next 24h): <span style={{ color: remaining > 0 ? "#22c55e" : "#f59e0b" }}>{remaining}</span> / 3
+                  </div>
+                  {remaining === 0 && hours > 0 && (
+                    <div style={{ fontSize: 12, color: "#cbd5e1", fontWeight: 700 }}>
+                      Next change in ~{hours} hour{hours === 1 ? "" : "s"}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {isBlocked && !isTestMode && (
               <div style={S.warningCard}>
                 <div style={S.warningIcon}>⚠️</div>
@@ -1719,7 +1896,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       ? "Upgrade processing — this can take a few seconds."
                       : user?.billing?.cancelAtPeriodEnd
                         ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
-                        : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
+                        : (user as any)?.scheduledPlanChange?.type === "downgrade" &&
+                            typeof (user as any)?.scheduledPlanChange?.effectiveAtMs === "number" &&
+                            (user as any)?.scheduledPlanChange?.effectiveAtMs > Date.now()
+                          ? `Downgrade scheduled — stays active until ${formatDate((user as any).scheduledPlanChange.effectiveAtMs)}`
+                          : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
                   </span>
                 )}
               </div>
@@ -2648,6 +2829,106 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               lockReason="Stream Destinations are not included in your current plan."
               onUpgrade={() => setActiveTab("plan")}
             />
+          </div>
+        )}
+
+        {/* ================================================================ */}
+        {/* SECTION 5: CLOSE ACCOUNT */}
+        {/* ================================================================ */}
+        {activeTab === "close" && (
+          <div style={{ marginTop: 16, display: "grid", gap: 16 }}>
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <h2 style={S.cardTitle}>Close Account</h2>
+              </div>
+              <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.5 }}>
+                Manage cancellation and account deletion. Cancellation keeps access until the end of the current billing period.
+              </div>
+
+              <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={cancelSubscription}
+                  disabled={closeCancelLoading}
+                  style={{
+                    ...S.primaryBtn,
+                    opacity: closeCancelLoading ? 0.8 : 1,
+                  }}
+                >
+                  {closeCancelLoading ? "Cancelling..." : "Cancel subscription (period end)"}
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+                If you don't have an active subscription, this will no-op.
+              </div>
+            </div>
+
+            <div
+              style={{
+                ...S.card,
+                border: "1px solid rgba(239, 68, 68, 0.35)",
+                background: "rgba(239, 68, 68, 0.05)",
+              }}
+            >
+              <div style={S.cardHeader}>
+                <h2 style={{ ...S.cardTitle, color: "#fecaca" }}>Delete Account</h2>
+              </div>
+              <div style={{ color: "#fca5a5", fontSize: 13, lineHeight: 1.5 }}>
+                This immediately locks you out. Your data is scheduled for purge after 7 days.
+              </div>
+
+              <div style={{ marginTop: 6, color: "#fecaca", fontSize: 12, fontWeight: 800 }}>
+                Deleting your account cancels billing and permanently removes your content after 7 days.
+              </div>
+
+              <div style={{ marginTop: 12, display: "grid", gap: 10, maxWidth: 520 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, color: "#fee2e2", fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={closeDeleteConfirmed}
+                    onChange={(e) => setCloseDeleteConfirmed(e.target.checked)}
+                  />
+                  I understand this will immediately lock me out
+                </label>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontSize: 12, color: "#fecaca", fontWeight: 700 }}>Type DELETE to confirm</div>
+                  <input
+                    value={closeDeleteText}
+                    onChange={(e) => setCloseDeleteText(e.target.value)}
+                    placeholder="DELETE"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(239, 68, 68, 0.45)",
+                      background: "rgba(2,6,23,0.6)",
+                      color: "#fff",
+                      outline: "none",
+                      fontSize: 14,
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={deleteAccount}
+                  disabled={closeDeleteLoading}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(239, 68, 68, 0.7)",
+                    background: closeDeleteLoading ? "rgba(239, 68, 68, 0.18)" : "rgba(239, 68, 68, 0.12)",
+                    color: "#fecaca",
+                    cursor: closeDeleteLoading ? "not-allowed" : "pointer",
+                    fontWeight: 800,
+                    letterSpacing: 0.2,
+                  }}
+                >
+                  {closeDeleteLoading ? "Deleting..." : "Delete account"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

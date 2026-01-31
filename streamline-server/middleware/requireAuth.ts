@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { getUserAccount } from "../lib/userAccount";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
-type AuthUser = { uid: string };
+type AuthUser = { uid: string; iatSec?: number };
 
 export type InviteClaims = {
   roomId?: string;
@@ -63,11 +63,12 @@ export function tryGetAuthUser(req: Request): AuthUser | null {
             ? decoded.id
             : "";
       if (uid) {
+        const iatSec = typeof decoded?.iat === "number" ? decoded.iat : undefined;
         if (shouldLogAuthDebug(req)) {
           console.log("[auth-debug] Verified header JWT for uid", uid);
         }
         (req as any)._authUsed = "header";
-        return { uid };
+        return { uid, iatSec };
       }
       if (shouldLogAuthDebug(req)) {
         console.warn("[auth-debug] Header JWT verified but missing uid; falling back to cookie");
@@ -91,11 +92,12 @@ export function tryGetAuthUser(req: Request): AuthUser | null {
             ? decoded.id
             : "";
       if (uid) {
+        const iatSec = typeof decoded?.iat === "number" ? decoded.iat : undefined;
         if (shouldLogAuthDebug(req)) {
           console.log("[auth-debug] Verified cookie JWT for uid", uid);
         }
         (req as any)._authUsed = "cookie";
-        return { uid };
+        return { uid, iatSec };
       }
       if (shouldLogAuthDebug(req)) {
         console.warn("[auth-debug] Cookie JWT verified but missing uid");
@@ -134,6 +136,27 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     try {
       const account = await getUserAccount(user.uid);
       (req as any).account = account;
+
+      // Enforce immediate lockout for deleted accounts.
+      const raw = account.rawUser || {};
+      const deletedAtMs =
+        typeof (raw as any).deletedAtMs === "number"
+          ? (raw as any).deletedAtMs
+          : typeof (raw as any).deletedAt === "number"
+            ? (raw as any).deletedAt
+            : null;
+      if (deletedAtMs && deletedAtMs > 0) {
+        return res.status(403).json({ error: "account_deleted" });
+      }
+
+      // Session revocation: reject tokens issued before authRevokedAtMs.
+      const revokedAtMs = typeof (raw as any).authRevokedAtMs === "number" ? (raw as any).authRevokedAtMs : null;
+      if (revokedAtMs && revokedAtMs > 0 && typeof user.iatSec === "number") {
+        const tokenIssuedAtMs = user.iatSec * 1000;
+        if (tokenIssuedAtMs < revokedAtMs) {
+          return res.status(401).json({ error: "session_revoked" });
+        }
+      }
     } catch (err) {
       console.error("[requireAuth] getUserAccount failed:", (err as any)?.message || err);
       // Continue without req.account; callers can still compute it on demand.

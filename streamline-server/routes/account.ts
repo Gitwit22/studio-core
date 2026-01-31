@@ -15,6 +15,7 @@ import {
   type RolePermissionMap,
 } from "../lib/permissions/defaultRoleProfiles";
 import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
+import { stripe } from "../lib/stripe";
 
 const router = Router();
 
@@ -620,10 +621,21 @@ router.get("/me", async (req, res) => {
 
     const platformTranscodeEnabled = getPlatformTranscodeEnabled();
 
+    const billingTruth = {
+      status: typeof (data as any).billingStatus === "string" ? (data as any).billingStatus : null,
+      currentPeriodEndMs:
+        typeof (data as any)?.billing?.currentPeriodEnd === "number" ? (data as any).billing.currentPeriodEnd : null,
+      cancelAtPeriodEnd: !!(data as any)?.billing?.cancelAtPeriodEnd,
+      planId: typeof (data as any).planId === "string" ? (data as any).planId : null,
+      pendingPlan: typeof (data as any).pendingPlan === "string" ? (data as any).pendingPlan : null,
+      scheduledPlanChange: (data as any).scheduledPlanChange ?? null,
+    };
+
     return res.json({
       id: uid,
       email: data.email || null,
       displayName: data.displayName || null,
+      billingTruth,
       permissionsMode: mediaPrefs.permissionsMode,
       advancedPermissions: {
         enabled: false,
@@ -674,6 +686,94 @@ router.get("/me", async (req, res) => {
   } catch (err: any) {
     console.error("[account/me] error", err);
     return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Close Account
+// POST /api/account/close
+// Body: { mode: "cancel_only" | "delete" }
+// - cancel_only: cancel_at_period_end=true (stop future billing, keep access until period end)
+// - delete: cancel subscription (if any), revoke sessions, soft delete for 7 days, immediate lockout
+// ---------------------------------------------------------------------------
+
+router.post("/close", async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+
+    const { mode } = (req.body || {}) as { mode?: "cancel_only" | "delete" };
+    if (mode !== "cancel_only" && mode !== "delete") {
+      return res.status(400).json({ error: "invalid_mode" });
+    }
+
+    const userRef = firestore.collection("users").doc(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) return res.status(404).json({ error: "user_not_found" });
+    const user = (snap.data() as any) || {};
+
+    const subscriptionId: string | undefined = user?.billing?.subscriptionId || user?.stripeSubscriptionId;
+
+    const now = Date.now();
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+    if (mode === "cancel_only") {
+      if (subscriptionId) {
+        try {
+          const updated = await stripe.subscriptions.update(subscriptionId, {
+            cancel_at_period_end: true,
+          } as any);
+
+          const currentPeriodEndSec = (updated as any).current_period_end as number | undefined;
+          const currentPeriodEnd = typeof currentPeriodEndSec === "number" ? currentPeriodEndSec * 1000 : null;
+
+          await userRef.set(
+            {
+              billing: {
+                ...(user?.billing || {}),
+                cancelAtPeriodEnd: true,
+                currentPeriodEnd,
+                updatedAt: now,
+              },
+              updatedAt: now,
+            },
+            { merge: true }
+          );
+        } catch (err: any) {
+          console.error("[account/close] cancel_only failed to update Stripe subscription", err?.message || err);
+          return res.status(500).json({ error: "cancel_subscription_failed" });
+        }
+      }
+
+      return res.json({ ok: true, mode: "cancel_only" });
+    }
+
+    // mode === "delete"
+    if (subscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(subscriptionId);
+      } catch (err: any) {
+        console.error("[account/close] delete failed to cancel Stripe subscription", err?.message || err);
+        // Continue: user requested deletion should still lock out immediately.
+      }
+    }
+
+    await userRef.set(
+      {
+        deletedAtMs: now,
+        deleteAfterMs: now + SEVEN_DAYS_MS,
+        authRevokedAtMs: now,
+        deletionRequestedAtMs: now,
+        deletionReason: "user_requested",
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    return res.json({ ok: true, mode: "delete", deletedAtMs: now, deleteAfterMs: now + SEVEN_DAYS_MS });
+  } catch (err: any) {
+    console.error("POST /api/account/close failed", err?.message || err);
+    return res.status(500).json({ error: "close_account_failed" });
   }
 });
 

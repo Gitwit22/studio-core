@@ -120,6 +120,95 @@ async function expireEmergencyRecordings(now: Date): Promise<{ deletedCount: num
   return { deletedCount };
 }
 
+async function deleteCollection(ref: FirebaseFirestore.CollectionReference, limit: number = 200) {
+  const snap = await ref.limit(limit).get();
+  if (snap.empty) return 0;
+  const batch = firestore.batch();
+  for (const doc of snap.docs) batch.delete(doc.ref);
+  await batch.commit();
+  return snap.size;
+}
+
+async function purgeDeletedAccounts(now: Date): Promise<{ purgedCount: number }> {
+  const nowMs = now.getTime();
+  const snap = await firestore
+    .collection("users")
+    .where("deleteAfterMs", "<=", nowMs)
+    .limit(50)
+    .get();
+
+  let purgedCount = 0;
+
+  for (const doc of snap.docs) {
+    const uid = doc.id;
+    const data = (doc.data() as any) || {};
+    const deletedAtMs = typeof data.deletedAtMs === "number" ? data.deletedAtMs : null;
+    const deleteAfterMs = typeof data.deleteAfterMs === "number" ? data.deleteAfterMs : null;
+
+    if (!deletedAtMs || !deleteAfterMs || deleteAfterMs > nowMs) continue;
+
+    try {
+      // Best-effort cleanup of known user-owned data.
+      // Note: Firestore does not automatically delete subcollections.
+
+      // users/{uid}/rolePresets
+      try {
+        let removed = 0;
+        // Loop in case there are >limit docs
+        for (let i = 0; i < 5; i++) {
+          const n = await deleteCollection(doc.ref.collection("rolePresets"), 200);
+          removed += n;
+          if (n === 0) break;
+        }
+        if (removed) {
+          console.log("[maintenance] purged rolePresets", { uid, removed });
+        }
+      } catch {}
+
+      // users/{uid}/emergencyRecording
+      try {
+        let removed = 0;
+        for (let i = 0; i < 5; i++) {
+          const n = await deleteCollection(doc.ref.collection("emergencyRecording"), 200);
+          removed += n;
+          if (n === 0) break;
+        }
+        if (removed) {
+          console.log("[maintenance] purged emergencyRecording", { uid, removed });
+        }
+      } catch {}
+
+      // accounts/{uid}
+      try {
+        await firestore.collection("accounts").doc(uid).delete();
+      } catch {}
+
+      // billingAudit where uid == uid (best-effort, small batches)
+      try {
+        for (let i = 0; i < 5; i++) {
+          const auditSnap = await firestore
+            .collection("billingAudit")
+            .where("uid", "==", uid)
+            .limit(200)
+            .get();
+          if (auditSnap.empty) break;
+          const batch = firestore.batch();
+          for (const a of auditSnap.docs) batch.delete(a.ref);
+          await batch.commit();
+        }
+      } catch {}
+
+      // Finally: delete the primary user doc.
+      await doc.ref.delete();
+      purgedCount += 1;
+    } catch (e: any) {
+      console.warn("[maintenance/purge-deleted-accounts] failed for", uid, e?.message || e);
+    }
+  }
+
+  return { purgedCount };
+}
+
 router.get("/expire-emergency-recordings", async (_req, res) => {
   const now = new Date();
   const { deletedCount } = await expireEmergencyRecordings(now);
@@ -130,6 +219,18 @@ router.post("/expire-emergency-recordings", async (_req, res) => {
   const now = new Date();
   const { deletedCount } = await expireEmergencyRecordings(now);
   return res.json({ ok: true, deletedCount });
+});
+
+router.get("/purge-deleted-accounts", async (_req, res) => {
+  const now = new Date();
+  const { purgedCount } = await purgeDeletedAccounts(now);
+  return res.json({ ok: true, purgedCount });
+});
+
+router.post("/purge-deleted-accounts", async (_req, res) => {
+  const now = new Date();
+  const { purgedCount } = await purgeDeletedAccounts(now);
+  return res.json({ ok: true, purgedCount });
 });
 
 export default router;

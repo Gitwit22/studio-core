@@ -8,10 +8,16 @@ import { PLAN_IDS, PlanId, isPlanId } from "../types/plan";
 import { getUserAccount } from "../lib/userAccount";
 import { CURRENT_TOS_VERSION, hasAcceptedCurrentTos } from "../lib/tos";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
+import { comparePlans } from "../lib/planRank";
+import {
+  applyDailyWindowReset,
+  applySuccessfulPlanChange,
+  assertDailyPlanLimit,
+  assertMonthlyDowngradeLimit,
+  normalizeBillingGuards,
+  type BillingGuards,
+} from "../lib/billingGuards";
 
-// Plan change guardrails
-const PLAN_CHANGE_WINDOW_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
-const PLAN_CHANGE_MAX_IN_WINDOW = 2;
 const PLAN_CHANGE_LOCK_TTL_MS = 60 * 1000; // 60 seconds
 
 type PlanChangeHistoryEntry = {
@@ -46,8 +52,9 @@ function sanitizeHistory(history: any): PlanChangeHistoryEntry[] {
 async function acquirePlanChangeLock(params: {
   userRef: DocumentReference;
   requestId: string;
+  targetPlanId: PlanId;
 }) {
-  const { userRef, requestId } = params;
+  const { userRef, requestId, targetPlanId } = params;
   const now = Date.now();
 
   return db.runTransaction(async (tx) => {
@@ -57,25 +64,43 @@ async function acquirePlanChangeLock(params: {
     }
 
     const user = snap.data() as any;
-    const history = sanitizeHistory(user?.planChangeHistory);
 
-    // Cooldown check: block on 3rd change inside 5-day window
-    const recent = history.filter((entry) => entry.at >= now - PLAN_CHANGE_WINDOW_MS);
-    if (recent.length >= PLAN_CHANGE_MAX_IN_WINDOW) {
-      const oldestRecent = recent[0];
-      const cooldownUntil = oldestRecent.at + PLAN_CHANGE_WINDOW_MS;
+    const currentPlanId: PlanId = isPlanId(user?.planId) ? (user.planId as PlanId) : "free";
+    const direction = comparePlans(currentPlanId, targetPlanId);
+
+    // Canonical plan-change guards (stored on user doc).
+    let guards: BillingGuards = normalizeBillingGuards(user?.billingGuards, now);
+
+    // Daily limit (rolling 24h, max 3 changes) applies to upgrades and downgrades.
+    const daily = assertDailyPlanLimit(guards, now);
+    if (!daily.ok) {
+      throw Object.assign(new Error("plan_change_limit_daily"), {
+        code: "DAILY_LIMIT",
+        retryAfterMs: daily.retryAfterMs,
+      });
+    }
+
+    // If the window expired, reset it now (does not count as a change).
+    if ((daily as any).reset) {
+      guards = applyDailyWindowReset(guards, now);
       tx.set(
         userRef,
         {
-          planChangeCooldownUntil: cooldownUntil,
-          planChangeLock: null,
+          billingGuards: guards,
         },
         { merge: true }
       );
-      throw Object.assign(new Error("plan_change_cooldown"), {
-        code: "COOLDOWN",
-        cooldownUntil,
-      });
+    }
+
+    // Downgrade-only rule: once per rolling 30 days.
+    if (direction < 0) {
+      const down = assertMonthlyDowngradeLimit(guards, now);
+      if (!down.ok) {
+        throw Object.assign(new Error("downgrade_limit_monthly"), {
+          code: "MONTHLY_DOWNGRADE_LIMIT",
+          retryAfterMs: down.retryAfterMs,
+        });
+      }
     }
 
     const lock = user?.planChangeLock;
@@ -105,7 +130,7 @@ async function acquirePlanChangeLock(params: {
       { merge: true }
     );
 
-    return { user, newLock };
+    return { user, newLock, currentPlanId, direction };
   });
 }
 
@@ -138,20 +163,6 @@ function priceIdFor(plan: PlanId, planMeta?: any) {
 
 // Accept any PlanId + variant for checkout
 type CheckoutPlanVariant = `${PlanId}_paid` | `${PlanId}_trial` | PlanId;
-
-const PLAN_RANKS: Record<string, number> = {
-  free: 0,
-  starter: 1,
-  basic: 1,
-  pro: 2,
-  enterprise: 3,
-  internal_unlimited: 4,
-};
-
-function getPlanRank(planId?: string | null): number {
-  if (!planId) return 0;
-  return PLAN_RANKS[planId] ?? 0;
-}
 
 function planIdFromStripeSubscription(sub: any): PlanId {
   const metaPlan = String(sub?.metadata?.plan || "").trim();
@@ -230,13 +241,16 @@ router.post("/checkout", requireAuth, async (req, res) => {
       return res.json({ success: true, reused: true, ...user.planChangeRequestResult });
     }
 
-    // Acquire lock + cooldown enforcement
+    // Acquire lock + guard enforcement
     let lockedUser: any = null;
     try {
-      lockedUser = await acquirePlanChangeLock({ userRef, requestId });
+      lockedUser = await acquirePlanChangeLock({ userRef, requestId, targetPlanId: canonicalPlan });
     } catch (err: any) {
-      if (err?.code === "COOLDOWN") {
-        return res.status(429).json({ success: false, error: "plan_change_cooldown", cooldownUntil: err.cooldownUntil });
+      if (err?.code === "DAILY_LIMIT") {
+        return res.status(429).json({ success: false, error: "plan_change_limit_daily", retryAfterMs: err.retryAfterMs });
+      }
+      if (err?.code === "MONTHLY_DOWNGRADE_LIMIT") {
+        return res.status(429).json({ success: false, error: "downgrade_limit_monthly", retryAfterMs: err.retryAfterMs });
       }
       if (err?.code === "LOCKED") {
         return res.status(409).json({ success: false, error: "plan_change_locked", lockUntil: err.lockUntil });
@@ -248,6 +262,8 @@ router.post("/checkout", requireAuth, async (req, res) => {
     }
 
     const userAtLock = lockedUser?.user ?? user;
+    const currentPlanId: PlanId = isPlanId(userAtLock?.planId) ? (userAtLock.planId as PlanId) : "free";
+    const direction = comparePlans(currentPlanId, canonicalPlan);
 
     // Enforce Terms of Service acceptance before creating a checkout session.
     if (!hasAcceptedCurrentTos(userAtLock)) {
@@ -265,6 +281,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
         (userAtLock as any).tosVersion = CURRENT_TOS_VERSION;
         (userAtLock as any).tosAcceptedAt = now;
       } else {
+        await userRef.set({ planChangeLock: null }, { merge: true });
         return res.status(403).json({
           success: false,
           error: "tos_not_accepted",
@@ -282,7 +299,168 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const useTrial = variant === "trial" && !hasHadTrial;
     const trialDays = useTrial ? DEFAULT_TRIAL_DAYS : 0;
 
-    // Ensure Stripe customer exists
+    const subscriptionId: string | undefined = userAtLock?.billing?.subscriptionId || userAtLock?.stripeSubscriptionId;
+
+    // Fast-path: existing active subscription => apply upgrade immediately or schedule downgrade.
+    if (subscriptionId) {
+      const sub = await stripe.subscriptions.retrieve(subscriptionId);
+      const billingStatus = String((sub as any)?.status || "none");
+      const billingActive = billingStatus === "active" || billingStatus === "trialing";
+
+      if (billingActive && direction !== 0) {
+        const itemId: string | undefined = (sub as any)?.items?.data?.[0]?.id;
+        const currentPriceId: string | undefined = (sub as any)?.items?.data?.[0]?.price?.id;
+        if (!itemId || !currentPriceId) {
+          await userRef.set({ planChangeLock: null }, { merge: true });
+          return res.status(500).json({ success: false, error: "subscription_item_missing" });
+        }
+
+        // Fetch plan metadata from Firestore for custom plans
+        let planMeta: any = {};
+        try {
+          const planSnap = await db.collection("plans").doc(canonicalPlan).get();
+          if (planSnap.exists) planMeta = planSnap.data();
+        } catch {}
+
+        const targetPriceId = priceIdFor(canonicalPlan, planMeta);
+        const now = Date.now();
+        const guards = normalizeBillingGuards(userAtLock?.billingGuards, now);
+        const nextGuards = applySuccessfulPlanChange({ guards, nowMs: now, isDowngrade: direction < 0 });
+
+        if (direction > 0) {
+          // Upgrade: effective immediately.
+          const updated = await stripe.subscriptions.update(subscriptionId, {
+            cancel_at_period_end: false,
+            items: [{ id: itemId, price: targetPriceId }],
+            proration_behavior: "always_invoice",
+            metadata: {
+              ...(sub as any)?.metadata,
+              userId: uid,
+              plan: canonicalPlan,
+              planVariant: canonicalPlan,
+            },
+          } as any);
+
+          const currentPeriodEndSec = (updated as any).current_period_end as number | undefined;
+          const currentPeriodEnd = typeof currentPeriodEndSec === "number" ? currentPeriodEndSec * 1000 : null;
+
+          const history = sanitizeHistory(userAtLock?.planChangeHistory);
+          const nextHistory =
+            currentPlanId === canonicalPlan
+              ? history
+              : [...history, { at: now, fromPlan: currentPlanId, toPlan: canonicalPlan, source: "upgrade" }].slice(-10);
+
+          await userRef.set(
+            {
+              planId: canonicalPlan,
+              pendingPlan: null,
+              scheduledPlanChange: null,
+              billingGuards: nextGuards,
+              planChangeHistory: nextHistory,
+              planChangeLock: null,
+              planChangeRequestId: requestId,
+              planChangeRequestResult: {
+                requestId,
+                status: "ok",
+                mode: "upgrade",
+                plan: canonicalPlan,
+                createdAt: now,
+              },
+              billingActive: billingStatus === "active" || billingStatus === "trialing",
+              billingStatus,
+              billing: {
+                ...(userAtLock?.billing || {}),
+                provider: "stripe",
+                customerId: (sub as any)?.customer ?? userAtLock?.stripeCustomerId ?? userAtLock?.billing?.customerId ?? null,
+                subscriptionId: subscriptionId,
+                priceId: targetPriceId,
+                cancelAtPeriodEnd: !!(updated as any).cancel_at_period_end,
+                currentPeriodEnd,
+                updatedAt: now,
+              },
+              updatedAt: now,
+            },
+            { merge: true }
+          );
+
+          return res.json({ success: true, mode: "upgrade", planId: canonicalPlan, requestId });
+        }
+
+        // Downgrade: schedule at period end.
+        const currentPeriodEndSec = (sub as any).current_period_end as number | undefined;
+        const currentPeriodEnd = typeof currentPeriodEndSec === "number" ? currentPeriodEndSec : null;
+        const currentPeriodStartSec = (sub as any).current_period_start as number | undefined;
+        const currentPeriodStart = typeof currentPeriodStartSec === "number" ? currentPeriodStartSec : Math.floor(now / 1000);
+        if (!currentPeriodEnd) {
+          await userRef.set({ planChangeLock: null }, { merge: true });
+          return res.status(500).json({ success: false, error: "subscription_period_missing" });
+        }
+
+        const scheduleIdExisting = (sub as any).schedule || (sub as any).subscription_schedule;
+        const schedule = scheduleIdExisting
+          ? await stripe.subscriptionSchedules.retrieve(String(scheduleIdExisting))
+          : await stripe.subscriptionSchedules.create({ from_subscription: subscriptionId } as any);
+
+        const scheduleId = schedule.id;
+
+        await stripe.subscriptionSchedules.update(
+          scheduleId,
+          {
+            end_behavior: "release",
+            phases: [
+              {
+                start_date: currentPeriodStart,
+                end_date: currentPeriodEnd,
+                items: [{ price: currentPriceId, quantity: 1 }],
+                proration_behavior: "none",
+              },
+              {
+                start_date: currentPeriodEnd,
+                items: [{ price: targetPriceId, quantity: 1 }],
+                proration_behavior: "none",
+              },
+            ],
+          } as any
+        );
+
+        const effectiveAtMs = currentPeriodEnd * 1000;
+
+        const history = sanitizeHistory(userAtLock?.planChangeHistory);
+        const nextHistory = [...history, { at: now, fromPlan: currentPlanId, toPlan: canonicalPlan, source: "downgrade_scheduled" }].slice(-10);
+
+        await userRef.set(
+          {
+            // Keep current plan active until effective date.
+            planId: currentPlanId,
+            pendingPlan: canonicalPlan,
+            scheduledPlanChange: {
+              type: "downgrade",
+              targetPlanId: canonicalPlan,
+              effectiveAtMs,
+              scheduleId,
+            },
+            billingGuards: nextGuards,
+            planChangeHistory: nextHistory,
+            planChangeLock: null,
+            planChangeRequestId: requestId,
+            planChangeRequestResult: {
+              requestId,
+              status: "ok",
+              mode: "downgrade_scheduled",
+              plan: canonicalPlan,
+              effectiveAtMs,
+              createdAt: now,
+            },
+            updatedAt: now,
+          },
+          { merge: true }
+        );
+
+        return res.json({ success: true, mode: "downgrade_scheduled", planId: currentPlanId, pendingPlan: canonicalPlan, effectiveAtMs, requestId });
+      }
+    }
+
+    // Ensure Stripe customer exists (needed for first-time checkout)
     let customerId: string | undefined = userAtLock?.stripeCustomerId || userAtLock?.billing?.customerId;
 
     if (!customerId) {
@@ -345,6 +523,8 @@ router.post("/checkout", requireAuth, async (req, res) => {
     });
 
     const now = Date.now();
+    const guards = normalizeBillingGuards(userAtLock?.billingGuards, now);
+    const nextGuards = applySuccessfulPlanChange({ guards, nowMs: now, isDowngrade: false });
     const history = sanitizeHistory(userAtLock?.planChangeHistory);
     const nextHistory = [
       ...history,
@@ -359,8 +539,9 @@ router.post("/checkout", requireAuth, async (req, res) => {
     await userRef.set(
       {
         pendingPlan: canonicalPlan,
+        scheduledPlanChange: null,
+        billingGuards: nextGuards,
         planChangeHistory: nextHistory,
-        planChangeCooldownUntil: null,
         planChangeLock: null,
         planChangeRequestId: requestId,
         planChangeRequestResult: {
@@ -570,6 +751,12 @@ router.post("/refresh", requireAuth, async (req, res) => {
     const currentPeriodEnd = typeof currentPeriodEndSec === "number" ? currentPeriodEndSec * 1000 : null;
     const priceId = sub?.items?.data?.[0]?.price?.id ?? null;
 
+    const stripeIndicatesScheduledChange =
+      !!(sub as any).cancel_at_period_end ||
+      !!(sub as any).pending_update ||
+      !!(sub as any).schedule ||
+      !!(sub as any).subscription_schedule;
+
     const prevPlan = (user?.planId as PlanId) || "free";
     const now = Date.now();
     const history = sanitizeHistory(user?.planChangeHistory);
@@ -578,12 +765,56 @@ router.post("/refresh", requireAuth, async (req, res) => {
         ? history
         : [...history, { at: now, fromPlan: prevPlan, toPlan: nextPlan, source: "billing_refresh" }].slice(-10);
 
+    const scheduledPlanChange = user?.scheduledPlanChange || null;
+    const preservePendingPlan =
+      scheduledPlanChange &&
+      scheduledPlanChange.type === "downgrade" &&
+      typeof scheduledPlanChange.effectiveAtMs === "number" &&
+      scheduledPlanChange.effectiveAtMs > now &&
+      stripeIndicatesScheduledChange;
+
+    const shouldClearScheduledPlanChange =
+      scheduledPlanChange &&
+      scheduledPlanChange.type === "downgrade" &&
+      typeof scheduledPlanChange.effectiveAtMs === "number" &&
+      scheduledPlanChange.effectiveAtMs <= now &&
+      typeof scheduledPlanChange.targetPlanId === "string" &&
+      scheduledPlanChange.targetPlanId === nextPlan;
+
+    const shouldClearStaleFutureScheduledPlanChange =
+      scheduledPlanChange &&
+      scheduledPlanChange.type === "downgrade" &&
+      typeof scheduledPlanChange.effectiveAtMs === "number" &&
+      scheduledPlanChange.effectiveAtMs > now &&
+      !stripeIndicatesScheduledChange;
+
+    const desiredPlanId = billingActive ? nextPlan : "free";
+    const willClearScheduledPlanChange = !!(shouldClearScheduledPlanChange || shouldClearStaleFutureScheduledPlanChange);
+    const desiredPendingPlan = preservePendingPlan
+      ? (user?.pendingPlan ?? null)
+      : billingActive
+        ? null
+        : (user?.pendingPlan ?? null);
+
+    const pendingPlanCleared = (user?.pendingPlan ?? null) !== null && desiredPendingPlan === null;
+
+    const changes: string[] = [];
+    if ((user?.planId ?? "free") !== desiredPlanId) changes.push("updated_planId");
+    if ((user?.pendingPlan ?? null) !== desiredPendingPlan && desiredPendingPlan === null) changes.push("cleared_pendingPlan");
+    if (willClearScheduledPlanChange && (user?.scheduledPlanChange ?? null) !== null) changes.push("cleared_scheduledPlanChange");
+    if (String(user?.billingStatus || "none") !== billingStatus) changes.push("updated_billingStatus");
+    if (Boolean(user?.billingActive) !== billingActive) changes.push("updated_billingActive");
+    if (Number(user?.billing?.currentPeriodEnd ?? null) !== Number(currentPeriodEnd ?? null)) changes.push("updated_currentPeriodEndMs");
+    if (Boolean(user?.billing?.cancelAtPeriodEnd) !== Boolean(sub.cancel_at_period_end)) changes.push("updated_cancelAtPeriodEnd");
+
+    const changed = changes.length > 0;
+
     await userRef.set(
       {
-        planId: billingActive ? nextPlan : "free",
-        pendingPlan: billingActive ? null : (user?.pendingPlan ?? null),
+        planId: desiredPlanId,
+        pendingPlan: desiredPendingPlan,
+        ...(willClearScheduledPlanChange ? { scheduledPlanChange: null } : {}),
         planChangeHistory: nextHistory,
-        planChangeCooldownUntil: billingActive ? null : (user?.planChangeCooldownUntil ?? null),
         planChangeLock: null,
         planChangeRequestId: null,
         planChangeRequestResult: null,
@@ -606,10 +837,17 @@ router.post("/refresh", requireAuth, async (req, res) => {
 
     return res.json({
       success: true,
-      planId: billingActive ? nextPlan : "free",
+      planId: desiredPlanId,
       billingStatus,
       billingActive,
-      pendingPlanCleared: billingActive,
+      pendingPlanCleared,
+      changed,
+      changes,
+      stripe: {
+        subscriptionStatus: billingStatus,
+        hasSchedule: stripeIndicatesScheduledChange,
+        currentPeriodEndMs: currentPeriodEnd,
+      },
     });
   } catch (err: any) {
     console.error("POST /api/billing/refresh failed:", err?.message || err);
@@ -734,9 +972,11 @@ router.get("/status", requireAuth, async (req, res) => {
     const user = snap.data() as any;
 
     const now = Date.now();
-    const cooldownUntil = typeof user?.planChangeCooldownUntil === "number" ? user.planChangeCooldownUntil : null;
-    const cooldownActive = !!(cooldownUntil && cooldownUntil > now);
     const lock = user?.planChangeLock || null;
+
+    const guards = normalizeBillingGuards(user?.billingGuards, now);
+    const daily = assertDailyPlanLimit(guards, now);
+    const dailyRemaining = daily.ok ? Math.max(0, 3 - (guards.changeCountInWindow ?? 0)) : 0;
 
     const subscriptionId: string | undefined =
       user?.billing?.subscriptionId || user?.stripeSubscriptionId;
@@ -787,15 +1027,21 @@ router.get("/status", requireAuth, async (req, res) => {
 
     const planId = user?.planId || "free";
     const pendingPlan = user?.pendingPlan ?? null;
+    const scheduledPlanChange = user?.scheduledPlanChange ?? null;
 
     let state: string = "ACTIVE";
-    if (cooldownActive) {
-      state = "COOLDOWN";
-    } else if (cancelAtPeriodEnd) {
+    if (cancelAtPeriodEnd) {
       state = "CANCEL_AT_PERIOD_END";
+    } else if (
+      scheduledPlanChange &&
+      scheduledPlanChange.type === "downgrade" &&
+      typeof scheduledPlanChange.effectiveAtMs === "number" &&
+      scheduledPlanChange.effectiveAtMs > now
+    ) {
+      state = "PENDING_DOWNGRADE";
     } else if (scheduledChange) {
       if (pendingPlan && pendingPlan !== planId) {
-        state = getPlanRank(pendingPlan) > getPlanRank(planId) ? "PENDING_UPGRADE" : "PENDING_DOWNGRADE";
+        state = comparePlans(planId, pendingPlan) > 0 ? "PENDING_UPGRADE" : "PENDING_DOWNGRADE";
       } else {
         state = "PENDING_CHANGE";
       }
@@ -815,13 +1061,23 @@ router.get("/status", requireAuth, async (req, res) => {
       state,
       planId,
       pendingPlan,
+      scheduledPlanChange,
       billingStatus: status || null,
       billingActive,
       subscriptionId: subscriptionId || null,
       scheduledChange,
       scheduledEffectiveDate,
       cancelAtPeriodEnd,
-      cooldownUntil: cooldownUntil || null,
+      guards: {
+        changeWindowStartMs: guards.changeWindowStartMs,
+        changeCountInWindow: guards.changeCountInWindow,
+        lastDowngradeAtMs: guards.lastDowngradeAtMs,
+        lastPlanChangeAtMs: guards.lastPlanChangeAtMs,
+      },
+      daily: {
+        remaining: dailyRemaining,
+        retryAfterMs: daily.ok ? 0 : (daily as any).retryAfterMs,
+      },
       lock: lock || null,
       request: {
         lastRequestId: user?.planChangeRequestId ?? null,
