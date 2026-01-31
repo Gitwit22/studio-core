@@ -123,6 +123,15 @@ async function handleUsageSummary(req: any, res: any) {
     const recordingCurrent = toNumber(usageMinutes.recording?.currentPeriod);
     const recordingLifetime = toNumber(usageMinutes.recording?.lifetime ?? ytdMinutes.recording?.lifetime);
 
+    const transcodeCurrent = toNumber(usageMinutes.transcode?.currentPeriod ?? usage.transcodeMinutes);
+    const transcodeLifetime = toNumber(ytdMinutes.transcode?.lifetime ?? ytd.transcodeMinutes);
+
+    // Canonical aliases (match /api/account/me)
+    const inRoomCurrent = liveCurrentBase;
+    const inRoomLifetime = liveLifetimeBase;
+    const broadcastCurrent = transcodeCurrent;
+    const broadcastLifetime = transcodeLifetime;
+
     const participantLimit = Number(plan.limits.monthlyMinutes || 0); // 0 = unlimited
     const transcodeLimit = Number(plan.limits.transcodeMinutes || 0); // 0 = unlimited
 
@@ -154,6 +163,20 @@ async function handleUsageSummary(req: any, res: any) {
           live: {
             currentPeriod: liveCurrent,
             lifetime: liveLifetime,
+          },
+          // Bucketed transcode minutes (broadcast/egress)
+          transcode: {
+            currentPeriod: transcodeCurrent,
+            lifetime: transcodeLifetime,
+          },
+          // Canonical aliases
+          inRoom: {
+            currentPeriod: inRoomCurrent,
+            lifetime: inRoomLifetime,
+          },
+          broadcast: {
+            currentPeriod: broadcastCurrent,
+            lifetime: broadcastLifetime,
           },
           recording: {
             currentPeriod: recordingCurrent,
@@ -201,6 +224,18 @@ async function handleUsageSummary(req: any, res: any) {
               currentPeriod: liveCurrent,
               lifetime: liveLifetime,
             },
+            transcode: {
+              currentPeriod: transcodeCurrent,
+              lifetime: transcodeLifetime,
+            },
+            inRoom: {
+              currentPeriod: inRoomCurrent,
+              lifetime: inRoomLifetime,
+            },
+            broadcast: {
+              currentPeriod: broadcastCurrent,
+              lifetime: broadcastLifetime,
+            },
             recording: {
               currentPeriod: recordingCurrent,
               lifetime: recordingLifetime,
@@ -218,6 +253,15 @@ async function handleUsageSummary(req: any, res: any) {
           minutes: {
             live: {
               lifetime: toNumber(ytdMinutes.live?.lifetime ?? liveLifetime),
+            },
+            transcode: {
+              lifetime: transcodeLifetime,
+            },
+            inRoom: {
+              lifetime: inRoomLifetime,
+            },
+            broadcast: {
+              lifetime: broadcastLifetime,
             },
             recording: {
               lifetime: toNumber(ytdMinutes.recording?.lifetime ?? recordingLifetime),

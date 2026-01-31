@@ -154,6 +154,10 @@ router.get("/users", async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
     const planFilter = req.query.plan as PlanId | undefined;
+    const includeDeleted = (() => {
+      const raw = String(req.query.includeDeleted || "").trim().toLowerCase();
+      return raw === "1" || raw === "true" || raw === "yes";
+    })();
 
     let query = firestore.collection("users").orderBy("createdAt", "desc");
 
@@ -168,9 +172,28 @@ router.get("/users", async (req, res) => {
       ...doc.data(),
     }));
 
+    const filteredUsers = includeDeleted
+      ? users.map((u: any) => {
+          // Always include deletedAtMs and deleteAfterMs for deleted users
+          if (typeof u?.deletedAtMs === "number" && u.deletedAtMs > 0) {
+            return {
+              ...u,
+              deletedAt: new Date(u.deletedAtMs).toISOString(),
+              deleteAfter: new Date(u.deleteAfterMs || 0).toISOString(),
+              purgeInDays: u.deleteAfterMs ? Math.max(0, Math.ceil((u.deleteAfterMs - Date.now()) / (1000 * 60 * 60 * 24))) : null,
+            };
+          }
+          return u;
+        })
+      : users.filter((u: any) => {
+          const status = typeof u?.accountStatus === "string" ? String(u.accountStatus).toLowerCase() : "";
+          const deletedAtMs = typeof u?.deletedAtMs === "number" ? u.deletedAtMs : null;
+          return status !== "deleted" && !(deletedAtMs && deletedAtMs > 0);
+        });
+
     res.json({
-      users,
-      total: snapshot.size,
+      users: filteredUsers,
+      total: filteredUsers.length,
       limit,
       offset,
     });

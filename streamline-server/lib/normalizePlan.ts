@@ -7,7 +7,9 @@ export type CanonicalPlan = {
   limits: {
     monthlyMinutes: number; // canonical minutes bucket used by usage
     monthlyMinutesIncluded: number; // alias for plan listing
-    transcodeMinutes: number;
+    // When undefined, the plan does NOT include broadcast/transcode minutes.
+    // When 0, it may mean "unlimited" for internal plans.
+    transcodeMinutes?: number;
     maxGuests: number;
     rtmpDestinationsMax: number;
     maxSessionMinutes: number;
@@ -129,10 +131,16 @@ export function normalizePlan(id: string, doc: any | undefined | null): Canonica
     0
   );
 
-  const transcodeMinutes = toNumber(
-    limits.transcodeMinutes ?? data.transcodeMinutes,
-    0
-  );
+  // IMPORTANT: preserve absence vs explicit value.
+  // - If the plan doc does not define transcodeMinutes at all, treat as "not included" (undefined).
+  // - If the plan doc defines transcodeMinutes (including 0), keep it.
+  const hasTranscodeMinutesField =
+    (limits && Object.prototype.hasOwnProperty.call(limits, "transcodeMinutes")) ||
+    Object.prototype.hasOwnProperty.call(data, "transcodeMinutes");
+
+  const transcodeMinutes = hasTranscodeMinutesField
+    ? toNumber(limits.transcodeMinutes ?? data.transcodeMinutes, 0)
+    : undefined;
 
   // Canonical multistream feature flag. Honor both the modern
   // `features.multistream` key and the legacy/admin

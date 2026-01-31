@@ -539,6 +539,9 @@ router.get("/me", async (req, res) => {
       usageMinutes.recording?.lifetime ?? ytdMinutes.recording?.lifetime
     );
 
+    const transcodeCurrent = toNumber(usageMinutes.transcode?.currentPeriod ?? usage.transcodeMinutes);
+    const transcodeLifetime = toNumber(ytdMinutes.transcode?.lifetime ?? ytd.transcodeMinutes);
+
     const effectivePermissionsMode = "simple" as const;
     const permissionsModeLockReason = "plan" as const;
 
@@ -586,6 +589,8 @@ router.get("/me", async (req, res) => {
       // older callers can continue to function.
       const rtmpDestinationsMax = resolveMaxDestinations(limits);
 
+      const transcodeLimitRaw = (limits as any).transcodeMinutes;
+
       effectiveEntitlements = {
         planId: entitlements.planId,
         planName: plan.name || entitlements.planId,
@@ -610,7 +615,9 @@ router.get("/me", async (req, res) => {
           maxDestinations: rtmpDestinationsMax,
           maxGuests: Number(limits.maxGuests || 0),
           participantMinutes: Number(limits.monthlyMinutes || limits.monthlyMinutesIncluded || 0),
-          transcodeMinutes: Number(limits.transcodeMinutes || 0),
+          // IMPORTANT: omit this field entirely when the plan does not include broadcast/transcode.
+          // Client gating relies on presence (typeof === "number").
+          transcodeMinutes: typeof transcodeLimitRaw === "number" ? Number(transcodeLimitRaw) : undefined,
           maxRecordingMinutesPerClip: Number(limits.maxRecordingMinutesPerClip || 0),
         },
         caps: entitlements.caps || {},
@@ -668,6 +675,19 @@ router.get("/me", async (req, res) => {
       effectiveEntitlements,
       usage: {
         minutes: {
+          // Canonical / UX-safe names:
+          // - inRoom: participant minutes (per participant)
+          // - broadcast: transcode/egress minutes (HLS/RTMP broadcasting)
+          inRoom: {
+            currentPeriod: liveCurrentBase,
+            lifetime: liveLifetimeBase,
+          },
+          broadcast: {
+            currentPeriod: transcodeCurrent,
+            lifetime: transcodeLifetime,
+          },
+
+          // Backwards compatibility fields (legacy callers may still reference these)
           live: {
             currentPeriod: liveCurrent,
             lifetime: liveLifetime,
@@ -760,6 +780,7 @@ router.post("/close", async (req, res) => {
 
     await userRef.set(
       {
+        accountStatus: "deleted",
         deletedAtMs: now,
         deleteAfterMs: now + SEVEN_DAYS_MS,
         authRevokedAtMs: now,

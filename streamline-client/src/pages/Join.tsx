@@ -16,8 +16,8 @@ type SavedEmbedSummary = {
 
 
 type UsageData = {
-  streamingMinutes: number;
-  maxStreamingMinutes: number;
+  inRoomMinutes: number;
+  maxInRoomMinutes: number;
   storageUsed: number;
   maxStorage: number;
   planId: PlanId;
@@ -363,6 +363,7 @@ export default function Join() {
   .then((data) => {
     if (!didCancel) {
       const um = data?.usageMonthly || {};
+      const minutes = data?.usage?.minutes || um?.usage?.minutes || {};
       // Canonicalize plan id
       let planIdRaw = data?.plan?.id ?? data?.user?.planId ?? "free";
       let canonicalPlanId: PlanId = "free";
@@ -372,8 +373,12 @@ export default function Join() {
         canonicalPlanId = planIdRaw;
       }
       setUsageData({
-        streamingMinutes: um?.participantMinutes ?? um?.usage?.participantMinutes ?? Math.max(0, Math.round((data?.user?.usage?.hoursStreamedThisMonth || 0) * 60)),
-        maxStreamingMinutes: data?.plan?.limits?.participantMinutes ?? 0,
+        inRoomMinutes:
+          minutes?.inRoom?.currentPeriod ??
+          um?.participantMinutes ??
+          um?.usage?.participantMinutes ??
+          Math.max(0, Math.round((data?.user?.usage?.hoursStreamedThisMonth || 0) * 60)),
+        maxInRoomMinutes: data?.plan?.limits?.participantMinutes ?? 0,
         storageUsed: um?.storageGB ?? um?.usage?.storageGB ?? 0,
         maxStorage: data?.plan?.limits?.storageGB ?? 0,
         planId: canonicalPlanId,
@@ -516,8 +521,8 @@ export default function Join() {
   }
 
   const streamingPercent =
-    usageData && usageData.maxStreamingMinutes > 0
-      ? (usageData.streamingMinutes / usageData.maxStreamingMinutes) * 100
+    usageData && usageData.maxInRoomMinutes > 0
+      ? (usageData.inRoomMinutes / usageData.maxInRoomMinutes) * 100
       : 0;
 
   const storagePercent =
@@ -606,7 +611,7 @@ export default function Join() {
                 flexWrap: "wrap",
               }}
             >
-              {/* Streaming Minutes */}
+              {/* In-room minutes */}
               <div>
                 <div
                   style={{
@@ -617,7 +622,7 @@ export default function Join() {
                     marginBottom: "4px",
                   }}
                 >
-                  Streaming Minutes
+                  In-room minutes
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <div style={{ fontSize: "18px", fontWeight: 700 }}>
@@ -625,7 +630,7 @@ export default function Join() {
                       ? "..."
                       : usageError
                       ? "—"
-                      : usageData?.streamingMinutes ?? "—"}
+                      : usageData?.inRoomMinutes ?? "—"}
                   </div>
                   <div style={{ fontSize: "13px", color: "#9ca3af" }}>
                     /{" "}
@@ -633,8 +638,11 @@ export default function Join() {
                       ? "..."
                       : usageError
                       ? "—"
-                      : usageData?.maxStreamingMinutes ?? "—"}
+                      : usageData?.maxInRoomMinutes ?? "—"}
                   </div>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
+                  Joining uses In-room minutes.
                 </div>
                 <div
                   style={{

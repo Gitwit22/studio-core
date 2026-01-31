@@ -12,7 +12,9 @@ import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
 import { getMeCached, clearMeCache } from "../lib/meCache";
+import { clearPlatformFlagsCache } from "../lib/platformFlagsCache";
 import { isFeatureAvailable, isPlatformEnabled } from "../lib/featureAvailability";
+import { getUsageGating, usageLabels, usageTooltips } from "../lib/usageLabels";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -150,7 +152,8 @@ const DEFAULT_ENTITLEMENTS = {
 };
 
 const DEFAULT_USAGE = {
-  streamingMinutes: { used: 0, limit: 0, lifetime: 0 },
+  inRoomMinutes: { used: 0, limit: 0, lifetime: 0 },
+  broadcastMinutes: { used: 0, limit: 0, lifetime: 0 },
   recordingMinutes: { used: 0, lifetime: 0 },
   overages: { participantMinutes: 0, transcodeMinutes: 0 },
   rtmpDestinations: { used: 0, limit: 0 },
@@ -670,36 +673,50 @@ export default function SettingsBilling() {
       const overages = usageMonthly.overages || {};
       const usageWrapper = data?.usage || {};
       const usageMinutes = usageWrapper.minutes || usageInner.minutes || {};
+      const ytdMinutes = usageMonthly?.ytd?.minutes || {};
       // Fallback to legacy hours on user.usage if monthly doc not present
       const legacyHours = Number(data?.user?.usage?.hoursStreamedThisMonth || 0);
       const legacyMinutes = Math.max(0, Math.round(legacyHours * 60));
       const participantUsed = Number(usageMonthly.participantMinutes ?? usageInner.participantMinutes ?? legacyMinutes ?? 0);
+      const transcodeUsed = Number(usageMonthly.transcodeMinutes ?? usageInner.transcodeMinutes ?? 0);
 
-      const liveCurrent = Number(
-        usageMinutes.live?.currentPeriod ?? usageInner.minutes?.live?.currentPeriod ?? participantUsed
+      const inRoomCurrent = Number(usageMinutes.inRoom?.currentPeriod ?? participantUsed);
+      const inRoomLifetime = Number(
+        usageMinutes.inRoom?.lifetime ??
+          ytdMinutes.inRoom?.lifetime ??
+          usageMonthly?.ytd?.participantMinutes ??
+          participantUsed
       );
-      const liveLifetime = Number(
-        usageMinutes.live?.lifetime ??
-        usageMonthly?.ytd?.minutes?.live?.lifetime ??
-        usageInner.minutes?.live?.lifetime ??
-        usageMonthly?.ytd?.participantMinutes ??
-        participantUsed
+
+      const broadcastCurrent = Number(usageMinutes.broadcast?.currentPeriod ?? usageMinutes.transcode?.currentPeriod ?? transcodeUsed);
+      const broadcastLifetime = Number(
+        usageMinutes.broadcast?.lifetime ??
+          usageMinutes.transcode?.lifetime ??
+          ytdMinutes.broadcast?.lifetime ??
+          ytdMinutes.transcode?.lifetime ??
+          usageMonthly?.ytd?.transcodeMinutes ??
+          0
       );
       const recordingCurrent = Number(
         usageMinutes.recording?.currentPeriod ?? usageInner.minutes?.recording?.currentPeriod ?? 0
       );
       const recordingLifetime = Number(
         usageMinutes.recording?.lifetime ??
-        usageMonthly?.ytd?.minutes?.recording?.lifetime ??
+        ytdMinutes?.recording?.lifetime ??
         usageInner.minutes?.recording?.lifetime ??
         0
       );
 
       setUsage({
-        streamingMinutes: {
-          used: liveCurrent,
+        inRoomMinutes: {
+          used: inRoomCurrent,
           limit: Number(limits.participantMinutes ?? 0) || (data?.plan?.id === "pro" ? 1200 : data?.plan?.id === "starter" ? 300 : 60),
-          lifetime: liveLifetime,
+          lifetime: inRoomLifetime,
+        },
+        broadcastMinutes: {
+          used: broadcastCurrent,
+          limit: Number(limits.transcodeMinutes ?? 0),
+          lifetime: broadcastLifetime,
         },
         recordingMinutes: {
           used: recordingCurrent,
@@ -1232,8 +1249,9 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
 
       clearAuthStorage();
       clearMeCache();
+      clearPlatformFlagsCache();
       setToast("Account deletion requested");
-      nav("/join", { replace: true });
+      nav("/login", { replace: true, state: { accountDeleted: true } });
     } catch (err: any) {
       setError(err?.body?.error || err?.message || "Failed to delete account");
     } finally {
@@ -2250,15 +2268,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         )}
                       </div>
                       <ul style={S.featureList}>
-                        <FeatureRow label="In-Room Minutes" value={plan.limits.monthlyMinutesIncluded} />
-                        {platformTranscodeEnabled !== false && (
+                        <FeatureRow label={usageLabels.inRoomMinutes} value={plan.limits.monthlyMinutesIncluded} />
+                        {platformTranscodeEnabled !== false && plan.limits.transcodeMinutes > 0 && (
                           <FeatureRow
-                            label="Streaming Minutes"
-                            value={
-                              plan.limits.transcodeMinutes > 0
-                                ? plan.limits.transcodeMinutes
-                                : "Not included"
-                            }
+                            label={usageLabels.broadcastMinutes}
+                            value={plan.limits.transcodeMinutes}
                           />
                         )}
                         <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
@@ -2300,13 +2314,15 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       {(planId !== "free" && planId !== "basic") && (
                         <div style={{ color: "#94a3b8", fontSize: 12, margin: "8px 0 0 0", lineHeight: 1.45 }}>
                           <div>
-                            <span style={{ color: "#60a5fa" }}>Streaming Minutes</span> are consumed when StreamLine sends your live video to other platforms (like YouTube, Facebook, Twitch, etc.).
+                            <span style={{ color: "#60a5fa" }}>{usageLabels.inRoomMinutes}</span> {" "}
+                            {usageTooltips.inRoomMinutes}
                           </div>
                           <div style={{ marginTop: 6 }}>
-                            They are not used when you’re just streaming inside StreamLine.
+                            <span style={{ color: "#a78bfa" }}>{usageLabels.broadcastMinutes}</span> {" "}
+                            {usageTooltips.broadcastMinutes}
                           </div>
                           <div style={{ marginTop: 8 }}>
-                            They are counted per destination, per minute.
+                            Broadcast minutes are counted per destination, per minute.
                           </div>
                         </div>
                       )}
@@ -2699,8 +2715,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             <div style={{ marginTop: 8, marginBottom: 12, padding: 12, border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, background: "rgba(255,255,255,0.02)" }}>
               <div style={{ fontWeight: 700, color: "#e5e7eb", marginBottom: 6 }}>Minutes Used (This Month)</div>
               <div style={{ color: "#cbd5e1", marginBottom: 4 }}>
-                Live streaming: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.streamingMinutes.used}</span> min
+                {usageLabels.inRoomMinutes}: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.inRoomMinutes.used}</span> min
               </div>
+              {getUsageGating(user).canShowBroadcastMinutes && (
+                <div style={{ color: "#cbd5e1", marginBottom: 4 }}>
+                  {usageLabels.broadcastMinutes}: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.broadcastMinutes.used}</span> min
+                </div>
+              )}
               <div style={{ color: "#cbd5e1", marginBottom: 6 }}>
                 Recording: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.used}</span> min
               </div>
@@ -2714,8 +2735,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </span>
                 {" "}min
                 <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                  {" "}(live: {Number(usage.overages?.participantMinutes ?? 0)} / transcode: {Number(usage.overages?.transcodeMinutes ?? 0)})
+                  {" "}(in-room: {Number(usage.overages?.participantMinutes ?? 0)} / broadcast: {Number(usage.overages?.transcodeMinutes ?? 0)})
                 </span>
+              </div>
+              <div style={{ color: "#94a3b8", fontSize: 12 }}>
+                {usageTooltips.inRoomMinutes} {usageTooltips.broadcastMinutes}
               </div>
               <div style={{ color: "#94a3b8", fontSize: 12 }}>Recording minutes are included in your total usage.</div>
               <div style={{ marginTop: 8 }}>
@@ -2737,7 +2761,10 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               </div>
               {showLifetimeDetails && (
                 <div style={{ marginTop: 8, color: "#cbd5e1", fontSize: 13 }}>
-                  <div>Lifetime live minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.streamingMinutes.lifetime ?? 0}</span> min</div>
+                  <div>Lifetime in-room minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.inRoomMinutes.lifetime ?? 0}</span> min</div>
+                  {getUsageGating(user).canShowBroadcastMinutes && (
+                    <div>Lifetime broadcast minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.broadcastMinutes.lifetime ?? 0}</span> min</div>
+                  )}
                   <div>Lifetime recording minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.lifetime}</span> min</div>
                 </div>
               )}
@@ -2745,15 +2772,26 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
             <div style={S.usageGrid}>
               <UsageBar
-                label="Streaming Minutes"
-                used={usage.streamingMinutes.used}
+                label={usageLabels.inRoomMinutes}
+                used={usage.inRoomMinutes.used}
                 limit={
-                  usage.streamingMinutes.limit ||
+                  usage.inRoomMinutes.limit ||
                   currentPlan.limits?.monthlyMinutesIncluded ||
                   0
                 }
                 unit="min"
               />
+              {getUsageGating(user).canShowBroadcastMinutes && (
+                <UsageBar
+                  label={usageLabels.broadcastMinutes}
+                  used={usage.broadcastMinutes.used}
+                  limit={
+                    usage.broadcastMinutes.limit ||
+                    0
+                  }
+                  unit="min"
+                />
+              )}
               <UsageBar
                 label="Stream Destinations"
                 used={usage.rtmpDestinations.used}

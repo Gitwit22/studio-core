@@ -27,6 +27,14 @@ export const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
+  const accountDeleted = useMemo(() => {
+    try {
+      return Boolean((location.state as any)?.accountDeleted);
+    } catch {
+      return false;
+    }
+  }, [location.state]);
+
   const nextUrl = useMemo(() => {
     try {
       const sp = new URLSearchParams(location.search || "");
@@ -216,6 +224,23 @@ export const LoginPage: React.FC = () => {
             marginBottom: "24px",
           }}
         >
+          {accountDeleted && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                background: "rgba(0,0,0,0.35)",
+                color: "#e5e7eb",
+                fontSize: 13,
+                lineHeight: 1.4,
+              }}
+            >
+              Your account has been deleted. Please sign in with a different account.
+            </div>
+          )}
+
           {inviteRoleHint && (
             <div
               style={{

@@ -32,11 +32,13 @@ async function incrementHlsUsageMinutes(uid: string, minutes: number) {
   const nextUsage = {
     ...prevUsage,
     hlsMinutes: Number(prevUsage.hlsMinutes || 0) + safeMinutes,
+    transcodeMinutes: Number(prevUsage.transcodeMinutes || 0) + safeMinutes,
   };
 
   const nextYtd = {
     ...prevYtd,
     hlsMinutes: Number(prevYtd.hlsMinutes || 0) + safeMinutes,
+    transcodeMinutes: Number(prevYtd.transcodeMinutes || 0) + safeMinutes,
   };
 
   await usageRef.set(
