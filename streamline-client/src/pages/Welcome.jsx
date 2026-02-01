@@ -1,5 +1,6 @@
-import React from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { API_BASE } from "../lib/apiBase";
 
 /**
  * STREAMLINE WELCOME PAGE - REDESIGNED
@@ -15,6 +16,46 @@ import { useNavigate } from "react-router-dom";
 
 const Welcome = () => {
   const nav = useNavigate();
+
+  const [stats, setStats] = useState({ streamers: null, hoursStreamed: null, streamersActive: null });
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/stats/public`, { credentials: "include" });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (!cancelled) {
+          setStats({
+            streamers: data?.streamers ?? null,
+            hoursStreamed: data?.hoursStreamed ?? null,
+            streamersActive: data?.streamersActive ?? null,
+          });
+        }
+      } catch (e) {
+        if (!cancelled) setStatsError(e?.message || "Failed to load stats");
+      } finally {
+        if (!cancelled) setStatsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const fmtK = (n) => {
+    if (n == null) return null;
+    if (n >= 1_000_000) return `${Math.floor(n / 1_000_000)}M+`;
+    if (n >= 1_000) return `${Math.floor(n / 1_000)}K+`;
+    return String(n);
+  };
+
+  const renderStatValue = (value) => {
+    if (statsLoading) return "…";
+    if (value == null) return "—";
+    return fmtK(value);
+  };
 
   return (
     <div 
@@ -107,7 +148,7 @@ const Welcome = () => {
           </p>
         </div>
 
-        {/* FEATURE CARDS - MUST BE 3 COLUMNS ON DESKTOP */}
+        {/* FEATURE CARDS - NOW 4 COLUMNS ON DESKTOP */}
         <div 
           style={{
             display: 'grid',
@@ -117,7 +158,7 @@ const Welcome = () => {
             padding: '0 16px'
           }}
         >
-          {/* Card 1 */}
+          {/* Card 1 - Multi-Platform */}
           <div 
             style={{
               background: 'rgba(255, 255, 255, 0.05)',
@@ -144,11 +185,11 @@ const Welcome = () => {
               Multi-Platform
             </div>
             <div style={{ fontSize: '12px', color: '#6b7280' }}>
-              Stream to all platforms at once
+              Stream to all platforms at once.
             </div>
           </div>
 
-          {/* Card 2 */}
+          {/* Card 2 - Recording */}
           <div 
             style={{
               background: 'rgba(255, 255, 255, 0.05)',
@@ -170,16 +211,16 @@ const Welcome = () => {
               e.currentTarget.style.transform = 'translateY(0)';
             }}
           >
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚡</div>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔴</div>
             <div style={{ fontSize: '14px', fontWeight: 600, color: '#ffffff', marginBottom: '4px' }}>
-              Ultra Low Latency
+              Recording
             </div>
             <div style={{ fontSize: '12px', color: '#6b7280' }}>
-              Real-time interaction
+              Record your stream for playback, downloads, or editing later.
             </div>
           </div>
 
-          {/* Card 3 */}
+          {/* Card 3 - HLS */}
           <div 
             style={{
               background: 'rgba(255, 255, 255, 0.05)',
@@ -201,12 +242,43 @@ const Welcome = () => {
               e.currentTarget.style.transform = 'translateY(0)';
             }}
           >
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>✂️</div>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🌐</div>
             <div style={{ fontSize: '14px', fontWeight: 600, color: '#ffffff', marginBottom: '4px' }}>
-              Built-in Editor
+              HLS
             </div>
             <div style={{ fontSize: '12px', color: '#6b7280' }}>
-              Edit and share instantly
+              Stream to a shareable link that works on websites and across devices.
+            </div>
+          </div>
+
+          {/* Card 4 - Easy Navigation */}
+          <div 
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              backdropFilter: 'blur(15px)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '16px',
+              padding: '24px',
+              transition: 'all 0.3s ease',
+              cursor: 'pointer'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+              e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.3)';
+              e.currentTarget.style.transform = 'translateY(-4px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🧭</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#ffffff', marginBottom: '4px' }}>
+              Easy Navigation
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280' }}>
+              Quickly find your way with a clean, intuitive interface.
             </div>
           </div>
         </div>
@@ -252,7 +324,7 @@ const Welcome = () => {
           </button>
           
           <button
-            onClick={() => nav("/login")}
+            onClick={() => nav("/learnmore")}
             style={{
               width: window.innerWidth < 640 ? '100%' : 'auto',
               background: 'rgba(255, 255, 255, 0.05)',
@@ -291,57 +363,34 @@ const Welcome = () => {
           }}
         >
           <div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>10K+</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>
+              {renderStatValue(stats.streamers)}
+            </div>
             <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               Streamers
             </div>
           </div>
           <div style={{ width: '1px', background: 'rgba(255, 255, 255, 0.1)' }}></div>
           <div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>50M+</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>
+              {renderStatValue(stats.hoursStreamed)}
+            </div>
             <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               Hours Streamed
             </div>
           </div>
           <div style={{ width: '1px', background: 'rgba(255, 255, 255, 0.1)' }}></div>
           <div>
-            <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>99.9%</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: '#ffffff' }}>
+              {renderStatValue(stats.streamersActive)}
+            </div>
             <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-              Uptime
+              Active Now
             </div>
           </div>
         </div>
 
       </div>
-
-      {/* DEV BYPASS - BOTTOM RIGHT */}
-      <button
-        onClick={() => nav("/join")}
-        style={{
-          position: 'absolute',
-          bottom: '24px',
-          right: '24px',
-          color: 'rgba(248, 113, 113, 0.5)',
-          fontSize: '12px',
-          background: 'rgba(0, 0, 0, 0.2)',
-          backdropFilter: 'blur(10px)',
-          padding: '6px 12px',
-          borderRadius: '8px',
-          border: '1px solid rgba(220, 38, 38, 0.2)',
-          cursor: 'pointer',
-          transition: 'all 0.3s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.color = 'rgba(248, 113, 113, 1)';
-          e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.4)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.color = 'rgba(248, 113, 113, 0.5)';
-          e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.2)';
-        }}
-      >
-        dev bypass →
-      </button>
 
       {/* FOOTER LINKS - BOTTOM LEFT */}
       <div 
@@ -355,30 +404,32 @@ const Welcome = () => {
           color: '#4b5563'
         }}
       >
-        <a 
-          href="#" 
+        <Link 
+          to="/privacy" 
           style={{ color: '#4b5563', textDecoration: 'none', transition: 'color 0.3s ease' }}
           onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
           onMouseLeave={(e) => e.currentTarget.style.color = '#4b5563'}
         >
           Privacy
-        </a>
-        <a 
-          href="#" 
+        </Link>
+        <a
+          href="/terms"
+          target="_blank"
+          rel="noopener noreferrer"
           style={{ color: '#4b5563', textDecoration: 'none', transition: 'color 0.3s ease' }}
           onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
           onMouseLeave={(e) => e.currentTarget.style.color = '#4b5563'}
         >
           Terms
         </a>
-        <a 
-          href="#" 
+        <Link 
+          to="/support" 
           style={{ color: '#4b5563', textDecoration: 'none', transition: 'color 0.3s ease' }}
           onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
           onMouseLeave={(e) => e.currentTarget.style.color = '#4b5563'}
         >
           Support
-        </a>
+        </Link>
       </div>
 
       {/* CSS ANIMATION KEYFRAMES */}

@@ -1,0 +1,262 @@
+import { Router } from "express";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import { requireAuth } from "../middleware/requireAuth";
+import { firestore as db } from "../firebaseAdmin";
+import { getUserAccount } from "../lib/userAccount";
+import { normalizeBillingTruthFromUser } from "../lib/billingTruth";
+import { CURRENT_TOS_VERSION } from "../lib/tos";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
+
+console.log("✅ auth router loaded");
+
+const router = Router();
+
+// --- helpers ---
+function cookieOptions() {
+  // On Render we always serve over HTTPS, but local dev runs on http://localhost.
+  // Derive a simple "isLocal" flag from CLIENT_URL so cookies stay usable in
+  // local dev while remaining Secure in hosted environments.
+  const clientUrl = process.env.CLIENT_URL || process.env.CLIENT_URL_2 || "";
+  const isLocal = clientUrl.startsWith("http://localhost") || clientUrl.startsWith("http://127.0.0.1");
+
+  // In hosted environments the API is typically on a different subdomain
+  // than the web app (e.g. api.onrender.com vs app.onrender.com). For the
+  // httpOnly auth cookie to be sent on cross-site XHR/fetch requests from
+  // the web origin, it must explicitly opt out of SameSite protections.
+  //
+  // - Local dev (localhost ↔ localhost) is same-site, so SameSite=Lax is
+  //   sufficient and avoids third-party-cookie semantics.
+  // - Hosted envs must use SameSite=None; Secure so that the browser will
+  //   attach the cookie on cross-site API calls made with credentials: 'include'.
+  const secure = !isLocal;
+  const sameSite: "none" | "lax" = secure ? "none" : "lax";
+
+  return {
+    httpOnly: true,
+    secure,
+    sameSite,
+    path: "/",
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  };
+}
+
+function mustGetEnv(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
+}
+
+function stripSensitiveUserFields(user: any) {
+  if (!user) return user;
+  const { passwordHash, ...safe } = user;
+  return safe;
+}
+
+// Health check for auth router
+router.get("/ping", (_req, res) => res.json({ ok: true }));
+
+/**
+ * GET /api/auth/me
+ * Returns the authenticated user's normalized account document.
+ *
+ * Behavior:
+ * - Never 404s due to missing user doc; auto-creates a minimal doc.
+ * - Exposes planId, billingEnabled, platformBillingEnabled, effectiveBillingEnabled, isAdmin.
+ */
+router.get("/me", requireAuth, async (req, res) => {
+  try {
+    const user = (req as any).user || {};
+    const userId = user.id || user.uid;
+    if (!userId) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    const account = (req as any).account || await getUserAccount(userId);
+
+    // Load the latest Firestore snapshot so we can strip sensitive fields
+    const snap = await db.collection("users").doc(userId).get();
+    const raw = stripSensitiveUserFields(snap.data() || account.rawUser || {});
+
+    // Ensure billingTruth/planId are present for legacy docs.
+    // This keeps admin + client display consistent even for free users.
+    try {
+      const planIdMissing = typeof (raw as any).planId !== "string" || !String((raw as any).planId).trim();
+      const billingTruthMissing = !(raw as any).billingTruth;
+
+      if (planIdMissing || billingTruthMissing) {
+        const now = Date.now();
+        const nextPlanId = planIdMissing ? "free" : (raw as any).planId;
+        const patch: any = { updatedAt: now };
+        if (planIdMissing) patch.planId = "free";
+        if (billingTruthMissing) {
+          patch.billingTruth = normalizeBillingTruthFromUser({ ...raw, planId: nextPlanId }, now);
+        }
+        await db.collection("users").doc(userId).set(patch, { merge: true });
+        // Keep response in sync without requiring another round-trip.
+        if (planIdMissing) (raw as any).planId = "free";
+        if (billingTruthMissing) (raw as any).billingTruth = patch.billingTruth;
+      }
+    } catch {
+      // non-fatal
+    }
+
+    const body = {
+      id: userId,
+      ...raw,
+      planId: account.planId,
+      billingEnabled: account.billingEnabled,
+      platformBillingEnabled: account.platformBillingEnabled,
+      effectiveBillingEnabled: account.effectiveBillingEnabled,
+      isAdmin: account.isAdmin,
+      // When effective billing is disabled (either per-user or platform-wide),
+      // treat the account as running in "test" mode from the client's POV.
+      billingMode: account.effectiveBillingEnabled === false ? "test" : "live",
+    };
+
+    return res.json(body);
+  } catch (err: any) {
+    console.error("GET /api/auth/me failed:", err?.message || err);
+    return res.status(500).json({ error: "Failed to load user" });
+  }
+});
+
+ //POST /api/auth/login
+  //Body: { email, password }
+ //Sets httpOnly cookie "token" so requireAuth works.
+ 
+router.post("/login", async (req, res) => {
+  try {
+    // ✅ never destructure blindly
+    const { email, password } = (req.body || {}) as { email?: string; password?: string };
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Missing email or password" });
+    }
+
+    const emailNorm = email.trim().toLowerCase();
+
+    // Find user by email (stored in Firestore)
+    const snap = await db
+      .collection("users")
+      .where("email", "==", emailNorm)
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const doc = snap.docs[0];
+    const user = doc.data() as any;
+
+    // Verify password
+    const storedHash = user.passwordHash;
+    if (!storedHash) {
+      // user exists but has no password hash (maybe legacy or admin-created)
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const ok = await bcrypt.compare(password, storedHash);
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const uid = doc.id;
+
+    const JWT_SECRET = mustGetEnv("JWT_SECRET");
+
+    // Token payload must match what requireAuth expects
+    const token = jwt.sign({ uid }, JWT_SECRET, { expiresIn: "7d" });
+
+    // Set cookie for httpOnly auth (legacy/secondary) and return token
+    // in the JSON body so the frontend can use Authorization headers.
+    res.cookie("token", token, cookieOptions());
+
+    return res.json({
+      user: { id: uid, ...stripSensitiveUserFields(user) },
+      token,
+    });
+  } catch (err: any) {
+    console.error("POST /api/auth/login failed:", err?.message || err);
+    return res.status(500).json({
+      error: "Login failed",
+      detail: err?.message || String(err),
+    });
+  }
+});
+
+router.post("/signup", async (req, res) => {
+  try {
+    const { email, password, displayName, timeZone, tosAccepted } = (req.body || {}) as any;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password required" });
+    }
+
+    // Require explicit Terms of Service acceptance for new accounts.
+    if (tosAccepted !== true) {
+      return res.status(400).json({ error: "tos_required" });
+    }
+
+    const emailNorm = String(email).trim().toLowerCase();
+
+    const existing = await db
+      .collection("users")
+      .where("email", "==", emailNorm)
+      .limit(1)
+      .get();
+
+    if (!existing.empty) {
+      return res.status(409).json({ error: "Email already in use" });
+    }
+
+    const passwordHash = await bcrypt.hash(String(password), 10);
+
+    const userRef = db.collection("users").doc();
+    const uid = userRef.id;
+
+    const now = Date.now();
+
+    const userData = {
+      email: emailNorm,
+      displayName: displayName ? String(displayName) : "",
+      passwordHash,
+      planId: "free",
+      billingTruth: normalizeBillingTruthFromUser({ planId: "free" }, now),
+      billingActive: false,
+      billingStatus: "none",
+      createdAt: now,
+      timeZone: timeZone ? String(timeZone) : "America/Chicago",
+      tosVersion: CURRENT_TOS_VERSION,
+      tosAcceptedAt: now,
+      tosAcceptedIp: req.ip || undefined,
+      tosUserAgent: req.get("user-agent") || undefined,
+    };
+
+    await userRef.set(userData);
+
+    const JWT_SECRET = mustGetEnv("JWT_SECRET");
+    const token = jwt.sign({ uid }, JWT_SECRET, { expiresIn: "7d" });
+
+    // Set cookie for httpOnly auth (legacy/secondary) and return token
+    // in the JSON body so the frontend can use Authorization headers.
+    res.cookie("token", token, cookieOptions());
+
+    return res.json({ user: { id: uid, ...stripSensitiveUserFields(userData) }, token });
+  } catch (err: any) {
+    console.error("POST /api/auth/signup failed:", err?.message || err);
+    return res.status(500).json({
+      error: "Signup failed",
+      detail: err?.message || String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ * Clears auth cookie.
+ */
+router.post("/logout", (_req, res) => {
+  res.clearCookie("token", { path: "/" });
+  return res.json({ ok: true });
+});
+
+export default router;

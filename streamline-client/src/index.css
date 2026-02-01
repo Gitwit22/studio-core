@@ -96,12 +96,12 @@ button:focus-visible {
 
 .sl-watermark {
   position: absolute;
-  bottom: 80px;
-  right: 15px;
-  width: 140px;          /* adjust size */
-  opacity: 0.8;          /* 80% opacity */
-  pointer-events: none;  /* don't block clicks */
-  z-index: 9999;         /* over the video tiles */
+  top: 12px;
+  right: 12px;
+  width: 96px;
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 9999;
 }
 
 /* ======================================
@@ -112,32 +112,9 @@ button:focus-visible {
 
 @media (max-width: 768px) {
   .sl-watermark {
-    width: 60px;   /* phone size */
-    bottom: 80px;
+    width: 64px;
+    top: 12px;
     right: 6px;
-  }
-}
-
-
-@media (min-width: 769px) {
-  .sl-layout .lk-video-grid {
-    display: flex !important;     /* restore LiveKit flex layout */
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 8px;
-  }
-
-  .sl-layout .lk-video-grid > * {
-    aspect-ratio: auto !important;
-    width: auto !important;
-    height: auto !important;
-    flex: 0 1 auto !important;    /* normal rectangular tiles */
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .sl-layout .lk-video-grid > * video {
-    object-fit: cover !important;
   }
 }
 /* Optional: light-mode override (remove if you always want dark) */
@@ -205,4 +182,8 @@ button:focus-visible {
   .sl-layout .lk-video-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+
+/* Desktop: allow LiveKit to control screen-share tile visuals; no extra overlay */
+@media (min-width: 769px) {
 }

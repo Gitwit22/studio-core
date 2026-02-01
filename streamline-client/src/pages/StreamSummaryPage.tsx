@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRecordingProgress } from '../hooks/useRecordingProgress';
 import { editingApi } from '../lib/editingApi';
+import { apiFetchAuth } from '../lib/api';
 
 /**
  * STREAMLINE STREAM SUMMARY PAGE - REDESIGNED
@@ -17,6 +18,9 @@ export default function StreamSummaryPage() {
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editPrivacy, setEditPrivacy] = useState('public');
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -28,91 +32,70 @@ export default function StreamSummaryPage() {
           justifyContent: 'center',
           backgroundColor: '#000000',
           color: '#ffffff'
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <div 
-            style={{
-              width: '48px',
-              height: '48px',
-              border: '4px solid rgba(220, 38, 38, 0.3)',
-              borderTop: '4px solid #ef4444',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              margin: '0 auto 16px'
-            }}
-          />
-          <p style={{ color: '#9ca3af' }}>Loading summary...</p>
-        </div>
-        <style>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    );
-  }
+        import { Navigate, useParams } from 'react-router-dom';
 
-  if (!recording) {
-    return (
-      <div 
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: '#000000',
-          color: '#ffffff'
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <p style={{ color: '#ef4444', marginBottom: '16px', fontSize: '16px' }}>
-            ❌ Recording not found
-          </p>
-          <button
-            onClick={() => nav('/join')}
-            style={{
-              padding: '12px 24px',
-              background: 'linear-gradient(to right, #dc2626, #ef4444)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '10px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
+        // Legacy page. Kept as a redirect so any old links/bookmarks land on the
+        // canonical host post-stream summary page.
+        export default function StreamSummaryPage() {
+          const { recordingId } = useParams<{ recordingId: string }>();
+          const target = recordingId ? `/room-exit/${encodeURIComponent(recordingId)}` : '/room-exit/unknown';
+          return <Navigate to={target} replace state={{ exitRole: 'host' }} />;
+        }
+        alert("This recording link expired. Use Settings → Usage → Emergency Download.");
+        return;
+      }
+      if (res.status === 402) {
+        alert("Upgrade required to download this recording.");
+        return;
+      }
+      if (!res.ok) throw new Error("Failed to get download link");
 
-  const handleOpenMetadataEditor = () => {
-    setEditTitle(recording.title);
-    setEditDescription((recording as any).description || '');
-    setEditPrivacy((recording as any).privacy || 'public');
-    setShowMetadataEditor(true);
+      const data = await res.json();
+      const url = data?.data?.url;
+      if (!data?.success || !url) {
+        throw new Error(data?.error || "Invalid download link response");
+      }
+
+      window.open(url, "_blank");
+      setConfirmMessage(null);
+      setShowConfirmModal(true);
+    } catch (err) {
+      console.error("Download failed:", err);
+      alert("Failed to download recording. Use Settings → Usage → Emergency Download.");
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
-  const handleSaveMetadata = () => {
-    const updatedRecording = {
-      ...recording,
-      title: editTitle,
-      description: editDescription,
-      privacy: editPrivacy,
-    };
-
-    const recordings = JSON.parse(localStorage.getItem('sl_recordings') || '[]');
-    const idx = recordings.findIndex((r: any) => r.id === recording.id);
-    if (idx !== -1) {
-      recordings[idx] = updatedRecording;
-      localStorage.setItem('sl_recordings', JSON.stringify(recordings));
+  const handleConfirmYes = async () => {
+    try {
+      await apiFetchAuth(`/api/recordings/${recordingId}/download-link?confirm=true`, {}, { allowNonOk: true });
+      setConfirmMessage("Great — you're all set. Save the file somewhere safe.");
+    } catch (e) {
+      setConfirmMessage("Noted. Thanks for confirming.");
+    } finally {
+      setShowConfirmModal(true);
     }
+  };
 
-    setShowMetadataEditor(false);
-    window.location.reload();
+  const handleConfirmNo = async () => {
+    try {
+      await apiFetchAuth(
+        `/api/recordings/${recordingId}/report-download-issue`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: "user_reported_issue" }),
+        },
+        { allowNonOk: true }
+      );
+    } catch {}
+    setConfirmMessage("Use Settings → Usage → Emergency Download (Latest Recording) if you're having trouble.");
+    setShowConfirmModal(true);
+  };
+
+  const handleCloseConfirmModal = () => {
+    setShowConfirmModal(false);
+    setConfirmMessage(null);
   };
 
   const statusConfig = {
@@ -198,7 +181,7 @@ export default function StreamSummaryPage() {
         
         {/* BACK BUTTON */}
         <button
-          onClick={() => nav('/dashboard')}
+          onClick={() => nav('/join')}
           style={{
             marginBottom: '32px',
             padding: '10px 20px',
@@ -218,7 +201,7 @@ export default function StreamSummaryPage() {
             e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)';
           }}
         >
-          ← Back to Dashboard
+          ← Back
         </button>
 
         {/* TITLE */}
@@ -375,6 +358,59 @@ export default function StreamSummaryPage() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {recording.videoUrl && (
+                  <div
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '13px', color: '#9ca3af', fontWeight: 600 }}>Preview</span>
+                      <span style={{ fontSize: '12px', color: '#d1d5db' }}>Press play to make sure it works.</span>
+                    </div>
+                    <div style={{ borderRadius: '10px', overflow: 'hidden', background: '#0b0b0b' }}>
+                      <video
+                        controls
+                        src={recording.videoUrl}
+                        style={{ width: '100%', display: 'block', background: '#000' }}
+                      />
+                    </div>
+                    <button
+                      onClick={handleDownload}
+                      disabled={isDownloading}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        background: 'rgba(220, 38, 38, 0.15)',
+                        border: '1px solid rgba(220, 38, 38, 0.4)',
+                        color: '#fecaca',
+                        borderRadius: '10px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        cursor: isDownloading ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.3s ease',
+                        opacity: isDownloading ? 0.7 : 1,
+                        textAlign: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isDownloading) return;
+                        e.currentTarget.style.background = 'rgba(220, 38, 38, 0.25)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(220, 38, 38, 0.15)';
+                      }}
+                    >
+                      {isDownloading ? 'Preparing download...' : 'Click here to download'}
+                    </button>
+                  </div>
+                )}
                 
                 <button
                   onClick={() => nav(`/editing/assets?newRecording=${recording.id}`)}
@@ -402,6 +438,22 @@ export default function StreamSummaryPage() {
                 >
                   ✂️ Edit in StreamLine
                 </button>
+
+                {showConfirmModal && (
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}>
+                    <div style={{ background: '#111', border: '1px solid #333', borderRadius: 12, padding: 20, width: 320 }}>
+                      <h4 style={{ margin: 0, marginBottom: 10, color: '#fff' }}>Did your download start?</h4>
+                      <p style={{ margin: 0, marginBottom: 16, color: '#d1d5db', fontSize: 14 }}>If not, try Emergency Download in Settings → Usage.</p>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <button onClick={handleConfirmNo} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #444', background: '#1f2937', color: '#fff', cursor: 'pointer' }}>No</button>
+                        <button onClick={handleConfirmYes} style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#dc2626,#ef4444)', color: '#fff', cursor: 'pointer' }}>Yes</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {confirmMessage && (
+                  <div style={{ color: '#d1d5db', fontSize: 13, marginTop: 8 }}>{confirmMessage}</div>
+                )}
 
                 <button
                   onClick={handleOpenMetadataEditor}
@@ -455,11 +507,10 @@ export default function StreamSummaryPage() {
                   📚 View Asset Library
                 </button>
 
-                <a
-                  href={recording.videoUrl}
-                  download={`${recording.title}.mp4`}
+                <button
+                  onClick={handleDownload}
+                  disabled={isDownloading}
                   style={{
-                    display: 'block',
                     width: '100%',
                     padding: '14px 24px',
                     background: 'rgba(255, 255, 255, 0.05)',
@@ -468,22 +519,23 @@ export default function StreamSummaryPage() {
                     borderRadius: '12px',
                     fontSize: '15px',
                     fontWeight: 500,
-                    cursor: 'pointer',
                     textAlign: 'center',
-                    textDecoration: 'none',
-                    transition: 'all 0.3s ease'
+                    transition: 'all 0.3s ease',
+                    opacity: isDownloading ? 0.7 : 1,
+                    cursor: isDownloading ? 'not-allowed' : 'pointer'
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-                    e.currentTarget.style.color = '#ffffff';
+                    if (isDownloading) return;
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.1)';
+                    (e.currentTarget as HTMLButtonElement).style.color = '#ffffff';
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                    e.currentTarget.style.color = '#9ca3af';
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.05)';
+                    (e.currentTarget as HTMLButtonElement).style.color = '#9ca3af';
                   }}
                 >
-                  📥 Download MP4
-                </a>
+                  {isDownloading ? 'Preparing download...' : '📥 Download MP4'}
+                </button>
               </div>
             </div>
           )}
