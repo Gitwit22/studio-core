@@ -15,6 +15,7 @@ import { getCurrentMonthKey } from "../lib/usageTracker";
 import { PLAN_IDS, PlanId, isPlanId, getAllPlanIds } from "../types/plan";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
+import { normalizeBillingTruthFromUser } from "../lib/billingTruth";
 
 const router = express.Router();
 
@@ -154,6 +155,10 @@ router.get("/users", async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
     const planFilter = req.query.plan as PlanId | undefined;
+    const includeDeleted = (() => {
+      const raw = String(req.query.includeDeleted || "").trim().toLowerCase();
+      return raw === "1" || raw === "true" || raw === "yes";
+    })();
 
     let query = firestore.collection("users").orderBy("createdAt", "desc");
 
@@ -163,14 +168,44 @@ router.get("/users", async (req, res) => {
 
     const snapshot = await query.limit(limit).offset(offset).get();
 
-    const users = snapshot.docs.map((doc) => ({
-      uid: doc.id,
-      ...doc.data(),
-    }));
+    const now = Date.now();
+
+    const users = snapshot.docs.map((doc) => {
+      const raw = doc.data() || {};
+      const planId = typeof (raw as any).planId === "string" && String((raw as any).planId).trim() ? (raw as any).planId : "free";
+      const billingTruth = normalizeBillingTruthFromUser({ ...raw, planId }, now);
+      return {
+        uid: doc.id,
+        ...raw,
+        planId,
+        billingTruth,
+        billingReady: true,
+        stripeConnected: Boolean(billingTruth.stripeCustomerId),
+      };
+    });
+
+    const filteredUsers = includeDeleted
+      ? users.map((u: any) => {
+          // Always include deletedAtMs and deleteAfterMs for deleted users
+          if (typeof u?.deletedAtMs === "number" && u.deletedAtMs > 0) {
+            return {
+              ...u,
+              deletedAt: new Date(u.deletedAtMs).toISOString(),
+              deleteAfter: new Date(u.deleteAfterMs || 0).toISOString(),
+              purgeInDays: u.deleteAfterMs ? Math.max(0, Math.ceil((u.deleteAfterMs - Date.now()) / (1000 * 60 * 60 * 24))) : null,
+            };
+          }
+          return u;
+        })
+      : users.filter((u: any) => {
+          const status = typeof u?.accountStatus === "string" ? String(u.accountStatus).toLowerCase() : "";
+          const deletedAtMs = typeof u?.deletedAtMs === "number" ? u.deletedAtMs : null;
+          return status !== "deleted" && !(deletedAtMs && deletedAtMs > 0);
+        });
 
     res.json({
-      users,
-      total: snapshot.size,
+      users: filteredUsers,
+      total: filteredUsers.length,
       limit,
       offset,
     });
@@ -733,11 +768,16 @@ router.get("/usage", async (req, res) => {
         const billingEnabled = userData.billingEnabled === false ? false : true;
         const effectiveBillingEnabled = platformBillingEnabled && billingEnabled;
 
+        const billingTruth = normalizeBillingTruthFromUser(userData, Date.now());
+
         return {
           userId,
           email: userData.email,
           displayName: userData.displayName,
           planId,
+          billingTruthStatus: billingTruth.status,
+          stripeConnected: Boolean(billingTruth.stripeCustomerId),
+          stripeCustomerId: billingTruth.stripeCustomerId,
           billingEnabled,
           platformBillingEnabled,
           effectiveBillingEnabled,

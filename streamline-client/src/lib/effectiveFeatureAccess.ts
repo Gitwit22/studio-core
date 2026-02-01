@@ -95,6 +95,11 @@ export function computeEffectiveFeatureAccess(input: {
     transcodeEnabled: boolean;
     recordingEnabled: boolean;
   };
+  usage: {
+    broadcastMinutes: {
+      visible: boolean;
+    };
+  };
   plan: {
     rtmpDestinationsMax: number;
     hlsRuntime: boolean;
@@ -157,7 +162,14 @@ export function computeEffectiveFeatureAccess(input: {
     : platformMyContentEnabled;
 
   const features = (eff as any).features || {};
+  const effLimits = (eff as any).limits || {};
   const rtmpDestinationsMax = resolveRtmpDestinationsMax(eff as any);
+
+  // Canonical usage gating: Broadcast minutes are only meaningful when
+  // transcode is enabled platform-wide AND the plan exposes a transcodeMinutes limit.
+  // (Server omits transcodeMinutes for plans without broadcast.)
+  const canShowBroadcastMinutes =
+    platformTranscodeEnabled === true && typeof (effLimits as any).transcodeMinutes === "number";
 
   const planHlsRuntime = resolveCanHlsRuntime(features);
   const planHlsSetup = resolveCanHlsSetup(features);
@@ -183,6 +195,11 @@ export function computeEffectiveFeatureAccess(input: {
       hlsEnabled: platformHlsEnabled,
       transcodeEnabled: platformTranscodeEnabled,
       recordingEnabled: platformRecordingEnabled,
+    },
+    usage: {
+      broadcastMinutes: {
+        visible: canShowBroadcastMinutes,
+      },
     },
     plan: {
       rtmpDestinationsMax,

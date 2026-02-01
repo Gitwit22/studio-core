@@ -240,7 +240,20 @@ export function clearAuthStorage() {
   if (typeof window === "undefined") return;
   try {
     clearAuthToken();
-    window.localStorage.removeItem("sl_user");
-    window.localStorage.removeItem("sl_userId");
+    // Clear all Streamline-scoped session state (auth + cached user/session hints)
+    // so stale tabs/deep-links can't reuse old localStorage values.
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key) continue;
+      if (key === "authToken" || key.startsWith("sl_")) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {}
+    }
   } catch {}
 }

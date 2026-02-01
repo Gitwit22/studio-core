@@ -12,7 +12,9 @@ import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
 import { getMeCached, clearMeCache } from "../lib/meCache";
+import { clearPlatformFlagsCache } from "../lib/platformFlagsCache";
 import { isFeatureAvailable, isPlatformEnabled } from "../lib/featureAvailability";
+import { getUsageGating, usageLabels, usageTooltips } from "../lib/usageLabels";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -150,7 +152,8 @@ const DEFAULT_ENTITLEMENTS = {
 };
 
 const DEFAULT_USAGE = {
-  streamingMinutes: { used: 0, limit: 0, lifetime: 0 },
+  inRoomMinutes: { used: 0, limit: 0, lifetime: 0 },
+  broadcastMinutes: { used: 0, limit: 0, lifetime: 0 },
   recordingMinutes: { used: 0, lifetime: 0 },
   overages: { participantMinutes: 0, transcodeMinutes: 0 },
   rtmpDestinations: { used: 0, limit: 0 },
@@ -168,6 +171,11 @@ const DEFAULT_MEDIA_PREFS = {
 };
 
 type CheckoutPlanVariant = "starter_trial" | "starter_paid" | "basic" | "pro";
+
+function checkoutVariantToPlanId(plan: CheckoutPlanVariant): PlanId {
+  if (plan === "starter_paid" || plan === "starter_trial") return "starter";
+  return plan;
+}
 
 function formatDate(input: any): string {
   if (!input) return "—";
@@ -206,8 +214,17 @@ function getStatusBadge(status: string | undefined, cancelAtPeriodEnd?: boolean)
   return { text: status, icon: "ℹ️", color: "#6b7280", bg: "rgba(55,65,81,0.35)" };
 }
 
-function getPlanActionLabel(current: PlanId, target: PlanId, isProcessing: boolean): string {
-  if (isProcessing) return "Pending change";
+function getPlanActionLabel(
+  current: PlanId,
+  target: PlanId,
+  params: { isProcessing: boolean; pendingPlan?: string | null }
+): string {
+  const pendingPlan = String(params.pendingPlan || "").trim();
+
+  // Only show "Pending" on the target plan, not every card.
+  if (pendingPlan && target === (pendingPlan as any)) return "Pending change";
+
+  if (params.isProcessing) return "Processing…";
   if (current === target) return "Current plan";
   const order: PlanId[] = ["free", "basic", "starter", "pro"];
   const curIdx = order.indexOf(current);
@@ -329,7 +346,17 @@ export default function SettingsBilling() {
   const [showManagePicker, setShowManagePicker] = useState(false);
   const [showLifetimeDetails, setShowLifetimeDetails] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles">("plan");
+  const [overagesToggleSaving, setOveragesToggleSaving] = useState(false);
+  const [overagesToggleMessage, setOveragesToggleMessage] = useState<string | null>(null);
+
+  const [billingStatusSnapshot, setBillingStatusSnapshot] = useState<any | null>(null);
+
+  const [closeCancelLoading, setCloseCancelLoading] = useState(false);
+  const [closeDeleteLoading, setCloseDeleteLoading] = useState(false);
+  const [closeDeleteConfirmed, setCloseDeleteConfirmed] = useState(false);
+  const [closeDeleteText, setCloseDeleteText] = useState("");
+
+  const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles" | "close">("plan");
 
   // If a platform-wide feature is disabled, avoid landing on a hidden tab.
   useEffect(() => {
@@ -398,10 +425,17 @@ export default function SettingsBilling() {
   // If billing is active or trialing, ensure pendingPlan is cleared to avoid stuck UI
   useEffect(() => {
     if (!user) return;
-    if ((user.billingStatus === "active" || user.billingStatus === "trialing") && user.pendingPlan) {
+    const scheduled = (user as any)?.scheduledPlanChange;
+    const hasFutureScheduledDowngrade =
+      scheduled &&
+      scheduled.type === "downgrade" &&
+      typeof scheduled.effectiveAtMs === "number" &&
+      scheduled.effectiveAtMs > Date.now();
+
+    if (!hasFutureScheduledDowngrade && (user.billingStatus === "active" || user.billingStatus === "trialing") && user.pendingPlan) {
       setUser((prev: any) => (prev ? { ...prev, pendingPlan: null } : prev));
     }
-  }, [user?.billingStatus, user?.pendingPlan]);
+  }, [user?.billingStatus, user?.pendingPlan, (user as any)?.scheduledPlanChange?.effectiveAtMs, (user as any)?.scheduledPlanChange?.type]);
 
   // Reset transient actionLoading when page regains visibility (e.g., returning from Stripe)
   useEffect(() => {
@@ -433,6 +467,7 @@ export default function SettingsBilling() {
         loadPlans(),
         loadUsage(),
         loadEntitlements(),
+        loadBillingStatus(),
         loadMediaPrefs(),
         loadCohostProfile(),
         loadRolePresets(),
@@ -443,6 +478,125 @@ export default function SettingsBilling() {
       setLoading(false);
     }
   };
+
+  const finalizeBillingAfterPlanChange = async (params?: {
+    expectedPlanId?: PlanId;
+    expectedDowngradeScheduled?: boolean;
+    maxPollAttempts?: number;
+    pollIntervalMs?: number;
+  }) => {
+    const maxAttempts = Math.max(1, Math.min(5, params?.maxPollAttempts ?? 5));
+    const intervalMs = Math.max(400, Math.min(4000, params?.pollIntervalMs ?? 1200));
+
+    const shouldStop = (me: any | null) => {
+      if (!me) return false;
+
+      if (params?.expectedPlanId) {
+        const planId = canonicalPlanId(me?.effectiveEntitlements?.planId ?? me?.planId);
+        if (planId === params.expectedPlanId) return true;
+      }
+
+      if (params?.expectedDowngradeScheduled) {
+        const scheduled = (me as any)?.scheduledPlanChange;
+        const ok =
+          scheduled &&
+          scheduled.type === "downgrade" &&
+          typeof scheduled.effectiveAtMs === "number" &&
+          scheduled.effectiveAtMs > Date.now();
+        if (ok) return true;
+      }
+
+      // If we don't know what to expect, just do a single refresh pass.
+      if (!params?.expectedPlanId && !params?.expectedDowngradeScheduled) return true;
+
+      return false;
+    };
+
+    // Make sure any in-memory cache is invalidated first.
+    clearMeCache();
+
+    // Kick Stripe->DB reconciliation; ignore failures (user may still get updated via webhooks).
+    try {
+      await apiFetchWithCookieFallback("/api/billing/refresh", { method: "POST" });
+    } catch {
+      // ignore
+    }
+
+    // Force-refresh the local sources of truth the page actually reads.
+    try {
+      await refreshAuth();
+    } catch {
+      // ignore
+    }
+
+    let me: any | null = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        me = await loadUser({ forceRefresh: true });
+      } catch {
+        me = null;
+      }
+
+      try {
+        await Promise.all([loadEntitlements(), loadUsage(), loadBillingStatus()]);
+      } catch {
+        // ignore
+      }
+
+      if (shouldStop(me)) return me;
+      await new Promise((r) => window.setTimeout(r, intervalMs));
+    }
+
+    return me;
+  };
+
+  const handleRefreshStatus = async () => {
+    try {
+      // Try to reconcile Stripe -> Firestore (self-heals when webhooks lag/miss)
+      const res = await apiFetchWithCookieFallback("/api/billing/refresh", { method: "POST" });
+      const { json } = await safeReadJson(res);
+      const changed = Boolean((json as any)?.changed);
+      if (res.ok) {
+        showToast(changed ? "Status refreshed." : "No changes found.");
+      }
+      clearMeCache();
+    } catch {
+      // ignore; still allow the user to refresh local state
+    }
+    await loadAllData();
+  };
+
+  // Post-Stripe return polish: if we land here with a processing hint, auto-sync
+  // plan state so the page feels instant once webhooks/refresh apply.
+  useEffect(() => {
+    if (!upgradeProcessing) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const expectedFromState = (location.state as any)?.expectedPlanId;
+      const expectedPlanId: PlanId | undefined = isPlanId(expectedFromState)
+        ? (expectedFromState as PlanId)
+        : "pro";
+
+      await finalizeBillingAfterPlanChange({ expectedPlanId, maxPollAttempts: 5, pollIntervalMs: 1200 });
+
+      if (cancelled) return;
+
+      setUpgradeProcessing(false);
+      try {
+        // Remove the router state so refresh doesn't keep the banner.
+        nav(location.pathname, { replace: true, state: {} });
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [upgradeProcessing, location.pathname, location.state, nav]);
 
   useEffect(() => {
     loadAllData();
@@ -471,6 +625,19 @@ export default function SettingsBilling() {
         setUser(null);
       }
       throw err;
+    }
+  };
+
+  const loadBillingStatus = async () => {
+    try {
+      const res = await apiFetchWithCookieFallback("/api/billing/status", { method: "GET" });
+      const { json } = await safeReadJson(res);
+      if (!res.ok) return;
+      if ((json as any)?.success) {
+        setBillingStatusSnapshot(json);
+      }
+    } catch {
+      // Non-critical UI. Billing page should still work without this.
     }
   };
 
@@ -617,36 +784,50 @@ export default function SettingsBilling() {
       const overages = usageMonthly.overages || {};
       const usageWrapper = data?.usage || {};
       const usageMinutes = usageWrapper.minutes || usageInner.minutes || {};
+      const ytdMinutes = usageMonthly?.ytd?.minutes || {};
       // Fallback to legacy hours on user.usage if monthly doc not present
       const legacyHours = Number(data?.user?.usage?.hoursStreamedThisMonth || 0);
       const legacyMinutes = Math.max(0, Math.round(legacyHours * 60));
       const participantUsed = Number(usageMonthly.participantMinutes ?? usageInner.participantMinutes ?? legacyMinutes ?? 0);
+      const transcodeUsed = Number(usageMonthly.transcodeMinutes ?? usageInner.transcodeMinutes ?? 0);
 
-      const liveCurrent = Number(
-        usageMinutes.live?.currentPeriod ?? usageInner.minutes?.live?.currentPeriod ?? participantUsed
+      const inRoomCurrent = Number(usageMinutes.inRoom?.currentPeriod ?? participantUsed);
+      const inRoomLifetime = Number(
+        usageMinutes.inRoom?.lifetime ??
+          ytdMinutes.inRoom?.lifetime ??
+          usageMonthly?.ytd?.participantMinutes ??
+          participantUsed
       );
-      const liveLifetime = Number(
-        usageMinutes.live?.lifetime ??
-        usageMonthly?.ytd?.minutes?.live?.lifetime ??
-        usageInner.minutes?.live?.lifetime ??
-        usageMonthly?.ytd?.participantMinutes ??
-        participantUsed
+
+      const broadcastCurrent = Number(usageMinutes.broadcast?.currentPeriod ?? usageMinutes.transcode?.currentPeriod ?? transcodeUsed);
+      const broadcastLifetime = Number(
+        usageMinutes.broadcast?.lifetime ??
+          usageMinutes.transcode?.lifetime ??
+          ytdMinutes.broadcast?.lifetime ??
+          ytdMinutes.transcode?.lifetime ??
+          usageMonthly?.ytd?.transcodeMinutes ??
+          0
       );
       const recordingCurrent = Number(
         usageMinutes.recording?.currentPeriod ?? usageInner.minutes?.recording?.currentPeriod ?? 0
       );
       const recordingLifetime = Number(
         usageMinutes.recording?.lifetime ??
-        usageMonthly?.ytd?.minutes?.recording?.lifetime ??
+        ytdMinutes?.recording?.lifetime ??
         usageInner.minutes?.recording?.lifetime ??
         0
       );
 
       setUsage({
-        streamingMinutes: {
-          used: liveCurrent,
+        inRoomMinutes: {
+          used: inRoomCurrent,
           limit: Number(limits.participantMinutes ?? 0) || (data?.plan?.id === "pro" ? 1200 : data?.plan?.id === "starter" ? 300 : 60),
-          lifetime: liveLifetime,
+          lifetime: inRoomLifetime,
+        },
+        broadcastMinutes: {
+          used: broadcastCurrent,
+          limit: Number(limits.transcodeMinutes ?? 0),
+          lifetime: broadcastLifetime,
         },
         recordingMinutes: {
           used: recordingCurrent,
@@ -957,6 +1138,88 @@ export default function SettingsBilling() {
     window.setTimeout(() => setToast(null), 3000);
   };
 
+  const setOveragesEnabled = async (nextEnabled: boolean) => {
+    setOveragesToggleSaving(true);
+    setOveragesToggleMessage(null);
+
+    const prevEnabled = Boolean((user as any)?.billingSettings?.overagesEnabled);
+
+    // Optimistic UI (will be corrected by /me refetch).
+    setUser((prev: any) =>
+      prev
+        ? {
+            ...prev,
+            billingSettings: {
+              ...(prev.billingSettings || {}),
+              overagesEnabled: nextEnabled,
+            },
+          }
+        : prev
+    );
+
+    try {
+      const res = await apiFetchWithCookieFallback("/api/billing/overages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+
+      const { json, text } = await safeReadJson(res);
+
+      if (!res.ok) {
+        const err = String((json as any)?.error || "").trim();
+        if (res.status === 409 && err === "payment_method_required") {
+          setOveragesToggleMessage("Add a default payment method to enable overages.");
+
+          // Ensure toggle stays OFF.
+          setUser((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  billingSettings: {
+                    ...(prev.billingSettings || {}),
+                    overagesEnabled: false,
+                  },
+                }
+              : prev
+          );
+        } else if (res.status === 403 && err === "overages_not_allowed") {
+          setOveragesToggleMessage(null);
+        } else {
+          setOveragesToggleMessage(
+            (text && text.length < 140 ? text : null) || "Could not update overages. Please try again."
+          );
+        }
+      } else {
+        showToast(nextEnabled ? "Overages enabled" : "Overages disabled");
+      }
+    } catch (err: any) {
+      setOveragesToggleMessage(err?.message || "Could not update overages. Please try again.");
+
+      // Revert optimistic state if we couldn't reach the server.
+      setUser((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              billingSettings: {
+                ...(prev.billingSettings || {}),
+                overagesEnabled: prevEnabled,
+              },
+            }
+          : prev
+      );
+    } finally {
+      // Always refresh /me so UI matches server truth.
+      try {
+        clearMeCache();
+        await loadUser({ forceRefresh: true });
+      } catch {
+        // ignore
+      }
+      setOveragesToggleSaving(false);
+    }
+  };
+
   const scheduleCohostProfileSave = (nextProfile: any) => {
     if (cohostProfileSaveTimerRef.current) {
       window.clearTimeout(cohostProfileSaveTimerRef.current);
@@ -993,6 +1256,12 @@ export default function SettingsBilling() {
 
       const { json, text } = await safeReadJson(res);
 
+      if (res.status === 410) {
+        setEmergencyExpiresAtMs(null);
+        setEmergencyMessage("This emergency download link expired. After 1 hour, the recording is automatically deleted.");
+        return;
+      }
+
       if (!res.ok) {
         console.error("Emergency download failed (http)", {
           status: res.status,
@@ -1004,13 +1273,16 @@ export default function SettingsBilling() {
 
       const url = (json as any)?.url || (json as any)?.data?.url;
       const expiresAt = (json as any)?.expiresAt || (json as any)?.data?.expiresAt;
+      const expiresAtMs = (json as any)?.expiresAtMs || (json as any)?.data?.expiresAtMs;
       if (!url) {
         console.error("Emergency download failed (shape)", { body: json ?? text });
         setEmergencyMessage("Recording URL missing. Contact support.");
         return;
       }
 
-      if (typeof expiresAt === "string" && expiresAt) {
+      if (typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs)) {
+        setEmergencyExpiresAtMs(expiresAtMs);
+      } else if (typeof expiresAt === "string" && expiresAt) {
         const ms = Date.parse(expiresAt);
         setEmergencyExpiresAtMs(Number.isFinite(ms) ? ms : null);
       }
@@ -1068,18 +1340,64 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     });
 
     const data = await res.json();
-    if (!data.success || !data.url) {
-      throw new Error(data.error || "Checkout failed");
+    if (!data.success) {
+      throw Object.assign(new Error(data.error || "Checkout failed"), { status: res.status, body: data });
     }
 
-    window.location.href = data.url;
+    // First-time paid subscription flow (Stripe Checkout)
+    if (data.url) {
+      window.location.href = data.url;
+      return;
+    }
+
+    // Existing subscriber flow: server may apply upgrade immediately or schedule downgrade.
+    if (data.mode === "upgrade") {
+      setToast("Plan updated");
+      setActionLoading(null);
+      try {
+        await finalizeBillingAfterPlanChange({
+          expectedPlanId: checkoutVariantToPlanId(plan),
+          maxPollAttempts: 5,
+          pollIntervalMs: 1200,
+        });
+      } catch {}
+      return;
+    }
+
+    if (data.mode === "downgrade_scheduled") {
+      const effectiveAtMs = typeof data.effectiveAtMs === "number" ? data.effectiveAtMs : null;
+      const dateLabel = effectiveAtMs ? new Date(effectiveAtMs).toLocaleString() : "your renewal date";
+      setToast(`Downgrade scheduled for ${dateLabel}`);
+      setActionLoading(null);
+      try {
+        await finalizeBillingAfterPlanChange({
+          expectedDowngradeScheduled: true,
+          maxPollAttempts: 5,
+          pollIntervalMs: 1200,
+        });
+      } catch {}
+      return;
+    }
+
+    setToast("Plan change requested");
+    setActionLoading(null);
   } catch (err: any) {
-    if (err?.status === 403 && err?.body?.error === "billing_disabled") {
+    const bodyError = err?.body?.error;
+    const retryAfterMs = typeof err?.body?.retryAfterMs === "number" ? err.body.retryAfterMs : null;
+
+    if (bodyError === "plan_change_limit_daily") {
+      const hours = retryAfterMs ? Math.max(1, Math.ceil(retryAfterMs / 3600000)) : 24;
+      setError(`You can change plans again in ${hours} hour${hours === 1 ? "" : "s"}.`);
+    } else if (bodyError === "downgrade_limit_monthly") {
+      const date = retryAfterMs ? new Date(Date.now() + retryAfterMs) : null;
+      const label = date ? date.toLocaleDateString() : "later";
+      setError(`You can downgrade again on ${label}.`);
+    } else if (err?.status === 403 && bodyError === "billing_disabled") {
       setError("Billing is disabled for this account. Use Test Mode plan switching instead.");
-    } else if (err?.status === 403 && err?.body?.error === "tos_not_accepted") {
+    } else if (err?.status === 403 && bodyError === "tos_not_accepted") {
       setCheckoutTosError("You must agree to the Terms of Service before changing plans.");
-    } else if (err?.body?.error) {
-      setError(err.body.error);
+    } else if (bodyError) {
+      setError(bodyError);
     } else {
       setError(err.message || "Failed to start checkout. Please try again.");
     }
@@ -1087,6 +1405,63 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
   }
 };
+
+  const cancelSubscription = async () => {
+    if (closeCancelLoading) return;
+    setCloseCancelLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetchWithCookieFallback("/api/account/close", {
+        method: "POST",
+        body: JSON.stringify({ mode: "cancel_only" }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) {
+        throw Object.assign(new Error(data?.error || "Cancel failed"), { status: res.status, body: data });
+      }
+      setToast("Subscription will cancel at period end");
+      try {
+        clearMeCache();
+        const me = await loadUser({ forceRefresh: true });
+        await loadEntitlements();
+        setUser(me);
+      } catch {}
+    } catch (err: any) {
+      setError(err?.body?.error || err?.message || "Failed to cancel subscription");
+    } finally {
+      setCloseCancelLoading(false);
+    }
+  };
+
+  const deleteAccount = async () => {
+    if (closeDeleteLoading) return;
+    if (!closeDeleteConfirmed || closeDeleteText.trim().toUpperCase() !== "DELETE") {
+      setError("Confirm deletion by checking the box and typing DELETE.");
+      return;
+    }
+    setCloseDeleteLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetchWithCookieFallback("/api/account/close", {
+        method: "POST",
+        body: JSON.stringify({ mode: "delete" }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) {
+        throw Object.assign(new Error(data?.error || "Delete failed"), { status: res.status, body: data });
+      }
+
+      clearAuthStorage();
+      clearMeCache();
+      clearPlatformFlagsCache();
+      setToast("Account deletion requested");
+      nav("/login", { replace: true, state: { accountDeleted: true } });
+    } catch (err: any) {
+      setError(err?.body?.error || err?.message || "Failed to delete account");
+    } finally {
+      setCloseDeleteLoading(false);
+    }
+  };
 
 
 
@@ -1178,57 +1553,6 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
 
       const planMeta = plans.find((p) => canonicalPlanId(p.id) === newPlanId);
       const name = planMeta?.name || newPlanId;
-
-    // Post-success polish: if Stripe redirects back before webhooks apply, auto-refetch /me
-    // a few times so the page feels instant once entitlements flip.
-    useEffect(() => {
-      if (!upgradeProcessing) return;
-
-      let cancelled = false;
-      let attempts = 0;
-      const maxAttempts = 5; // ~20s at 4s interval
-      const intervalMs = 4000;
-
-      async function tick() {
-        attempts++;
-
-        try {
-          // Force a network fetch (don't let SPA cache lie)
-          const me = await loadUser({ forceRefresh: true });
-          await loadEntitlements();
-
-          const planId = me?.effectiveEntitlements?.planId ?? me?.planId;
-          const canHls = me?.effectiveEntitlements?.features?.canHls ?? me?.effectiveEntitlements?.features?.hlsEnabled;
-
-          const flipped = planId === "pro" || canHls === true;
-
-          if (flipped) {
-            if (!cancelled) {
-              setUpgradeProcessing(false);
-              try {
-                // Remove the router state so refresh doesn't keep the banner.
-                nav(location.pathname, { replace: true, state: {} });
-              } catch {}
-            }
-            return;
-          }
-        } catch {
-          // ignore; keep polling
-        }
-
-        if (!cancelled && attempts < maxAttempts) {
-          setTimeout(tick, intervalMs);
-        } else if (!cancelled) {
-          // Stop polling after the cap; banner can remain until manual refresh.
-          // (User requested we don't block navigation.)
-        }
-      }
-
-      tick();
-      return () => {
-        cancelled = true;
-      };
-    }, [upgradeProcessing, nav, location.pathname]);
       setTestModeSummary(`You are now simulating the ${name} plan. Limits and gates below use this plan.`);
       showToast("Plan switched (Test Mode)");
 
@@ -1480,6 +1804,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
           >
             Mod/Guest Setup
           </button>
+          <button
+            type="button"
+            style={activeTab === "close" ? { ...S.tab, ...S.tabActive } : S.tab}
+            onClick={() => setActiveTab("close")}
+          >
+            Close Account
+          </button>
         </div>
 
         {/* ================================================================ */}
@@ -1666,6 +1997,43 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
         {/* ================================================================ */}
         {activeTab === "plan" && (
           <>
+            {(() => {
+              const remaining = (billingStatusSnapshot as any)?.daily?.remaining;
+              const retryAfterMs = (billingStatusSnapshot as any)?.daily?.retryAfterMs;
+              if (typeof remaining !== "number") return null;
+              const hours = typeof retryAfterMs === "number" && retryAfterMs > 0
+                ? Math.max(1, Math.ceil(retryAfterMs / 3600000))
+                : 0;
+              return (
+                <div
+                  style={{
+                    marginBottom: 14,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: "1px solid rgba(148,163,184,0.22)",
+                    background: "rgba(148,163,184,0.06)",
+                    color: "#e5e7eb",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    Plan changes available (next 24h): <span style={{ color: remaining > 0 ? "#22c55e" : "#f59e0b" }}>{remaining}</span> / 3
+                  </div>
+                  {remaining === 0 && hours > 0 && (
+                    <div style={{ fontSize: 12, color: "#cbd5e1", fontWeight: 700 }}>
+                      Next change in ~{hours} hour{hours === 1 ? "" : "s"}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {isBlocked && !isTestMode && (
               <div style={S.warningCard}>
                 <div style={S.warningIcon}>⚠️</div>
@@ -1699,7 +2067,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       ? "Upgrade processing — this can take a few seconds."
                       : user?.billing?.cancelAtPeriodEnd
                         ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
-                        : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
+                        : (user as any)?.scheduledPlanChange?.type === "downgrade" &&
+                            typeof (user as any)?.scheduledPlanChange?.effectiveAtMs === "number" &&
+                            (user as any)?.scheduledPlanChange?.effectiveAtMs > Date.now()
+                          ? `Downgrade scheduled — stays active until ${formatDate((user as any).scheduledPlanChange.effectiveAtMs)}`
+                          : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
                   </span>
                 )}
               </div>
@@ -1935,7 +2307,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
                     {/* Processing */}
                     {isProcessing && (
-                      <button onClick={loadAllData} style={S.secondaryBtn}>
+                      <button onClick={handleRefreshStatus} style={S.secondaryBtn}>
                         🔄 Refresh Status
                       </button>
                     )}
@@ -2049,15 +2421,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                         )}
                       </div>
                       <ul style={S.featureList}>
-                        <FeatureRow label="In-Room Minutes" value={plan.limits.monthlyMinutesIncluded} />
-                        {platformTranscodeEnabled !== false && (
+                        <FeatureRow label={usageLabels.inRoomMinutes} value={plan.limits.monthlyMinutesIncluded} />
+                        {platformTranscodeEnabled !== false && plan.limits.transcodeMinutes > 0 && (
                           <FeatureRow
-                            label="Streaming Minutes"
-                            value={
-                              plan.limits.transcodeMinutes > 0
-                                ? plan.limits.transcodeMinutes
-                                : "Not included"
-                            }
+                            label={usageLabels.broadcastMinutes}
+                            value={plan.limits.transcodeMinutes}
                           />
                         )}
                         <FeatureRow label="Max guests" value={plan.limits.maxGuests} />
@@ -2099,13 +2467,15 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                       {(planId !== "free" && planId !== "basic") && (
                         <div style={{ color: "#94a3b8", fontSize: 12, margin: "8px 0 0 0", lineHeight: 1.45 }}>
                           <div>
-                            <span style={{ color: "#60a5fa" }}>Streaming Minutes</span> are consumed when StreamLine sends your live video to other platforms (like YouTube, Facebook, Twitch, etc.).
+                            <span style={{ color: "#60a5fa" }}>{usageLabels.inRoomMinutes}</span> {" "}
+                            {usageTooltips.inRoomMinutes}
                           </div>
                           <div style={{ marginTop: 6 }}>
-                            They are not used when you’re just streaming inside StreamLine.
+                            <span style={{ color: "#a78bfa" }}>{usageLabels.broadcastMinutes}</span> {" "}
+                            {usageTooltips.broadcastMinutes}
                           </div>
                           <div style={{ marginTop: 8 }}>
-                            They are counted per destination, per minute.
+                            Broadcast minutes are counted per destination, per minute.
                           </div>
                         </div>
                       )}
@@ -2136,7 +2506,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             }}
                             disabled={!!actionLoading || isBlocked || isProcessing}
                           >
-                            {actionLoading === "basic" ? "⏳..." : getPlanActionLabel(userPlan, "basic" as any, isProcessing)}
+                            {actionLoading === "basic"
+                              ? "⏳..."
+                              : getPlanActionLabel(userPlan, "basic" as any, {
+                                  isProcessing,
+                                  pendingPlan: user?.pendingPlan,
+                                })}
                           </button>
                         ) : planId === "starter" && (userPlan === "free" || userPlan === "basic") ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -2148,7 +2523,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                               }}
                               disabled={!!actionLoading || isBlocked || isProcessing}
                             >
-                              {actionLoading === "starter_paid" ? "⏳..." : getPlanActionLabel(userPlan, "starter", isProcessing)}
+                              {actionLoading === "starter_paid"
+                                ? "⏳..."
+                                : getPlanActionLabel(userPlan, "starter", {
+                                    isProcessing,
+                                    pendingPlan: user?.pendingPlan,
+                                  })}
                             </button>
                             <button
                               onClick={() => startCheckout("starter_trial")}
@@ -2170,7 +2550,12 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             }}
                             disabled={!!actionLoading || isBlocked || isProcessing}
                           >
-                            {actionLoading === "pro" ? "⏳..." : getPlanActionLabel(userPlan, "pro", isProcessing)}
+                            {actionLoading === "pro"
+                              ? "⏳..."
+                              : getPlanActionLabel(userPlan, "pro", {
+                                  isProcessing,
+                                  pendingPlan: user?.pendingPlan,
+                                })}
                           </button>
                         ) : planId === "free" && (userPlan === "starter" || userPlan === "pro" || userPlan === "basic") ? (
                           <button
@@ -2194,7 +2579,10 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             }}
                             disabled={!!actionLoading || isBlocked}
                           >
-                            {getPlanActionLabel(userPlan, planId as any, isProcessing)}
+                            {getPlanActionLabel(userPlan, planId as any, {
+                              isProcessing,
+                              pendingPlan: user?.pendingPlan,
+                            })}
                           </button>
                         )}
                       </div>
@@ -2480,8 +2868,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             <div style={{ marginTop: 8, marginBottom: 12, padding: 12, border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, background: "rgba(255,255,255,0.02)" }}>
               <div style={{ fontWeight: 700, color: "#e5e7eb", marginBottom: 6 }}>Minutes Used (This Month)</div>
               <div style={{ color: "#cbd5e1", marginBottom: 4 }}>
-                Live streaming: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.streamingMinutes.used}</span> min
+                {usageLabels.inRoomMinutes}: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.inRoomMinutes.used}</span> min
               </div>
+              {getUsageGating(user).canShowBroadcastMinutes && (
+                <div style={{ color: "#cbd5e1", marginBottom: 4 }}>
+                  {usageLabels.broadcastMinutes}: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.broadcastMinutes.used}</span> min
+                </div>
+              )}
               <div style={{ color: "#cbd5e1", marginBottom: 6 }}>
                 Recording: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.used}</span> min
               </div>
@@ -2495,8 +2888,11 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 </span>
                 {" "}min
                 <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                  {" "}(live: {Number(usage.overages?.participantMinutes ?? 0)} / transcode: {Number(usage.overages?.transcodeMinutes ?? 0)})
+                  {" "}(in-room: {Number(usage.overages?.participantMinutes ?? 0)} / broadcast: {Number(usage.overages?.transcodeMinutes ?? 0)})
                 </span>
+              </div>
+              <div style={{ color: "#94a3b8", fontSize: 12 }}>
+                {usageTooltips.inRoomMinutes} {usageTooltips.broadcastMinutes}
               </div>
               <div style={{ color: "#94a3b8", fontSize: 12 }}>Recording minutes are included in your total usage.</div>
               <div style={{ marginTop: 8 }}>
@@ -2518,23 +2914,91 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               </div>
               {showLifetimeDetails && (
                 <div style={{ marginTop: 8, color: "#cbd5e1", fontSize: 13 }}>
-                  <div>Lifetime live minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.streamingMinutes.lifetime ?? 0}</span> min</div>
+                  <div>Lifetime in-room minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.inRoomMinutes.lifetime ?? 0}</span> min</div>
+                  {getUsageGating(user).canShowBroadcastMinutes && (
+                    <div>Lifetime broadcast minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.broadcastMinutes.lifetime ?? 0}</span> min</div>
+                  )}
                   <div>Lifetime recording minutes: <span style={{ color: "#fff", fontWeight: 700 }}>{usage.recordingMinutes.lifetime}</span> min</div>
                 </div>
               )}
             </div>
 
+            {(() => {
+              const eff = (user as any)?.effectiveEntitlements;
+              const planId = String(eff?.planId || "").trim();
+              const overagesAllowed = eff?.features?.overagesAllowed === true;
+              const canShowOveragesToggle = planId === "pro" || overagesAllowed;
+              if (!canShowOveragesToggle) return null;
+
+              const enabled = Boolean((user as any)?.billingSettings?.overagesEnabled);
+
+              return (
+                <div style={{
+                  marginTop: 8,
+                  marginBottom: 12,
+                  padding: 12,
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  borderRadius: 12,
+                  background: "rgba(255,255,255,0.02)",
+                }}>
+                  <div style={{ fontWeight: 800, color: "#e5e7eb", marginBottom: 4 }}>Overages</div>
+                  <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 10 }}>
+                    $10 per additional 100 minutes — billed automatically after your stream ends.
+                  </div>
+
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 700, color: "#e5e7eb" }}>
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      disabled={overagesToggleSaving}
+                      onChange={(e) => setOveragesEnabled(e.target.checked)}
+                    />
+                    <span>{enabled ? "Enabled" : "Disabled"}</span>
+                  </label>
+
+                  <div style={{ marginTop: 6, color: "#94a3b8", fontSize: 12 }}>
+                    Applies to in-room minutes over your plan limit.
+                  </div>
+
+                  {overagesToggleMessage && (
+                    <div style={{
+                      marginTop: 10,
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid rgba(239,68,68,0.4)",
+                      background: "rgba(239,68,68,0.12)",
+                      color: "#fecdd3",
+                      fontSize: 13,
+                    }}>
+                      {overagesToggleMessage}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <div style={S.usageGrid}>
               <UsageBar
-                label="Streaming Minutes"
-                used={usage.streamingMinutes.used}
+                label={usageLabels.inRoomMinutes}
+                used={usage.inRoomMinutes.used}
                 limit={
-                  usage.streamingMinutes.limit ||
+                  usage.inRoomMinutes.limit ||
                   currentPlan.limits?.monthlyMinutesIncluded ||
                   0
                 }
                 unit="min"
               />
+              {getUsageGating(user).canShowBroadcastMinutes && (
+                <UsageBar
+                  label={usageLabels.broadcastMinutes}
+                  used={usage.broadcastMinutes.used}
+                  limit={
+                    usage.broadcastMinutes.limit ||
+                    0
+                  }
+                  unit="min"
+                />
+              )}
               <UsageBar
                 label="Stream Destinations"
                 used={usage.rtmpDestinations.used}
@@ -2591,7 +3055,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                 Expires in {emergencyCountdown || "—"}
               </div>
               <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
-                Use this if your in-room download didn’t work. Downloads are available for a limited time.
+                This emergency download link expires in 1 hour. After that, the recording is automatically deleted.
               </div>
               {emergencyMessage && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>{emergencyMessage}</div>
@@ -2610,6 +3074,106 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               lockReason="Stream Destinations are not included in your current plan."
               onUpgrade={() => setActiveTab("plan")}
             />
+          </div>
+        )}
+
+        {/* ================================================================ */}
+        {/* SECTION 5: CLOSE ACCOUNT */}
+        {/* ================================================================ */}
+        {activeTab === "close" && (
+          <div style={{ marginTop: 16, display: "grid", gap: 16 }}>
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <h2 style={S.cardTitle}>Close Account</h2>
+              </div>
+              <div style={{ color: "#94a3b8", fontSize: 13, lineHeight: 1.5 }}>
+                Manage cancellation and account deletion. Cancellation keeps access until the end of the current billing period.
+              </div>
+
+              <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={cancelSubscription}
+                  disabled={closeCancelLoading}
+                  style={{
+                    ...S.primaryBtn,
+                    opacity: closeCancelLoading ? 0.8 : 1,
+                  }}
+                >
+                  {closeCancelLoading ? "Cancelling..." : "Cancel subscription (period end)"}
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+                If you don't have an active subscription, this will no-op.
+              </div>
+            </div>
+
+            <div
+              style={{
+                ...S.card,
+                border: "1px solid rgba(239, 68, 68, 0.35)",
+                background: "rgba(239, 68, 68, 0.05)",
+              }}
+            >
+              <div style={S.cardHeader}>
+                <h2 style={{ ...S.cardTitle, color: "#fecaca" }}>Delete Account</h2>
+              </div>
+              <div style={{ color: "#fca5a5", fontSize: 13, lineHeight: 1.5 }}>
+                This immediately locks you out. Your data is scheduled for purge after 7 days.
+              </div>
+
+              <div style={{ marginTop: 6, color: "#fecaca", fontSize: 12, fontWeight: 800 }}>
+                Deleting your account cancels billing and permanently removes your content after 7 days.
+              </div>
+
+              <div style={{ marginTop: 12, display: "grid", gap: 10, maxWidth: 520 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, color: "#fee2e2", fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={closeDeleteConfirmed}
+                    onChange={(e) => setCloseDeleteConfirmed(e.target.checked)}
+                  />
+                  I understand this will immediately lock me out
+                </label>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontSize: 12, color: "#fecaca", fontWeight: 700 }}>Type DELETE to confirm</div>
+                  <input
+                    value={closeDeleteText}
+                    onChange={(e) => setCloseDeleteText(e.target.value)}
+                    placeholder="DELETE"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(239, 68, 68, 0.45)",
+                      background: "rgba(2,6,23,0.6)",
+                      color: "#fff",
+                      outline: "none",
+                      fontSize: 14,
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={deleteAccount}
+                  disabled={closeDeleteLoading}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(239, 68, 68, 0.7)",
+                    background: closeDeleteLoading ? "rgba(239, 68, 68, 0.18)" : "rgba(239, 68, 68, 0.12)",
+                    color: "#fecaca",
+                    cursor: closeDeleteLoading ? "not-allowed" : "pointer",
+                    fontWeight: 800,
+                    letterSpacing: 0.2,
+                  }}
+                >
+                  {closeDeleteLoading ? "Deleting..." : "Delete account"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

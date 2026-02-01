@@ -105,12 +105,15 @@ async function requireMyContentRecordingsEnabled(req: any, res: any, next: any) 
   return next();
 }
 
-const EMERGENCY_RETENTION_MS = 2 * 60 * 60 * 1000; // 2 hours
+// Emergency recordings are intentionally short-lived: 1-hour retention window.
+const EMERGENCY_RETENTION_MS = 1 * 60 * 60 * 1000; // 1 hour
 
 type EmergencyCurrentDoc = {
   recordingId?: string;
   createdAt?: any;
   expiresAt?: any;
+  emergencyAvailableUntilMs?: number;
+  deleteAfterMs?: number;
   status?: string;
   r2Keys?: string[];
   r2Prefix?: string;
@@ -841,6 +844,7 @@ router.post(
       .doc("current");
 
     const emergencyExpiresAt = new Date(now.getTime() + EMERGENCY_RETENTION_MS);
+    const emergencyExpiresAtMs = emergencyExpiresAt.getTime();
 
     const autoStopAt =
       maxRecordingMinutesPerClip > 0
@@ -862,7 +866,13 @@ router.post(
       livekitRoomName,
       layout: layout || "grid",
       mode,
-      ...(isEmergency ? { recordingClass: "emergency" } : {}),
+      ...(isEmergency
+        ? {
+            recordingClass: "emergency",
+            emergencyAvailableUntilMs: emergencyExpiresAtMs,
+            deleteAfterMs: emergencyExpiresAtMs,
+          }
+        : {}),
       status: "starting",
       downloadReady: false,
       objectKey,
@@ -935,6 +945,8 @@ router.post(
             recordingId,
             createdAt: now,
             expiresAt: emergencyExpiresAt,
+            emergencyAvailableUntilMs: emergencyExpiresAtMs,
+            deleteAfterMs: emergencyExpiresAtMs,
             status: "active",
             r2Keys: [objectKey],
           },
@@ -1515,7 +1527,14 @@ router.get("/emergency-status", requireAuth, requireMyContentRecordingsEnabled a
     const expiresAt = toDate(current.expiresAt);
     const now = new Date();
 
-    const expiresInSeconds = expiresAt ? Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 1000)) : null;
+    const expiresAtMs = Number.isFinite(current.emergencyAvailableUntilMs)
+      ? (current.emergencyAvailableUntilMs as number)
+      : expiresAt
+        ? expiresAt.getTime()
+        : null;
+
+    const remainingMs = typeof expiresAtMs === "number" ? Math.max(0, expiresAtMs - now.getTime()) : null;
+    const expiresInSeconds = typeof remainingMs === "number" ? Math.floor(remainingMs / 1000) : null;
 
     return res.json({
       success: true,
@@ -1524,6 +1543,8 @@ router.get("/emergency-status", requireAuth, requireMyContentRecordingsEnabled a
         recordingId: current.recordingId || null,
         status: status || null,
         expiresAt: expiresAt ? expiresAt.toISOString() : null,
+        expiresAtMs,
+        remainingMs,
         expiresInSeconds,
       },
     });
@@ -1561,8 +1582,34 @@ router.get("/emergency-latest", requireAuth, requireMyContentRecordingsEnabled a
         const status = String(current.status || "").toLowerCase();
         const expiresAt = toDate(current.expiresAt);
         const now = new Date();
+        const nowMs = now.getTime();
 
-        if (status !== "deleted" && expiresAt && expiresAt.getTime() > now.getTime()) {
+        const emergencyAvailableUntilMs = Number.isFinite(current.emergencyAvailableUntilMs)
+          ? (current.emergencyAvailableUntilMs as number)
+          : expiresAt
+            ? expiresAt.getTime()
+            : null;
+
+        // Hard failure if expired: never return a URL with TTL=0 or that could still work.
+        if (status !== "deleted" && typeof emergencyAvailableUntilMs === "number" && nowMs >= emergencyAvailableUntilMs) {
+          return res.status(410).json({
+            success: false,
+            error: "recording_expired",
+            expiresAtMs: emergencyAvailableUntilMs,
+            remainingMs: 0,
+          });
+        }
+
+        if (status === "deleted") {
+          return res.status(410).json({
+            success: false,
+            error: "recording_deleted",
+            expiresAtMs: typeof emergencyAvailableUntilMs === "number" ? emergencyAvailableUntilMs : null,
+            remainingMs: 0,
+          });
+        }
+
+        if (typeof emergencyAvailableUntilMs === "number" && nowMs < emergencyAvailableUntilMs) {
           const recordingId = current.recordingId ? String(current.recordingId) : "";
           const keys = Array.isArray(current.r2Keys)
             ? current.r2Keys.map(String).map((s) => s.trim()).filter(Boolean)
@@ -1580,8 +1627,22 @@ router.get("/emergency-latest", requireAuth, requireMyContentRecordingsEnabled a
           if (objectKey) {
             const size = await r2HeadObjectSize(objectKey);
             if (size > 0) {
-              const signedUrl = await getSignedDownloadUrl(objectKey, 15 * 60);
-              const expiresInSeconds = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 1000));
+              // Emergency link should be usable up to the emergency expiry window.
+              // Never hand out a URL that outlives the window (cap at 1 hour).
+              const remainingMs = Math.max(0, emergencyAvailableUntilMs - nowMs);
+              const expiresInSeconds = Math.floor(remainingMs / 1000);
+
+              if (expiresInSeconds <= 0) {
+                return res.status(410).json({
+                  success: false,
+                  error: "recording_expired",
+                  expiresAtMs: emergencyAvailableUntilMs,
+                  remainingMs: 0,
+                });
+              }
+
+              const signedTtlSeconds = Math.max(1, Math.min(60 * 60, expiresInSeconds));
+              const signedUrl = await getSignedDownloadUrl(objectKey, signedTtlSeconds);
 
               return res.status(200).json({
                 success: true,
@@ -1590,7 +1651,9 @@ router.get("/emergency-latest", requireAuth, requireMyContentRecordingsEnabled a
                   recordingId: recordingId || null,
                   fallbackUsed: false,
                   emergency: true,
-                  expiresAt: expiresAt.toISOString(),
+                  expiresAt: new Date(emergencyAvailableUntilMs).toISOString(),
+                  expiresAtMs: emergencyAvailableUntilMs,
+                  remainingMs,
                   expiresInSeconds,
                   size,
                 },

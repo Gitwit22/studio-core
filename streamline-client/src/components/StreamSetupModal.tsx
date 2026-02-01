@@ -1661,6 +1661,9 @@ export default function StreamSetupModalV2({
                     ? 'This room is not connected to a Saved Embed yet. Create one in Settings → HLS Setup and join using that Saved Room to go live.'
                     : 'Connected to your Saved Embed. Start HLS to begin broadcasting to its viewer link.'}
               </div>
+              <div style={{ fontSize: '0.75rem', color: 'rgba(148, 163, 184, 0.95)', marginBottom: '0.75rem' }}>
+                Broadcasting uses Broadcast minutes.
+              </div>
               {boundEmbedId && (
                 <div style={{
                   display: 'flex',

@@ -7,6 +7,9 @@ interface UsageData {
   email: string;
   displayName?: string;
   planId: "free" | "starter" | "pro" | "basic" | "enterprise" | "internal_unlimited";
+  billingTruthStatus?: "free" | "active" | "trialing" | "past_due" | "canceled" | string;
+  stripeConnected?: boolean;
+  stripeCustomerId?: string | null;
   billingEnabled?: boolean;
   platformBillingEnabled?: boolean;
   effectiveBillingEnabled?: boolean;
@@ -312,6 +315,7 @@ export default function AdminUsage() {
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold">User</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Plan</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Billing</th>
                   <th className="px-4 py-3 text-right text-sm font-semibold">Usage</th>
                   <th className="px-4 py-3 text-right text-sm font-semibold">
                     <div>Overage (this month)</div>
@@ -340,6 +344,18 @@ export default function AdminUsage() {
                       >
                         {user.planId.toUpperCase()}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-sm font-semibold">
+                          {String(user.billingTruthStatus || "free").toLowerCase() === "free"
+                            ? "Free (ready)"
+                            : String(user.billingTruthStatus || "unknown")}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          Stripe: {user.stripeConnected ? "connected" : "not connected"}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
                       {user.minutesUsed} min

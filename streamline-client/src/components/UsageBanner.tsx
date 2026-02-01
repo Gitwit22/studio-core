@@ -41,7 +41,12 @@ export default function UsageBanner() {
 
         const planId = eff.planId || usageJson?.plan?.id || usageJson?.user?.planId || "free";
 
-        const participantMinutesUsed = Number(usageJson?.usageMonthly?.usage?.participantMinutes ?? 0);
+        const participantMinutesUsed = Number(
+          usageJson?.usageMonthly?.usage?.minutes?.inRoom?.currentPeriod ??
+            usageJson?.usage?.minutes?.inRoom?.currentPeriod ??
+            usageJson?.usageMonthly?.usage?.participantMinutes ??
+            0
+        );
         const usedHours = Math.round((participantMinutesUsed / 60) * 10) / 10;
 
         const maxMinutes = Number(
@@ -51,7 +56,11 @@ export default function UsageBanner() {
         );
         const maxHours = maxMinutes > 0 ? Math.round((maxMinutes / 60) * 10) / 10 : 0;
 
-        const ytdMinutes = Number(usageJson?.usageMonthly?.ytd?.participantMinutes ?? 0);
+        const ytdMinutes = Number(
+          usageJson?.usageMonthly?.ytd?.minutes?.inRoom?.lifetime ??
+            usageJson?.usageMonthly?.ytd?.participantMinutes ??
+            0
+        );
         const ytdHours = Math.round((ytdMinutes / 60) * 10) / 10;
 
         const resetDate = usageJson?.resetDate || null;

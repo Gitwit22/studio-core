@@ -13,6 +13,7 @@ import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import { evaluateUsageGate } from "../lib/usageOverages";
 import { upsertUsageMonthlyOverageTotals } from "../lib/usageOveragesWriter";
 import { LIMIT_ERRORS } from "../lib/limitErrors";
+import { deletePrefix } from "../lib/storageClient";
 
 const router = Router();
 
@@ -32,11 +33,13 @@ async function incrementHlsUsageMinutes(uid: string, minutes: number) {
   const nextUsage = {
     ...prevUsage,
     hlsMinutes: Number(prevUsage.hlsMinutes || 0) + safeMinutes,
+    transcodeMinutes: Number(prevUsage.transcodeMinutes || 0) + safeMinutes,
   };
 
   const nextYtd = {
     ...prevYtd,
     hlsMinutes: Number(prevYtd.hlsMinutes || 0) + safeMinutes,
+    transcodeMinutes: Number(prevYtd.transcodeMinutes || 0) + safeMinutes,
   };
 
   await usageRef.set(
@@ -64,6 +67,16 @@ function getHlsPublicBaseUrl(): string {
   }
 
   throw new Error("Missing env: HLS_PUBLIC_BASE_URL");
+}
+
+async function cleanupHlsArtifacts(params: { roomId: string; prefix?: string | null }) {
+  const prefix = (params.prefix && String(params.prefix).trim()) || `hls/${params.roomId}/`;
+  try {
+    await deletePrefix(prefix);
+  } catch (e: any) {
+    // Best-effort: do not fail stop/status paths on storage cleanup issues.
+    console.warn("[hls] failed to delete HLS prefix", { roomId: params.roomId, prefix, error: e?.message || e });
+  }
 }
 
 router.get("/ping", (req, res) => res.send("hls ok"));
@@ -338,6 +351,9 @@ router.get("/status/:roomId", requireAuth as any, requireRoomAccessToken as any,
           }
         }
 
+        // Best-effort: delete playlist + segments immediately.
+        await cleanupHlsArtifacts({ roomId, prefix: (hls as any).prefix });
+
         // Compute and track usage against the room owner when available.
         let durationMinutes = 0;
         const startedAt: any = hls.startedAt;
@@ -446,6 +462,9 @@ router.post("/stop/:roomId", requireAuth as any, requireRoomAccessToken as any, 
         console.error("Failed to stop HLS egress", e);
       }
     }
+
+    // Best-effort: remove playlist + segments from storage.
+    await cleanupHlsArtifacts({ roomId, prefix: (hls as any).prefix });
 
     let durationMinutes = 0;
     const startedAt: any = hls.startedAt;

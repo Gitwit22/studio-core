@@ -12,6 +12,8 @@
 
 import express from "express";
 import crypto from "crypto";
+import { deletePrefix } from "../lib/storageClient";
+import { setHlsIdle } from "../services/rooms";
 import Stripe from "stripe";
 import { firestore as db } from "../firebaseAdmin";
 import { stripe } from "../lib/stripe";
@@ -92,6 +94,24 @@ function planIdFromPrice(priceId?: string) {
   if (!priceId) return "free";
   if (priceId === process.env.STRIPE_PRICE_STARTER) return "starter";
   if (priceId === process.env.STRIPE_PRICE_PRO) return "pro";
+  if (priceId === process.env.STRIPE_PRICE_BASIC) return "basic";
+  return "free";
+}
+
+function canonicalPlanFromSubscription(subscription: any): "free" | "starter" | "basic" | "pro" {
+  const metaPlan = String(subscription?.metadata?.plan || "").trim();
+  if (metaPlan === "free" || metaPlan === "starter" || metaPlan === "basic" || metaPlan === "pro") {
+    return metaPlan;
+  }
+
+  const planVariant = String(subscription?.metadata?.planVariant || "").trim();
+  if (planVariant === "pro") return "pro";
+  if (planVariant === "basic") return "basic";
+  if (planVariant.startsWith("starter")) return "starter";
+
+  const priceId = subscription?.items?.data?.[0]?.price?.id;
+  const fromPrice = planIdFromPrice(priceId);
+  if (fromPrice === "starter" || fromPrice === "basic" || fromPrice === "pro") return fromPrice;
   return "free";
 }
 
@@ -188,15 +208,30 @@ router.post(
           }
 
           const planVariant = subscription?.metadata?.planVariant;
-          const canonicalPlan = planVariant === "pro" ? "pro" : "starter";
+          const canonicalPlan = canonicalPlanFromSubscription(subscription);
           const isActive =
             subscription.status === "active" || subscription.status === "trialing";
 
           const userSnap = await getUserRef(uid).get();
           const user = userSnap.exists ? userSnap.data() : {};
 
-          const currentPlan = user?.planId || "free";
+          const scheduledPlanChange = (user as any)?.scheduledPlanChange || null;
           const now = Date.now();
+          const preservePendingPlan =
+            scheduledPlanChange &&
+            scheduledPlanChange.type === "downgrade" &&
+            typeof scheduledPlanChange.effectiveAtMs === "number" &&
+            scheduledPlanChange.effectiveAtMs > now;
+
+          const shouldClearScheduledPlanChange =
+            scheduledPlanChange &&
+            scheduledPlanChange.type === "downgrade" &&
+            typeof scheduledPlanChange.effectiveAtMs === "number" &&
+            scheduledPlanChange.effectiveAtMs <= now &&
+            typeof scheduledPlanChange.targetPlanId === "string" &&
+            scheduledPlanChange.targetPlanId === canonicalPlan;
+
+          const currentPlan = user?.planId || "free";
           const history = sanitizeHistory((user as any)?.planChangeHistory);
           const nextHistory =
             currentPlan === canonicalPlan
@@ -205,8 +240,9 @@ router.post(
 
           await getUserRef(uid).set(
             {
-              planId: canonicalPlan,
-              pendingPlan: null,
+              planId: isActive ? canonicalPlan : "free",
+              pendingPlan: preservePendingPlan ? ((user as any)?.pendingPlan ?? null) : null,
+              ...(shouldClearScheduledPlanChange ? { scheduledPlanChange: null } : {}),
               planChangeHistory: nextHistory,
               planChangeCooldownUntil: null,
               planChangeLock: null,
@@ -262,6 +298,8 @@ router.post(
           const planVariant = sub?.metadata?.planVariant;
           if (planVariant === "starter_trial" || planVariant === "starter_paid") {
             planId = "starter";
+          } else if (planVariant === "basic") {
+            planId = "basic";
           } else if (planVariant === "pro") {
             planId = "pro";
           }
@@ -281,12 +319,29 @@ router.post(
           const setHasHadTrial =
             planVariant === "starter_trial" ? { hasHadTrial: true } : {};
 
+          const userSnap = await getUserRef(uid).get();
+          const user = userSnap.exists ? userSnap.data() : {};
+          const currentPlan = (user as any)?.planId || "free";
+          const now = Date.now();
+          const history = sanitizeHistory((user as any)?.planChangeHistory);
+          const nextHistory =
+            currentPlan === planId
+              ? history
+              : [...history, { at: now, fromPlan: currentPlan, toPlan: planId, source: "stripe_webhook" }].slice(-10);
+
           await getUserRef(uid).set(
             {
               planId: billingActive ? planId : "free",
+              pendingPlan: null,
+              planChangeHistory: nextHistory,
+              planChangeCooldownUntil: null,
+              planChangeLock: null,
+              planChangeRequestId: null,
+              planChangeRequestResult: null,
               billingActive,
               billingStatus,
               billing: {
+                ...(((user as any)?.billing) || {}),
                 provider: "stripe",
                 customerId: customerId ?? sub.customer,
                 subscriptionId: sub.id,
@@ -297,6 +352,7 @@ router.post(
                 ...setHasHadTrial,
               },
               ...(planVariant === "starter_trial" ? { hasHadTrial: true } : {}),
+              updatedAt: Date.now(),
             },
             { merge: true }
           );
@@ -416,6 +472,39 @@ router.post("/livekit", express.raw({ type: "*/*" }), async (req, res) => {
     if (!egressId) {
       console.error("[livekit-webhook] CRITICAL: Missing egressId in egress_ended event");
       return res.status(400).json({ ok: false, error: "Missing egressId" });
+    }
+
+    // If this egressId belongs to an HLS session (rooms.hls.egressId), do an
+    // immediate best-effort cleanup so segments don't linger after the stream ends.
+    try {
+      const roomSnap = await db
+        .collection("rooms")
+        .where("hls.egressId", "==", egressId)
+        .limit(1)
+        .get();
+
+      if (!roomSnap.empty) {
+        const roomDoc = roomSnap.docs[0];
+        const roomData = (roomDoc.data() || {}) as any;
+        const prefix = String(roomData?.hls?.prefix || `hls/${roomDoc.id}/`).trim();
+
+        try {
+          await deletePrefix(prefix);
+        } catch (e: any) {
+          console.warn("[livekit-webhook] HLS deletePrefix failed", { roomId: roomDoc.id, prefix, error: e?.message || e });
+        }
+
+        try {
+          await setHlsIdle(roomDoc.ref);
+        } catch (e: any) {
+          console.warn("[livekit-webhook] setHlsIdle failed", { roomId: roomDoc.id, error: e?.message || e });
+        }
+
+        return res.status(200).json({ ok: true, handled: "hls_cleanup", roomId: roomDoc.id, prefix });
+      }
+    } catch (e: any) {
+      // Continue into recording flow if HLS lookup fails.
+      console.warn("[livekit-webhook] HLS lookup failed", e?.message || e);
     }
 
     // =========================================================================

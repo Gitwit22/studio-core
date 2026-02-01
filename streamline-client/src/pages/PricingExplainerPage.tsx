@@ -276,7 +276,7 @@ export const PricingExplainerPage: React.FC = () => {
             active={activeTab === "streaming"}
             onClick={() => setActiveTab("streaming")}
             icon="📡"
-            label="Streaming Minutes"
+            label="Broadcast Minutes"
           />
         </div>
 
@@ -311,7 +311,7 @@ export const PricingExplainerPage: React.FC = () => {
             <ul style={{ margin: 0, paddingLeft: "1.25rem", color: "#94a3b8", lineHeight: 1.8 }}>
               <li>
                 <strong style={{ color: "#f1f5f9" }}>In-Room Minutes</strong> and{" "}
-                <strong style={{ color: "#f1f5f9" }}>Streaming Minutes</strong> are used at
+                <strong style={{ color: "#f1f5f9" }}>Broadcast Minutes</strong> are used at
                 the same time
               </li>
               <li>They are tracked separately</li>
@@ -335,7 +335,7 @@ export const PricingExplainerPage: React.FC = () => {
 
         {/* Plan comparison table */}
         <section style={{ marginBottom: "3rem" }}>
-          <SectionHeader icon="📋" title="Which Plans Include Streaming & HLS?" />
+          <SectionHeader icon="📋" title="Which Plans Include Broadcast & HLS?" />
           <div
             style={{
               overflowX: "auto",
@@ -380,7 +380,7 @@ export const PricingExplainerPage: React.FC = () => {
                 <tr style={{ background: "rgba(30, 41, 59, 0.8)" }}>
                   <Th>Plan</Th>
                   <Th>In-Room Minutes</Th>
-                  {platformTranscodeEnabled !== false && <Th>Streaming Minutes</Th>}
+                  {platformTranscodeEnabled !== false && <Th>Broadcast Minutes</Th>}
                   {platformRecordingEnabled !== false && <Th>Recording</Th>}
                   {platformTranscodeEnabled !== false && <Th>Multistream</Th>}
                   {platformHlsEnabled !== false && <Th>HLS</Th>}
@@ -416,18 +416,18 @@ export const PricingExplainerPage: React.FC = () => {
               title="Starter Plan"
               accent="#f59e0b"
               items={[
-                "Streaming pauses when minutes are used up",
+                "Broadcasting pauses when minutes are used up",
                 "No surprise charges",
-                "Upgrade anytime to continue streaming",
+                "Upgrade anytime to continue broadcasting",
               ]}
             />
             <InfoCard
               title="Pro Plan"
               accent="#8b5cf6"
               items={[
-                "Includes generous Streaming Minutes",
+                "Includes generous Broadcast Minutes",
                 "Additional minutes available as overages:",
-                "$10 per 100 Streaming Minutes",
+                "$10 per 100 Broadcast Minutes",
                 "You'll always see usage before any overage applies",
               ]}
             />
@@ -639,7 +639,7 @@ const StreamingContent: React.FC = () => (
       </div>
       <div>
         <h3 style={{ fontSize: "1.25rem", fontWeight: 600, color: "#f1f5f9", margin: 0 }}>
-          Streaming Minutes
+          Broadcast Minutes
         </h3>
         <p style={{ fontSize: "0.875rem", color: "#94a3b8", margin: 0 }}>
           Broadcasting outside StreamLine
@@ -648,7 +648,7 @@ const StreamingContent: React.FC = () => (
     </div>
 
     <p style={{ color: "#cbd5e1", lineHeight: 1.7, marginBottom: "1.25rem" }}>
-      Streaming Minutes are used when you broadcast your stream outside the room, such as:
+      Broadcast Minutes are used when you broadcast your stream outside the room, such as:
     </p>
 
     <ul style={{ margin: 0, paddingLeft: "1.25rem", color: "#cbd5e1", lineHeight: 1.8, marginBottom: "1.25rem" }}>
@@ -671,7 +671,7 @@ const StreamingContent: React.FC = () => (
     </div>
 
     <h4 style={{ fontSize: "1rem", fontWeight: 600, color: "#f1f5f9", marginBottom: "1rem" }}>
-      How Streaming Minutes are counted
+      How Broadcast Minutes are counted
     </h4>
 
     <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
@@ -687,7 +687,7 @@ const StreamingContent: React.FC = () => (
           HLS (Viewer Link / Embed)
         </h5>
         <ul style={{ margin: 0, paddingLeft: "1rem", color: "#94a3b8", fontSize: "0.8125rem", lineHeight: 1.7 }}>
-          <li>Uses 1 Streaming Minute per minute</li>
+          <li>Uses 1 Broadcast minute per minute</li>
           <li>Does not increase based on viewers</li>
           <li style={{ color: "#cbd5e1" }}>
             <strong>1 hour of HLS = 60 minutes</strong>

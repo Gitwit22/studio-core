@@ -28,6 +28,8 @@ import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 import { clearAuthStorage } from "./lib/api";
+import { clearMeCache } from "./lib/meCache";
+import { clearPlatformFlagsCache } from "./lib/platformFlagsCache";
 import { useFeatureAccess } from "./hooks/useFeatureAccess";
 import { useEffectiveEntitlements } from "./hooks/useEffectiveEntitlements";
 
@@ -59,6 +61,8 @@ function App() {
   useEffect(() => {
     const onUnauthorized = () => {
       clearAuthStorage();
+      clearMeCache();
+      clearPlatformFlagsCache();
       setShowUnauthorized(true);
 
       const path = window.location.pathname || "";

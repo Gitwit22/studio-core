@@ -16,8 +16,10 @@ type SavedEmbedSummary = {
 
 
 type UsageData = {
-  streamingMinutes: number;
-  maxStreamingMinutes: number;
+  inRoomMinutes: number;
+  maxInRoomMinutes: number;
+  broadcastMinutes: number;
+  maxBroadcastMinutes: number;
   storageUsed: number;
   maxStorage: number;
   planId: PlanId;
@@ -363,6 +365,7 @@ export default function Join() {
   .then((data) => {
     if (!didCancel) {
       const um = data?.usageMonthly || {};
+      const minutes = data?.usage?.minutes || um?.usage?.minutes || {};
       // Canonicalize plan id
       let planIdRaw = data?.plan?.id ?? data?.user?.planId ?? "free";
       let canonicalPlanId: PlanId = "free";
@@ -372,8 +375,19 @@ export default function Join() {
         canonicalPlanId = planIdRaw;
       }
       setUsageData({
-        streamingMinutes: um?.participantMinutes ?? um?.usage?.participantMinutes ?? Math.max(0, Math.round((data?.user?.usage?.hoursStreamedThisMonth || 0) * 60)),
-        maxStreamingMinutes: data?.plan?.limits?.participantMinutes ?? 0,
+        inRoomMinutes:
+          minutes?.inRoom?.currentPeriod ??
+          um?.participantMinutes ??
+          um?.usage?.participantMinutes ??
+          Math.max(0, Math.round((data?.user?.usage?.hoursStreamedThisMonth || 0) * 60)),
+        maxInRoomMinutes: data?.plan?.limits?.participantMinutes ?? 0,
+        broadcastMinutes:
+          minutes?.broadcast?.currentPeriod ??
+          minutes?.transcode?.currentPeriod ??
+          um?.transcodeMinutes ??
+          um?.usage?.transcodeMinutes ??
+          0,
+        maxBroadcastMinutes: data?.plan?.limits?.transcodeMinutes ?? 0,
         storageUsed: um?.storageGB ?? um?.usage?.storageGB ?? 0,
         maxStorage: data?.plan?.limits?.storageGB ?? 0,
         planId: canonicalPlanId,
@@ -516,8 +530,13 @@ export default function Join() {
   }
 
   const streamingPercent =
-    usageData && usageData.maxStreamingMinutes > 0
-      ? (usageData.streamingMinutes / usageData.maxStreamingMinutes) * 100
+    usageData && usageData.maxInRoomMinutes > 0
+      ? (usageData.inRoomMinutes / usageData.maxInRoomMinutes) * 100
+      : 0;
+
+  const broadcastPercent =
+    usageData && usageData.maxBroadcastMinutes > 0
+      ? (usageData.broadcastMinutes / usageData.maxBroadcastMinutes) * 100
       : 0;
 
   const storagePercent =
@@ -606,7 +625,7 @@ export default function Join() {
                 flexWrap: "wrap",
               }}
             >
-              {/* Streaming Minutes */}
+              {/* In-room minutes */}
               <div>
                 <div
                   style={{
@@ -617,7 +636,7 @@ export default function Join() {
                     marginBottom: "4px",
                   }}
                 >
-                  Streaming Minutes
+                  Streaming minutes
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <div style={{ fontSize: "18px", fontWeight: 700 }}>
@@ -625,7 +644,7 @@ export default function Join() {
                       ? "..."
                       : usageError
                       ? "—"
-                      : usageData?.streamingMinutes ?? "—"}
+                      : usageData?.inRoomMinutes ?? "—"}
                   </div>
                   <div style={{ fontSize: "13px", color: "#9ca3af" }}>
                     /{" "}
@@ -633,7 +652,7 @@ export default function Join() {
                       ? "..."
                       : usageError
                       ? "—"
-                      : usageData?.maxStreamingMinutes ?? "—"}
+                      : usageData?.maxInRoomMinutes ?? "—"}
                   </div>
                 </div>
                 <div
@@ -656,6 +675,62 @@ export default function Join() {
                   />
                 </div>
               </div>
+
+              {/* Broadcast minutes (only when plan includes broadcast/transcode) */}
+              {usageData && usageData.maxBroadcastMinutes > 0 && (
+                <div>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: "#6b7280",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Broadcast minutes
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div style={{ fontSize: "18px", fontWeight: 700 }}>
+                      {usageLoading
+                        ? "..."
+                        : usageError
+                        ? "—"
+                        : usageData?.broadcastMinutes ?? "—"}
+                    </div>
+                    <div style={{ fontSize: "13px", color: "#9ca3af" }}>
+                      /{" "}
+                      {usageLoading
+                        ? "..."
+                        : usageError
+                        ? "—"
+                        : usageData?.maxBroadcastMinutes ?? "—"}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
+                    Broadcasting uses broadcast minutes.
+                  </div>
+                  <div
+                    style={{
+                      width: "120px",
+                      height: "4px",
+                      background: "rgba(255, 255, 255, 0.1)",
+                      borderRadius: "2px",
+                      marginTop: "4px",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${broadcastPercent}%`,
+                        background: "linear-gradient(to right, #a855f7, #8b5cf6)",
+                        borderRadius: "2px",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Storage Used */}
               <div>
