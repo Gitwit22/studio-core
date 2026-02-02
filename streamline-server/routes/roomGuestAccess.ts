@@ -13,12 +13,34 @@ async function getAccessTokenCtor() {
   return mod.AccessToken;
 }
 
+function getLiveKitServerUrlForClient(): string | null {
+  const raw = String(process.env.LIVEKIT_URL || "").trim();
+  if (!raw) return null;
+  // LiveKit client expects ws(s) URLs. Allow operators to configure https(s)
+  // and normalize it safely.
+  if (/^https?:\/\//i.test(raw)) {
+    return raw.replace(/^http:\/\//i, "ws://").replace(/^https:\/\//i, "wss://");
+  }
+  return raw;
+}
+
 function getRoomAccessSecret() {
   const env = String(process.env.NODE_ENV || "development").toLowerCase();
-  const raw = process.env.ROOM_ACCESS_TOKEN_SECRET || process.env.JWT_SECRET || "";
-  if ((env === "production" || env === "staging") && (!process.env.ROOM_ACCESS_TOKEN_SECRET || raw === "dev-secret")) {
-    throw new Error("ROOM_ACCESS_TOKEN_SECRET must be set (no dev-secret in production)");
+  const explicit = process.env.ROOM_ACCESS_TOKEN_SECRET;
+  const fallback = process.env.JWT_SECRET;
+  const raw = String(explicit || fallback || "").trim();
+
+  // In production/staging we require a real secret, but we allow falling back to
+  // JWT_SECRET for backwards compatibility with older deployments.
+  if (env === "production" || env === "staging") {
+    if (!raw || raw === "dev-secret") {
+      throw new Error("ROOM_ACCESS_TOKEN_SECRET (or JWT_SECRET) must be set (no dev-secret in production)");
+    }
+    if (!explicit && process.env.AUTH_DEBUG === "1") {
+      console.warn("[roomGuestAccess] Using JWT_SECRET fallback for ROOM_ACCESS_TOKEN_SECRET");
+    }
   }
+
   return raw || "dev-secret";
 }
 
@@ -271,7 +293,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), { expiresIn: "12h" });
 
-    const serverUrl = process.env.LIVEKIT_URL || null;
+    const serverUrl = getLiveKitServerUrlForClient();
 
     return res.json({
       token,
