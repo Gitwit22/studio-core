@@ -469,11 +469,21 @@ app.post("/api/roomModeration/mute-lock", requireAuth, requireRoomAccessToken as
 
         const currentPerms: any = (p as any).permission || {};
         const currentSources: any[] = currentPerms.canPublishSources || [];
+        const sourcesAreStrings = currentSources.some((s) => typeof s === "string");
+
+        const normalizeSource = (s: any) => (typeof s === "string" ? s.toLowerCase() : s);
+        const isMic = (s: any) => {
+          const n = normalizeSource(s);
+          return n === TrackSource.MICROPHONE || n === "microphone";
+        };
+        const isScreenShareAudio = (s: any) => {
+          const n = normalizeSource(s);
+          return n === TrackSource.SCREEN_SHARE_AUDIO || n === "screen_share_audio";
+        };
 
         if (muteLock) {
           // Remove audio-related publish sources (mic + screen share audio)
-          const blocked = new Set([TrackSource.MICROPHONE, TrackSource.SCREEN_SHARE_AUDIO]);
-          const nextSources = currentSources.filter((s) => !blocked.has(s));
+          const nextSources = currentSources.filter((s) => !(isMic(s) || isScreenShareAudio(s)));
 
           await roomService.updateParticipant(livekitRoomName, p.identity, {
             permission: {
@@ -483,7 +493,9 @@ app.post("/api/roomModeration/mute-lock", requireAuth, requireRoomAccessToken as
           });
         } else {
           // Restore audio publish ability while preserving any existing sources
-          const toEnsure = [TrackSource.MICROPHONE, TrackSource.SCREEN_SHARE_AUDIO];
+          const mic = sourcesAreStrings ? "microphone" : TrackSource.MICROPHONE;
+          const ssa = sourcesAreStrings ? "screen_share_audio" : TrackSource.SCREEN_SHARE_AUDIO;
+          const toEnsure = [mic, ssa];
           const merged = Array.from(new Set([...currentSources, ...toEnsure]));
 
           await roomService.updateParticipant(livekitRoomName, p.identity, {

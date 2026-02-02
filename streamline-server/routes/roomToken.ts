@@ -13,11 +13,12 @@ import { intersectPermissionsWithEntitlements } from "../lib/rolePermissions";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { roleToParticipantPermission } from "../lib/livekitPermissions";
-import { TrackSource } from "livekit-server-sdk";
 import jwt from "jsonwebtoken";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
+
+type PublishSource = "microphone" | "camera" | "screen_share" | "screen_share_audio";
 
 // Dynamic import for AccessToken constructor
 async function getAccessTokenCtor() {
@@ -134,19 +135,19 @@ function roleToGrant(role: GrantRole) {
 
   const participantPerm = roleToParticipantPermission(permissionRole);
 
-  let canPublishSources: TrackSource[] = [];
+  let canPublishSources: PublishSource[] = [];
   if (permissionRole === "viewer") {
     canPublishSources = [];
   } else if (permissionRole === "cohost") {
     canPublishSources = [
-      TrackSource.MICROPHONE,
-      TrackSource.CAMERA,
-      TrackSource.SCREEN_SHARE,
-      TrackSource.SCREEN_SHARE_AUDIO,
+      "microphone",
+      "camera",
+      "screen_share",
+      "screen_share_audio",
     ];
   } else {
     // participant + moderator
-    canPublishSources = [TrackSource.MICROPHONE, TrackSource.CAMERA];
+    canPublishSources = ["microphone", "camera"];
   }
 
   const base = {
@@ -154,7 +155,9 @@ function roleToGrant(role: GrantRole) {
     canSubscribe: participantPerm.canSubscribe,
     canPublish: participantPerm.canPublish,
     canPublishData: participantPerm.canPublishData,
-    canPublishSources,
+    // livekit-server-sdk types model this as TrackSource[], but token grants
+    // are serialized as string source names.
+    canPublishSources: canPublishSources as any,
   } as const;
 
   if (role === "viewer") {
