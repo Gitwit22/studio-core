@@ -18,8 +18,6 @@ import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
 
-type PublishSource = "microphone" | "camera" | "screen_share" | "screen_share_audio";
-
 // Dynamic import for AccessToken constructor
 async function getAccessTokenCtor() {
   const mod = await import("livekit-server-sdk");
@@ -135,29 +133,11 @@ function roleToGrant(role: GrantRole) {
 
   const participantPerm = roleToParticipantPermission(permissionRole);
 
-  let canPublishSources: PublishSource[] = [];
-  if (permissionRole === "viewer") {
-    canPublishSources = [];
-  } else if (permissionRole === "cohost") {
-    canPublishSources = [
-      "microphone",
-      "camera",
-      "screen_share",
-      "screen_share_audio",
-    ];
-  } else {
-    // participant + moderator
-    canPublishSources = ["microphone", "camera"];
-  }
-
   const base = {
     roomJoin: true,
     canSubscribe: participantPerm.canSubscribe,
     canPublish: participantPerm.canPublish,
     canPublishData: participantPerm.canPublishData,
-    // livekit-server-sdk types model this as TrackSource[], but token grants
-    // are serialized as string source names.
-    canPublishSources: canPublishSources as any,
   } as const;
 
   if (role === "viewer") {

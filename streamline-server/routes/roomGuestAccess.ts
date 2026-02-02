@@ -51,7 +51,6 @@ function roleGrant(role: "viewer" | "participant" | "host") {
       canSubscribe: true,
       canPublish: false,
       canPublishData: false,
-      canPublishSources: [],
       roomAdmin: false,
       canUpdateMetadata: false,
     } as const;
@@ -63,7 +62,6 @@ function roleGrant(role: "viewer" | "participant" | "host") {
       canSubscribe: true,
       canPublish: true,
       canPublishData: true,
-      canPublishSources: ["microphone", "camera", "screen_share", "screen_share_audio"],
       roomAdmin: false,
       canUpdateMetadata: false,
     } as const;
@@ -75,7 +73,6 @@ function roleGrant(role: "viewer" | "participant" | "host") {
     canSubscribe: true,
     canPublish: true,
     canPublishData: true,
-    canPublishSources: ["microphone", "camera"],
     roomAdmin: false,
     canUpdateMetadata: false,
   } as const;
