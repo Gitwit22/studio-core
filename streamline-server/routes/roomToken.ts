@@ -510,11 +510,20 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     const apiKey = process.env.LIVEKIT_API_KEY;
     const apiSecret = process.env.LIVEKIT_API_SECRET;
     if (!apiKey || !apiSecret) {
-      return res.status(500).json({ error: "LiveKit keys missing in env" });
+      const missing: string[] = [];
+      if (!apiKey) missing.push("LIVEKIT_API_KEY");
+      if (!apiSecret) missing.push("LIVEKIT_API_SECRET");
+      return res.status(500).json({ code: "misconfigured", error: "LiveKit keys missing", missing });
     }
 
     const inviteIdentity = invite?.identity || invite?.uid || invite?.sub || null;
     const tokenIdentity = uid || inviteIdentity || `invite-${roomId}`;
+    if (!tokenIdentity || !String(tokenIdentity).trim()) {
+      return res.status(500).json({ code: "internal_error", error: "invalid_identity" });
+    }
+    if (!roomName || !String(roomName).trim()) {
+      return res.status(500).json({ code: "internal_error", error: "invalid_room_name" });
+    }
 
     // Determine which account's entitlements and permission mode should apply.
     // We always scope entitlements to the room owner, never the caller.
@@ -727,6 +736,9 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     // already derived from rooms.livekitRoomName || roomName || name || id.
     // Treat that as the canonical LiveKit key and carry it explicitly.
     const livekitRoomName = roomName;
+    if (!livekitRoomName || !String(livekitRoomName).trim()) {
+      return res.status(500).json({ code: "internal_error", error: "invalid_livekit_room_name" });
+    }
 
     const AccessToken = await getAccessTokenCtor();
     const at = new AccessToken(apiKey, apiSecret, { identity: tokenIdentity, name: displayName });
@@ -877,7 +889,10 @@ router.post("/guest", requireAuth as any, async (req: any, res) => {
     const apiKey = process.env.LIVEKIT_API_KEY;
     const apiSecret = process.env.LIVEKIT_API_SECRET;
     if (!apiKey || !apiSecret) {
-      return res.status(500).json({ error: "LiveKit keys missing in env" });
+      const missing: string[] = [];
+      if (!apiKey) missing.push("LIVEKIT_API_KEY");
+      if (!apiSecret) missing.push("LIVEKIT_API_SECRET");
+      return res.status(500).json({ code: "misconfigured", error: "LiveKit keys missing", missing });
     }
 
     // Load room policy + owner (do not trust hostUid from the client).
@@ -933,6 +948,12 @@ router.post("/guest", requireAuth as any, async (req: any, res) => {
     }
 
     const identity = (guestId && guestId.trim()) || uid;
+    if (!identity || !String(identity).trim()) {
+      return res.status(500).json({ code: "internal_error", error: "invalid_identity" });
+    }
+    if (!roomName || !String(roomName).trim()) {
+      return res.status(500).json({ code: "internal_error", error: "invalid_room_name" });
+    }
     const resolved = await resolveRoleForInvite({ uid: hostUid, requestedRole: "participant" });
     if (resolved.ok === false) {
       const payload = resolved.error;

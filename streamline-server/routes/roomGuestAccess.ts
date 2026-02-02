@@ -242,7 +242,10 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     const apiKey = process.env.LIVEKIT_API_KEY;
     const apiSecret = process.env.LIVEKIT_API_SECRET;
     if (!apiKey || !apiSecret) {
-      return res.status(500).json({ error: "LiveKit keys missing in env" });
+      const missing: string[] = [];
+      if (!apiKey) missing.push("LIVEKIT_API_KEY");
+      if (!apiSecret) missing.push("LIVEKIT_API_SECRET");
+      return res.status(500).json({ code: "misconfigured", error: "LiveKit keys missing", missing });
     }
 
     const displayName = sanitizeDisplayName(String(req.body?.displayName || req.body?.identity || "Viewer")).trim() || "Viewer";
@@ -250,6 +253,12 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     const isHost = !!user && ownerId && user.uid === ownerId;
     const lkRole: "viewer" | "participant" | "host" = user ? (isHost ? "host" : "participant") : "viewer";
     const identity = user ? user.uid : `invite:${guest!.inviteId}:${Math.random().toString(16).slice(2)}`;
+    if (!identity || !String(identity).trim()) {
+      return res.status(500).json({ code: "internal_error", error: "invalid_identity" });
+    }
+    if (!livekitRoomName) {
+      return res.status(500).json({ code: "internal_error", error: "invalid_livekit_room_name" });
+    }
 
     // When host joins, flip room live.
     if (user && isHost && roomStatus !== "live") {
@@ -308,6 +317,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       roomId,
       roomName: roomAccessPayload.roomName,
       roomAccessToken,
+      participantIdentity: identity,
       isViewer: lkRole === "viewer",
       role: lkRole,
       effectiveRoleKey: lkRole === "viewer" ? "viewer" : "participant",
