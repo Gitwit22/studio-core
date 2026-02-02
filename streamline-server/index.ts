@@ -15,6 +15,8 @@ import plansRoutes from "./routes/plans";
 import roomTokenRoute from "./routes/roomToken";
 import roomsCreateRoutes from "./routes/roomsCreate";
 import invitesRoutes from "./routes/invites";
+import roomInvitesRoutes from "./routes/roomInvites";
+import roomGuestAccessRoutes from "./routes/roomGuestAccess";
 import multistreamRoutes from "./routes/multistream";
 import roomsResolveRoutes from "./routes/roomsResolve";
 import roomsHlsConfigRoutes from "./routes/roomsHlsConfig";
@@ -166,6 +168,12 @@ app.use("/api/roomToken", roomTokenRoute);
 
 // Room creation (host flow)
 app.use("/api/rooms", roomsCreateRoutes);
+
+// Room invite creation (authenticated)
+app.use("/api/rooms", roomInvitesRoutes);
+
+// Guest invite redeem + room status/token (mixed auth)
+app.use("/api", roomGuestAccessRoutes);
 
 // Invite resolve/accept flow
 app.use("/api/invites", invitesRoutes);

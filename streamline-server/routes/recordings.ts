@@ -69,10 +69,16 @@ async function getMyContentPlatformFlags(): Promise<MyContentPlatformFlags> {
       ? ((myContentRecordingsSnap.data() as any) || {})
       : {};
 
+    const myContentEnabled = myContentData.enabled === true;
+    // Recording pipeline is controlled by featureFlags/recording.
+    // This flag is an additional opt-out. Missing => enabled.
+    const rawMyContentRecordingsEnabled = (myContentRecordingsData as any).enabled;
+    const myContentRecordingsEnabled =
+      rawMyContentRecordingsEnabled === undefined ? true : rawMyContentRecordingsEnabled === true;
+
     cachedMyContentFlags = {
-      // Safety-first: missing => disabled.
-      myContentEnabled: myContentData.enabled === true,
-      myContentRecordingsEnabled: myContentRecordingsData.enabled === true,
+      myContentEnabled,
+      myContentRecordingsEnabled,
     };
     cachedMyContentFlagsAt = now;
     return cachedMyContentFlags;
@@ -80,7 +86,8 @@ async function getMyContentPlatformFlags(): Promise<MyContentPlatformFlags> {
     console.error("[recordings] failed to load My Content platform flags", err);
     cachedMyContentFlags = {
       myContentEnabled: false,
-      myContentRecordingsEnabled: false,
+      // Fail-open to avoid breaking recording when Firestore is transient.
+      myContentRecordingsEnabled: true,
     };
     cachedMyContentFlagsAt = now;
     return cachedMyContentFlags;
@@ -89,12 +96,12 @@ async function getMyContentPlatformFlags(): Promise<MyContentPlatformFlags> {
 
 async function assertMyContentRecordingsEnabled(res: any): Promise<boolean> {
   const flags = await getMyContentPlatformFlags();
-  if (flags.myContentEnabled && flags.myContentRecordingsEnabled) return true;
+  if (flags.myContentRecordingsEnabled) return true;
 
   res.status(403).json({
     error: LIMIT_ERRORS.FEATURE_DISABLED,
     feature: "myContentRecordingsEnabled",
-    reason: "My Content recordings are disabled platform-wide",
+    reason: "Recordings are disabled by featureFlags/myContentRecordingsEnabled",
     platformFlags: flags,
   });
   return false;

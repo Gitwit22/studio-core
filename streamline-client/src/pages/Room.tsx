@@ -850,6 +850,8 @@ function RoomPage() {
   );
   const [roomTokenMode, setRoomTokenMode] = useState<"unknown" | "auth" | "guest">("unknown");
   const roomTokenMintInFlightRef = useRef(false);
+  const [roomGateStatus, setRoomGateStatus] = useState<"unknown" | "idle" | "live" | "blocked">("unknown");
+  const roomGatePollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [controlsPanelOpen, setControlsPanelOpen] = useState(false);
   const [effectiveControls, setEffectiveControls] = useState<EffectiveControls>(() => ({
     canPublishAudio: true,
@@ -1467,7 +1469,9 @@ function RoomPage() {
   useEffect(() => {
     if (!hostCheckReady) return;
     if (!displayName) return;
-    if (!roomId && !effectiveRoomName) return;
+    if (!roomId) return;
+    // Guests should only request RTC tokens once the room is live.
+    if (!isHost && roomGateStatus !== "live") return;
     // If we already have a valid token+serverUrl for this mount, avoid
     // refetching room tokens on every minor state change. This prevents
     // duplicate /api/roomToken calls that can cause spurious 401s and
@@ -1476,62 +1480,42 @@ function RoomPage() {
     if (roomTokenMintInFlightRef.current) return;
     // Role used to mint the LiveKit token + roomAccessToken.
     // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
-    const requestedRole = isHost ? "host" : userRole === "moderator" ? "participant" : userRole;
-    const roleNeedsAuth = requestedRole === "cohost" || requestedRole === "host";
+    const requestedRole = isHost ? "host" : "participant";
     const role = requestedRole;
-    const isGuest = role === "guest";
+    const isGuest = false;
 
     const fetchToken = async () => {
       try {
         roomTokenMintInFlightRef.current = true;
         console.log(`[Room] Fetching room token (role=${role || "host"})...`);
         const bearerToken = getAuthToken();
-        const buildRoomTokenRequest = (mode: "auth" | "guest") => {
-          const endpoint = mode === "guest" ? `${API_BASE}/api/roomToken/guest` : `${API_BASE}/api/roomToken`;
+        const buildRoomTokenRequest = (mode: "auth") => {
+          const canonicalRoomId = roomId || "";
+          const endpoint = `${API_BASE}/api/rooms/${encodeURIComponent(canonicalRoomId)}/token`;
           const payload: any = { identity: displayName };
 
-          // If we have a canonical roomId, send only that.
-          // Otherwise, fall back to roomName so the server can resolve.
-          if (roomId) {
-            payload.roomId = roomId;
-          } else {
-            payload.roomName = effectiveRoomName;
-          }
-
-          // Hosts should never rely on invite tokens for room access.
-          // Using a stale invite for a different room can cause
-          // invite_room_mismatch 403 errors when minting host tokens.
-          if (inviteToken && !isHost) {
-            payload.inviteToken = inviteToken;
-          }
+          // New API uses the URL roomId; keep displayName in the body so
+          // participant name is set in LiveKit.
 
           // Tell the backend what role we want this token minted as.
           // The backend will clamp/lock it as needed.
           // If we failed auth for a privileged role, always request a low-trust role
           // for the guest fallback so the UI can honestly operate in viewer/guest mode.
-          payload.role = mode === "guest" && roleNeedsAuth ? "participant" : role;
+          payload.role = role;
 
-          if (mode === "guest") {
-            payload.displayName = displayName;
-            payload.guestId = getOrCreateUid();
-          } else {
-            payload.uid = getOrCreateUid();
-            payload.displayName = displayName;
-            // Invites are currently guest/participant-only (no elevated roles).
-          }
+          payload.uid = getOrCreateUid();
+          payload.displayName = displayName;
+          // Invites are currently guest/participant-only (no elevated roles).
 
           return { endpoint, payload };
         };
 
-        const tryFetch = async (mode: "auth" | "guest", opts?: { omitInvite?: boolean }) => {
+        const tryFetch = async (mode: "auth") => {
           const { endpoint, payload } = buildRoomTokenRequest(mode);
-          if (opts?.omitInvite) {
-            delete (payload as any).inviteToken;
-          }
           // apiFetch always sends cookies; for /api/roomToken we also attach Bearer
           // explicitly when available so incognito/cookie-blocked sessions can host.
           const headers: Record<string, string> = {};
-          if (mode === "auth" && bearerToken) {
+          if (bearerToken) {
             headers.Authorization = `Bearer ${bearerToken}`;
           }
           const res = await apiFetch(endpoint, {
@@ -1542,29 +1526,7 @@ function RoomPage() {
           return { res, mode };
         };
 
-        // Primary: if role is not guest, try auth token first.
-        // If denied due to auth, we only fall back to guest for low-trust roles.
-        let attempt = await tryFetch(isGuest ? "guest" : "auth");
-        if (!attempt.res.ok && !isGuest && (attempt.res.status === 401 || attempt.res.status === 403)) {
-          // For privileged roles: degrade gracefully to a guest token and surface re-auth banner.
-          if (roleNeedsAuth) {
-            setNeedsReauth(true);
-            setAuthStatus("guest");
-            setReauthBannerText("Host tools unavailable — sign in again in a normal window.");
-            setIsHost(false);
-            setUserRole("participant");
-          }
-          console.warn("[Room] auth roomToken denied; falling back to guest token", attempt.res.status);
-          attempt = await tryFetch("guest");
-        }
-
-        // If a guest token request fails with 403 (e.g. stale or mismatched invite),
-        // retry once without the invite token so a valid participant link doesn't leave
-        // the user stuck without video.
-        if (isGuest && !attempt.res.ok && attempt.res.status === 403) {
-          console.warn("[Room] guest roomToken denied; retrying without invite token", attempt.res.status);
-          attempt = await tryFetch("guest", { omitInvite: true });
-        }
+        let attempt = await tryFetch("auth");
 
         const res = attempt.res;
         console.log("[Room] roomToken status:", res.status, "mode:", attempt.mode);
@@ -1599,6 +1561,17 @@ function RoomPage() {
 
         if (!res.ok) {
           console.error("[Room] roomToken HTTP error", res.status, rawText);
+          if (res.status === 401) {
+            setNeedsReauth(true);
+            setAuthStatus("guest");
+            setReauthBannerText("Login or invite required to join this room.");
+          } else if (res.status === 403) {
+            setNeedsReauth(true);
+            setAuthStatus("guest");
+            setReauthBannerText("Not allowed to join this room.");
+          } else if (res.status === 409) {
+            setRoomGateStatus("idle");
+          }
           return;
         }
         if (!data) {
@@ -1685,7 +1658,7 @@ function RoomPage() {
     };
 
     fetchToken();
-  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady, token, serverUrl]);
+  }, [displayName, roomId, effectiveRoomName, inviteToken, userRole, isHost, hostCheckReady, token, serverUrl, roomGateStatus]);
 
   
 
@@ -1694,6 +1667,61 @@ function RoomPage() {
       setShowStreamSetup(false);
     }
   }, [isViewer, showStreamSetup]);
+
+  // Guest flow: poll idle/live and auto-join when live.
+  // Hosts can join anytime (they flip the room live on join).
+  useEffect(() => {
+    if (!roomId) return;
+
+    // Host can proceed immediately.
+    if (isHost) {
+      setRoomGateStatus("live");
+      return;
+    }
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await apiFetch(`/api/rooms/${encodeURIComponent(roomId)}/status`, undefined, { allowNonOk: true });
+        if (cancelled) return;
+
+        if (res.status === 401 || res.status === 403) {
+          setRoomGateStatus("blocked");
+          setNeedsReauth(true);
+          setReauthBannerText("Invite required (or sign in) to access this room.");
+          return;
+        }
+
+        if (!res.ok) {
+          setRoomGateStatus("blocked");
+          return;
+        }
+
+        const data = await res.json().catch(() => null);
+        const status = data?.status === "live" ? "live" : "idle";
+        setRoomGateStatus(status);
+
+        if (status === "idle") {
+          roomGatePollRef.current = setTimeout(poll, 4000);
+        }
+      } catch {
+        if (!cancelled) {
+          roomGatePollRef.current = setTimeout(poll, 5000);
+        }
+      }
+    };
+
+    poll();
+
+    return () => {
+      cancelled = true;
+      if (roomGatePollRef.current) {
+        clearTimeout(roomGatePollRef.current);
+        roomGatePollRef.current = null;
+      }
+    };
+  }, [roomId, isHost]);
 
   // Load effective entitlements + media presets only when the user explicitly opens host tools.
   // (Nuclear option 2: avoid background /me calls after connect.)
@@ -2754,6 +2782,14 @@ function RoomPage() {
       {isViewer && (
         <div className="w-full bg-amber-500 text-black text-sm font-semibold px-4 py-2 flex items-center gap-2">
           👀 View-only mode — publishing controls are disabled.
+        </div>
+      )}
+      {!isHost && roomGateStatus === "idle" && !token && (
+        <div className="w-full bg-slate-900 text-white text-sm font-semibold px-4 py-2 flex items-center justify-between gap-3">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span>Not started yet — waiting for the host to start.</span>
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.85 }}>This page will auto-join when live.</div>
         </div>
       )}
       {!isViewer && needsReauth && (

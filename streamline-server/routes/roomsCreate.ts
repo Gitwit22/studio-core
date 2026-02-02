@@ -19,6 +19,14 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
   if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   const roomType = (req.body?.roomType || "rtc") as "rtc" | "hls";
+
+  // Optional room access policy (secure defaults are applied in ensureRoomDoc).
+  const visibilityRaw = String(req.body?.visibility || "").trim().toLowerCase();
+  const visibility = (visibilityRaw === "public" || visibilityRaw === "unlisted" || visibilityRaw === "private")
+    ? (visibilityRaw as "public" | "unlisted" | "private")
+    : undefined;
+  const requiresAuth = typeof req.body?.requiresAuth === "boolean" ? req.body.requiresAuth : undefined;
+  const requiresPayment = typeof req.body?.requiresPayment === "boolean" ? req.body.requiresPayment : undefined;
   const rawNameInput = String(req.body?.livekitRoomName || req.body?.roomName || "");
   const rawName = sanitizeDisplayName(rawNameInput).trim();
 
@@ -41,6 +49,9 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
       roomType,
       initialStatus: "idle",
       savedEmbedId: savedEmbedId || undefined,
+      visibility,
+      requiresAuth,
+      requiresPayment,
     });
 
     return res.status(201).json({

@@ -28,6 +28,11 @@ export const DEFAULT_ROOM_HLS_CONFIG: RoomHlsConfig = {
 export type RoomDoc = {
   ownerId: string;
   livekitRoomName?: string;
+  // Room access policy (server-enforced during token issuance).
+  // Defaults are intentionally secure.
+  visibility?: "public" | "unlisted" | "private";
+  requiresAuth?: boolean;
+  requiresPayment?: boolean;
   // Optional link to a saved embed / viewer page
   savedEmbedId?: string;
   roomType?: string;
@@ -59,6 +64,10 @@ export async function ensureRoomDoc(params: {
   initialStatus?: string;
   // When provided, bind this room to a specific saved embed.
   savedEmbedId?: string;
+  // Optional policy overrides (otherwise defaults apply).
+  visibility?: RoomDoc["visibility"];
+  requiresAuth?: boolean;
+  requiresPayment?: boolean;
 }): Promise<{
   ref: FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData>;
   data: RoomDoc;
@@ -68,11 +77,21 @@ export async function ensureRoomDoc(params: {
   const snap = await ref.get();
   const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
 
+  const visibility: RoomDoc["visibility"] =
+    params.visibility === "public" || params.visibility === "unlisted" || params.visibility === "private"
+      ? params.visibility
+      : "unlisted";
+  const requiresAuth = params.requiresAuth === undefined ? true : !!params.requiresAuth;
+  const requiresPayment = params.requiresPayment === undefined ? false : !!params.requiresPayment;
+
   if (!snap.exists) {
     const doc: Partial<RoomDoc> = {
       ownerId,
       roomType: roomType || "rtc",
       livekitRoomName,
+      visibility,
+      requiresAuth,
+      requiresPayment,
       ...(savedEmbedId ? { savedEmbedId } : {}),
       createdAt: serverTimestamp,
       updatedAt: serverTimestamp,
@@ -88,6 +107,11 @@ export async function ensureRoomDoc(params: {
     if (!existing.ownerId) patch.ownerId = ownerId;
     if (!existing.roomType) patch.roomType = roomType || "rtc";
     if (!existing.livekitRoomName) patch.livekitRoomName = livekitRoomName;
+    if (existing.visibility !== "public" && existing.visibility !== "unlisted" && existing.visibility !== "private") {
+      patch.visibility = visibility;
+    }
+    if (typeof existing.requiresAuth !== "boolean") patch.requiresAuth = requiresAuth;
+    if (typeof existing.requiresPayment !== "boolean") patch.requiresPayment = requiresPayment;
     if (savedEmbedId && !existing.savedEmbedId) patch.savedEmbedId = savedEmbedId;
     if (!("createdAt" in existing)) patch.createdAt = serverTimestamp;
     patch.updatedAt = serverTimestamp;
