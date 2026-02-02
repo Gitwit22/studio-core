@@ -294,6 +294,13 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), { expiresIn: "12h" });
 
     const serverUrl = getLiveKitServerUrlForClient();
+    if (!serverUrl) {
+      return res.status(500).json({
+        code: "misconfigured",
+        error: "LIVEKIT_URL missing",
+        missing: ["LIVEKIT_URL"],
+      });
+    }
 
     return res.json({
       token,
@@ -307,7 +314,11 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     });
   } catch (err: any) {
     console.error("/api/rooms/:roomId/token error", err?.message || err);
-    return res.status(500).json({ error: "Failed to create room token" });
+    return res.status(500).json({
+      code: "internal_error",
+      error: "Failed to create room token",
+      message: process.env.AUTH_DEBUG === "1" ? String(err?.message || err) : undefined,
+    });
   }
 });
 

@@ -738,6 +738,13 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     console.log("✅ roomToken jwt typeof:", typeof lkJwt, "len:", lkJwt.length);
 
     const serverUrl = getLiveKitServerUrlForClient();
+    if (!serverUrl) {
+      return res.status(500).json({
+        code: "misconfigured",
+        error: "LIVEKIT_URL missing",
+        missing: ["LIVEKIT_URL"],
+      });
+    }
 
     const roomAccessPayload = {
       roomId,
@@ -790,7 +797,11 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     });
   } catch (err: any) {
     console.error("roomToken error:", err);
-    return res.status(500).json({ error: "Failed to create room token" });
+    return res.status(500).json({
+      code: "internal_error",
+      error: "Failed to create room token",
+      message: process.env.AUTH_DEBUG === "1" ? String(err?.message || err) : undefined,
+    });
   }
 });
 
@@ -940,6 +951,13 @@ router.post("/guest", requireAuth as any, async (req: any, res) => {
     });
     const lkJwt = await at.toJwt();
     const serverUrl = getLiveKitServerUrlForClient();
+    if (!serverUrl) {
+      return res.status(500).json({
+        code: "misconfigured",
+        error: "LIVEKIT_URL missing",
+        missing: ["LIVEKIT_URL"],
+      });
+    }
     if (process.env.AUTH_DEBUG === "1") {
       console.log("[invite-debug] mint guest room token", {
         roomName,
@@ -999,7 +1017,11 @@ router.post("/guest", requireAuth as any, async (req: any, res) => {
     });
   } catch (err: any) {
     console.error("roomToken guest error:", err);
-    return res.status(500).json({ error: "Failed to create guest token" });
+    return res.status(500).json({
+      code: "internal_error",
+      error: "Failed to create guest token",
+      message: process.env.AUTH_DEBUG === "1" ? String(err?.message || err) : undefined,
+    });
   }
 });
 
