@@ -495,37 +495,40 @@ router.post("/:roomId/start-multistream", requireAuth, requireRoomAccessToken as
         platforms,
         egressIds,
       });
-        // Persist a durable egress session record so we can attribute usage on
-        // egress_ended webhooks even if the activeStreams doc is deleted.
-        try {
+
+      // Persist durable egress session records so we can attribute usage on
+      // egress_ended webhooks even if the activeStreams doc is deleted.
+      try {
+        const sessionRows = [
+          { id: egressIds?.normal || primaryEgressId, group: "normal", destinationCount: urls.length },
+          { id: egressIds?.instagram, group: "instagram", destinationCount: instagramUrls.length },
+        ].filter((row): row is { id: string; group: "normal" | "instagram"; destinationCount: number } =>
+          typeof row.id === "string" && row.id.trim().length > 0
+        );
+
+        for (const row of sessionRows) {
           await firestore
             .collection("egressSessions")
-            .doc(String(response.egressId))
+            .doc(String(row.id))
             .set(
               {
-                egressId: String(response.egressId),
+                egressId: String(row.id),
                 uid,
                 roomId,
                 roomName,
                 kind: "multistream",
-                destinationCount: urls.length,
+                group: row.group,
+                destinationCount: row.destinationCount,
                 startedAt: new Date(startedAt),
                 createdAt: new Date(),
                 updatedAt: new Date(),
               },
               { merge: true }
             );
-        } catch (e) {
-          console.warn("[multistream:start] failed to write egressSessions", (e as any)?.message || e);
         }
-
-        console.log("[multistream:warmup] egress started", {
-          uid,
-          roomName,
-          warmupMs,
-          warmupSeconds: Math.round(warmupMs / 1000),
-          platforms,
-        });
+      } catch (e) {
+        console.warn("[multistream:start] failed to write egressSessions", (e as any)?.message || e);
+      }
 
       // Ensure non-empty JSON body
       return res.status(200).json({
@@ -674,13 +677,16 @@ router.post("/:roomId/stop-multistream", requireAuth, requireRoomAccessToken as 
         }
         console.error("Error stopping multistream:", err);
         stopResults.push({ egressId: id, status: "error", message });
+      }
+    }
+
     const now = new Date();
 
     // Best-effort: attribute broadcast (transcode/egress) minutes even if
     // LiveKit webhooks are not configured or are delayed.
-    const countUsage = async () => {
+    const countUsageForEgress = async (id: string) => {
       try {
-        const sessionRef = firestore.collection("egressSessions").doc(String(egressId));
+        const sessionRef = firestore.collection("egressSessions").doc(String(id));
         await firestore.runTransaction(async (tx) => {
           const s = await tx.get(sessionRef);
           if (!s.exists) return;
@@ -756,20 +762,9 @@ router.post("/:roomId/stop-multistream", requireAuth, requireRoomAccessToken as 
       }
     };
 
-    try {
-      await egressClient.stopEgress(egressId);
-      await countUsage();
-      await foundRef.delete();
-      return res.json({ success: true, status: "stopped" });
-    } catch (err: any) {
-      const message = err?.message || String(err);
-      const code = (err as any)?.code || (err as any)?.status;
-      const isNotRunning = code === 412 || /412/.test(message) || /not running/i.test(message);
-      if (isNotRunning) {
-        console.warn("stopEgress returned precondition/unknown state; treating as already stopped", { egressId, message });
-        await countUsage();
-        await foundRef.delete();
-        return res.json({ success: true, status: "stopped", reason: "not_running" });
+    for (const r of stopResults) {
+      if (r.status === "stopped" || r.status === "not_running") {
+        await countUsageForEgress(r.egressId);
       }
     }
 
