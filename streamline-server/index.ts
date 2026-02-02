@@ -163,8 +163,7 @@ app.use("/api/usage", usageRoutes); // gives /api/usage/summary
 // API ROUTES - Order matters! More specific routes first
 // =============================================================================
 
-// Token route used by the frontend
-app.use("/api/roomToken", roomTokenRoute);
+// RTC token minting: use /api/rooms/:roomId/token (mounted via roomGuestAccessRoutes)
 
 // Room creation (host flow)
 app.use("/api/rooms", roomsCreateRoutes);
@@ -205,6 +204,21 @@ app.use("/api/plans", plansRoutes);
 app.use("/api/stats", statsRoutes);
 // Lightweight telemetry events
 app.use("/api/telemetry", telemetryRoutes);
+
+// Protected config health (helps diagnose env drift across Render services)
+app.get("/api/health/config", requireAuth, (req, res) => {
+  const asBool = (v: any) => (v ? true : false);
+  return res.json({
+    ok: true,
+    env: String(process.env.NODE_ENV || "development"),
+    tokenGrants: "v3-no-sources",
+    hasLivekitUrl: asBool(process.env.LIVEKIT_URL),
+    hasLivekitApiKey: asBool(process.env.LIVEKIT_API_KEY),
+    hasLivekitApiSecret: asBool(process.env.LIVEKIT_API_SECRET),
+    hasJwtSecret: asBool(process.env.JWT_SECRET),
+    hasRoomAccessTokenSecret: asBool(process.env.ROOM_ACCESS_TOKEN_SECRET),
+  });
+});
 
 
 // Storage test route
@@ -865,34 +879,8 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/usage/summary", async (req, res) => {
-  try {
-    const uid = req.query.uid as string;
-    if (!uid) return res.status(400).json({ error: "uid required" });
-
-    const userRef = db.collection("users").doc(uid);
-    const userSnap = await userRef.get();
-
-    if (!userSnap.exists) {
-      return res.status(404).json({ error: "user not found" });
-    }
-
-    const userData = userSnap.data() || {};
-    const usage = (userData.usage || {}) as any;
-
-    return res.json({
-      hoursStreamedToday: usage.hoursStreamedToday || 0,
-      hoursStreamedThisMonth: usage.hoursStreamedThisMonth || 0,
-      ytdHours: usage.ytdHours || 0,
-      guestCountToday: usage.guestCountToday || 0,
-      periodStart: usage.periodStart ? usage.periodStart.toDate() : null,
-      resetDate: usage.resetDate ? usage.resetDate.toDate() : null,
-    });
-  } catch (err) {
-    console.error("usage summary error", err);
-    return res.status(500).json({ error: "internal server error" });
-  }
-});
+// NOTE: /api/usage/summary is implemented in routes/usageRoutes.ts
+// and is requireAuth-protected with a stable payload.
 
 app.post("/api/usage/streamEnded", async (req, res) => {
   try {
@@ -1118,4 +1106,13 @@ app.use((req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
+  console.log("[config-health]", {
+    env: String(process.env.NODE_ENV || "development"),
+    tokenGrants: "v3-no-sources",
+    hasLivekitUrl: !!process.env.LIVEKIT_URL,
+    hasLivekitApiKey: !!process.env.LIVEKIT_API_KEY,
+    hasLivekitApiSecret: !!process.env.LIVEKIT_API_SECRET,
+    hasJwtSecret: !!process.env.JWT_SECRET,
+    hasRoomAccessTokenSecret: !!process.env.ROOM_ACCESS_TOKEN_SECRET,
+  });
 });

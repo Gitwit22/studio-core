@@ -444,8 +444,8 @@ useEffect(() => {
 ### 🔧 Configuration Requirements
 
 **Environment Variables Needed:**
-- `VITE_API_BASE` - Client-side (defaults to `http://localhost:5137/api`)
-- `JWT_SECRET` - Server-side (defaults to `dev-secret`)
+- `VITE_API_BASE` - Client-side (defaults to `http://localhost:5137`; client calls use `/api/*` paths)
+- `JWT_SECRET` - Server-side (development only; production must not use `dev-secret`)
 - Firestore credentials (configured in `firebaseAdmin.ts`)
 
 **LocalStorage Fields Used:**
@@ -472,7 +472,7 @@ useEffect(() => {
 - [x] userId validated and sent
 
 ### Backend Persistence
-- [x] /api/recordings/save endpoint exists
+- [x] /api/recordings/start and /api/recordings/stop endpoints exist
 - [x] Validates required fields (roomName, userId)
 - [x] Creates Firestore document
 - [x] Records status=processing initially

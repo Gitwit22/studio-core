@@ -45,36 +45,16 @@ function getRoomAccessSecret() {
 }
 
 function roleGrant(role: "viewer" | "participant" | "host") {
-  if (role === "viewer") {
-    return {
-      roomJoin: true,
-      canSubscribe: true,
-      canPublish: false,
-      canPublishData: false,
-      roomAdmin: false,
-      canUpdateMetadata: false,
-    } as const;
-  }
+  const isViewer = role === "viewer";
+  const isHost = role === "host";
 
-  if (role === "host") {
-    return {
-      roomJoin: true,
-      canSubscribe: true,
-      canPublish: true,
-      canPublishData: true,
-      roomAdmin: false,
-      canUpdateMetadata: false,
-    } as const;
-  }
-
-  // participant
+  // Minimal, stable token grants (no per-source publish restrictions)
   return {
     roomJoin: true,
     canSubscribe: true,
-    canPublish: true,
-    canPublishData: true,
-    roomAdmin: false,
-    canUpdateMetadata: false,
+    canPublish: !isViewer,
+    canPublishData: !isViewer,
+    roomAdmin: isHost,
   } as const;
 }
 
@@ -213,23 +193,63 @@ router.get("/rooms/:roomId/status", async (req: any, res) => {
  */
 router.post("/rooms/:roomId/token", async (req: any, res) => {
   try {
+    res.setHeader("x-sl-token-grants", "v3-no-sources");
     const roomId = String(req.params.roomId || "").trim();
     if (!roomId) return res.status(400).json({ error: "roomId_required" });
 
     const user = tryGetAuthUser(req);
     const guest = tryGetGuestSession(req);
 
-    if (!user && (!guest || guest.roomId !== roomId)) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
+    const allowGuestJoin = String(process.env.ALLOW_GUEST_RTC_JOIN || "").trim() === "1";
 
     const snap = await firestore.collection("rooms").doc(roomId).get();
-    if (!snap.exists) return res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
+    if (!snap.exists) return res.status(404).json({ error: "room_not_found" });
 
     const room = (snap.data() as any) || {};
     const ownerId = typeof room.ownerId === "string" ? room.ownerId.trim() : "";
     const livekitRoomName = String(room.livekitRoomName || roomId).trim();
     const roomStatus = room.status === "live" ? "live" : "idle";
+
+    // Room policy defaults (secure-by-default for older docs)
+    const visibilityRaw = typeof room.visibility === "string" ? room.visibility.trim().toLowerCase() : "";
+    const visibility: "public" | "unlisted" | "private" =
+      visibilityRaw === "public" || visibilityRaw === "unlisted" || visibilityRaw === "private"
+        ? (visibilityRaw as any)
+        : "unlisted";
+    const requiresAuth = typeof room.requiresAuth === "boolean" ? !!room.requiresAuth : true;
+    const requiresPayment = typeof room.requiresPayment === "boolean" ? !!room.requiresPayment : false;
+    const roomType = typeof room.roomType === "string" ? String(room.roomType).trim() : "";
+
+    // Policy: room type must be rtc when explicitly set
+    if (roomType && roomType !== "rtc") {
+      return res.status(400).json({ error: "room_not_rtc" });
+    }
+
+    // Policy: auth requirement
+    if (requiresAuth && !user) {
+      return res.status(401).json({ error: "login_required" });
+    }
+
+    // If not authed, guest access must be explicitly enabled and backed by a verified guest session
+    if (!user) {
+      if (!allowGuestJoin) {
+        return res.status(401).json({ error: "login_required" });
+      }
+      if (!guest || guest.roomId !== roomId) {
+        return res.status(401).json({ error: "login_required" });
+      }
+    }
+
+    // Policy: visibility
+    const isOwner = !!user && !!ownerId && user.uid === ownerId;
+    if (visibility === "private" && !isOwner) {
+      return res.status(403).json({ error: "not_allowed" });
+    }
+
+    // Policy: payment
+    if (requiresPayment && !isOwner) {
+      return res.status(402).json({ error: "payment_required" });
+    }
 
     // Guests can only join once room is live.
     if (!user && roomStatus !== "live") {
@@ -247,8 +267,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     const displayName = sanitizeDisplayName(String(req.body?.displayName || req.body?.identity || "Viewer")).trim() || "Viewer";
 
-    const isHost = !!user && ownerId && user.uid === ownerId;
-    const lkRole: "viewer" | "participant" | "host" = user ? (isHost ? "host" : "participant") : "viewer";
+    const lkRole: "viewer" | "participant" | "host" = user ? (isOwner ? "host" : "participant") : "viewer";
     const identity = user ? user.uid : `invite:${guest!.inviteId}:${Math.random().toString(16).slice(2)}`;
     if (!identity || !String(identity).trim()) {
       return res.status(500).json({ code: "internal_error", error: "invalid_identity" });
@@ -258,7 +277,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     }
 
     // When host joins, flip room live.
-    if (user && isHost && roomStatus !== "live") {
+    if (user && isOwner && roomStatus !== "live") {
       await firestore.collection("rooms").doc(roomId).set(
         {
           status: "live",
@@ -321,6 +340,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     });
   } catch (err: any) {
     console.error("/api/rooms/:roomId/token error", err?.message || err);
+    res.setHeader("x-sl-token-grants", "v3-no-sources");
     return res.status(500).json({
       code: "internal_error",
       error: "Failed to create room token",

@@ -163,10 +163,10 @@ if (recording?.status === 'ready') {
 
 ### Get Backend Download URL
 ```typescript
-const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5137/api';
+const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5137';
 const token = localStorage.getItem('sl_token');
 
-const response = await fetch(`${apiBase}/recordings/${recordingId}/download`, {
+const response = await fetch(`${apiBase}/api/recordings/${recordingId}/download`, {
   headers: { Authorization: `Bearer ${token}` }
 });
 
@@ -193,7 +193,7 @@ const data = await response.json();
 ### Environment Variables
 ```env
 # Frontend
-VITE_API_BASE=http://localhost:5137/api
+VITE_API_BASE=http://localhost:5137
 
 # Backend (already configured)
 JWT_SECRET=dev-secret

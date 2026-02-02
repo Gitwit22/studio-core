@@ -1482,7 +1482,6 @@ function RoomPage() {
     // IMPORTANT: Hosts must request role="host" so /api/hls/start isn't rejected as insufficient_role.
     const requestedRole = isHost ? "host" : "participant";
     const role = requestedRole;
-    const isGuest = false;
 
     const fetchToken = async () => {
       try {
@@ -1565,6 +1564,12 @@ function RoomPage() {
             setNeedsReauth(true);
             setAuthStatus("guest");
             setReauthBannerText("Login or invite required to join this room.");
+            try {
+              const next = `${location.pathname}${location.search}`;
+              nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
+            } catch {
+              // ignore
+            }
           } else if (res.status === 403) {
             setNeedsReauth(true);
             setAuthStatus("guest");

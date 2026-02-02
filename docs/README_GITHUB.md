@@ -151,7 +151,7 @@ streamline/
 ### Backend API Routes
 - `POST /api/auth/login` - User login
 - `POST /api/auth/signup` - User signup
-- `GET /api/roomToken` - Get LiveKit room token
+- `POST /api/rooms/{roomId}/token` - Get LiveKit room token (RTC)
 - `POST /api/usage/streamEnded` - Log stream completion
 - `GET /api/usage/summary` - Get user usage stats
 - `POST /api/editing/*` - Editing API endpoints
