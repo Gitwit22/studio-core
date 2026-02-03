@@ -3271,7 +3271,7 @@ function RoomPage() {
         }
       >
         <StreamSetupModalV2
-          open={showStreamSetup && canManageStream}
+          open={showStreamSetup}
           onClose={() => setShowStreamSetup(false)}
           roomName={roomName ?? ""}
           roomId={roomId || ""}

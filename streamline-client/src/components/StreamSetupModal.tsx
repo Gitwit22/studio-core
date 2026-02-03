@@ -600,15 +600,7 @@ export default function StreamSetupModalV2({
 
   if (!open) return null;
 
-  if (!entitlementsReady) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div className="rounded-lg bg-slate-900 px-4 py-3 text-sm text-slate-100 shadow-lg">
-          Loading stream features...
-        </div>
-      </div>
-    );
-  }
+  const isEntitlementsLoading = !entitlementsReady;
 
   const streamIsLive = streamStatus === "live";
   const streamIsBusy = streamStatus === "starting" || streamStatus === "stopping";
