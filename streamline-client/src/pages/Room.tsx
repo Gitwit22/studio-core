@@ -3,34 +3,33 @@ import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
+  apiGetRoomLayout,
+  apiUpdateRoomLayout,
   apiStartRecording,
   apiStopRecording,
   apiFetch,
   apiFetchAuth,
-  apiGetRoomLayout,
-  apiUpdateRoomLayout,
-  getAuthToken,
-  clearAuthStorage,
+  apiGetCurrentUser,
+  apiGetPlans,
+  apiGetRoomToken,
+  apiGetRoomInviteToken,
+  apiGetUserPrefs,
+  apiGetUserFeatureAccess,
+  apiPatchUserPrefs,
+  apiGetDestinations,
+  apiCreateDestination,
+  apiUpdateDestination,
+  apiDeleteDestination,
+  apiConnectDestination,
+  apiDisconnectDestination,
+  apiRefreshDestination,
+  apiResetDestination,
+  apiGetRoomControls,
+  apiGetRoomPermissions,
+  apiSetRoomControls,
+  type RoomLayout,
+  type RoomLayoutMode,
 } from "../lib/api";
-import { LiveKitRoom, VideoConference, useLocalParticipant, useRoomContext } from "@livekit/components-react";
-import "@livekit/components-styles";
-import { RoomEvent, Track } from "livekit-client";
-import {
-  RECONNECT_MEDIA_MESSAGE_TYPE,
-  reconnectMedia,
-  tryParseLiveKitDataMessage,
-} from "../lib/mediaRecovery";
-import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
-import StreamSetupModalV2 from "../components/StreamSetupModal";
-import { ErrorBoundary } from "../components/ErrorBoundary";
-import RoleOverlay from "../components/RoleOverlay";
-import { RoleChangeToast } from "../components/RoleChangeToast";
-import { API_BASE } from "../lib/apiBase";
-import { APP_BASE } from "../lib/appBase";
-import { normalizeUiRolePresetId } from "../lib/roles";
-import { computeEffectiveFeatureAccess } from "../lib/effectiveFeatureAccess";
-import { usePlatformFlags } from "../hooks/usePlatformFlags";
-import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
 
@@ -1049,6 +1048,7 @@ function RoomPage() {
   const [presetClamped, setPresetClamped] = useState(false);
   const [defaultLayoutPref, setDefaultLayoutPref] = useState<"speaker" | "grid">("speaker");
   const [roomLayoutMode, setRoomLayoutMode] = useState<"speaker" | "grid" | null>(null);
+  const [roomLayoutConfig, setRoomLayoutConfig] = useState<RoomLayout | null>(null);
   const [defaultRecordingModePref, setDefaultRecordingModePref] = useState<"cloud" | "dual">("cloud");
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
@@ -1083,6 +1083,7 @@ function RoomPage() {
   useEffect(() => {
     // Reset room-scoped layout when switching rooms.
     setRoomLayoutMode(null);
+    setRoomLayoutConfig(null);
   }, [roomId]);
 
   useEffect(() => {
@@ -1092,6 +1093,7 @@ function RoomPage() {
       .then((data) => {
         if (cancelled) return;
         setRoomLayoutMode(data.effectiveLayoutMode);
+        setRoomLayoutConfig(data.roomLayout);
       })
       .catch(() => {
         // Best-effort only; fall back to account default.
@@ -1101,10 +1103,21 @@ function RoomPage() {
     };
   }, [roomId, roomAccessToken]);
 
-  const handleChangeRoomLayout = async (next: "speaker" | "grid") => {
+  const handleUpdateRoomLayout = async (next: { mode: RoomLayoutMode } & Partial<RoomLayout>) => {
     if (!roomId || !roomAccessToken) return;
-    await apiUpdateRoomLayout(roomId, roomAccessToken, { mode: next });
-    setRoomLayoutMode(next);
+    const res = await apiUpdateRoomLayout(roomId, roomAccessToken, next);
+    setRoomLayoutConfig(res.roomLayout);
+    // Effective layout only influences composite modes today.
+    if (res.roomLayout.mode === "speaker" || res.roomLayout.mode === "grid") {
+      setRoomLayoutMode(res.roomLayout.mode);
+    }
+  };
+
+  const handleChangeRoomLayout = async (next: "speaker" | "grid") => {
+    await handleUpdateRoomLayout({
+      ...(roomLayoutConfig || {}),
+      mode: next,
+    } as any);
   };
 
   useEffect(() => {
@@ -3282,6 +3295,8 @@ function RoomPage() {
           selectedPresetId={selectedPresetId}
           defaultLayout={roomLayoutMode ?? defaultLayoutPref}
           onChangeRoomLayout={handleChangeRoomLayout}
+          roomLayout={roomLayoutConfig}
+          onUpdateRoomLayout={handleUpdateRoomLayout}
           defaultRecordingMode={defaultRecordingModePref}
           streamStatus={streamStatus}
           onStartStream={handleStartMultistream}

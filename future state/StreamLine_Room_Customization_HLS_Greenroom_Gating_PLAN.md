@@ -22,6 +22,124 @@ Branch context: `feature/hls-dev`
 
 ---
 
+## UI ⇄ Coding Alignment (single source of truth)
+
+This section is the “no drift” contract that ties:
+
+- UI screens (RoomCustomization, PreJoinLobby, HlsGreenroom, Host dashboard)
+- Feature flags
+- Firestore fields
+- Server endpoints
+
+If something is added to UI, it must map here (or be explicitly called “UI-only”).
+
+### Canonical objects
+
+**RoomSettingsPolicy (server enforced)**
+
+- Stored at: `rooms/{roomId}.settings.greenroom`
+- Used by: join router, join request endpoints, host admit
+
+```ts
+type RoomSettingsPolicy = {
+  greenroom: {
+    mode: "off" | "prejoin" | "hls_waiting";
+    requireApproval: boolean;
+    autoAdmit: boolean;
+    vipBypass: boolean;
+    vipList: string[];
+    blockedList: string[];
+  };
+};
+```
+
+**RoomCustomizationConfig (UI payload)**
+
+- Stored at: `rooms/{roomId}.settings.customization`
+- Used by: RoomCustomization UI rendering + HlsGreenroom presentation
+- Not all fields are enforcement-critical.
+
+### Canonical API response shape (so UI and server agree)
+
+#### GET /api/rooms/:roomId (viewer-safe)
+
+This endpoint is the source of truth for routing + presentation.
+
+```ts
+type RoomsGetResponse = {
+  roomId: string;
+  platformFlags: {
+    greenroomHlsEnabled: boolean;
+    roomCustomizationEnabled: boolean;
+  };
+
+  // Room settings
+  settings: {
+    customization?: RoomCustomizationConfig; // optional when feature flag off
+    greenroom: RoomSettingsPolicy["greenroom"];
+  };
+
+  // Runtime HLS
+  hls: {
+    status: "idle" | "starting" | "live" | "ended" | "error";
+    playlistUrl: string | null;
+    error?: string | null;
+    startedAt?: string | null;
+    endedAt?: string | null;
+  };
+};
+```
+
+Rules:
+- When `platformFlags.roomCustomizationEnabled === false`, `settings.customization` may be omitted or returned as null.
+- When `platformFlags.greenroomHlsEnabled === false`, the server must **force** `settings.greenroom.mode` to behave like prejoin/off (never hls_waiting).
+
+### UI to backend mapping matrix
+
+#### 1) RoomCustomization UI (your provided RoomCustomization.tsx + preview)
+
+| UI area | Reads | Writes | Feature flag | Notes |
+|---|---|---|---|---|
+| Templates (preset) | none (static) | none | `roomCustomizationEnabled` | Presets ship with client; no backend needed |
+| Templates (saved) | localStorage | localStorage | `roomCustomizationEnabled` | MVP is local-only; later can add server templates |
+| Branding/Visuals/Audio/Overlays/Alerts/Chat | `GET /api/rooms/:roomId` → `settings.customization` | `POST /api/rooms/:roomId/settings` (host) → `settings.customization` | `roomCustomizationEnabled` | Save-only MVP |
+| Greenroom tab (policy subset) | `GET /api/rooms/:roomId` → `settings.greenroom` | `POST /api/rooms/:roomId/settings` (host) → `settings.greenroom` | `greenroomHlsEnabled` and/or `roomCustomizationEnabled` | Policy fields must update server-enforced `settings.greenroom` |
+| Greenroom tab (presentation) | `GET /api/rooms/:roomId` → `settings.customization.greenroom.*` | `POST /api/rooms/:roomId/settings` (host) → `settings.customization.greenroom.*` | `roomCustomizationEnabled` | Waiting room message/background/music are UI-only |
+
+Hard alignment rule:
+- Any field that affects admission/security must live in `settings.greenroom` (policy).
+
+#### 2) Join Router page (/rooms/:roomId/join)
+
+| UI action | Reads | Calls | Flag dependence | Outcome |
+|---|---|---|---|---|
+| Decide route | `GET /api/rooms/:roomId` | none | `greenroomHlsEnabled` | `/prejoin` vs `/greenroom` based on `settings.greenroom.mode` + `hls.status` |
+| Fallback on error | none | none | n/a | Send user to `/prejoin` + show banner |
+
+#### 3) PreJoinLobby (existing “GreenRoom.tsx” concept)
+
+| UI action | Reads | Writes | Flags | Notes |
+|---|---|---|---|---|
+| Device preview + name | browser media APIs | localStorage (`sl_displayName`) | none | Should remain functional even if all new flags are off |
+
+#### 4) HlsGreenroom (new waiting room)
+
+| UI action | Reads | Calls | Flags | Notes |
+|---|---|---|---|---|
+| Show waiting UI | `GET /api/rooms/:roomId` (or `GET /api/hls/public/:roomId`) | none | `greenroomHlsEnabled` | Uses `settings.customization.greenroom.waitingRoomMessage/background/music` |
+| Request to join | none | `POST /api/rooms/:roomId/join-requests` | `greenroomHlsEnabled` | Returns approved(token) or waiting(requestId) |
+| Poll status | none | `GET /api/rooms/:roomId/join-requests/:requestId` | `greenroomHlsEnabled` | On approved returns token once |
+
+#### 5) Host “Greenroom” dashboard panel
+
+| UI action | Reads | Calls | Flags | Notes |
+|---|---|---|---|---|
+| View pending list | server query `joinRequests where status==waiting` | host-only endpoint (recommended) | `greenroomHlsEnabled` | Avoid client direct Firestore for MVP |
+| Approve / deny | none | approve/deny endpoints | `greenroomHlsEnabled` | Approve triggers token availability for guest |
+
+
+---
+
 ## 0) Definitions (unambiguous naming)
 
 You currently have two “greenroom” concepts. We will support both and name them clearly.
@@ -136,16 +254,10 @@ rooms/{roomId} {
 
   // NEW: room customization & policy (schema from RoomCustomization UI)
   settings: {
-    branding?: {
-      title?: string,
-      logoUrl?: string,
-      primaryColor?: string,
-      ...
-    },
-
-    overlays?: {
-      ...
-    },
+    // Full UI-driven customization payload.
+    // This is intentionally a single object so the client can render
+    // the RoomCustomization UI without needing multiple endpoints.
+    customization?: RoomCustomizationConfig,
 
     // NEW: greenroom config (policy)
     greenroom: {
@@ -159,6 +271,135 @@ rooms/{roomId} {
   },
 }
 ```
+
+#### RoomCustomizationConfig (from provided UI)
+
+The Room Customization UI you provided defines a `RoomConfig` object with these sections:
+
+```ts
+type RoomCustomizationConfig = {
+  // Branding
+  banner: null | {
+    url: string;
+    position: "top" | "bottom";
+    height: number;
+    opacity: number;
+  };
+  logo: null | {
+    url: string;
+    position: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+    size: number;
+    opacity: number;
+  };
+  watermark: null | {
+    url: string;
+    position: "center" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
+    size: number;
+    opacity: number;
+  };
+
+  // Visual
+  background: {
+    type: "solid" | "gradient" | "image" | "video" | "animated";
+    value: string;
+    blur?: number;
+    overlay?: string;
+  };
+  overlay: null | {
+    url: string;
+    opacity: number;
+    blendMode: string;
+  };
+
+  // Audio
+  themeMusic: null | {
+    url: string;
+    name: string;
+    volume: number;
+    loop: boolean;
+    playOn: "waiting" | "intro" | "outro" | "always";
+  };
+  soundEffects: Array<{
+    id: string;
+    name: string;
+    url: string;
+    trigger: "follow" | "subscribe" | "donation" | "raid" | "custom";
+    volume: number;
+  }>;
+
+  // Text Elements
+  lowerThird: null | {
+    enabled: boolean;
+    template: "modern" | "minimal" | "classic" | "neon";
+    primaryColor: string;
+    secondaryColor: string;
+    textColor: string;
+    animation: "slide" | "fade" | "bounce";
+  };
+  ticker: null | {
+    enabled: boolean;
+    messages: string[];
+    speed: number;
+    backgroundColor: string;
+    textColor: string;
+  };
+
+  // Interactions
+  alerts: {
+    enabled: boolean;
+    style: "popup" | "banner" | "corner";
+    duration: number;
+    sound: boolean;
+    animation: "bounce" | "slide" | "fade" | "zoom";
+  };
+  chatStyle: {
+    theme: "default" | "minimal" | "bubble" | "neon" | "retro";
+    fontSize: number;
+    showBadges: boolean;
+    showTimestamps: boolean;
+    backgroundColor: string;
+    textColor: string;
+  };
+
+  // Stream Info
+  streamInfo: {
+    title: string;
+    category: string;
+    tags: string[];
+    description: string;
+  };
+
+  // Greenroom (UI tab)
+  greenroom: {
+    enabled: boolean;
+    autoAdmit: boolean;
+    maxWaitingGuests: number;
+    waitingRoomMessage: string;
+    waitingRoomBackground: string;
+    requireApproval: boolean;
+    allowGuestVideo: boolean;
+    allowGuestAudio: boolean;
+    allowGuestScreenShare: boolean;
+    guestNamePrefix: string;
+    notifyOnJoin: boolean;
+    notifySound: string;
+    autoMuteOnEntry: boolean;
+    showGuestCount: boolean;
+    waitingRoomMusic: string | null;
+    customInstructions: string;
+    blockedUsers: string[];
+    vipList: string[];
+  };
+};
+```
+
+Storage note:
+- Persist this object as `rooms/{roomId}.settings.customization`.
+- Keep `rooms/{roomId}.settings.greenroom` as the **server-enforced policy** object used by the join router and join-requests endpoints.
+
+Why both?
+- `settings.customization.greenroom.*` is UI/UX configuration and defaults.
+- `settings.greenroom.*` is the canonical gating policy with a clean, minimal surface for server enforcement.
 
 Notes:
 - Your spec uses `runtime.hls` and `runtime.greenroom`. In this repo, `hls` is already treated as runtime state. For minimal migration, keep `hls` as-is and add `settings.greenroom` for policy.
@@ -400,6 +641,49 @@ Host pages use:
 Repo note:
 - There is already `RoomLayout` plumbing and `hlsConfig` viewer config in `rooms/{roomId}`. Room customization should augment these, not fight them.
 
+### 8.3 RoomCustomization UI (from provided mock)
+
+The provided Room Customization UI is a multi-tab editor that builds a single `RoomConfig` object. It supports:
+
+- Templates (preset templates + saved templates)
+- Branding (banner/logo/watermark)
+- Visuals (background + overlay)
+- Audio (theme music + SFX)
+- Overlays (overlay blend/opacity)
+- Alerts + Chat style
+- Greenroom tab (waiting room + admission controls + VIP/blocked)
+
+Plan for persistence (MVP):
+- **Room settings save** writes `rooms/{roomId}.settings.customization`.
+- “Save as Template” remains **localStorage-only** initially (as in the UI mock), until you decide to add server-side template storage.
+
+Important alignment point (Greenroom tab vs HLS Greenroom spec):
+
+The UI’s Greenroom tab is a superset of the spec. To keep server enforcement simple and still honor UI, we map UI fields into:
+
+1) **Policy (server enforced):** `rooms/{roomId}.settings.greenroom`
+2) **Presentation/defaults (client only):** `rooms/{roomId}.settings.customization.greenroom`
+
+Recommended mapping:
+
+| UI field (customization.greenroom.*) | Policy field (settings.greenroom.*) | Used by |
+|---|---|---|
+| enabled | mode (see decision below) | join router + routes |
+| requireApproval | requireApproval | join-requests + host admit |
+| autoAdmit | autoAdmit | join-requests |
+| vipList | vipList | join-requests |
+| blockedUsers | blockedList | join-requests |
+| waitingRoomMessage/background/music/customInstructions | (no policy equivalent) | HlsGreenroom UI |
+| maxWaitingGuests/showGuestCount | (no policy equivalent) | host dashboard UI |
+| allowGuestVideo/audio/screenShare/autoMuteOnEntry/guestNamePrefix | (no policy equivalent) | admitted speaker defaults + PreJoinLobby |
+| notifyOnJoin/notifySound | (no policy equivalent) | host dashboard UX |
+
+Mode decision:
+- The UI mock has `enabled: boolean` but the spec requires `mode: "off" | "prejoin" | "hls_waiting"`.
+- For future implementation, add a Mode selector to the Greenroom tab, and derive:
+  - `enabled=false` ⇒ `mode="off"`
+  - `enabled=true` + selection ⇒ `mode="prejoin"` or `"hls_waiting"`
+
 ---
 
 ## 9) Development-mode safety (don’t break the platform)
@@ -492,6 +776,12 @@ This is the exact order to implement later without thrashing.
 
 4) Route strategy
 - Add `/rooms/:roomId/*` while keeping existing routes for backwards compatibility.
+
+5) Room customization storage shape
+- Store full UI object as `settings.customization` (recommended for easiest UI rendering), vs normalizing it into separate objects.
+
+6) Greenroom mode UI
+- Update the RoomCustomization Greenroom tab to support `mode: off | prejoin | hls_waiting` instead of only `enabled: boolean`.
 
 ---
 

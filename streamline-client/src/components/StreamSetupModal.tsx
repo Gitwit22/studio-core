@@ -86,6 +86,15 @@ type SessionRtmpDestination = {
   videoFit?: "cover" | "contain";
 };
 
+type RoomLayoutMode = "speaker" | "grid" | "carousel" | "pip";
+
+type RoomLayout = {
+  mode: RoomLayoutMode;
+  maxTiles?: number;
+  followSpeaker?: boolean;
+  pinnedIdentity?: string | null;
+};
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -95,6 +104,11 @@ interface Props {
   selectedPresetId?: string;
   defaultLayout?: "speaker" | "grid";
   onChangeRoomLayout?: (layout: "speaker" | "grid") => Promise<void> | void;
+  // Full room layout object returned from /api/rooms/:roomId/layout.
+  // This can include additional settings beyond the composite recording layout.
+  roomLayout?: RoomLayout | null;
+  // Optional: update the full roomLayout object (mode + advanced settings).
+  onUpdateRoomLayout?: (layout: RoomLayout) => Promise<void> | void;
   defaultRecordingMode?: "cloud" | "dual";
   
   // Stream state
@@ -152,6 +166,8 @@ export default function StreamSetupModalV2({
   selectedPresetId,
   defaultLayout = "speaker",
   onChangeRoomLayout,
+  roomLayout,
+  onUpdateRoomLayout,
   defaultRecordingMode = "cloud",
   streamStatus,
   onStartStream,
@@ -207,9 +223,16 @@ export default function StreamSetupModalV2({
   const platformOrder: PlatformKey[] = ["youtube", "facebook", "twitch", "instagram", "custom"];
 
   const [layout, setLayout] = useState<"speaker" | "grid">(defaultLayout);
+  const [roomLayoutMode, setRoomLayoutMode] = useState<RoomLayoutMode>("speaker");
   const [recordingMode, setRecordingMode] = useState<"cloud" | "dual">(defaultRecordingMode);
   const [roomLayoutBusy, setRoomLayoutBusy] = useState(false);
   const [roomLayoutError, setRoomLayoutError] = useState<string | null>(null);
+
+  const [layoutMaxTiles, setLayoutMaxTiles] = useState<string>("");
+  const [layoutFollowSpeaker, setLayoutFollowSpeaker] = useState<boolean>(false);
+  const [layoutPinnedIdentity, setLayoutPinnedIdentity] = useState<string>("");
+  const [roomLayoutAdvancedBusy, setRoomLayoutAdvancedBusy] = useState(false);
+  const [roomLayoutAdvancedSaved, setRoomLayoutAdvancedSaved] = useState(false);
 
   // Canonical: HLS is always keyed by Firestore roomId.
   const hlsRoomId = roomId?.trim() || "";
@@ -240,6 +263,27 @@ export default function StreamSetupModalV2({
     setLayout(defaultLayout);
   }, [defaultLayout]);
 
+  // Hydrate advanced layout settings from the canonical room layout object (server).
+  useEffect(() => {
+    if (!open) return;
+    if (!roomLayout) {
+      setLayoutMaxTiles("");
+      setLayoutFollowSpeaker(false);
+      setLayoutPinnedIdentity("");
+      setRoomLayoutMode("speaker");
+      return;
+    }
+    setRoomLayoutMode(roomLayout.mode);
+    if (typeof roomLayout.maxTiles === "number" && Number.isFinite(roomLayout.maxTiles)) {
+      setLayoutMaxTiles(String(roomLayout.maxTiles));
+    } else {
+      setLayoutMaxTiles("");
+    }
+    setLayoutFollowSpeaker(roomLayout.followSpeaker === true);
+    setLayoutPinnedIdentity(typeof roomLayout.pinnedIdentity === "string" ? roomLayout.pinnedIdentity : "");
+    setRoomLayoutAdvancedSaved(false);
+  }, [open, roomLayout]);
+
   async function handleRoomLayoutChange(next: "speaker" | "grid") {
     if (recordingIsActive || roomLayoutBusy) return;
     const prev = layout;
@@ -254,6 +298,64 @@ export default function StreamSetupModalV2({
       setRoomLayoutError("Failed to update room layout");
     } finally {
       setRoomLayoutBusy(false);
+    }
+  }
+
+  async function handleSaveAdvancedRoomLayout() {
+    if (recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy) return;
+    if (!onUpdateRoomLayout) return;
+
+    setRoomLayoutError(null);
+    setRoomLayoutAdvancedSaved(false);
+    setRoomLayoutAdvancedBusy(true);
+
+    const next: RoomLayout = { mode: roomLayoutMode };
+
+    const mt = Number(layoutMaxTiles);
+    if (Number.isFinite(mt) && mt > 0) {
+      next.maxTiles = Math.floor(mt);
+    }
+
+    next.followSpeaker = layoutFollowSpeaker;
+
+    const pin = layoutPinnedIdentity.trim();
+    next.pinnedIdentity = pin ? pin : null;
+
+    try {
+      await onUpdateRoomLayout(next);
+      setRoomLayoutAdvancedSaved(true);
+      setTimeout(() => setRoomLayoutAdvancedSaved(false), 2000);
+    } catch {
+      setRoomLayoutError("Failed to update advanced room layout settings");
+    } finally {
+      setRoomLayoutAdvancedBusy(false);
+    }
+  }
+
+  async function handleRoomLayoutModeChange(nextMode: RoomLayoutMode) {
+    if (recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy) return;
+    setRoomLayoutMode(nextMode);
+    setRoomLayoutError(null);
+    if (!onUpdateRoomLayout) return;
+
+    const next: RoomLayout = {
+      mode: nextMode,
+      followSpeaker: layoutFollowSpeaker,
+      pinnedIdentity: layoutPinnedIdentity.trim() ? layoutPinnedIdentity.trim() : null,
+    };
+    const mt = Number(layoutMaxTiles);
+    if (Number.isFinite(mt) && mt > 0) next.maxTiles = Math.floor(mt);
+
+    setRoomLayoutAdvancedBusy(true);
+    setRoomLayoutAdvancedSaved(false);
+    try {
+      await onUpdateRoomLayout(next);
+      setRoomLayoutAdvancedSaved(true);
+      setTimeout(() => setRoomLayoutAdvancedSaved(false), 2000);
+    } catch {
+      setRoomLayoutError("Failed to update room layout mode");
+    } finally {
+      setRoomLayoutAdvancedBusy(false);
     }
   }
 
@@ -1486,9 +1588,9 @@ export default function StreamSetupModalV2({
                 )}
               </div>
 
-              {/* Room Layout Selector */}
+              {/* Recording Layout Selector (composite egress supports speaker/grid) */}
               <label style={{ fontSize: '0.875rem', marginBottom: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontWeight: 600 }}>Room Layout:</span>
+                <span style={{ fontWeight: 600 }}>Recording Layout:</span>
                 <select
                   value={layout}
                   onChange={(e) => handleRoomLayoutChange(e.target.value as "speaker" | "grid")}
@@ -1512,7 +1614,144 @@ export default function StreamSetupModalV2({
               </label>
 
               <div style={{ marginBottom: '0.75rem', fontSize: '0.75rem', color: '#94a3b8' }}>
-                Sets the layout for the room and is used for recordings.
+                Used for recordings (LiveKit composite egress supports speaker/grid).
+              </div>
+
+              {/* Room layout mode (saved to rooms/{roomId}.roomLayout.mode) */}
+              <label style={{ fontSize: '0.875rem', marginBottom: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span style={{ fontWeight: 600 }}>Room Layout Mode:</span>
+                <select
+                  value={roomLayoutMode}
+                  onChange={(e) => handleRoomLayoutModeChange(e.target.value as RoomLayoutMode)}
+                  disabled={recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy || !onUpdateRoomLayout}
+                  style={{
+                    padding: '0.4rem 0.7rem',
+                    borderRadius: '0.3rem',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    background: '#111827',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                    cursor: (recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy || !onUpdateRoomLayout) ? 'not-allowed' : 'pointer',
+                    opacity: (recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy || !onUpdateRoomLayout) ? 0.5 : 1,
+                  }}
+                >
+                  <option value="speaker">Speaker</option>
+                  <option value="grid">Grid</option>
+                  <option value="carousel">Carousel</option>
+                  <option value="pip">PiP</option>
+                </select>
+              </label>
+
+              <div style={{ marginBottom: '0.75rem', fontSize: '0.75rem', color: '#94a3b8' }}>
+                Persists to the room settings. Carousel/PiP aren’t used for recordings.
+              </div>
+
+              {/* Advanced room layout settings (persisted to rooms/{roomId}.roomLayout) */}
+              <div
+                style={{
+                  marginBottom: '0.9rem',
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  border: '1px solid rgba(255,255,255,0.10)',
+                  background: 'rgba(15, 23, 42, 0.35)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>Advanced layout settings</div>
+                  {roomLayoutAdvancedSaved && (
+                    <div style={{ fontSize: '0.75rem', color: '#22c55e', fontWeight: 700 }}>Saved</div>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 8, display: 'grid', gap: 10 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <span style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>Max tiles (grid)</span>
+                    <input
+                      value={layoutMaxTiles}
+                      onChange={(e) => setLayoutMaxTiles(e.target.value.replace(/[^0-9]/g, ''))}
+                      placeholder="auto"
+                      inputMode="numeric"
+                      disabled={recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy || !onUpdateRoomLayout}
+                      style={{
+                        width: 120,
+                        padding: '0.4rem 0.6rem',
+                        borderRadius: '0.35rem',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        background: '#0b1220',
+                        color: '#fff',
+                        fontSize: '0.8rem',
+                      }}
+                    />
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <span style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>Follow speaker (auto-pin)</span>
+                    <input
+                      type="checkbox"
+                      checked={layoutFollowSpeaker}
+                      onChange={(e) => setLayoutFollowSpeaker(e.target.checked)}
+                      disabled={recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy || !onUpdateRoomLayout}
+                    />
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <span style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>Pinned identity</span>
+                    <input
+                      value={layoutPinnedIdentity}
+                      onChange={(e) => setLayoutPinnedIdentity(e.target.value)}
+                      placeholder="(blank = none)"
+                      disabled={recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy || !onUpdateRoomLayout}
+                      style={{
+                        width: 220,
+                        padding: '0.4rem 0.6rem',
+                        borderRadius: '0.35rem',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        background: '#0b1220',
+                        color: '#fff',
+                        fontSize: '0.8rem',
+                      }}
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveAdvancedRoomLayout}
+                    disabled={
+                      recordingIsActive ||
+                      roomLayoutBusy ||
+                      roomLayoutAdvancedBusy ||
+                      !onUpdateRoomLayout
+                    }
+                    style={{
+                      width: '100%',
+                      padding: '0.6rem',
+                      borderRadius: '0.45rem',
+                      border: '1px solid rgba(239, 68, 68, 0.6)',
+                      background: roomLayoutAdvancedBusy ? 'rgba(239, 68, 68, 0.12)' : 'rgba(239, 68, 68, 0.08)',
+                      color: '#fee2e2',
+                      fontWeight: 700,
+                      fontSize: '0.8rem',
+                      cursor:
+                        recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy || !onUpdateRoomLayout
+                          ? 'not-allowed'
+                          : 'pointer',
+                      opacity:
+                        recordingIsActive || roomLayoutBusy || roomLayoutAdvancedBusy || !onUpdateRoomLayout
+                          ? 0.6
+                          : 1,
+                    }}
+                  >
+                    {roomLayoutAdvancedBusy ? 'Saving…' : 'Save advanced layout settings'}
+                  </button>
+
+                  {!onUpdateRoomLayout && (
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                      Advanced layout settings are unavailable for this role.
+                    </div>
+                  )}
+                </div>
               </div>
 
               {roomLayoutError && (

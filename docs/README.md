@@ -1,123 +1,22 @@
-# 🎬 StreamLine - Recording & Editing MVP
+# StreamLine Docs (Canonical Index)
 
-## ✅ Implementation Complete!
+This folder is the single place for platform documentation. The goal is: **few files, high signal, current reality**.
 
-All code for a complete, end-to-end recording and editing workflow has been implemented **without requiring backend storage setup**.
+## Start Here
 
----
+- Dev setup + env + local runbook: [DEVELOPMENT.md](DEVELOPMENT.md)
+- Editing suite docs: [Editor/README.md](Editor/README.md)
+- Permissions / roles / invites (room security model): [PERMISSIONS_AND_INVITES.md](PERMISSIONS_AND_INVITES.md)
+- Usage limits + billing flags + enforcement contract: [USAGE_BILLING_LIMITS.md](USAGE_BILLING_LIMITS.md)
+- Storage (R2) + operational notes: [OPS_STORAGE.md](OPS_STORAGE.md)
+- Streaming destinations contract: [STREAMING_API_CONTRACT.md](STREAMING_API_CONTRACT.md)
+- Roadmap / what's next: [ROADMAP.md](ROADMAP.md)
 
-## 📚 Documentation
+## Docs Principles
 
-Start with these in order:
+- Prefer linking to code entry points over duplicating long implementation logs.
+- If a doc becomes stale, fold the relevant parts into a canonical doc and delete the stale file.
 
-1. **[QUICKSTART.md](QUICKSTART.md)** ← Start here (5 min read)
-   - Overview of what was built
-   - Quick 2-minute test flow
-   - File structure
-   - What works list
-
-2. **[TEST_PLAN.md](TEST_PLAN.md)** ← For testing (10 min read)
-   - Step-by-step testing guide
-   - 5-minute quick test
-   - Asset library test
-   - Projects dashboard test
-   - Timeline editor test
-   - Persistence test
-   - Success criteria
-
-3. **[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)** ← For understanding (10 min read)
-   - Hour-by-hour breakdown
-   - File descriptions
-   - Next steps for backend
-   - Development notes
-
-4. **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** ← For details (15 min read)
-   - By the numbers
-   - Complete user flows
-   - Features implemented
-   - Design decisions
-   - Performance metrics
-
-5. **[CHECKLIST.md](CHECKLIST.md)** ← For verification (5 min read)
-   - All files created
-   - All files modified
-   - All features implemented
-   - Sign-off
-
----
-
-## 🚀 Quick Start
-
-### Run the App
-```bash
-cd streamline-client
-npm install  # (if needed)
-npm run dev
-```
-
-### Test the Flow
-1. Go to `/join`
-2. Create a room and join
-3. Wait 10 seconds (recording auto-starts)
-4. Click "← Back" to end stream
-5. Watch progress bar fill (0% → 100%)
-6. When ready, click "✂️ Edit in StreamLine"
-7. Timeline editor opens with video loaded
-8. Test: play, seek, split, zoom
-
-**Total time: 2 minutes**
-
----
-
-## 📋 What's Included
-
-### Code Files Created
-```
-src/services/
-  └── mockRecording.ts              (Recording simulation)
-
-src/hooks/
-  └── useRecordingProgress.ts        (Real-time progress tracking)
-
-src/pages/
-  └── StreamSummaryPage.tsx          (Post-stream summary)
-
-src/editing/
-  ├── mockData.ts                    (Sample assets/projects)
-  ├── useEditingFeatures.ts          (Feature flags)
-  ├── AssetLibrary.tsx               (Asset browsing)
-  ├── ProjectsDashboard.tsx          (Project management)
-  └── EditorPage.tsx                 (Timeline editor)
-```
-
-### Code Files Modified
-```
-src/
-  ├── App.tsx                        (New routes added)
-  └── pages/Room.tsx                 (Recording controls added)
-```
-
-### Documentation Files
-```
-├── QUICKSTART.md                    (← Start here)
-├── TEST_PLAN.md
-├── IMPLEMENTATION_GUIDE.md
-├── IMPLEMENTATION_SUMMARY.md
-├── CHECKLIST.md
-└── README.md                        (This file)
-```
-
----
-
-## 🎯 Features
-
-### Recording Flow
-✅ Auto-start when room joins  
-✅ 🔴 Live recording indicator  
-✅ Auto-stop when stream ends  
-✅ Auto-redirect to summary page  
-✅ Progress bar animation (0% → 100%)  
-✅ Status transitions (Recording → Processing → Ready)  
 ✅ localStorage persistence  
 
 ### Stream Summary

@@ -268,7 +268,7 @@ export async function apiUpdateRoomLayout(
 ) {
   const res = await apiFetchAuth(`/api/rooms/${encodeURIComponent(roomId)}/layout`, {
     method: "PATCH",
-    body: JSON.stringify(roomLayout),
+    body: JSON.stringify({ roomLayout }),
     headers: {
       "x-room-access-token": roomAccessToken,
     },
