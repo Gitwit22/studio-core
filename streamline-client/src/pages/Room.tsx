@@ -1551,7 +1551,12 @@ function RoomPage() {
         roomTokenMintInFlightRef.current = true;
         console.log(`[Room] Fetching room token (role=${role || "host"})...`);
         const bearerToken = getAuthToken();
-        const buildRoomTokenRequest = (mode: "auth") => {
+        // Force invite mode when a token is present in the URL and we are not authed.
+        // This matches the legacy participant join flow: /room/<roomId>?t=<inviteToken>
+        // Also fall back to any locally-stored invite token for backward compatibility.
+        const inviteTokenFromUrl = new URLSearchParams(window.location.search).get("t");
+        const inviteTokenForJoin = (inviteTokenFromUrl || inviteToken || null)?.trim?.() || null;
+        const buildRoomTokenRequest = () => {
           const canonicalRoomId = roomId || "";
           const endpoint = `${API_BASE}/api/rooms/${encodeURIComponent(canonicalRoomId)}/token`;
           const payload: any = { identity: displayName };
@@ -1568,32 +1573,21 @@ function RoomPage() {
           payload.uid = getOrCreateUid();
           payload.displayName = displayName;
           // Invites are currently guest/participant-only (no elevated roles).
-          if (!bearerToken && inviteToken) {
-            payload.inviteToken = inviteToken;
+          if (!bearerToken && inviteTokenForJoin) {
+            payload.inviteToken = inviteTokenForJoin;
           }
 
           return { endpoint, payload };
         };
 
-        const tryFetch = async (mode: "auth") => {
-          const { endpoint, payload } = buildRoomTokenRequest(mode);
-          // apiFetch always sends cookies; for /api/roomToken we also attach Bearer
-          // explicitly when available so incognito/cookie-blocked sessions can host.
-          const headers: Record<string, string> = {};
-          if (bearerToken) {
-            headers.Authorization = `Bearer ${bearerToken}`;
-          } else if (inviteToken) {
-            headers["x-invite-token"] = inviteToken;
-          }
-          const res = await apiFetch(endpoint, {
-            method: "POST",
-            body: JSON.stringify(payload),
-            headers,
-          }, { allowNonOk: true });
-          return { res, mode };
-        };
+        const { endpoint, payload } = buildRoomTokenRequest();
 
-        let attempt = await tryFetch("auth");
+        const mode: "auth" | "invite" = bearerToken ? "auth" : payload.inviteToken ? "invite" : "auth";
+        const tokenRes = bearerToken
+          ? await apiFetchAuth(endpoint, { method: "POST", body: JSON.stringify(payload) }, { allowNonOk: true })
+          : await apiFetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }, { allowNonOk: true });
+
+        const attempt = { res: tokenRes, mode };
 
         const res = attempt.res;
         console.log("[Room] roomToken status:", res.status, "mode:", attempt.mode);

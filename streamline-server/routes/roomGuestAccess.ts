@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { firestore } from "../firebaseAdmin";
 import { tryGetAuthUser, verifyInviteToken } from "../middleware/requireAuth";
 import { tryGetGuestSession } from "../middleware/guestSession";
+import { verifyRoomAccessToken } from "../middleware/roomAccessToken";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { signGuestSession } from "../middleware/guestSession";
@@ -12,6 +13,9 @@ export function extractInviteToken(req: any): string | null {
   const hdr = (req?.headers as any) || {};
   const fromHeader = hdr["x-invite-token"] ?? hdr["X-Invite-Token"];
   if (typeof fromHeader === "string" && fromHeader.trim()) return fromHeader.trim();
+  // Fallback: some clients may pass the invite token in the room-access header.
+  const fromRoomAccessHeader = hdr["x-room-access-token"] ?? hdr["X-Room-Access-Token"];
+  if (typeof fromRoomAccessHeader === "string" && fromRoomAccessHeader.trim()) return fromRoomAccessHeader.trim();
   const fromBody = req?.body?.inviteToken;
   if (typeof fromBody === "string" && fromBody.trim()) return fromBody.trim();
   const fromQuery = req?.query?.inviteToken ?? req?.query?.t;
@@ -19,20 +23,27 @@ export function extractInviteToken(req: any): string | null {
   return null;
 }
 
-export function tryGetLegacyInviteGuest(req: any, roomId: string): { inviteId: string; roomId: string; role: "viewer" } | null {
+export function tryGetLegacyInviteGuest(req: any, roomId: string): { inviteId: string; roomId: string; role: "viewer" | "participant" } | null {
   const raw = extractInviteToken(req);
   if (!raw) return null;
   try {
-    const claims = verifyInviteToken(raw) as any;
+    let claims: any;
+    try {
+      claims = verifyInviteToken(raw) as any;
+    } catch {
+      // Also allow roomAccessTokens in invite flows (share links).
+      claims = verifyRoomAccessToken(raw) as any;
+    }
     const claimRoomId = typeof claims?.roomId === "string" ? claims.roomId.trim() : "";
     const rawRole = String(claims?.role || "guest").toLowerCase();
     // Never allow elevated roles through legacy invite JWTs for guest RTC join.
     // Cohost (and legacy moderator) invites must be handled by the authed flow.
-    if (rawRole === "cohost" || rawRole === "moderator") return null;
+    if (rawRole === "host" || rawRole === "cohost" || rawRole === "moderator") return null;
     if (!claimRoomId || claimRoomId !== roomId) return null;
 
     const inviteId = `legacy:${Buffer.from(raw).toString("base64url").slice(0, 24)}`;
-    return { inviteId, roomId, role: "viewer" };
+    const role: "viewer" | "participant" = rawRole === "viewer" ? "viewer" : "participant";
+    return { inviteId, roomId, role };
   } catch {
     return null;
   }
@@ -252,7 +263,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       if (legacyGuest) {
         guest = legacyGuest as any;
         const expiresIn = "2h";
-        const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: "viewer" }, expiresIn);
+        const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: legacyGuest.role }, expiresIn);
         const secure = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
         res.cookie("sl_guest", sessionJwt, {
           httpOnly: true,
@@ -332,7 +343,11 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     const displayName = sanitizeDisplayName(String(req.body?.displayName || req.body?.identity || "Viewer")).trim() || "Viewer";
 
-    const lkRole: "viewer" | "participant" | "host" = user ? (isOwner ? "host" : "participant") : "viewer";
+    const lkRole: "viewer" | "participant" | "host" = user
+      ? (isOwner ? "host" : "participant")
+      : guest?.role === "participant"
+        ? "participant"
+        : "viewer";
     const identity = user ? user.uid : `invite:${guest!.inviteId}:${Math.random().toString(16).slice(2)}`;
     if (!identity || !String(identity).trim()) {
       return res.status(500).json({ code: "internal_error", error: "invalid_identity" });

@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 export type GuestSessionClaims = {
   inviteId: string;
   roomId: string;
-  role: "viewer";
+  role: "viewer" | "participant";
   iat?: number;
   exp?: number;
 };
@@ -27,7 +27,7 @@ export function tryGetGuestSession(req: Request): GuestSessionClaims | null {
     const decoded = jwt.verify(cookieToken, getGuestSessionSecret()) as any;
     const inviteId = typeof decoded?.inviteId === "string" ? decoded.inviteId : "";
     const roomId = typeof decoded?.roomId === "string" ? decoded.roomId : "";
-    const role = decoded?.role === "viewer" ? ("viewer" as const) : null;
+    const role = decoded?.role === "viewer" || decoded?.role === "participant" ? (decoded.role as any) : null;
     if (!inviteId || !roomId || !role) return null;
     return {
       inviteId,

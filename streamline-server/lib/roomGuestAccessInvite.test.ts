@@ -32,7 +32,7 @@ test("tryGetLegacyInviteGuest: accepts guest/participant roles only and matches 
   const guest = tryGetLegacyInviteGuest(reqOk, roomId);
   assert.ok(guest);
   assert.equal(guest.roomId, roomId);
-  assert.equal(guest.role, "viewer");
+  assert.equal(guest.role, "participant");
   assert.ok(String(guest.inviteId).startsWith("legacy:"));
 
   const wrongRoomToken = signLegacyInvite({ roomId: "room_other", roomName: "Other", role: "guest" }, secret);
