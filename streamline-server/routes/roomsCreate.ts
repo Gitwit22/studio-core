@@ -4,6 +4,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { ensureRoomDoc } from "../services/rooms";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
+import { normalizeRoomLayout, type RoomLayout } from "../lib/roomLayout";
 
 const router = Router();
 
@@ -41,6 +42,21 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
 
   const livekitRoomName = rawName || roomId;
 
+  // Seed roomLayout from account defaults (users/{uid}.mediaPrefs.defaultRoomLayout)
+  // so new rooms inherit the user's preferred layout without requiring per-room setup.
+  let initialRoomLayout: RoomLayout | undefined = undefined;
+  try {
+    const userSnap = await db.collection("users").doc(uid).get();
+    const userData = userSnap.exists ? (userSnap.data() as any) || {} : {};
+    const mediaPrefs = (userData as any)?.mediaPrefs || {};
+    initialRoomLayout =
+      normalizeRoomLayout(mediaPrefs.defaultRoomLayout) ||
+      normalizeRoomLayout({ mode: mediaPrefs.defaultLayout }) ||
+      undefined;
+  } catch (err) {
+    console.warn("/api/rooms/create failed to read mediaPrefs for initialRoomLayout", err);
+  }
+
   try {
     const { data } = await ensureRoomDoc({
       roomId,
@@ -48,6 +64,7 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
       livekitRoomName,
       roomType,
       initialStatus: "idle",
+      initialRoomLayout,
       savedEmbedId: savedEmbedId || undefined,
       visibility,
       requiresAuth,

@@ -17,11 +17,15 @@ import {
 import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
 import { stripe } from "../lib/stripe";
 import { computeAccountMeBillingFields } from "../lib/billingTruth";
+import { normalizeRoomLayout } from "../lib/roomLayout";
 
 const router = Router();
 
 const DEFAULT_MEDIA_PREFS = {
   defaultLayout: "speaker" as "speaker" | "grid",
+  // Viewer/participant room layout default (used to seed new rooms).
+  // Recordings still use defaultLayout (speaker/grid composite).
+  defaultRoomLayout: { mode: "speaker" as const },
   defaultRecordingMode: "cloud" as "cloud" | "dual",
   defaultPresetId: "standard_720p30" as MediaPresetId,
   warnOnHighQuality: true,
@@ -192,9 +196,17 @@ export const SIMPLE_ROLE_DEFAULTS: Record<"participant" | "moderator" | "cohost"
 function normalizeMediaPrefs(raw: any, planId: string) {
   const prefs = { ...DEFAULT_MEDIA_PREFS, ...(raw || {}) };
   const { preset } = clampPresetForPlan(planId, prefs.defaultPresetId);
+
+  const defaultRoomLayout =
+    normalizeRoomLayout((prefs as any).defaultRoomLayout) ||
+    normalizeRoomLayout({ mode: (prefs as any).defaultLayout }) ||
+    { mode: "speaker" as const };
+
   return {
     ...prefs,
     defaultPresetId: preset.id,
+    defaultLayout: prefs.defaultLayout === "grid" || prefs.defaultLayout === "speaker" ? prefs.defaultLayout : "speaker",
+    defaultRoomLayout,
     autoClamp: true,
     permissionsMode: prefs.permissionsMode === "advanced" ? "advanced" : "simple",
   };
@@ -832,6 +844,12 @@ router.patch("/media-prefs", async (req, res) => {
 
     if (body.defaultLayout === "speaker" || body.defaultLayout === "grid") {
       updates.defaultLayout = body.defaultLayout;
+    }
+    if (body.defaultRoomLayout && typeof body.defaultRoomLayout === "object") {
+      const normalized = normalizeRoomLayout(body.defaultRoomLayout);
+      if (normalized) {
+        updates.defaultRoomLayout = normalized;
+      }
     }
     if (body.defaultRecordingMode === "cloud" || body.defaultRecordingMode === "dual") {
       updates.defaultRecordingMode = body.defaultRecordingMode;

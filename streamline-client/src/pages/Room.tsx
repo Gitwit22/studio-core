@@ -3,8 +3,6 @@ import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  apiGetRoomLayout,
-  apiUpdateRoomLayout,
   apiStartRecording,
   apiStopRecording,
   apiFetch,
@@ -27,8 +25,6 @@ import {
   apiGetRoomControls,
   apiGetRoomPermissions,
   apiSetRoomControls,
-  type RoomLayout,
-  type RoomLayoutMode,
 } from "../lib/api";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
@@ -1047,8 +1043,6 @@ function RoomPage() {
   const [effectivePresetId, setEffectivePresetId] = useState<string | null>(null);
   const [presetClamped, setPresetClamped] = useState(false);
   const [defaultLayoutPref, setDefaultLayoutPref] = useState<"speaker" | "grid">("speaker");
-  const [roomLayoutMode, setRoomLayoutMode] = useState<"speaker" | "grid" | null>(null);
-  const [roomLayoutConfig, setRoomLayoutConfig] = useState<RoomLayout | null>(null);
   const [defaultRecordingModePref, setDefaultRecordingModePref] = useState<"cloud" | "dual">("cloud");
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
@@ -1079,46 +1073,6 @@ function RoomPage() {
     setMaxGuestsAllowed(null);
     setMaxRecordingMinutesPerClip(null);
   }, [roomId]);
-
-  useEffect(() => {
-    // Reset room-scoped layout when switching rooms.
-    setRoomLayoutMode(null);
-    setRoomLayoutConfig(null);
-  }, [roomId]);
-
-  useEffect(() => {
-    if (!roomId || !roomAccessToken) return;
-    let cancelled = false;
-    apiGetRoomLayout(roomId, roomAccessToken)
-      .then((data) => {
-        if (cancelled) return;
-        setRoomLayoutMode(data.effectiveLayoutMode);
-        setRoomLayoutConfig(data.roomLayout);
-      })
-      .catch(() => {
-        // Best-effort only; fall back to account default.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [roomId, roomAccessToken]);
-
-  const handleUpdateRoomLayout = async (next: { mode: RoomLayoutMode } & Partial<RoomLayout>) => {
-    if (!roomId || !roomAccessToken) return;
-    const res = await apiUpdateRoomLayout(roomId, roomAccessToken, next);
-    setRoomLayoutConfig(res.roomLayout);
-    // Effective layout only influences composite modes today.
-    if (res.roomLayout.mode === "speaker" || res.roomLayout.mode === "grid") {
-      setRoomLayoutMode(res.roomLayout.mode);
-    }
-  };
-
-  const handleChangeRoomLayout = async (next: "speaker" | "grid") => {
-    await handleUpdateRoomLayout({
-      ...(roomLayoutConfig || {}),
-      mode: next,
-    } as any);
-  };
 
   useEffect(() => {
     setHostCheckReady(true);
@@ -3293,10 +3247,7 @@ function RoomPage() {
           roomAccessToken={roomAccessToken || undefined}
           
           selectedPresetId={selectedPresetId}
-          defaultLayout={roomLayoutMode ?? defaultLayoutPref}
-          onChangeRoomLayout={handleChangeRoomLayout}
-          roomLayout={roomLayoutConfig}
-          onUpdateRoomLayout={handleUpdateRoomLayout}
+          defaultLayout={defaultLayoutPref}
           defaultRecordingMode={defaultRecordingModePref}
           streamStatus={streamStatus}
           onStartStream={handleStartMultistream}

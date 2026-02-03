@@ -66,6 +66,7 @@ export async function ensureRoomDoc(params: {
   livekitRoomName: string;
   roomType?: string;
   initialStatus?: string;
+  initialRoomLayout?: RoomLayout;
   // When provided, bind this room to a specific saved embed.
   savedEmbedId?: string;
   // Optional policy overrides (otherwise defaults apply).
@@ -76,7 +77,7 @@ export async function ensureRoomDoc(params: {
   ref: FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData>;
   data: RoomDoc;
 }> {
-  const { roomId, ownerId, livekitRoomName, roomType, initialStatus, savedEmbedId } = params;
+  const { roomId, ownerId, livekitRoomName, roomType, initialStatus, savedEmbedId, initialRoomLayout } = params;
   const ref = db.collection("rooms").doc(roomId);
   const snap = await ref.get();
   const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
@@ -93,6 +94,7 @@ export async function ensureRoomDoc(params: {
       ownerId,
       roomType: roomType || "rtc",
       livekitRoomName,
+      ...(initialRoomLayout ? { roomLayout: initialRoomLayout } : {}),
       visibility,
       requiresAuth,
       requiresPayment,
@@ -117,6 +119,7 @@ export async function ensureRoomDoc(params: {
     if (typeof existing.requiresAuth !== "boolean") patch.requiresAuth = requiresAuth;
     if (typeof existing.requiresPayment !== "boolean") patch.requiresPayment = requiresPayment;
     if (savedEmbedId && !existing.savedEmbedId) patch.savedEmbedId = savedEmbedId;
+    if (initialRoomLayout && !existing.roomLayout) patch.roomLayout = initialRoomLayout;
     if (!("createdAt" in existing)) patch.createdAt = serverTimestamp;
     patch.updatedAt = serverTimestamp;
     if (!existing.status) patch.status = initialStatus || "live";

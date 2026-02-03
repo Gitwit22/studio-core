@@ -7,7 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
 import SettingsDestinations from "./SettingsDestinations";
-import { ApiUnauthorizedError, apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
+import { ApiUnauthorizedError, apiFetch, apiFetchAuth, clearAuthStorage, type RoomLayout, type RoomLayoutMode } from "../lib/api";
 import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
 import { formatLimitLabel } from "../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
@@ -164,6 +164,7 @@ const DEFAULT_USAGE = {
 const DEFAULT_MEDIA_PREFS = {
   defaultPresetId: "standard_720p30",
   defaultLayout: "speaker" as "speaker" | "grid",
+  defaultRoomLayout: { mode: "speaker" as RoomLayoutMode } as RoomLayout,
   defaultRecordingMode: "cloud" as "cloud" | "dual",
   destinationsDefaultMode: "last_used" as "last_used" | "pick_each_time",
   warnOnHighQuality: true,
@@ -2685,13 +2686,13 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               </div>
 
               <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 12, background: "rgba(255,255,255,0.02)" }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Room Layout</div>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Recording Layout</div>
                 <div style={{ display: "flex", gap: 10 }}>
                   {(["speaker", "grid"] as const).map((opt) => (
                     <label key={opt} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
                       <input
                         type="radio"
-                        name="recLayout"
+                        name="recordingLayout"
                         value={opt}
                         checked={mediaPrefs.defaultLayout === opt}
                         onChange={() => setMediaPrefs((prev) => ({ ...prev, defaultLayout: opt }))}
@@ -2701,7 +2702,103 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                   ))}
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
-                  Sets the layout for the room and is used for recordings.
+                  Composite recording layout (LiveKit egress). Speaker and Grid only.
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 12, background: "rgba(255,255,255,0.02)" }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Room Layout (default)</div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13, color: "#cbd5e1" }}>
+                    <span style={{ fontWeight: 600, color: "#e2e8f0" }}>Layout mode</span>
+                    <select
+                      value={mediaPrefs.defaultRoomLayout?.mode || "speaker"}
+                      onChange={(e) => {
+                        const mode = e.target.value as RoomLayoutMode;
+                        setMediaPrefs((prev) => ({
+                          ...prev,
+                          defaultRoomLayout: {
+                            ...(prev.defaultRoomLayout || ({ mode: "speaker" } as RoomLayout)),
+                            mode,
+                          },
+                        }));
+                      }}
+                      style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "#0f172a", color: "#e2e8f0" }}
+                    >
+                      {(["speaker", "grid", "carousel", "pip"] as const).map((m) => (
+                        <option key={m} value={m}>
+                          {m === "pip" ? "PiP" : m.charAt(0).toUpperCase() + m.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <label style={{ display: "grid", gap: 6, fontSize: 13, color: "#cbd5e1" }}>
+                      <span style={{ fontWeight: 600, color: "#e2e8f0" }}>Max tiles</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={64}
+                        value={typeof mediaPrefs.defaultRoomLayout?.maxTiles === "number" ? String(mediaPrefs.defaultRoomLayout.maxTiles) : ""}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const next = raw === "" ? undefined : Number(raw);
+                          setMediaPrefs((prev) => ({
+                            ...prev,
+                            defaultRoomLayout: {
+                              ...(prev.defaultRoomLayout || ({ mode: "speaker" } as RoomLayout)),
+                              maxTiles: Number.isFinite(next as any) ? (next as number) : undefined,
+                            },
+                          }));
+                        }}
+                        placeholder="(auto)"
+                        style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "#0f172a", color: "#e2e8f0" }}
+                      />
+                    </label>
+
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#cbd5e1", paddingTop: 26 }}>
+                      <input
+                        type="checkbox"
+                        checked={mediaPrefs.defaultRoomLayout?.followSpeaker === true}
+                        onChange={(e) => {
+                          setMediaPrefs((prev) => ({
+                            ...prev,
+                            defaultRoomLayout: {
+                              ...(prev.defaultRoomLayout || ({ mode: "speaker" } as RoomLayout)),
+                              followSpeaker: e.target.checked,
+                            },
+                          }));
+                        }}
+                      />
+                      <span><strong style={{ color: "#e2e8f0" }}>Follow speaker</strong></span>
+                    </label>
+                  </div>
+
+                  <label style={{ display: "grid", gap: 6, fontSize: 13, color: "#cbd5e1" }}>
+                    <span style={{ fontWeight: 600, color: "#e2e8f0" }}>Pinned identity (optional)</span>
+                    <input
+                      type="text"
+                      value={mediaPrefs.defaultRoomLayout?.pinnedIdentity || ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setMediaPrefs((prev) => ({
+                          ...prev,
+                          defaultRoomLayout: {
+                            ...(prev.defaultRoomLayout || ({ mode: "speaker" } as RoomLayout)),
+                            pinnedIdentity: v.trim() ? v : null,
+                          },
+                        }));
+                      }}
+                      placeholder="LiveKit identity (leave blank for none)"
+                      style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "#0f172a", color: "#e2e8f0" }}
+                    />
+                  </label>
+
+                  <div style={{ marginTop: 2, fontSize: 12, color: "#94a3b8" }}>
+                    Applied as the default viewer/participant layout for newly created rooms.
+                  </div>
                 </div>
               </div>
 
