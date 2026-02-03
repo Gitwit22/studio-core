@@ -16,6 +16,12 @@ function getNextResetDate(): Date {
 
 const router = express.Router();
 
+const USAGE_SUMMARY_VERSION = "v1";
+const setUsageSummaryVersionHeader = (req: any, res: any, next: any) => {
+  res.setHeader("x-sl-usage-summary-version", USAGE_SUMMARY_VERSION);
+  next();
+};
+
 export type UsageSummaryResult = {
   status: number;
   body: any;
@@ -139,21 +145,17 @@ export async function computeUsageSummaryResult(uid: string): Promise<UsageSumma
   const participantLimit = Number(plan.limits.monthlyMinutes || 0); // 0 = unlimited
   const transcodeLimit = Number(plan.limits.transcodeMinutes || 0); // 0 = unlimited
 
-    const isOverParticipant =
-      participantLimit > 0 ? participantUsed >= participantLimit : false;
+  const isOverParticipant = participantLimit > 0 ? participantUsed >= participantLimit : false;
+  const isOverTranscode = transcodeLimit > 0 ? transcodeUsed >= transcodeLimit : false;
+  const isOverLimit = isOverParticipant || isOverTranscode;
 
-    const isOverTranscode =
-      transcodeLimit > 0 ? transcodeUsed >= transcodeLimit : false;
+  const remainingParticipantMinutes =
+    participantLimit > 0 ? Math.max(0, participantLimit - participantUsed) : null;
 
-    const isOverLimit = isOverParticipant || isOverTranscode;
+  const remainingTranscodeMinutes =
+    transcodeLimit > 0 ? Math.max(0, transcodeLimit - transcodeUsed) : null;
 
-    const remainingParticipantMinutes =
-      participantLimit > 0 ? Math.max(0, participantLimit - participantUsed) : null;
-
-    const remainingTranscodeMinutes =
-      transcodeLimit > 0 ? Math.max(0, transcodeLimit - transcodeUsed) : null;
-
-    const resetDateISO = getNextResetDate().toISOString();
+  const resetDateISO = getNextResetDate().toISOString();
 
   return {
     status: 200,
@@ -164,59 +166,16 @@ export async function computeUsageSummaryResult(uid: string): Promise<UsageSumma
       resetDate: resetDateISO,
       participantMinutes: participantUsed,
       transcodeMinutes: transcodeUsed,
-      usage: {
-        minutes: {
-          live: {
-            currentPeriod: liveCurrent,
-            lifetime: liveLifetime,
-          },
-          // Bucketed transcode minutes (broadcast/egress)
-          transcode: {
-            currentPeriod: transcodeCurrent,
-            lifetime: transcodeLifetime,
-          },
-          // Canonical aliases
-          inRoom: {
-            currentPeriod: inRoomCurrent,
-            lifetime: inRoomLifetime,
-          },
-          broadcast: {
-            currentPeriod: broadcastCurrent,
-            lifetime: broadcastLifetime,
-          },
-          recording: {
-            currentPeriod: recordingCurrent,
-            lifetime: recordingLifetime,
-          },
-          hls: {
-            currentPeriod: hlsCurrent,
-            lifetime: hlsLifetime,
-          },
-        },
-      };
-    }
 
-    async function handleUsageSummary(req: any, res: any) {
-      try {
-        const uid = (req as any).user?.uid;
-        if (!uid) {
-          return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
-        }
-
-        const result = await computeUsageSummaryResult(uid);
-        return res.status(result.status).json(result.body);
-      } catch (error: any) {
-        console.error("Error in usage summary:", error);
-        return res.status(500).json({ success: false, error: "Failed to fetch usage summary" });
-      }
+      billing: {
         overagesEnabled,
-        pendingPlan: userData.pendingPlan ?? null,
+        pendingPlan: (userData as any).pendingPlan ?? null,
       },
 
       plan: {
         id: planId,
         name: plan.name,
-        priceMonthly: plan.priceMonthly ?? null,
+        priceMonthly: (plan as any).priceMonthly ?? null,
         features: {
           recording: !!features.recording,
           rtmpMultistream: !!features.multistream,
@@ -235,6 +194,7 @@ export async function computeUsageSummaryResult(uid: string): Promise<UsageSumma
         usage: {
           participantMinutes: participantUsed,
           transcodeMinutes: transcodeUsed,
+          hlsMinutes: hlsCurrent,
           participantHours: Math.round((participantUsed / 60) * 100) / 100,
           transcodeHours: Math.round((transcodeUsed / 60) * 100) / 100,
           minutes: {
@@ -242,10 +202,12 @@ export async function computeUsageSummaryResult(uid: string): Promise<UsageSumma
               currentPeriod: liveCurrent,
               lifetime: liveLifetime,
             },
+            // Bucketed transcode minutes (broadcast/egress)
             transcode: {
               currentPeriod: transcodeCurrent,
               lifetime: transcodeLifetime,
             },
+            // Canonical aliases
             inRoom: {
               currentPeriod: inRoomCurrent,
               lifetime: inRoomLifetime,
@@ -305,22 +267,30 @@ export async function computeUsageSummaryResult(uid: string): Promise<UsageSumma
         isOverTranscode,
         remaining: {
           participantMinutes: remainingParticipantMinutes, // null = unlimited
-          transcodeMinutes: remainingTranscodeMinutes,     // null = unlimited
+          transcodeMinutes: remainingTranscodeMinutes, // null = unlimited
         },
       },
-    });
-  } catch (err: any) {
-    console.error("❌ /api/usage/summary error:", err);
-    return res.status(500).json({
-      success: false,
-      error: "internal_error",
-      details: err?.message || String(err),
-    });
+    },
+  };
+}
+
+async function handleUsageSummary(req: any, res: any) {
+  try {
+    const uid = (req as any).user?.uid;
+    if (!uid) {
+      return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    const result = await computeUsageSummaryResult(uid);
+    return res.status(result.status).json(result.body);
+  } catch (error: any) {
+    console.error("Error in usage summary:", error);
+    return res.status(500).json({ success: false, error: "Failed to fetch usage summary" });
   }
 }
 // Expose both endpoints with the same stable payload
-router.get("/summary", requireAuth, handleUsageSummary);
-router.get("/me", requireAuth, handleUsageSummary);
+router.get("/summary", setUsageSummaryVersionHeader, requireAuth, handleUsageSummary);
+router.get("/me", setUsageSummaryVersionHeader, requireAuth, handleUsageSummary);
 
 // Lightweight entitlements endpoint for client gating (features + limits)
 router.get("/entitlements", requireAuth, async (req, res) => {

@@ -93,6 +93,7 @@ All API calls from the frontend use relative paths (`/api/*`), which the Vite pr
 
 ### Usage
 - `GET /api/usage/summary` - Get usage stats
+- Response header: `x-sl-usage-summary-version: v1`
 - `POST /api/usage/streamEnded` - Log stream end
 
 ## Troubleshooting
