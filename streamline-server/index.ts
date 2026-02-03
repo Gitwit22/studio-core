@@ -22,6 +22,7 @@ import roomsResolveRoutes from "./routes/roomsResolve";
 import roomsHlsConfigRoutes from "./routes/roomsHlsConfig";
 import roomsActiveEmbedRoutes from "./routes/roomsActiveEmbed";
 import roomControlsRoutes from "./routes/roomControls";
+import roomsLayoutRoutes from "./routes/roomsLayout";
 import destinationsRoutes from "./routes/destinations";
 import liveRoutes from "./routes/live";
 import statsRoutes from "./routes/stats";
@@ -183,6 +184,8 @@ app.use("/api/multistream", multistreamRoutes);
 app.use("/api/rooms", roomsResolveRoutes);
 // Realtime in-room controls (host/cohost writes; all participants read via roomAccessToken)
 app.use("/api/rooms", roomControlsRoutes);
+// Persistent room layout config (controls viewer layout; recordings inherit)
+app.use("/api/rooms", roomsLayoutRoutes);
 // Room-level persistent HLS config (NOT runtime HLS state)
 app.use("/api/rooms", roomsHlsConfigRoutes);
 // Room-level selection of which Saved Embed to use for HLS control

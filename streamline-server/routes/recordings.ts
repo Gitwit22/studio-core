@@ -40,6 +40,7 @@ import { assertRoomPerm, RoomPermissionError } from "../lib/rolePermissions";
 import { evaluateUsageGate } from "../lib/usageOverages";
 import { upsertUsageMonthlyOverageTotals } from "../lib/usageOveragesWriter";
 import { deleteFiles, deletePrefix } from "../lib/storageClient";
+import { resolveCompositeLayoutFromRoom } from "../lib/roomLayout";
 
 const router = Router();
 
@@ -724,8 +725,12 @@ router.post(
       throw err;
     }
 
-    // CRITICAL: Layout must be exactly "speaker" or "grid" - anything else causes 400
-    const layout = rawLayout === "speaker" ? "speaker" : "grid";
+    // Canonical: recordings inherit layout from the room doc.
+    // Back-compat: allow request layout only if room layout is not set.
+    const roomSnap = await firestore.collection("rooms").doc(roomId).get();
+    const roomDoc = roomSnap.exists ? ((roomSnap.data() as any) || {}) : {};
+    const resolvedLayout = resolveCompositeLayoutFromRoom({ roomDoc, requestLayout: rawLayout, defaultMode: "speaker" });
+    const layout = resolvedLayout.mode;
     const mode = rawMode === "dual" ? "dual" : "cloud";
 
     // Optional: emergency recordings have special retention rules.

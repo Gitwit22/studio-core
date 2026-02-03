@@ -2685,7 +2685,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               </div>
 
               <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 12, background: "rgba(255,255,255,0.02)" }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Recording Layout</div>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Room Layout</div>
                 <div style={{ display: "flex", gap: 10 }}>
                   {(["speaker", "grid"] as const).map((opt) => (
                     <label key={opt} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
@@ -2701,7 +2701,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                   ))}
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
-                  Used when starting recordings from the room controls.
+                  Sets the layout for the room and is used for recordings.
                 </div>
               </div>
 

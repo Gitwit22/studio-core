@@ -94,6 +94,7 @@ interface Props {
   roomAccessToken?: string;
   selectedPresetId?: string;
   defaultLayout?: "speaker" | "grid";
+  onChangeRoomLayout?: (layout: "speaker" | "grid") => Promise<void> | void;
   defaultRecordingMode?: "cloud" | "dual";
   
   // Stream state
@@ -150,6 +151,7 @@ export default function StreamSetupModalV2({
   roomAccessToken,
   selectedPresetId,
   defaultLayout = "speaker",
+  onChangeRoomLayout,
   defaultRecordingMode = "cloud",
   streamStatus,
   onStartStream,
@@ -206,6 +208,8 @@ export default function StreamSetupModalV2({
 
   const [layout, setLayout] = useState<"speaker" | "grid">(defaultLayout);
   const [recordingMode, setRecordingMode] = useState<"cloud" | "dual">(defaultRecordingMode);
+  const [roomLayoutBusy, setRoomLayoutBusy] = useState(false);
+  const [roomLayoutError, setRoomLayoutError] = useState<string | null>(null);
 
   // Canonical: HLS is always keyed by Firestore roomId.
   const hlsRoomId = roomId?.trim() || "";
@@ -235,6 +239,23 @@ export default function StreamSetupModalV2({
   useEffect(() => {
     setLayout(defaultLayout);
   }, [defaultLayout]);
+
+  async function handleRoomLayoutChange(next: "speaker" | "grid") {
+    if (recordingIsActive || roomLayoutBusy) return;
+    const prev = layout;
+    setLayout(next);
+    setRoomLayoutError(null);
+    if (!onChangeRoomLayout) return;
+    setRoomLayoutBusy(true);
+    try {
+      await onChangeRoomLayout(next);
+    } catch {
+      setLayout(prev);
+      setRoomLayoutError("Failed to update room layout");
+    } finally {
+      setRoomLayoutBusy(false);
+    }
+  }
 
   useEffect(() => {
     setRecordingMode(defaultRecordingMode);
@@ -1465,13 +1486,13 @@ export default function StreamSetupModalV2({
                 )}
               </div>
 
-              {/* Layout Selector */}
-              <label style={{ fontSize: '0.875rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontWeight: 600 }}>Layout:</span>
+              {/* Room Layout Selector */}
+              <label style={{ fontSize: '0.875rem', marginBottom: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span style={{ fontWeight: 600 }}>Room Layout:</span>
                 <select
                   value={layout}
-                  onChange={e => setLayout(e.target.value as "speaker" | "grid")}
-                  disabled={recordingIsActive}
+                  onChange={(e) => handleRoomLayoutChange(e.target.value as "speaker" | "grid")}
+                  disabled={recordingIsActive || roomLayoutBusy || !onChangeRoomLayout}
                   style={{
                     padding: '0.4rem 0.7rem',
                     borderRadius: '0.3rem',
@@ -1481,14 +1502,31 @@ export default function StreamSetupModalV2({
                     fontWeight: 600,
                     fontSize: '0.85rem',
                     outline: 'none',
-                    cursor: recordingIsActive ? 'not-allowed' : 'pointer',
-                    opacity: recordingIsActive ? 0.5 : 1
+                    cursor: (recordingIsActive || roomLayoutBusy || !onChangeRoomLayout) ? 'not-allowed' : 'pointer',
+                    opacity: (recordingIsActive || roomLayoutBusy || !onChangeRoomLayout) ? 0.5 : 1
                   }}
                 >
                   <option value="speaker">Speaker</option>
                   <option value="grid">Grid</option>
                 </select>
               </label>
+
+              <div style={{ marginBottom: '0.75rem', fontSize: '0.75rem', color: '#94a3b8' }}>
+                Sets the layout for the room and is used for recordings.
+              </div>
+
+              {roomLayoutError && (
+                <div style={{
+                  fontSize: '0.75rem',
+                  color: '#ef4444',
+                  marginBottom: '0.75rem',
+                  padding: '0.5rem',
+                  background: 'rgba(220, 38, 38, 0.1)',
+                  borderRadius: '0.25rem'
+                }}>
+                  {roomLayoutError}
+                </div>
+              )}
 
               {/* Status */}
               {recordingStatus === "error" && (

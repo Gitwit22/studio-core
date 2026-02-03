@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { firestore as db } from "../firebaseAdmin";
 import type { HlsPresetId } from "./livekitEgress";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
+import type { RoomLayout } from "../lib/roomLayout";
 
 export type RoomHlsConfig = {
   enabled: boolean;
@@ -28,6 +29,9 @@ export const DEFAULT_ROOM_HLS_CONFIG: RoomHlsConfig = {
 export type RoomDoc = {
   ownerId: string;
   livekitRoomName?: string;
+  // Canonical room layout configuration (controls viewer/participant layout;
+  // recordings inherit this by default).
+  roomLayout?: RoomLayout;
   // Room access policy (server-enforced during token issuance).
   // Defaults are intentionally secure.
   visibility?: "public" | "unlisted" | "private";
