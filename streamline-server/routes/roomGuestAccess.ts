@@ -196,7 +196,24 @@ router.get("/rooms/:roomId/status", async (req: any, res) => {
     if (!roomId) return res.status(400).json({ error: "roomId_required" });
 
     const user = tryGetAuthUser(req);
-    const guest = tryGetGuestSession(req);
+    let guest = tryGetGuestSession(req);
+
+    if (!user && !guest) {
+      const legacyGuest = tryGetLegacyInviteGuest(req, roomId);
+      if (legacyGuest) {
+        guest = legacyGuest as any;
+        const expiresIn = "2h";
+        const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: "viewer" }, expiresIn);
+        const secure = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+        res.cookie("sl_guest", sessionJwt, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure,
+          path: "/",
+          maxAge: 2 * 60 * 60 * 1000,
+        });
+      }
+    }
 
     if (!user && (!guest || guest.roomId !== roomId)) {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });

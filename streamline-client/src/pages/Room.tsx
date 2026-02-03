@@ -1320,6 +1320,7 @@ function RoomPage() {
           const resolvedRoomId = String(data.roomId || "").trim();
           const resolvedRoomName = String(data.roomName || "").trim();
           const resolvedRole = String(data.role || "").trim();
+          const tokenType = String((data as any).tokenType || "").trim();
 
           if (resolvedRoomId) setFirestoreRoomId(resolvedRoomId);
           if (resolvedRoomName) setRoomName(resolvedRoomName);
@@ -1333,10 +1334,21 @@ function RoomPage() {
             }
           }
 
-          // Treat the incoming token as a roomAccessToken for downstream
-          // APIs (HLS, status, etc.). /api/roomToken will return a refreshed
-          // token which will overwrite this state when available.
-          setRoomAccessToken(t);
+          // Distinguish between legacy invite JWTs and roomAccessTokens.
+          // Invite tokens must be forwarded to /api/rooms/:roomId/token as x-invite-token.
+          if (tokenType === "invite") {
+            setInviteToken(t);
+            try {
+              localStorage.setItem("sl_invite_token", t);
+            } catch {
+              // ignore
+            }
+          } else {
+            // Treat the incoming token as a roomAccessToken for downstream
+            // APIs (HLS, status, etc.). /api/rooms/:roomId/token will return a refreshed
+            // token which will overwrite this state when available.
+            setRoomAccessToken(t);
+          }
           return;
         }
 
