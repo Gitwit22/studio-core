@@ -5,6 +5,13 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import { API_BASE } from "../lib/apiBase";
 import { APP_BASE } from "../lib/appBase";
 import {
+  LiveKitRoom,
+  VideoConference,
+  useRoomContext,
+  useLocalParticipant,
+} from "@livekit/components-react";
+import { RoomEvent } from "livekit-client";
+import {
   apiStartRecording,
   apiStopRecording,
   apiFetch,
@@ -28,10 +35,19 @@ import {
   apiGetRoomPermissions,
   apiSetRoomControls,
 } from "../lib/api";
+import RoleOverlay from "../components/RoleOverlay";
+import StreamSetupModalV2 from "../components/StreamSetupModal";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { RoleChangeToast } from "../components/RoleChangeToast";
+import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import {
+  RECONNECT_MEDIA_MESSAGE_TYPE,
+  reconnectMedia,
+  tryParseLiveKitDataMessage,
+} from "../lib/mediaRecovery";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
+import type { DestinationItem } from "../services/destinations";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
