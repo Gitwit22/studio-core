@@ -48,7 +48,7 @@ import {
   tryParseLiveKitDataMessage,
 } from "../lib/mediaRecovery";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
-import type { DestinationItem } from "../services/destinations";
+import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
