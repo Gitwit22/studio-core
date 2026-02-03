@@ -28,6 +28,7 @@ import {
   apiGetRoomPermissions,
   apiSetRoomControls,
 } from "../lib/api";
+import { computeEffectiveFeatureAccess } from "../lib/effectiveFeatureAccess";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
 import { usePlatformFlags } from "../hooks/usePlatformFlags";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
