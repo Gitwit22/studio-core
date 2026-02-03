@@ -174,7 +174,7 @@ function App() {
       <Route path="/settings/destinations" element={<SettingsDestinations />} />
       <Route path="/room-exit/:recordingId" element={<RoomExitPage />} />
 
-      {/* Stream Summary */}
+      {/* Legacy: /stream-summary -> canonical /room-exit */}
       <Route path="/stream-summary/:recordingId" element={<LegacyStreamSummaryRedirect />} />
       <Route
         path="/editing/post-stream"
