@@ -1,5 +1,5 @@
 import { getFeatureErrorMessage } from "../lib/featureErrors";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { API_BASE } from "../lib/apiBase";
@@ -28,9 +28,7 @@ import {
   apiGetRoomPermissions,
   apiSetRoomControls,
 } from "../lib/api";
-import { computeEffectiveFeatureAccess } from "../lib/effectiveFeatureAccess";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
-import { usePlatformFlags } from "../hooks/usePlatformFlags";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
@@ -805,7 +803,6 @@ function LiveKitShell({
 function RoomPage() {
   const location = useLocation();
   const nav = useNavigate();
-  const { flags: platformFlags } = usePlatformFlags();
   const { roomName: routeRoomNameParam } = useParams();
   const routeRoomId = routeRoomNameParam ? decodeURIComponent(routeRoomNameParam) : null;
   const [searchParams] = useSearchParams();
@@ -1060,6 +1057,21 @@ function RoomPage() {
     return cached || "";
   });
   const effectiveRoomName = roomName;
+
+  const rtmpCap = planRtmpDestinationsMax ?? 0;
+  const roomEffectiveEntitlementsForAccess = useMemo(
+    () => ({
+      features: {
+        hls: planHlsEnabled,
+        hlsCustomizationEnabled: planHlsCustomizationEnabled,
+      },
+      limits: {
+        rtmpDestinationsMax: rtmpCap,
+      },
+    }),
+    [planHlsEnabled, planHlsCustomizationEnabled, rtmpCap],
+  );
+  const { access: featureAccess } = useFeatureAccess(roomEffectiveEntitlementsForAccess);
 
   useEffect(() => {
     // When navigating between rooms in a single SPA session, always
@@ -2746,23 +2758,6 @@ function RoomPage() {
   }
 
   const guestCapLabel = typeof maxGuestsAllowed === "number" && maxGuestsAllowed > 0 ? `${maxGuestsAllowed}` : "—";
-  const rtmpCap = planRtmpDestinationsMax ?? 0;
-  const featureAccess = computeEffectiveFeatureAccess({
-    effectiveEntitlements: {
-      features: {
-        hls: planHlsEnabled,
-        hlsCustomizationEnabled: planHlsCustomizationEnabled,
-      },
-      limits: {
-        rtmpDestinationsMax: rtmpCap,
-      },
-    },
-    platformFlags: {
-      hlsEnabled: platformHlsEnabled,
-      transcodeEnabled: platformFlags?.transcodeEnabled,
-      recordingEnabled: platformRecordingEnabled,
-    },
-  });
 
   const entitlementSummary = `Rec:${planRecordingEnabled ? "on" : "off"} • Dual:${dualRecordingAllowed ? "on" : "off"} • RTMP:${rtmpCap === 0 ? "off" : rtmpCap === 1 ? "1" : `up to ${rtmpCap}`} • HLS:${planHlsEnabled ? "on" : "off"} • HLS Setup:${planHlsCustomizationEnabled ? "on" : "off"} • Guests:${guestCapLabel}`;
   const recordingEnabled =
