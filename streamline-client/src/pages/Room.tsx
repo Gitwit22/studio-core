@@ -1556,6 +1556,9 @@ function RoomPage() {
           payload.uid = getOrCreateUid();
           payload.displayName = displayName;
           // Invites are currently guest/participant-only (no elevated roles).
+          if (!bearerToken && inviteToken) {
+            payload.inviteToken = inviteToken;
+          }
 
           return { endpoint, payload };
         };
@@ -1567,6 +1570,8 @@ function RoomPage() {
           const headers: Record<string, string> = {};
           if (bearerToken) {
             headers.Authorization = `Bearer ${bearerToken}`;
+          } else if (inviteToken) {
+            headers["x-invite-token"] = inviteToken;
           }
           const res = await apiFetch(endpoint, {
             method: "POST",
@@ -1614,12 +1619,15 @@ function RoomPage() {
           if (res.status === 401) {
             setNeedsReauth(true);
             setAuthStatus("guest");
-            setReauthBannerText("Login or invite required to join this room.");
-            try {
-              const next = `${location.pathname}${location.search}`;
-              nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
-            } catch {
-              // ignore
+            setReauthBannerText(inviteToken ? "Invite invalid or expired." : "Login or invite required to join this room.");
+            // Only force login redirect when we truly have no invite to attempt guest join.
+            if (!inviteToken) {
+              try {
+                const next = `${location.pathname}${location.search}`;
+                nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
+              } catch {
+                // ignore
+              }
             }
           } else if (res.status === 403) {
             setNeedsReauth(true);
@@ -1739,7 +1747,13 @@ function RoomPage() {
 
     const poll = async () => {
       try {
-        const res = await apiFetch(`/api/rooms/${encodeURIComponent(roomId)}/status`, undefined, { allowNonOk: true });
+        const res = await apiFetch(
+          `/api/rooms/${encodeURIComponent(roomId)}/status`,
+          {
+            headers: inviteToken ? { "x-invite-token": inviteToken } : undefined,
+          },
+          { allowNonOk: true }
+        );
         if (cancelled) return;
 
         if (res.status === 401 || res.status === 403) {

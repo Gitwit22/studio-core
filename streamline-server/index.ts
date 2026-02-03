@@ -101,6 +101,9 @@ app.use(cors({
     // Explicitly allow both typical header casings to satisfy browser preflight checks.
     "x-room-access-token",
     "X-Room-Access-Token",
+    // Legacy invite JWT (join links) used for guest RTC join/status without auth.
+    "x-invite-token",
+    "X-Invite-Token",
   ],
   exposedHeaders: ["x-sl-auth-fallback", "x-sl-auth-header-invalid"],
   optionsSuccessStatus: 204,

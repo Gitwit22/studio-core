@@ -2,11 +2,41 @@ import { Router } from "express";
 import admin from "firebase-admin";
 import jwt from "jsonwebtoken";
 import { firestore } from "../firebaseAdmin";
-import { tryGetAuthUser } from "../middleware/requireAuth";
+import { tryGetAuthUser, verifyInviteToken } from "../middleware/requireAuth";
 import { tryGetGuestSession } from "../middleware/guestSession";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { signGuestSession } from "../middleware/guestSession";
+
+export function extractInviteToken(req: any): string | null {
+  const hdr = (req?.headers as any) || {};
+  const fromHeader = hdr["x-invite-token"] ?? hdr["X-Invite-Token"];
+  if (typeof fromHeader === "string" && fromHeader.trim()) return fromHeader.trim();
+  const fromBody = req?.body?.inviteToken;
+  if (typeof fromBody === "string" && fromBody.trim()) return fromBody.trim();
+  const fromQuery = req?.query?.inviteToken ?? req?.query?.t;
+  if (typeof fromQuery === "string" && fromQuery.trim()) return fromQuery.trim();
+  return null;
+}
+
+export function tryGetLegacyInviteGuest(req: any, roomId: string): { inviteId: string; roomId: string; role: "viewer" } | null {
+  const raw = extractInviteToken(req);
+  if (!raw) return null;
+  try {
+    const claims = verifyInviteToken(raw) as any;
+    const claimRoomId = typeof claims?.roomId === "string" ? claims.roomId.trim() : "";
+    const rawRole = String(claims?.role || "guest").toLowerCase();
+    // Never allow elevated roles through legacy invite JWTs for guest RTC join.
+    // Cohost (and legacy moderator) invites must be handled by the authed flow.
+    if (rawRole === "cohost" || rawRole === "moderator") return null;
+    if (!claimRoomId || claimRoomId !== roomId) return null;
+
+    const inviteId = `legacy:${Buffer.from(raw).toString("base64url").slice(0, 24)}`;
+    return { inviteId, roomId, role: "viewer" };
+  } catch {
+    return null;
+  }
+}
 
 async function getAccessTokenCtor() {
   const mod = await import("livekit-server-sdk");
@@ -198,7 +228,24 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     if (!roomId) return res.status(400).json({ error: "roomId_required" });
 
     const user = tryGetAuthUser(req);
-    const guest = tryGetGuestSession(req);
+    let guest = tryGetGuestSession(req);
+
+    if (!user && !guest) {
+      const legacyGuest = tryGetLegacyInviteGuest(req, roomId);
+      if (legacyGuest) {
+        guest = legacyGuest as any;
+        const expiresIn = "2h";
+        const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: "viewer" }, expiresIn);
+        const secure = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+        res.cookie("sl_guest", sessionJwt, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure,
+          path: "/",
+          maxAge: 2 * 60 * 60 * 1000,
+        });
+      }
+    }
 
     const allowGuestJoin = String(process.env.ALLOW_GUEST_RTC_JOIN || "").trim() === "1";
 
@@ -226,7 +273,8 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     }
 
     // Policy: auth requirement
-    if (requiresAuth && !user) {
+    // Allow guests to join via a verified guest session (sl_guest cookie) or legacy invite token.
+    if (requiresAuth && !user && !guest) {
       return res.status(401).json({ error: "login_required" });
     }
 
