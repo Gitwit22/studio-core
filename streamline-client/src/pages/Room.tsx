@@ -28,6 +28,7 @@ import {
   apiGetRoomPermissions,
   apiSetRoomControls,
 } from "../lib/api";
+import { RoleChangeToast } from "../components/RoleChangeToast";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
 
