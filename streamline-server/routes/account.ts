@@ -202,11 +202,17 @@ function normalizeMediaPrefs(raw: any, planId: string) {
     normalizeRoomLayout({ mode: (prefs as any).defaultLayout }) ||
     { mode: "speaker" as const };
 
+  const derivedDefaultLayout: "speaker" | "grid" =
+    defaultRoomLayout.mode === "grid" || defaultRoomLayout.mode === "carousel" ? "grid" : "speaker";
+
   return {
     ...prefs,
     defaultPresetId: preset.id,
-    defaultLayout: prefs.defaultLayout === "grid" || prefs.defaultLayout === "speaker" ? prefs.defaultLayout : "speaker",
+    // Single source of truth: defaultRoomLayout drives composite recording layout.
+    defaultLayout: derivedDefaultLayout,
     defaultRoomLayout,
+    // Single rule: destinations always reuse last-used selection.
+    destinationsDefaultMode: "last_used" as const,
     autoClamp: true,
     permissionsMode: prefs.permissionsMode === "advanced" ? "advanced" : "simple",
   };
@@ -842,9 +848,6 @@ router.patch("/media-prefs", async (req, res) => {
     const body = req.body || {};
     const updates: any = {};
 
-    if (body.defaultLayout === "speaker" || body.defaultLayout === "grid") {
-      updates.defaultLayout = body.defaultLayout;
-    }
     if (body.defaultRoomLayout && typeof body.defaultRoomLayout === "object") {
       const normalized = normalizeRoomLayout(body.defaultRoomLayout);
       if (normalized) {
@@ -857,9 +860,8 @@ router.patch("/media-prefs", async (req, res) => {
     if (typeof body.warnOnHighQuality === "boolean") {
       updates.warnOnHighQuality = body.warnOnHighQuality;
     }
-    if (body.destinationsDefaultMode === "last_used" || body.destinationsDefaultMode === "pick_each_time") {
-      updates.destinationsDefaultMode = body.destinationsDefaultMode;
-    }
+    // Destinations default is intentionally not user-configurable.
+    // Always reuse last used selection for a single cohesive behavior.
     if (body.defaultPresetId) {
       const preset = getPresetById(String(body.defaultPresetId));
       const { preset: effective, clamped } = clampPresetForPlan(planId, preset.id);

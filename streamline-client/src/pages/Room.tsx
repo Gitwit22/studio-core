@@ -1043,7 +1043,6 @@ function RoomPage() {
   const [selectedPresetId, setSelectedPresetId] = useState<string>("standard_720p30");
   const [effectivePresetId, setEffectivePresetId] = useState<string | null>(null);
   const [presetClamped, setPresetClamped] = useState(false);
-  const [defaultLayoutPref, setDefaultLayoutPref] = useState<"speaker" | "grid">("speaker");
   const [defaultRecordingModePref, setDefaultRecordingModePref] = useState<"cloud" | "dual">("cloud");
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
@@ -1774,9 +1773,6 @@ function RoomPage() {
           setAuthStatus("authed");
           const me = await meRes.json();
           const prefs = me?.mediaPrefs || {};
-          if (prefs.defaultLayout === "grid" || prefs.defaultLayout === "speaker") {
-            setDefaultLayoutPref(prefs.defaultLayout);
-          }
           if (prefs.defaultRecordingMode === "cloud" || prefs.defaultRecordingMode === "dual") {
             setDefaultRecordingModePref(prefs.defaultRecordingMode);
           }
@@ -2081,7 +2077,7 @@ function RoomPage() {
     layout = "grid",
     mode = "cloud",
     presetId,
-  }: { layout?: "speaker" | "grid"; mode?: "cloud" | "dual"; presetId?: string }) => {
+  }: { mode: "cloud" | "dual"; presetId?: string }) => {
     if (isViewer) {
       console.warn("startRecording blocked for viewer role");
       return;
@@ -2112,7 +2108,7 @@ function RoomPage() {
       console.warn("Dual recording requested but not allowed; falling back to cloud mode.");
     }
 
-    console.log("🎬 startRecording called. roomId:", roomId, "layout:", layout, "mode:", requestedMode);
+    console.log("🎬 startRecording called. roomId:", roomId, "mode:", requestedMode);
 
     autoStopTriggeredRef.current = false;
 
@@ -2133,7 +2129,7 @@ function RoomPage() {
       setRecordingCountdown("You're recording");
       try {
         console.log("📡 Calling apiStartRecording...");
-        const response = await apiStartRecording(roomId, layout, requestedMode, presetId || selectedPresetId, roomAccessToken || undefined);
+        const response = await apiStartRecording(roomId, requestedMode, presetId || selectedPresetId, roomAccessToken || undefined);
         console.log("📡 Got response:", response);
         const recId = response?.data?.recordingId ?? response?.recordingId;
         console.log("🎬 Extracted recordingId:", recId);
@@ -3248,7 +3244,6 @@ function RoomPage() {
           roomAccessToken={roomAccessToken || undefined}
           
           selectedPresetId={selectedPresetId}
-          defaultLayout={defaultLayoutPref}
           defaultRecordingMode={defaultRecordingModePref}
           streamStatus={streamStatus}
           onStartStream={handleStartMultistream}

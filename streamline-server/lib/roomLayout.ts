@@ -54,6 +54,9 @@ export function normalizeRoomLayout(input: any): RoomLayout | null {
 export function normalizeCompositeLayoutMode(raw: any): CompositeLayoutMode | null {
   const v = String(raw || "").toLowerCase();
   if (v === "speaker" || v === "grid") return v as CompositeLayoutMode;
+  // Composite egress only supports speaker/grid; map room-level modes to the closest composite.
+  if (v === "carousel") return "grid";
+  if (v === "pip") return "speaker";
   return null;
 }
 

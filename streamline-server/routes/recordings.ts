@@ -692,7 +692,6 @@ router.post(
     const {
       roomId: rawRoomId,
       roomName: rawRoomName,
-      layout: rawLayout,
       mode: rawMode,
       presetId,
       usageType: rawUsageType,
@@ -700,7 +699,6 @@ router.post(
     } = req.body as {
       roomId?: string;
       roomName?: string;
-      layout?: string;
       mode?: string; // "cloud" | "dual"
       presetId?: string;
       usageType?: string;
@@ -725,11 +723,30 @@ router.post(
       throw err;
     }
 
-    // Canonical: recordings inherit layout from the room doc.
-    // Back-compat: allow request layout only if room layout is not set.
-    const roomSnap = await firestore.collection("rooms").doc(roomId).get();
-    const roomDoc = roomSnap.exists ? ((roomSnap.data() as any) || {}) : {};
-    const resolvedLayout = resolveCompositeLayoutFromRoom({ roomDoc, requestLayout: rawLayout, defaultMode: "speaker" });
+    // Single mental model:
+    // - Room Layout is the source of truth
+    // - Recordings inherit Room Layout
+    // If a legacy room lacks roomLayout, seed it from account defaults before starting.
+    const roomRef = firestore.collection("rooms").doc(roomId);
+    const roomSnap = await roomRef.get();
+    let roomDoc = roomSnap.exists ? ((roomSnap.data() as any) || {}) : {};
+
+    if (!roomDoc.roomLayout) {
+      try {
+        const userSnap = await firestore.collection("users").doc(uid).get();
+        const userData = userSnap.exists ? ((userSnap.data() as any) || {}) : {};
+        const mediaPrefs = (userData as any).mediaPrefs || {};
+        const candidate = mediaPrefs.defaultRoomLayout;
+        if (candidate && typeof candidate === "object" && typeof candidate.mode === "string") {
+          await roomRef.set({ roomLayout: candidate }, { merge: true });
+          roomDoc = { ...roomDoc, roomLayout: candidate };
+        }
+      } catch (e: any) {
+        console.warn("[recordings/start] failed to seed missing roomLayout from mediaPrefs", e?.message || e);
+      }
+    }
+
+    const resolvedLayout = resolveCompositeLayoutFromRoom({ roomDoc, requestLayout: undefined, defaultMode: "speaker" });
     const layout = resolvedLayout.mode;
     const mode = rawMode === "dual" ? "dual" : "cloud";
 

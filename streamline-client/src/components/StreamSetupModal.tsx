@@ -93,7 +93,6 @@ interface Props {
   roomId: string;
   roomAccessToken?: string;
   selectedPresetId?: string;
-  defaultLayout?: "speaker" | "grid";
   defaultRecordingMode?: "cloud" | "dual";
   
   // Stream state
@@ -112,7 +111,7 @@ interface Props {
   
   // Recording state (independent from stream)
   recordingStatus: "idle" | "recording" | "stopping" | "stopped" | "error";
-  onStartRecording: (params: { layout: "speaker" | "grid"; mode: "cloud" | "dual"; presetId?: string }) => Promise<void>;
+  onStartRecording: (params: { mode: "cloud" | "dual"; presetId?: string }) => Promise<void>;
   onStopRecording: () => Promise<void>;
   recordingEnabled?: boolean;
   recordingElapsedSeconds?: number;
@@ -149,7 +148,6 @@ export default function StreamSetupModalV2({
   roomId,
   roomAccessToken,
   selectedPresetId,
-  defaultLayout = "speaker",
   defaultRecordingMode = "cloud",
   streamStatus,
   onStartStream,
@@ -204,7 +202,6 @@ export default function StreamSetupModalV2({
 
   const platformOrder: PlatformKey[] = ["youtube", "facebook", "twitch", "instagram", "custom"];
 
-  const [layout, setLayout] = useState<"speaker" | "grid">(defaultLayout);
   const [recordingMode, setRecordingMode] = useState<"cloud" | "dual">(defaultRecordingMode);
 
   // Canonical: HLS is always keyed by Firestore roomId.
@@ -230,11 +227,6 @@ export default function StreamSetupModalV2({
     const token = typeof window !== "undefined" ? window.localStorage.getItem("authToken") : null;
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
-
-  // Keep local layout/mode in sync with defaults from account prefs
-  useEffect(() => {
-    setLayout(defaultLayout);
-  }, [defaultLayout]);
 
   useEffect(() => {
     setRecordingMode(defaultRecordingMode);
@@ -921,7 +913,7 @@ export default function StreamSetupModalV2({
   };
 
   const handleStartRecording = async () => {
-    await onStartRecording({ layout, mode: recordingMode, presetId: selectedPresetId });
+    await onStartRecording({ mode: recordingMode, presetId: selectedPresetId });
   };
 
   return (

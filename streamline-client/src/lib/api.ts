@@ -206,14 +206,13 @@ export async function getToken(
 
 export async function apiStartRecording(
   roomId: string,
-  layout: "speaker" | "grid",
   mode: "cloud" | "dual" = "cloud",
   presetId?: string,
   roomAccessToken?: string | null
 ) {
   const res = await apiFetchAuth("/api/recordings/start", {
     method: "POST",
-    body: JSON.stringify({ roomId, layout, mode, presetId }),
+    body: JSON.stringify({ roomId, mode, presetId }),
     headers: roomAccessToken
       ? {
           "x-room-access-token": roomAccessToken,
