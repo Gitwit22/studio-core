@@ -876,6 +876,7 @@ function RoomPage() {
   const roomTokenMintInFlightRef = useRef(false);
   const [roomGateStatus, setRoomGateStatus] = useState<"unknown" | "idle" | "live" | "blocked">("unknown");
   const roomGatePollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hostToolsHydratedKeyRef = useRef<string | null>(null);
   const [controlsPanelOpen, setControlsPanelOpen] = useState(false);
   const [effectiveControls, setEffectiveControls] = useState<EffectiveControls>(() => ({
     canPublishAudio: true,
@@ -1069,6 +1070,18 @@ function RoomPage() {
   const [, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
     const [effectivePermissionsMode, setEffectivePermissionsMode] = useState<"simple" | "advanced">("simple");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
+
+  useEffect(() => {
+    // New room => allow fresh host tools hydration
+    hostToolsHydratedKeyRef.current = null;
+  }, [roomId]);
+
+  useEffect(() => {
+    // If all host tools are closed, allow a future open to hydrate again.
+    if (!showStreamSetup && !dashboardOpen) {
+      hostToolsHydratedKeyRef.current = null;
+    }
+  }, [showStreamSetup, dashboardOpen]);
   const [roomName, setRoomName] = useState<string>(() => {
     const fromState = (location.state as any)?.livekitRoomName;
     if (typeof fromState === "string" && fromState.trim()) return fromState.trim();
@@ -1774,6 +1787,10 @@ function RoomPage() {
     if (!showStreamSetup && !(dashboardOpen && canManageStream)) return;
     if (needsReauth) return;
     if (!canManageStream) return;
+
+    const toolsKey = `${roomId || ""}:${showStreamSetup ? "setup" : "dashboard"}`;
+    if (hostToolsHydratedKeyRef.current === toolsKey) return;
+    hostToolsHydratedKeyRef.current = toolsKey;
 
     let cancelled = false;
 
