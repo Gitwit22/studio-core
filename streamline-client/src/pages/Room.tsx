@@ -16,6 +16,7 @@ import {
   apiStopRecording,
   apiFetch,
   apiFetchAuth,
+  getAuthToken,
   apiGetCurrentUser,
   apiGetPlans,
   apiGetRoomToken,
