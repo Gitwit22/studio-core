@@ -2,6 +2,8 @@ import { getFeatureErrorMessage } from "../lib/featureErrors";
 import { useEffect, useState, useRef } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { API_BASE } from "../lib/apiBase";
+import { APP_BASE } from "../lib/appBase";
 import {
   apiStartRecording,
   apiStopRecording,
