@@ -6,7 +6,6 @@ import { API_BASE } from "../lib/apiBase";
 import { APP_BASE } from "../lib/appBase";
 import {
   LiveKitRoom,
-  VideoConference,
   useRoomContext,
   useLocalParticipant,
 } from "@livekit/components-react";
@@ -40,6 +39,7 @@ import RoleOverlay from "../components/RoleOverlay";
 import StreamSetupModalV2 from "../components/StreamSetupModal";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { RoleChangeToast } from "../components/RoleChangeToast";
+import SafeVideoConference from "../components/SafeVideoConference";
 import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
 import {
@@ -783,7 +783,7 @@ function LiveKitShell({
               </div>
             }
           >
-            <VideoConference />
+            <SafeVideoConference />
           </ErrorBoundary>
         </div>
         {watermarkEnabled && (
