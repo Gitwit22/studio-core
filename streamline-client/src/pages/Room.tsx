@@ -27,6 +27,7 @@ import {
   apiSetRoomControls,
 } from "../lib/api";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { usePlatformFlags } from "../hooks/usePlatformFlags";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
