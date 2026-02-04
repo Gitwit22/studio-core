@@ -132,7 +132,7 @@ const corsOptions: CorsOptions = {
 
 app.use(cors(corsOptions));
 // Preflight
-app.options("*", cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 
 
