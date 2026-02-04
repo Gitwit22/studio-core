@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import cors from "cors";
+import cors, { type CorsOptions } from "cors";
 import cookieParser from "cookie-parser";
 import webhookRouter from "./routes/webhook";
 import authRoutes from "./routes/auth";
@@ -73,29 +73,50 @@ function normalizeControlsDocId(raw: any): string {
 }
 
 // Allow primary client plus local dev hosts for testing/incognito shares
-const allowedOrigins = [
-  process.env.CLIENT_URL,
-  process.env.CLIENT_URL_2,
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "http://localhost:4173",
-  "http://127.0.0.1:4173",
-].filter(Boolean) as string[];
+const normalizeOrigin = (origin: string) => {
+  const trimmed = String(origin || "").trim();
+  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+};
 
+const allowedOrigins = new Set(
+  [
+    process.env.CLIENT_URL,
+    process.env.CLIENT_URL_2,
+    // Render deployments
+    "https://streamline-platform.onrender.com",
+    "https://streamline-hls-dev-web.onrender.com",
+    // Production custom domains
+    "https://streamline.nxtlvlts.com",
+    "https://www.streamline.nxtlvlts.com",
+    // Local dev
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+  ]
+    .filter(Boolean)
+    .map((o) => normalizeOrigin(String(o)))
+);
 
-
-app.use(cors({
+const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
+    // Allow same-origin / server-to-server / curl (no Origin header)
+    if (!origin) return callback(null, true);
+
+    // Normalize (strip trailing slash)
+    const normalized = normalizeOrigin(origin);
+
     // Note: for disallowed browser origins, do NOT throw (which becomes a 500).
     // Instead, disable CORS for that request (no ACAO header) and let the browser block it.
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (allowedOrigins.has(normalized)) return callback(null, true);
     return callback(null, false);
   },
   credentials: true,
-  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
+    "X-Requested-With",
     "Cache-Control",
     // Room-level access token used by in-room APIs (HLS, multistream, controls, etc.).
     // Explicitly allow both typical header casings to satisfy browser preflight checks.
@@ -107,7 +128,11 @@ app.use(cors({
   ],
   exposedHeaders: ["x-sl-auth-fallback", "x-sl-auth-header-invalid"],
   optionsSuccessStatus: 204,
-}));
+};
+
+app.use(cors(corsOptions));
+// Preflight
+app.options("*", cors(corsOptions));
 
 
 
