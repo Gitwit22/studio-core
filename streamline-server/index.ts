@@ -23,6 +23,7 @@ import roomsHlsConfigRoutes from "./routes/roomsHlsConfig";
 import roomsActiveEmbedRoutes from "./routes/roomsActiveEmbed";
 import roomControlsRoutes from "./routes/roomControls";
 import roomsLayoutRoutes from "./routes/roomsLayout";
+import roomsPolicyRoutes from "./routes/roomsPolicy";
 import destinationsRoutes from "./routes/destinations";
 import liveRoutes from "./routes/live";
 import statsRoutes from "./routes/stats";
@@ -210,6 +211,8 @@ app.use("/api/invites", invitesRoutes);
 app.use("/api/multistream", multistreamRoutes);
 // Room resolve endpoint (/api/rooms/resolve)
 app.use("/api/rooms", roomsResolveRoutes);
+// Room access policy (allowGuests, etc.)
+app.use("/api/rooms", roomsPolicyRoutes);
 // Realtime in-room controls (host/cohost writes; all participants read via roomAccessToken)
 app.use("/api/rooms", roomControlsRoutes);
 // Persistent room layout config (controls viewer layout; recordings inherit)
