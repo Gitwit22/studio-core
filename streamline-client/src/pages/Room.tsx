@@ -68,6 +68,14 @@ type RecordingStatus = "idle" | "recording" | "stopping" | "stopped" | "error";
 
 type GuestStatus = "viewing_join" | "entered_room" | null;
 
+function pendingDownloadBannerKey(roomId: string) {
+  return `sl_pending_download_banner:${roomId}`;
+}
+
+function recordingBannerDismissedKey(recordingId: string) {
+  return `sl_banner_dismissed:${recordingId}`;
+}
+
 function extractApiErrorCode(payload: any): string | null {
   const code = payload?.error ?? payload?.code ?? payload?.data?.error ?? payload?.data?.code;
   return typeof code === "string" && code.trim() ? code.trim() : null;
@@ -1023,7 +1031,9 @@ function RoomPage() {
   const [recordingBackgroundNotice, setRecordingBackgroundNotice] = useState<null | {
     kind: "processing" | "ready";
     recordingId: string;
+    downloadUrl?: string | null;
   }>(null);
+  const [postStopDownloadUrl, setPostStopDownloadUrl] = useState<string | null>(null);
   const [postStopProcessing, setPostStopProcessing] = useState(false);
   const [postStopReady, setPostStopReady] = useState(false);
   const [postStopStatus, setPostStopStatus] = useState<string | null>(null);
@@ -2020,6 +2030,7 @@ function RoomPage() {
       setPostStopProcessing(false);
       setPostStopReady(false);
       setPostStopStatus(null);
+      setPostStopDownloadUrl(null);
       return;
     }
 
@@ -2080,45 +2091,78 @@ function RoomPage() {
     };
   }, [API_BASE, recordingId, recordingStatus]);
 
-  // If the user stayed in the room while the recording was processing, re-open
-  // the modal once the recording becomes ready so they can download it.
+  // When a post-stop recording becomes ready, prefetch the signed download URL.
   useEffect(() => {
-    if (!stayedInRoomDuringProcessing) return;
+    if (recordingStatus !== "stopped" || !recordingId) return;
     if (!postStopReady) return;
 
-    setStayedInRoomDuringProcessing(false);
-
-    if (recordingId) {
-      setRecordingBackgroundNotice({ kind: "ready", recordingId });
-
-      // Optional: browser-level notification (only if the user previously allowed it).
+    let cancelled = false;
+    (async () => {
       try {
-        if (typeof window !== "undefined" && "Notification" in window) {
-          if (window.Notification.permission === "granted") {
-            const n = new window.Notification("Recording ready", {
-              body: "Open Settings → Usage → Latest video to download it.",
-            });
-            n.onclick = () => {
-              try {
-                window.focus();
-              } catch {}
-
-              try {
-                nav("/settings/billing", {
-                  state: {
-                    openTab: "usage",
-                    usageRoomId: effectiveRoomName || undefined,
-                  },
-                });
-              } catch {}
-            };
-          }
+        const res = await apiFetchAuth(`${API_BASE}/api/recordings/${recordingId}/download-link`, {}, { allowNonOk: true });
+        if (!res.ok) {
+          if (!cancelled) setPostStopDownloadUrl(null);
+          return;
         }
+        const data = await res.json().catch(() => null);
+        const url = data?.data?.url;
+        if (!cancelled) setPostStopDownloadUrl(typeof url === "string" && url.trim() ? url.trim() : null);
       } catch {
-        // ignore
+        if (!cancelled) setPostStopDownloadUrl(null);
       }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [API_BASE, recordingId, recordingStatus, postStopReady]);
+
+  // Re-notify rule: if user clicked Stay in room for this recording, show a banner.
+  // If they dismissed it while still processing, show a new one when ready.
+  useEffect(() => {
+    if (recordingStatus !== "stopped") return;
+    if (!roomId || !recordingId) return;
+
+    // Only show if a "Stay in room" action marked this recording as pending.
+    const pendingId = sessionStorage.getItem(pendingDownloadBannerKey(roomId));
+    if (!pendingId || pendingId !== recordingId) return;
+
+    if (!postStopReady) return;
+
+    // If the user dismissed the READY banner, don't show again.
+    const dismissed = sessionStorage.getItem(recordingBannerDismissedKey(recordingId));
+    if (dismissed === "ready") return;
+
+    setStayedInRoomDuringProcessing(false);
+    setRecordingBackgroundNotice({ kind: "ready", recordingId, downloadUrl: postStopDownloadUrl });
+
+    // Optional: browser-level notification (only if the user previously allowed it).
+    try {
+      if (typeof window !== "undefined" && "Notification" in window) {
+        if (window.Notification.permission === "granted") {
+          const n = new window.Notification("Recording is ready to download", {
+            body: "Click Download in the room banner (or open Settings → Usage → Latest video).",
+          });
+          n.onclick = () => {
+            try {
+              window.focus();
+            } catch {}
+
+            try {
+              nav("/settings/billing", {
+                state: {
+                  openTab: "usage",
+                  usageRoomId: effectiveRoomName || undefined,
+                },
+              });
+            } catch {}
+          };
+        }
+      }
+    } catch {
+      // ignore
     }
-  }, [postStopReady, stayedInRoomDuringProcessing, recordingId, nav, effectiveRoomName]);
+  }, [recordingStatus, roomId, recordingId, postStopReady, postStopDownloadUrl, nav, effectiveRoomName]);
 
   useEffect(() => {
     if (streamStatus === "live") {
@@ -2362,11 +2406,18 @@ function RoomPage() {
   };
 
   const handleStayInRoom = () => {
+    if (roomId && recordingId) {
+      try {
+        sessionStorage.setItem(pendingDownloadBannerKey(roomId), recordingId);
+      } catch {}
+    }
+
     if (!postStopReady) {
       setStayedInRoomDuringProcessing(true);
 
       if (recordingId) {
-        setRecordingBackgroundNotice({ kind: "processing", recordingId });
+        // Show an immediate, dismissable banner with a disabled Download button.
+        setRecordingBackgroundNotice({ kind: "processing", recordingId, downloadUrl: null });
       }
 
       // Request notification permission once (user gesture) so we can alert them when ready.
@@ -2380,6 +2431,11 @@ function RoomPage() {
         }
       } catch {
         // ignore
+      }
+    } else {
+      // If ready already, show the banner immediately.
+      if (recordingId) {
+        setRecordingBackgroundNotice({ kind: "ready", recordingId, downloadUrl: postStopDownloadUrl });
       }
     }
     setShowStreamEndedModal(false);
@@ -3724,11 +3780,21 @@ function RoomPage() {
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div style={{ fontWeight: 700, fontSize: 13 }}>
-              {recordingBackgroundNotice.kind === "processing" ? "Rendering in background" : "Recording ready"}
+              {recordingBackgroundNotice.kind === "processing"
+                ? "Recording is processing"
+                : "Recording is ready to download"}
             </div>
             <button
               type="button"
-              onClick={() => setRecordingBackgroundNotice(null)}
+              onClick={() => {
+                try {
+                  sessionStorage.setItem(
+                    recordingBannerDismissedKey(recordingBackgroundNotice.recordingId),
+                    recordingBackgroundNotice.kind
+                  );
+                } catch {}
+                setRecordingBackgroundNotice(null);
+              }}
               style={{
                 border: "none",
                 background: "transparent",
@@ -3744,10 +3810,18 @@ function RoomPage() {
           </div>
 
           <div style={{ marginTop: 6, fontSize: 12, color: "#cbd5e1", lineHeight: 1.35 }}>
-            {recordingBackgroundNotice.kind === "processing"
-              ? "Your video is rendering in the background. You can keep using the room."
-              : "Your video finished rendering and is ready to download."}
-            {" "}Retrieve it in <span style={{ color: "#e5e7eb", fontWeight: 600 }}>Settings → Usage → Latest video</span>.
+            {recordingBackgroundNotice.kind === "processing" ? (
+              <>
+                Recording is processing in the background. Download it from{" "}
+                <span style={{ color: "#e5e7eb", fontWeight: 600 }}>Settings → Usage → Latest video</span>{" "}
+                when it turns green.
+              </>
+            ) : (
+              <>
+                Recording is ready. Click <span style={{ color: "#e5e7eb", fontWeight: 700 }}>Download</span> (opens a new tab).{" "}
+                <span style={{ color: "#94a3b8" }}>Link lasts 1 hour.</span>
+              </>
+            )}
           </div>
 
           <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -3775,24 +3849,70 @@ function RoomPage() {
               Open Settings
             </button>
 
-            {recordingBackgroundNotice.kind === "ready" && recordingBackgroundNotice.recordingId ? (
-              <button
-                type="button"
-                onClick={() => nav(`/room-exit/${recordingBackgroundNotice.recordingId}`)}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(148,163,184,0.25)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "#e5e7eb",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  fontSize: 12,
-                }}
-              >
-                Open Download Page
-              </button>
-            ) : null}
+            <button
+              type="button"
+              disabled={recordingBackgroundNotice.kind !== "ready"}
+              onClick={async () => {
+                if (recordingBackgroundNotice.kind !== "ready") return;
+
+                const rid = recordingBackgroundNotice.recordingId;
+
+                const openUrl = (url: string) => {
+                  try {
+                    window.open(url, "_blank", "noopener,noreferrer");
+                  } catch {
+                    window.open(url, "_blank");
+                  }
+                };
+
+                // Use prefetched URL when available; otherwise fetch on-demand.
+                const prefetched = recordingBackgroundNotice.downloadUrl || postStopDownloadUrl;
+                if (typeof prefetched === "string" && prefetched.trim()) {
+                  openUrl(prefetched.trim());
+                  return;
+                }
+
+                try {
+                  const res = await apiFetchAuth(`${API_BASE}/api/recordings/${rid}/download-link`, {}, { allowNonOk: true });
+                  if (res.status === 410) {
+                    alert("This recording link expired. Use Settings → Usage → Latest video.");
+                    return;
+                  }
+                  if (res.status === 402) {
+                    alert("Upgrade required to download this recording.");
+                    return;
+                  }
+                  if (!res.ok) throw new Error("Failed to get download link");
+
+                  const data = await res.json().catch(() => null);
+                  const url = data?.data?.url;
+                  if (!data?.success || !url) throw new Error(data?.error || "Invalid download link response");
+                  openUrl(String(url));
+                } catch (err) {
+                  console.error(err);
+                  alert("Failed to download recording. Use Settings → Usage → Latest video.");
+                }
+              }}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border:
+                  recordingBackgroundNotice.kind === "ready"
+                    ? "1px solid rgba(34, 197, 94, 0.35)"
+                    : "1px solid rgba(148,163,184,0.25)",
+                background:
+                  recordingBackgroundNotice.kind === "ready"
+                    ? "rgba(34, 197, 94, 0.22)"
+                    : "rgba(148,163,184,0.08)",
+                color: recordingBackgroundNotice.kind === "ready" ? "#bbf7d0" : "#94a3b8",
+                cursor: recordingBackgroundNotice.kind === "ready" ? "pointer" : "not-allowed",
+                fontWeight: 800,
+                fontSize: 12,
+                opacity: recordingBackgroundNotice.kind === "ready" ? 1 : 0.75,
+              }}
+            >
+              {recordingBackgroundNotice.kind === "ready" ? "Download" : "Processing…"}
+            </button>
           </div>
         </div>
       )}

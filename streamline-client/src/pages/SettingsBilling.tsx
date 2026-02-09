@@ -1635,9 +1635,27 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       const res = await apiFetchWithCookieFallback("/api/billing/portal", {
         method: "POST",
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Portal failed");
-      window.location.href = data.url;
+      const data = await safeReadJson(res);
+
+      if (!res.ok) {
+        const errCode = String((data as any)?.error || "");
+        if (res.status === 403 && errCode === "billing_disabled") {
+          throw new Error("Billing is currently disabled for this workspace.");
+        }
+        if (res.status === 400 && errCode === "missing_customer") {
+          setShowManagePicker(true);
+          setActionLoading(null);
+          return;
+        }
+        if (res.status === 500 && errCode === "missing_stripe_key") {
+          throw new Error("Billing is temporarily unavailable (Stripe is not configured).");
+        }
+        throw new Error(errCode || "Portal failed");
+      }
+
+      const url = String((data as any)?.url || "");
+      if (!url) throw new Error("Portal failed");
+      window.location.href = url;
     } catch (err: any) {
       setError(err.message);
       setActionLoading(null);
@@ -2217,19 +2235,33 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
             <div style={{ ...S.card, opacity: isBlocked ? 0.6 : 1 }}>
               <div style={S.cardHeader}>
                 <h2 style={S.cardTitle}>Your Plan</h2>
-                {isProcessing && (
-                  <span style={S.processingBadge}>
-                    {upgradeProcessing
-                      ? "Upgrade processing — this can take a few seconds."
-                      : user?.billing?.cancelAtPeriodEnd
-                        ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
-                        : (user as any)?.scheduledPlanChange?.type === "downgrade" &&
-                            typeof (user as any)?.scheduledPlanChange?.effectiveAtMs === "number" &&
-                            (user as any)?.scheduledPlanChange?.effectiveAtMs > Date.now()
-                          ? `Downgrade scheduled — stays active until ${formatDate((user as any).scheduledPlanChange.effectiveAtMs)}`
-                          : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
-                  </span>
-                )}
+                <div style={S.cardHeaderRight}>
+                  {!isTestMode && userPlanId !== "free" && status !== "none" && (
+                    <button
+                      type="button"
+                      onClick={openPortal}
+                      style={S.manageBillingHeaderBtn}
+                      disabled={!!actionLoading}
+                      title={hasStripeCustomer ? "Open Stripe billing portal" : "Set up billing to manage your subscription"}
+                    >
+                      {actionLoading === "portal" ? "Loading…" : "Manage billing"}
+                    </button>
+                  )}
+
+                  {isProcessing && (
+                    <span style={S.processingBadge}>
+                      {upgradeProcessing
+                        ? "Upgrade processing — this can take a few seconds."
+                        : user?.billing?.cancelAtPeriodEnd
+                          ? `Cancellation scheduled — ends ${formatDate(user?.billing?.currentPeriodEnd)}`
+                          : (user as any)?.scheduledPlanChange?.type === "downgrade" &&
+                              typeof (user as any)?.scheduledPlanChange?.effectiveAtMs === "number" &&
+                              (user as any)?.scheduledPlanChange?.effectiveAtMs > Date.now()
+                            ? `Downgrade scheduled — stays active until ${formatDate((user as any).scheduledPlanChange.effectiveAtMs)}`
+                            : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {currentPlan ? (

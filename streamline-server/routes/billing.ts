@@ -812,10 +812,8 @@ router.post("/portal", requireAuth, async (req, res) => {
     if (!uid) return res.status(401).json({ success: false, error: PERMISSION_ERRORS.UNAUTHORIZED });
     const account = (req as any).account || await getUserAccount(uid);
     if (account.effectiveBillingEnabled === false) {
-      // Billing is disabled (Test Mode). Do not talk to Stripe; instead signal
-      // to the client that the portal is unavailable due to billing being off,
-      // but use a 200 status so this is not treated as a hard auth error.
-      return res.json({ success: false, error: "billing_disabled" });
+      // Billing is disabled (Test Mode). Do not talk to Stripe.
+      return res.status(403).json({ success: false, error: "billing_disabled" });
     }
 
     const snap = await getUserRef(uid).get();
@@ -824,7 +822,7 @@ router.post("/portal", requireAuth, async (req, res) => {
     const user = snap.data() as any;
 
     const customerId = user?.stripeCustomerId || user?.billing?.customerId;
-    if (!customerId) return res.status(400).json({ success: false, error: "No Stripe customer" });
+    if (!customerId) return res.status(400).json({ success: false, error: "missing_customer" });
 
     const CLIENT_URL = process.env.CLIENT_URL;
     if (!CLIENT_URL) throw new Error("Missing env var: CLIENT_URL");
@@ -837,6 +835,12 @@ router.post("/portal", requireAuth, async (req, res) => {
     return res.json({ success: true, url: portal.url });
   } catch (err: any) {
     console.error("POST /api/billing/portal failed:", err?.message || err);
+
+    const code = String(err?.code || "").toUpperCase();
+    if (code === "MISSING_STRIPE_KEY" || String(err?.message || "") === "missing_stripe_key") {
+      return res.status(500).json({ success: false, error: "missing_stripe_key" });
+    }
+
     return res.status(500).json({ success: false, error: err?.message || "Server error" });
   }
 });
