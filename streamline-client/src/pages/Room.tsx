@@ -1079,6 +1079,7 @@ function RoomPage() {
   const [firestoreRoomId, setFirestoreRoomId] = useState<string | null>(null);
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
   const [participantIdentity, setParticipantIdentity] = useState<string | null>(null);
+  const [adminOverride, setAdminOverride] = useState<boolean>(false);
   const [, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
     const [effectivePermissionsMode, setEffectivePermissionsMode] = useState<"simple" | "advanced">("simple");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
@@ -1188,7 +1189,18 @@ function RoomPage() {
     const candidateKey = roomId;
     if (!candidateKey) return;
     const createdRooms = JSON.parse(localStorage.getItem("sl_created_rooms") || "[]");
-    const willBeHost = createdRooms.includes(candidateKey);
+    const localIsAdmin = (() => {
+      try {
+        const raw = localStorage.getItem("sl_user");
+        if (!raw || raw === "undefined") return false;
+        const parsed = JSON.parse(raw);
+        return !!(parsed?.isAdmin || parsed?.admin?.isAdmin);
+      } catch {
+        return false;
+      }
+    })();
+
+    const willBeHost = createdRooms.includes(candidateKey) || localIsAdmin;
     setIsHost(willBeHost);
     const storedRole = (() => {
       try {
@@ -1805,6 +1817,13 @@ function RoomPage() {
         } else {
           setRoomAccessToken(null);
         }
+
+        if (typeof (data as any)?.adminOverride === "boolean") {
+          setAdminOverride(!!(data as any).adminOverride);
+        } else {
+          setAdminOverride(false);
+        }
+
         if (typeof participantIdentityRaw === "string" && participantIdentityRaw.trim()) {
           setParticipantIdentity(participantIdentityRaw.trim());
         } else {
@@ -1824,9 +1843,11 @@ function RoomPage() {
         if (typeof data?.effectiveRoleKey === "string") {
           setUserRole(data.effectiveRoleKey);
           if (data.effectiveRoleKey === "viewer") setIsHost(false);
+          if (data.effectiveRoleKey === "host") setIsHost(true);
         } else if (typeof data?.role === "string") {
           setUserRole(data.role);
           if (data.role === "viewer") setIsHost(false);
+          if (data.role === "host") setIsHost(true);
         }
         if (!lkToken || !finalServerUrl) {
           console.error("[Room] Missing token or serverUrl", { token: lkToken, serverUrl: serverUrlFromApi });
@@ -2377,7 +2398,7 @@ function RoomPage() {
 
     // When the host leaves, request that the server
     // disconnect all remaining participants from this room.
-    if (isHost && effectiveRoomName && roomAccessToken) {
+    if (isHost && !adminOverride && effectiveRoomName && roomAccessToken) {
       try {
         apiFetchAuth(
           `${API_BASE}/api/roomModeration/remove-all`,
