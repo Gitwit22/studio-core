@@ -181,6 +181,41 @@ function planIdFromStripeSubscription(sub: any): PlanId {
   return "free";
 }
 
+function pickPrimarySubscriptionItem(sub: any): { itemId: string; priceId: string } | null {
+  const items: any[] = Array.isArray(sub?.items?.data) ? sub.items.data : [];
+  if (items.length === 0) return null;
+  if (items.length === 1) {
+    const priceId = items[0]?.price?.id;
+    return priceId ? { itemId: items[0].id, priceId } : null;
+  }
+
+  const knownPlanPriceIds = new Set(
+    [process.env.STRIPE_PRICE_STARTER, process.env.STRIPE_PRICE_BASIC, process.env.STRIPE_PRICE_PRO].filter(
+      (v): v is string => typeof v === "string" && v.length > 0
+    )
+  );
+
+  const known = items.find((it) => {
+    const priceId = it?.price?.id;
+    return typeof priceId === "string" && knownPlanPriceIds.has(priceId);
+  });
+  if (known) {
+    return { itemId: known.id, priceId: known.price.id };
+  }
+
+  // Prefer non-metered recurring items as a heuristic for the main plan.
+  const nonMetered = items.find((it) => {
+    const usageType = it?.price?.recurring?.usage_type;
+    return usageType !== "metered" && typeof it?.price?.id === "string";
+  });
+  if (nonMetered) {
+    return { itemId: nonMetered.id, priceId: nonMetered.price.id };
+  }
+
+  const fallbackPriceId = items[0]?.price?.id;
+  return typeof fallbackPriceId === "string" ? { itemId: items[0].id, priceId: fallbackPriceId } : null;
+}
+
 router.post("/checkout", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
@@ -263,8 +298,8 @@ router.post("/checkout", requireAuth, async (req, res) => {
     }
 
     const userAtLock = lockedUser?.user ?? user;
-    const currentPlanId: PlanId = isPlanId(userAtLock?.planId) ? (userAtLock.planId as PlanId) : "free";
-    const direction = comparePlans(currentPlanId, canonicalPlan);
+    const currentPlanFromUser: PlanId = isPlanId(userAtLock?.planId) ? (userAtLock.planId as PlanId) : "free";
+    const directionFromUser = comparePlans(currentPlanFromUser, canonicalPlan);
 
     // Enforce Terms of Service acceptance before creating a checkout session.
     if (!hasAcceptedCurrentTos(userAtLock)) {
@@ -308,9 +343,21 @@ router.post("/checkout", requireAuth, async (req, res) => {
       const billingStatus = String((sub as any)?.status || "none");
       const billingActive = billingStatus === "active" || billingStatus === "trialing";
 
+      // Prefer Stripe as the source of truth for the current plan to avoid
+      // stale user docs causing incorrect direction calculations.
+      const currentPlanFromStripe: PlanId = planIdFromStripeSubscription(sub as any);
+      const direction = comparePlans(currentPlanFromStripe, canonicalPlan);
+
+      if (billingActive && direction === 0) {
+        // Already on the requested plan; clear the lock and respond.
+        await userRef.set({ planChangeLock: null, planChangeRequestId: requestId, planChangeRequestResult: { requestId, status: "ok", mode: "noop", plan: canonicalPlan, createdAt: Date.now() } }, { merge: true });
+        return res.json({ success: true, mode: "noop", planId: currentPlanFromStripe, requestId });
+      }
+
       if (billingActive && direction !== 0) {
-        const itemId: string | undefined = (sub as any)?.items?.data?.[0]?.id;
-        const currentPriceId: string | undefined = (sub as any)?.items?.data?.[0]?.price?.id;
+        const picked = pickPrimarySubscriptionItem(sub as any);
+        const itemId: string | undefined = picked?.itemId;
+        const currentPriceId: string | undefined = picked?.priceId;
         if (!itemId || !currentPriceId) {
           await userRef.set({ planChangeLock: null }, { merge: true });
           return res.status(500).json({ success: false, error: "subscription_item_missing" });
@@ -347,9 +394,9 @@ router.post("/checkout", requireAuth, async (req, res) => {
 
           const history = sanitizeHistory(userAtLock?.planChangeHistory);
           const nextHistory =
-            currentPlanId === canonicalPlan
+            currentPlanFromStripe === canonicalPlan
               ? history
-              : [...history, { at: now, fromPlan: currentPlanId, toPlan: canonicalPlan, source: "upgrade" }].slice(-10);
+              : [...history, { at: now, fromPlan: currentPlanFromStripe, toPlan: canonicalPlan, source: "upgrade" }].slice(-10);
 
           await userRef.set(
             {
@@ -427,12 +474,12 @@ router.post("/checkout", requireAuth, async (req, res) => {
         const effectiveAtMs = currentPeriodEnd * 1000;
 
         const history = sanitizeHistory(userAtLock?.planChangeHistory);
-        const nextHistory = [...history, { at: now, fromPlan: currentPlanId, toPlan: canonicalPlan, source: "downgrade_scheduled" }].slice(-10);
+        const nextHistory = [...history, { at: now, fromPlan: currentPlanFromStripe, toPlan: canonicalPlan, source: "downgrade_scheduled" }].slice(-10);
 
         await userRef.set(
           {
             // Keep current plan active until effective date.
-            planId: currentPlanId,
+            planId: currentPlanFromStripe,
             pendingPlan: canonicalPlan,
             scheduledPlanChange: {
               type: "downgrade",
@@ -457,7 +504,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
           { merge: true }
         );
 
-        return res.json({ success: true, mode: "downgrade_scheduled", planId: currentPlanId, pendingPlan: canonicalPlan, effectiveAtMs, requestId });
+        return res.json({ success: true, mode: "downgrade_scheduled", planId: currentPlanFromStripe, pendingPlan: canonicalPlan, effectiveAtMs, requestId });
       }
     }
 

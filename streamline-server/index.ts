@@ -317,19 +317,14 @@ async function assertEffectiveRoomControl(
     throw new RoomPermissionError(403, PERMISSION_ERRORS.ROOM_MISMATCH);
   }
 
+  // Moderation endpoints are permission-gated via roomAccessToken permissions
+  // (assertRoomPerm above). Some deployments may want host-only moderation.
   const role = String(access.role || "").toLowerCase();
-  const requiredRole = "host";
-  const roleOk = role === requiredRole;
-  if (process.env.AUTH_DEBUG === "1") {
-    console.log("[perm-debug] moderation role check", {
-      role,
-      required: requiredRole,
-      pass: roleOk,
-    });
-  }
-  // Updated policy: only hosts can use roomModeration endpoints.
-  // Non-hosts are blocked here regardless of controls docs.
-  if (!roleOk) {
+  const hostOnly = process.env.ROOM_MODERATION_HOST_ONLY === "1";
+  if (hostOnly && role !== "host") {
+    if (process.env.AUTH_DEBUG === "1") {
+      console.log("[perm-debug] moderation host-only blocked", { role, perm });
+    }
     throw new RoomPermissionError(403, PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS);
   }
 }

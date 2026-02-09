@@ -1357,6 +1357,14 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       throw Object.assign(new Error(data.error || "Checkout failed"), { status: res.status, body: data });
     }
 
+    // Billing disabled can return success without a Stripe URL or mode.
+    if (data?.billing?.mode === "disabled") {
+      setError("Billing is currently disabled for this account. Contact an admin/support to enable billing, then retry.");
+      setActionLoading(null);
+      setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
+      return;
+    }
+
     // First-time paid subscription flow (Stripe Checkout)
     if (data.url) {
       window.location.href = data.url;
@@ -1374,6 +1382,12 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
           pollIntervalMs: 1200,
         });
       } catch {}
+      return;
+    }
+
+    if (data.mode === "noop") {
+      setToast("You’re already on that plan");
+      setActionLoading(null);
       return;
     }
 
@@ -1397,6 +1411,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
   } catch (err: any) {
     const bodyError = err?.body?.error;
     const retryAfterMs = typeof err?.body?.retryAfterMs === "number" ? err.body.retryAfterMs : null;
+    const lockUntil = typeof err?.body?.lockUntil === "number" ? err.body.lockUntil : null;
 
     if (bodyError === "plan_change_limit_daily") {
       const hours = retryAfterMs ? Math.max(1, Math.ceil(retryAfterMs / 3600000)) : 24;
@@ -1405,6 +1420,9 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       const date = retryAfterMs ? new Date(Date.now() + retryAfterMs) : null;
       const label = date ? date.toLocaleDateString() : "later";
       setError(`You can downgrade again on ${label}.`);
+    } else if (bodyError === "plan_change_locked") {
+      const label = lockUntil ? new Date(lockUntil).toLocaleTimeString() : "shortly";
+      setError(`A plan change is already in progress. Try again ${lockUntil ? `after ${label}` : "in a moment"}.`);
     } else if (err?.status === 403 && bodyError === "billing_disabled") {
       setError("Billing is disabled for this account. Use Test Mode plan switching instead.");
     } else if (err?.status === 403 && bodyError === "tos_not_accepted") {
