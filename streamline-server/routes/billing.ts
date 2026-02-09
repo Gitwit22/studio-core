@@ -21,6 +21,13 @@ import { createOveragesEndpointHandler } from "../lib/overagesEndpoint";
 
 const PLAN_CHANGE_LOCK_TTL_MS = 60 * 1000; // 60 seconds
 
+type CheckoutNoopReason =
+  | "ALREADY_ON_PLAN"
+  | "BILLING_DISABLED"
+  | "MISSING_PRICE_ID"
+  | "MISSING_STRIPE_KEY"
+  | "UNSUPPORTED_MODE";
+
 type PlanChangeHistoryEntry = {
   at: number; // epoch ms
   fromPlan: string;
@@ -302,7 +309,38 @@ router.post("/checkout", requireAuth, async (req, res) => {
       // Billing is OFF (dev/admin override). Allow preflight without Stripe checks.
       return res.json({
         success: true,
+        reason: "billing_disabled",
+        noopReason: "BILLING_DISABLED" satisfies CheckoutNoopReason,
         billing: { mode: "disabled" },
+        requestId,
+      });
+    }
+
+    // Stripe must be configured for any non-disabled billing flow.
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: "missing_stripe_key",
+        noopReason: "MISSING_STRIPE_KEY" satisfies CheckoutNoopReason,
+      });
+    }
+
+    // Preflight Stripe price config BEFORE acquiring locks or writing anything.
+    // If misconfigured, return a safe error and leave Firestore unchanged.
+    let preflightPlanMeta: any = {};
+    try {
+      const planSnap = await db.collection("plans").doc(canonicalPlan).get();
+      if (planSnap.exists) preflightPlanMeta = planSnap.data();
+    } catch {}
+
+    let preflightPriceId: string;
+    try {
+      preflightPriceId = priceIdFor(canonicalPlan, preflightPlanMeta);
+    } catch {
+      return res.status(500).json({
+        success: false,
+        error: "missing_price_id",
+        noopReason: "MISSING_PRICE_ID" satisfies CheckoutNoopReason,
       });
     }
 
@@ -315,7 +353,12 @@ router.post("/checkout", requireAuth, async (req, res) => {
 
     // Idempotent: return the prior result if this requestId already finished
     if (user?.planChangeRequestId === requestId && user?.planChangeRequestResult) {
-      return res.json({ success: true, reused: true, ...user.planChangeRequestResult });
+      const prior = user.planChangeRequestResult as any;
+      const extraNoopReason =
+        prior?.mode === "noop" && !prior?.noopReason
+          ? ({ noopReason: "ALREADY_ON_PLAN" as CheckoutNoopReason } as const)
+          : null;
+      return res.json({ success: true, reused: true, ...prior, ...(extraNoopReason || {}) });
     }
 
     // Acquire lock + guard enforcement
@@ -408,9 +451,57 @@ router.post("/checkout", requireAuth, async (req, res) => {
       const direction = comparePlans(currentPlanFromStripe, canonicalPlan);
 
       if (billingActive && direction === 0) {
-        // Already on the requested plan; clear the lock and respond.
-        await userRef.set({ planChangeLock: null, planChangeRequestId: requestId, planChangeRequestResult: { requestId, status: "ok", mode: "noop", plan: canonicalPlan, createdAt: Date.now() } }, { merge: true });
-        return res.json({ success: true, mode: "noop", planId: currentPlanFromStripe, requestId });
+        const noopReason: CheckoutNoopReason = "ALREADY_ON_PLAN";
+
+        // Already on the requested plan.
+        // Important: reconcile the user doc with Stripe truth so the UI doesn't
+        // keep showing a stale planId (webhooks can lag/miss in dev/staging).
+        // SAFETY: Only do this Firestore reconciliation for ALREADY_ON_PLAN.
+        const now = Date.now();
+        const picked = pickPrimarySubscriptionItem(sub as any);
+        const currentPriceId: string | undefined = picked?.priceId;
+        const currentPeriodEndSec = (sub as any).current_period_end as number | undefined;
+        const currentPeriodEnd = typeof currentPeriodEndSec === "number" ? currentPeriodEndSec * 1000 : null;
+
+        await userRef.set(
+          {
+            planId: currentPlanFromStripe,
+            pendingPlan: null,
+            billingActive: true,
+            billingStatus,
+            billing: {
+              ...(userAtLock?.billing || {}),
+              provider: "stripe",
+              customerId: (sub as any)?.customer ?? userAtLock?.stripeCustomerId ?? userAtLock?.billing?.customerId ?? null,
+              subscriptionId: String((sub as any).id || "") || subscriptionId,
+              priceId: currentPriceId ?? (userAtLock?.billing?.priceId ?? null),
+              cancelAtPeriodEnd: !!(sub as any).cancel_at_period_end,
+              currentPeriodEnd,
+              updatedAt: now,
+            },
+            planChangeLock: null,
+            planChangeRequestId: requestId,
+            planChangeRequestResult: {
+              requestId,
+              status: "ok",
+              mode: "noop",
+              noopReason,
+              plan: canonicalPlan,
+              createdAt: now,
+            },
+            updatedAt: now,
+          },
+          { merge: true }
+        );
+
+        return res.json({
+          success: true,
+          mode: "noop",
+          reason: "already_on_plan",
+          noopReason,
+          planId: currentPlanFromStripe,
+          requestId,
+        });
       }
 
       if (billingActive && direction !== 0) {
@@ -422,14 +513,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
           return res.status(500).json({ success: false, error: "subscription_item_missing" });
         }
 
-        // Fetch plan metadata from Firestore for custom plans
-        let planMeta: any = {};
-        try {
-          const planSnap = await db.collection("plans").doc(canonicalPlan).get();
-          if (planSnap.exists) planMeta = planSnap.data();
-        } catch {}
-
-        const targetPriceId = priceIdFor(canonicalPlan, planMeta);
+        const targetPriceId: string = preflightPriceId;
         const now = Date.now();
         const guards = normalizeBillingGuards(userAtLock?.billingGuards, now);
         const nextGuards = applySuccessfulPlanChange({ guards, nowMs: now, isDowngrade: direction < 0 });
@@ -490,7 +574,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
             { merge: true }
           );
 
-          return res.json({ success: true, mode: "upgrade", planId: canonicalPlan, requestId });
+          return res.json({ success: true, mode: "upgrade", reason: "upgrade_applied", planId: canonicalPlan, requestId });
         }
 
         // Downgrade: schedule at period end.
@@ -596,7 +680,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
           { merge: true }
         );
 
-        return res.json({ success: true, mode: "downgrade_scheduled", planId: currentPlanFromStripe, pendingPlan: canonicalPlan, effectiveAtMs, requestId });
+        return res.json({ success: true, mode: "downgrade_scheduled", reason: "downgrade_scheduled_period_end", planId: currentPlanFromStripe, pendingPlan: canonicalPlan, effectiveAtMs, requestId });
       }
       }
     }
@@ -626,12 +710,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
       );
     }
 
-    // Fetch plan metadata from Firestore for custom plans
-    let planMeta: any = {};
-    try {
-      const planSnap = await db.collection("plans").doc(canonicalPlan).get();
-      if (planSnap.exists) planMeta = planSnap.data();
-    } catch {}
+    const checkoutPriceId: string = preflightPriceId;
 
     // Create Checkout Session
     const subscription_data: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
@@ -649,7 +728,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
-      line_items: [{ price: priceIdFor(canonicalPlan, planMeta), quantity: 1 }],
+      line_items: [{ price: checkoutPriceId, quantity: 1 }],
 
       success_url: `${CLIENT_URL}/billing/success`,
       cancel_url: `${CLIENT_URL}/billing/canceled`,
@@ -696,9 +775,19 @@ router.post("/checkout", requireAuth, async (req, res) => {
       { merge: true }
     );
 
-    return res.json({ success: true, url: session.url, requestId });
+    return res.json({ success: true, url: session.url, reason: "checkout_session_created", requestId });
   } catch (err: any) {
     console.error("POST /api/billing/checkout failed:", err?.message || err);
+
+    const code = String(err?.code || "").toUpperCase();
+    if (code === "MISSING_STRIPE_KEY" || String(err?.message || "") === "missing_stripe_key") {
+      return res.status(500).json({
+        success: false,
+        error: "missing_stripe_key",
+        noopReason: "MISSING_STRIPE_KEY" satisfies CheckoutNoopReason,
+      });
+    }
+
     if (req?.body?.requestId) {
       try {
         await getUserRef((req as any).user?.uid).set(
@@ -709,7 +798,11 @@ router.post("/checkout", requireAuth, async (req, res) => {
         );
       } catch {}
     }
-    return res.status(500).json({ success: false, error: err?.message || "Server error" });
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Server error",
+      noopReason: "UNSUPPORTED_MODE" satisfies CheckoutNoopReason,
+    });
   }
 });
 

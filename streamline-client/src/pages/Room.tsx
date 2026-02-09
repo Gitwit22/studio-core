@@ -306,7 +306,7 @@ function StreamEndedModal({
     try {
       const res = await apiFetchAuth(`${API_BASE}/api/recordings/${recordingId}/download-link`, {}, { allowNonOk: true });
       if (res.status === 410) {
-        alert("This recording link expired. Use Settings → Usage → Emergency Download.");
+        alert("This recording link expired. Use Settings → Usage → Latest video.");
         return;
       }
       if (res.status === 402) {
@@ -326,7 +326,7 @@ function StreamEndedModal({
       setShowConfirmModal(true);
     } catch (err) {
       console.error(err);
-      alert("Failed to download recording. Use Settings → Usage → Emergency Download.");
+      alert("Failed to download recording. Use Settings → Usage → Latest video.");
     }
   };
 
@@ -353,7 +353,7 @@ function StreamEndedModal({
         { allowNonOk: true }
       );
     } catch {}
-    setConfirmMessage("Use Settings → Usage → Emergency Download (Latest Recording) if you're having trouble.");
+    setConfirmMessage("Use Settings → Usage → Latest video if you're having trouble.");
     setShowConfirmModal(false);
   };
 
@@ -505,7 +505,7 @@ function StreamEndedModal({
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20 }}>
           <div style={{ background: "#111", border: "1px solid #333", borderRadius: 12, padding: 20, width: 320 }}>
             <h4 style={{ margin: 0, marginBottom: 10, color: "#fff" }}>Did your download start?</h4>
-            <p style={{ margin: 0, marginBottom: 16, color: "#d1d5db", fontSize: 14 }}>If not, you can retry via Emergency Download in Settings → Usage.</p>
+            <p style={{ margin: 0, marginBottom: 16, color: "#d1d5db", fontSize: 14 }}>If not, retry via Settings → Usage → Latest video.</p>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={handleConfirmNo} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #444", background: "#1f2937", color: "#fff", cursor: "pointer" }}>No</button>
               <button onClick={handleConfirmYes} style={{ padding: "8px 12px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#dc2626,#ef4444)", color: "#fff", cursor: "pointer" }}>Yes</button>
@@ -2058,10 +2058,10 @@ function RoomPage() {
   // If the user stayed in the room while the recording was processing, re-open
   // the modal once the recording becomes ready so they can download it.
   useEffect(() => {
+    // No popup; just clear the flag once ready.
     if (!stayedInRoomDuringProcessing) return;
     if (!postStopReady) return;
     setStayedInRoomDuringProcessing(false);
-    setShowStreamEndedModal(true);
   }, [postStopReady, stayedInRoomDuringProcessing]);
 
   useEffect(() => {

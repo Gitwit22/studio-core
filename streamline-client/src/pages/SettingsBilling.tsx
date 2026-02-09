@@ -332,6 +332,17 @@ export default function SettingsBilling() {
   const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
   const [emergencyExpiresAtMs, setEmergencyExpiresAtMs] = useState<number | null>(null);
   const [emergencyCountdown, setEmergencyCountdown] = useState<string | null>(null);
+  const [emergencyRoomId, setEmergencyRoomId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("sl_last_room") || "";
+    } catch {
+      return "";
+    }
+  });
+  const [latestVideoState, setLatestVideoState] = useState<"none" | "processing" | "ready" | "failed">("none");
+  const [latestVideoUrl, setLatestVideoUrl] = useState<string | null>(null);
+  const latestVideoPollIntervalRef = useRef<number | null>(null);
+  const latestVideoPollCountRef = useRef(0);
 
   const [actionLoading, setActionLoading] = useState<CheckoutPlanVariant | "portal" | null>(null);
 
@@ -397,31 +408,24 @@ export default function SettingsBilling() {
   }, [emergencyExpiresAtMs]);
 
   useEffect(() => {
-    if (activeTab !== "usage") return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetchAuth("/api/recordings/emergency-status", { cache: "no-store" }, { allowNonOk: true });
-        if (!res.ok) return;
-        const { json } = await safeReadJson(res);
-        const expiresAt = (json as any)?.data?.expiresAt;
-        if (cancelled) return;
-        if (typeof expiresAt === "string" && expiresAt) {
-          const ms = Date.parse(expiresAt);
-          setEmergencyExpiresAtMs(Number.isFinite(ms) ? ms : null);
-        } else {
-          setEmergencyExpiresAtMs(null);
-        }
-      } catch {
-        // Silent: countdown is non-critical UI.
+    // Stop any polling when leaving Usage.
+    if (activeTab !== "usage") {
+      if (latestVideoPollIntervalRef.current) {
+        window.clearInterval(latestVideoPollIntervalRef.current);
+        latestVideoPollIntervalRef.current = null;
       }
-    })();
+      latestVideoPollCountRef.current = 0;
+      return;
+    }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab]);
+    // Default room to last used room when opening Usage.
+    try {
+      const cached = localStorage.getItem("sl_last_room") || "";
+      if (cached && !emergencyRoomId) setEmergencyRoomId(cached);
+    } catch {
+      // ignore
+    }
+  }, [activeTab, emergencyRoomId]);
 
   // If billing is active or trialing, ensure pendingPlan is cleared to avoid stuck UI
   useEffect(() => {
@@ -600,6 +604,9 @@ export default function SettingsBilling() {
   }, [upgradeProcessing, location.pathname, location.state, nav]);
 
   useEffect(() => {
+    // Billing state changes quickly (Stripe/webhooks/refresh). Always start
+    // from a fresh /api/account/me payload to avoid stale plan cards.
+    clearMeCache();
     loadAllData();
   }, []);
 
@@ -1254,56 +1261,119 @@ export default function SettingsBilling() {
   };
 
   const handleEmergencyDownload = async () => {
+    if (latestVideoPollIntervalRef.current) {
+      window.clearInterval(latestVideoPollIntervalRef.current);
+      latestVideoPollIntervalRef.current = null;
+    }
+    latestVideoPollCountRef.current = 0;
+
     try {
       setEmergencyLoading(true);
       setEmergencyMessage(null);
+      setLatestVideoUrl(null);
+      setLatestVideoState("none");
+      setEmergencyExpiresAtMs(null);
 
-      let res: Response;
-      try {
-        res = await apiFetchAuth("/api/recordings/emergency-latest", { cache: "no-store" }, { allowNonOk: true });
-      } catch (err) {
-        console.error("Emergency download failed (network)", err);
-        setEmergencyMessage("Network error. Check your connection and try again.");
+      const roomId = (emergencyRoomId || "").trim();
+      if (!roomId) {
+        setEmergencyMessage("Enter a room name to fetch the latest recording.");
         return;
       }
 
-      const { json, text } = await safeReadJson(res);
+      const pollOnce = async (openWhenReady: boolean) => {
+        let res: Response;
+        try {
+          res = await apiFetchAuth(`/api/rooms/${encodeURIComponent(roomId)}/latest-recording`, { cache: "no-store" }, { allowNonOk: true });
+        } catch (err) {
+          console.error("Latest video fetch failed (network)", err);
+          setEmergencyMessage("Network error. Check your connection and try again.");
+          return;
+        }
 
-      if (res.status === 410) {
+        const { json, text } = await safeReadJson(res);
+        if (!res.ok) {
+          console.error("Latest video fetch failed (http)", { status: res.status, body: json ?? text });
+          setEmergencyMessage("Server error fetching latest recording. Try again.");
+          return;
+        }
+
+        const state = String((json as any)?.state || "none").toLowerCase();
+        const expiresAtMs = (json as any)?.expiresAtMs;
+        const url =
+          typeof (json as any)?.downloadUrl === "string"
+            ? (json as any).downloadUrl
+            : typeof (json as any)?.signedUrl === "string"
+            ? (json as any).signedUrl
+            : null;
+
+        if (state === "ready") {
+          setLatestVideoState("ready");
+          setLatestVideoUrl(url);
+          setEmergencyExpiresAtMs(typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs) ? expiresAtMs : null);
+
+          if (openWhenReady) {
+            if (url) {
+              window.open(url, "_blank");
+              setEmergencyMessage("Download link opened.");
+            } else {
+              const errCode = String((json as any)?.error || "");
+              setEmergencyMessage(
+                errCode === "storage_not_configured"
+                  ? "Storage is not configured on the server (R2 env vars missing). Download is unavailable."
+                  : "Recording is ready, but the download URL is unavailable."
+              );
+            }
+          }
+          return;
+        }
+
+        if (state === "processing") {
+          setLatestVideoState("processing");
+          setLatestVideoUrl(null);
+          setEmergencyExpiresAtMs(null);
+          setEmergencyMessage("Processing… we'll keep checking.");
+          return;
+        }
+
+        if (state === "failed") {
+          setLatestVideoState("failed");
+          setLatestVideoUrl(null);
+          setEmergencyExpiresAtMs(null);
+          setEmergencyMessage("Processing failed. Try recording again.");
+          return;
+        }
+
+        setLatestVideoState("none");
+        setLatestVideoUrl(null);
         setEmergencyExpiresAtMs(null);
-        setEmergencyMessage("This emergency download link expired. After 1 hour, the recording is automatically deleted.");
-        return;
-      }
+        setEmergencyMessage("No recordings found for this room yet.");
+      };
 
-      if (!res.ok) {
-        console.error("Emergency download failed (http)", {
-          status: res.status,
-          body: json ?? text,
-        });
-        setEmergencyMessage("Server error fetching recording. Try again.");
-        return;
-      }
+      await pollOnce(true);
 
-      const url = (json as any)?.url || (json as any)?.data?.url;
-      const expiresAt = (json as any)?.expiresAt || (json as any)?.data?.expiresAt;
-      const expiresAtMs = (json as any)?.expiresAtMs || (json as any)?.data?.expiresAtMs;
-      if (!url) {
-        console.error("Emergency download failed (shape)", { body: json ?? text });
-        setEmergencyMessage("Recording URL missing. Contact support.");
-        return;
+      // If processing, start modest polling until terminal state.
+      if (latestVideoPollIntervalRef.current) {
+        window.clearInterval(latestVideoPollIntervalRef.current);
+        latestVideoPollIntervalRef.current = null;
       }
+      latestVideoPollCountRef.current = 0;
+      latestVideoPollIntervalRef.current = window.setInterval(() => {
+        latestVideoPollCountRef.current += 1;
+        void pollOnce(false);
 
-      if (typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs)) {
-        setEmergencyExpiresAtMs(expiresAtMs);
-      } else if (typeof expiresAt === "string" && expiresAt) {
-        const ms = Date.parse(expiresAt);
-        setEmergencyExpiresAtMs(Number.isFinite(ms) ? ms : null);
-      }
+        // nudge reconcile occasionally
+        if (latestVideoPollCountRef.current % 4 === 0) {
+          void apiFetchAuth(`/api/rooms/${encodeURIComponent(roomId)}/recordings/reconcile`, { method: "POST" }, { allowNonOk: true }).catch(() => {});
+        }
 
-      window.open(url, "_blank");
-      setEmergencyMessage("Download link opened.");
+        // stop after ~10 minutes
+        if (latestVideoPollCountRef.current > 40 && latestVideoPollIntervalRef.current) {
+          window.clearInterval(latestVideoPollIntervalRef.current);
+          latestVideoPollIntervalRef.current = null;
+        }
+      }, 15000);
     } catch (err) {
-      console.error("Emergency download failed (unexpected)", err);
+      console.error("Latest video fetch failed (unexpected)", err);
       setEmergencyMessage("Unexpected error. Try again.");
     } finally {
       setEmergencyLoading(false);
@@ -1386,8 +1456,33 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     }
 
     if (data.mode === "noop") {
-      setToast("You’re already on that plan");
+      const noopReason = String(data?.noopReason || "").trim();
+
+      // Only treat noop as a "Stripe truth" signal when the server explicitly
+      // says the user is already on the plan.
+      if (!noopReason || noopReason === "ALREADY_ON_PLAN") {
+        setToast("You’re already on that plan");
+        setActionLoading(null);
+        const serverPlanId = canonicalPlanId(String(data?.planId || ""));
+        setUser((prev) => (prev ? { ...prev, planId: serverPlanId, pendingPlan: null } : prev));
+        try {
+          await finalizeBillingAfterPlanChange({ expectedPlanId: serverPlanId, maxPollAttempts: 5, pollIntervalMs: 1200 });
+        } catch {}
+        return;
+      }
+
+      // Any other noopReason: do not mutate local plan state; show a clear message.
+      if (noopReason === "BILLING_DISABLED") {
+        setError("Billing is currently disabled for this account. Contact an admin/support to enable billing, then retry.");
+      } else if (noopReason === "MISSING_STRIPE_KEY") {
+        setError("Billing isn’t configured on the server (missing Stripe key). Contact support.");
+      } else if (noopReason === "MISSING_PRICE_ID") {
+        setError("Billing configuration is incomplete (missing Stripe price id). Contact support.");
+      } else {
+        setError("Plan change could not be completed. Please try again or contact support.");
+      }
       setActionLoading(null);
+      setUser((prev) => (prev ? { ...prev, pendingPlan: null } : prev));
       return;
     }
 
@@ -1435,6 +1530,10 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setError("Billing is disabled for this account. Use Test Mode plan switching instead.");
     } else if (err?.status === 403 && bodyError === "tos_not_accepted") {
       setCheckoutTosError("You must agree to the Terms of Service before changing plans.");
+    } else if (bodyError === "missing_stripe_key") {
+      setError("Billing isn’t configured on the server (missing Stripe key). Contact support.");
+    } else if (bodyError === "missing_price_id") {
+      setError("Billing configuration is incomplete (missing Stripe price id). Contact support.");
     } else if (bodyError) {
       setError(bodyError);
     } else {
@@ -1633,7 +1732,10 @@ function canonicalPlanId(planId: string | undefined): PlanId {
   return "free";
 }
 
-const userPlanId: PlanId = canonicalPlanId(user?.planId);
+// Always prefer effectiveEntitlements.planId for UI, since it reflects the
+// server's reconciled billing truth even if the raw user doc lags.
+const effectivePlanIdForUi: PlanId = canonicalPlanId((user as any)?.effectiveEntitlements?.planId ?? user?.planId);
+const userPlanId: PlanId = effectivePlanIdForUi;
 const currentPlan = plans.find((p) => canonicalPlanId(p.id) === userPlanId);
 const status = user?.billingStatus;
 const hasStripeCustomer = !!(user?.billing?.customerId || (user as any)?.stripeCustomerId);
@@ -3148,7 +3250,7 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
 
             <div style={{ marginTop: 16, padding: 12, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, background: "rgba(255,255,255,0.02)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ color: "#e5e7eb", fontWeight: 600 }}>Emergency Download (Latest Recording)</div>
+                <div style={{ color: "#e5e7eb", fontWeight: 600 }}>Latest video (1-hour link)</div>
                 <button
                   type="button"
                   onClick={handleEmergencyDownload}
@@ -3163,18 +3265,43 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                     fontWeight: 600,
                   }}
                 >
-                  {emergencyLoading ? "Preparing..." : "Download latest recording"}
+                  {emergencyLoading ? "Checking..." : latestVideoState === "ready" ? "Open download link" : "Get latest video"}
                 </button>
               </div>
+              <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: "#9ca3af" }}>Room</div>
+                <input
+                  value={emergencyRoomId}
+                  onChange={(e) => setEmergencyRoomId(e.target.value)}
+                  placeholder="e.g. my-room"
+                  style={{
+                    flex: 1,
+                    minWidth: 180,
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(148,163,184,0.25)",
+                    background: "rgba(2,6,23,0.35)",
+                    color: "#e5e7eb",
+                    outline: "none",
+                    fontSize: 13,
+                  }}
+                />
+              </div>
+
               <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
-                Only one emergency recording is stored at a time.
+                Status: {latestVideoState === "none" ? "—" : latestVideoState}
+                {latestVideoState === "ready" && emergencyCountdown ? ` · Expires in ${emergencyCountdown}` : ""}
               </div>
-              <div style={{ marginTop: 4, fontSize: 12, color: "#9ca3af" }}>
-                Expires in {emergencyCountdown || "—"}
-              </div>
+
               <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af" }}>
-                This emergency download link expires in 1 hour. After that, the recording is automatically deleted.
+                Signed links expire in 1 hour. Reopen this panel to generate a fresh link.
               </div>
+
+              {latestVideoState === "ready" && !latestVideoUrl && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>
+                  Recording is ready, but the URL is unavailable (storage not configured).
+                </div>
+              )}
               {emergencyMessage && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "#fca5a5" }}>{emergencyMessage}</div>
               )}

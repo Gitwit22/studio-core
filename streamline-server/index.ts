@@ -24,6 +24,7 @@ import roomsActiveEmbedRoutes from "./routes/roomsActiveEmbed";
 import roomControlsRoutes from "./routes/roomControls";
 import roomsLayoutRoutes from "./routes/roomsLayout";
 import roomsPolicyRoutes from "./routes/roomsPolicy";
+import roomsRecordingsRoutes from "./routes/roomsRecordings";
 import destinationsRoutes from "./routes/destinations";
 import liveRoutes from "./routes/live";
 import statsRoutes from "./routes/stats";
@@ -217,6 +218,8 @@ app.use("/api/rooms", roomsPolicyRoutes);
 app.use("/api/rooms", roomControlsRoutes);
 // Persistent room layout config (controls viewer layout; recordings inherit)
 app.use("/api/rooms", roomsLayoutRoutes);
+// Latest recording state + reconcile helpers
+app.use("/api/rooms", roomsRecordingsRoutes);
 // Room-level persistent HLS config (NOT runtime HLS state)
 app.use("/api/rooms", roomsHlsConfigRoutes);
 // Room-level selection of which Saved Embed to use for HLS control
