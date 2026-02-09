@@ -370,6 +370,21 @@ export default function SettingsBilling() {
 
   const [activeTab, setActiveTab] = useState<"plan" | "usage" | "destinations" | "hls" | "defaults" | "roles" | "close">("plan");
 
+  // Allow other pages to deep-link into a specific settings tab.
+  // Example: nav('/settings/billing', { state: { openTab: 'usage', usageRoomId: 'my-room' } })
+  useEffect(() => {
+    const openTab = (location.state as any)?.openTab;
+    const validTabs: Array<typeof activeTab> = ["plan", "usage", "destinations", "hls", "defaults", "roles", "close"];
+    if (typeof openTab === "string" && validTabs.includes(openTab as any)) {
+      setActiveTab(openTab as any);
+    }
+
+    const usageRoomId = (location.state as any)?.usageRoomId;
+    if (typeof usageRoomId === "string" && usageRoomId.trim()) {
+      setEmergencyRoomId(usageRoomId.trim());
+    }
+  }, [location.state]);
+
   // If a platform-wide feature is disabled, avoid landing on a hidden tab.
   useEffect(() => {
     if (activeTab === "destinations" && platformTranscodeEnabled === false) {

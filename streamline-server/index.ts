@@ -363,11 +363,10 @@ app.post("/api/roomModeration/mute", requireAuth, requireRoomAccessToken as any,
     const TrackSource = sdk.TrackSource;
 
     const participant = await roomService.getParticipant(livekitRoomName, identity);
-    const audioTrack = participant.tracks?.find((t: any) => {
-      const isAudioType = t.type === TrackType.AUDIO;
-      const isMicSource = t.source === TrackSource.MICROPHONE;
-      return isAudioType || isMicSource;
-    });
+    const tracks: any[] = Array.isArray((participant as any)?.tracks) ? (participant as any).tracks : [];
+    const audioTrack =
+      tracks.find((t: any) => t?.source === TrackSource.MICROPHONE) ||
+      tracks.find((t: any) => t?.type === TrackType.AUDIO);
 
     if (!audioTrack) {
       console.warn("No audio track found for", { roomId, livekitRoomName, identity });
@@ -438,11 +437,10 @@ app.post("/api/roomModeration/mute-all", requireAuth, requireRoomAccessToken as 
     const results: Array<{ identity: string; trackSid: string | null; changed: boolean }> = [];
 
     for (const p of participants) {
-      const audioTrack = p.tracks?.find((t: any) => {
-        const isAudioType = t.type === TrackType.AUDIO;
-        const isMicSource = t.source === TrackSource.MICROPHONE;
-        return isAudioType || isMicSource;
-      });
+      const tracks: any[] = Array.isArray((p as any)?.tracks) ? (p as any).tracks : [];
+      const audioTrack =
+        tracks.find((t: any) => t?.source === TrackSource.MICROPHONE) ||
+        tracks.find((t: any) => t?.type === TrackType.AUDIO);
 
       if (!audioTrack) {
         results.push({ identity: p.identity, trackSid: null, changed: false });
@@ -508,24 +506,29 @@ app.post("/api/roomModeration/mute-lock", requireAuth, requireRoomAccessToken as
       const sdk = (await getLiveKitSdk()) as any;
       const TrackSource = sdk.TrackSource;
 
+      const toSourceString = (s: any): string => {
+        if (typeof s === "string") return s.toLowerCase();
+        // LiveKit server SDK may surface TrackSource values as enums; normalize to strings
+        if (s === TrackSource.MICROPHONE) return "microphone";
+        if (s === TrackSource.CAMERA) return "camera";
+        if (s === TrackSource.SCREEN_SHARE) return "screen_share";
+        if (s === TrackSource.SCREEN_SHARE_AUDIO) return "screen_share_audio";
+        return String(s).toLowerCase();
+      };
+
       const participants = await roomService.listParticipants(livekitRoomName);
 
       for (const p of participants) {
         if (hostIdentity && p.identity === hostIdentity) continue; // never restrict host
 
         const currentPerms: any = (p as any).permission || {};
-        const currentSources: any[] = currentPerms.canPublishSources || [];
-        const sourcesAreStrings = currentSources.some((s) => typeof s === "string");
+        const currentSourcesRaw: any[] = Array.isArray(currentPerms.canPublishSources)
+          ? currentPerms.canPublishSources
+          : [];
+        const currentSources = currentSourcesRaw.map(toSourceString).filter(Boolean);
 
-        const normalizeSource = (s: any) => (typeof s === "string" ? s.toLowerCase() : s);
-        const isMic = (s: any) => {
-          const n = normalizeSource(s);
-          return n === TrackSource.MICROPHONE || n === "microphone";
-        };
-        const isScreenShareAudio = (s: any) => {
-          const n = normalizeSource(s);
-          return n === TrackSource.SCREEN_SHARE_AUDIO || n === "screen_share_audio";
-        };
+        const isMic = (s: any) => toSourceString(s) === "microphone";
+        const isScreenShareAudio = (s: any) => toSourceString(s) === "screen_share_audio";
 
         if (muteLock) {
           // Remove audio-related publish sources (mic + screen share audio)
@@ -538,11 +541,10 @@ app.post("/api/roomModeration/mute-lock", requireAuth, requireRoomAccessToken as
             },
           });
         } else {
-          // Restore audio publish ability while preserving any existing sources
-          const mic = sourcesAreStrings ? "microphone" : TrackSource.MICROPHONE;
-          const ssa = sourcesAreStrings ? "screen_share_audio" : TrackSource.SCREEN_SHARE_AUDIO;
-          const toEnsure = [mic, ssa];
-          const merged = Array.from(new Set([...currentSources, ...toEnsure]));
+          // Restore audio publish ability while preserving any existing sources.
+          // Always use string publish sources for LiveKit compatibility.
+          const toEnsure = ["microphone", "screen_share_audio"];
+          const merged = Array.from(new Set([...(currentSources || []), ...toEnsure]));
 
           await roomService.updateParticipant(livekitRoomName, p.identity, {
             permission: {

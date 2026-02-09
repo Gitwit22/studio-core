@@ -26,6 +26,7 @@ import { RoleChangeToast } from "../components/RoleChangeToast";
 import SafeVideoConference from "../components/SafeVideoConference";
 import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { useHlsStatus } from "../hooks/useHlsStatus";
 import {
   RECONNECT_MEDIA_MESSAGE_TYPE,
   reconnectMedia,
@@ -812,6 +813,8 @@ function RoomPage() {
   const routeRoomId = routeRoomNameParam ? decodeURIComponent(routeRoomNameParam) : null;
   const [searchParams] = useSearchParams();
 
+  const { effectiveEntitlements: myEffectiveEntitlements } = useEffectiveEntitlements();
+
   const [displayName, setDisplayName] = useState(() => {
     // Prefer profile displayName if available, then fall back to cached value
     try {
@@ -1017,6 +1020,10 @@ function RoomPage() {
   const [recordingPlanId, setRecordingPlanId] = useState<string | null>(null);
   const [maxRecordingMinutesPerClip, setMaxRecordingMinutesPerClip] = useState<number | null>(null);
   const [recordingToast, setRecordingToast] = useState<string | null>(null);
+  const [recordingBackgroundNotice, setRecordingBackgroundNotice] = useState<null | {
+    kind: "processing" | "ready";
+    recordingId: string;
+  }>(null);
   const [postStopProcessing, setPostStopProcessing] = useState(false);
   const [postStopReady, setPostStopReady] = useState(false);
   const [postStopStatus, setPostStopStatus] = useState<string | null>(null);
@@ -1065,6 +1072,12 @@ function RoomPage() {
   const [, setAuthStatus] = useState<"unknown" | "authed" | "guest">("unknown");
     const [effectivePermissionsMode, setEffectivePermissionsMode] = useState<"simple" | "advanced">("simple");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
+
+  const { data: hlsStatusData } = useHlsStatus({
+    apiBase: API_BASE,
+    roomId: roomId || "",
+    roomAccessToken: roomAccessToken || "",
+  });
 
   useEffect(() => {
     if (!inviteModalOpen) return;
@@ -2058,11 +2071,42 @@ function RoomPage() {
   // If the user stayed in the room while the recording was processing, re-open
   // the modal once the recording becomes ready so they can download it.
   useEffect(() => {
-    // No popup; just clear the flag once ready.
     if (!stayedInRoomDuringProcessing) return;
     if (!postStopReady) return;
+
     setStayedInRoomDuringProcessing(false);
-  }, [postStopReady, stayedInRoomDuringProcessing]);
+
+    if (recordingId) {
+      setRecordingBackgroundNotice({ kind: "ready", recordingId });
+
+      // Optional: browser-level notification (only if the user previously allowed it).
+      try {
+        if (typeof window !== "undefined" && "Notification" in window) {
+          if (window.Notification.permission === "granted") {
+            const n = new window.Notification("Recording ready", {
+              body: "Open Settings → Usage → Latest video to download it.",
+            });
+            n.onclick = () => {
+              try {
+                window.focus();
+              } catch {}
+
+              try {
+                nav("/settings/billing", {
+                  state: {
+                    openTab: "usage",
+                    usageRoomId: effectiveRoomName || undefined,
+                  },
+                });
+              } catch {}
+            };
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [postStopReady, stayedInRoomDuringProcessing, recordingId, nav, effectiveRoomName]);
 
   useEffect(() => {
     if (streamStatus === "live") {
@@ -2308,6 +2352,23 @@ function RoomPage() {
   const handleStayInRoom = () => {
     if (!postStopReady) {
       setStayedInRoomDuringProcessing(true);
+
+      if (recordingId) {
+        setRecordingBackgroundNotice({ kind: "processing", recordingId });
+      }
+
+      // Request notification permission once (user gesture) so we can alert them when ready.
+      try {
+        if (typeof window !== "undefined" && "Notification" in window) {
+          const alreadyAsked = localStorage.getItem("sl_recording_notify_perm_requested") === "1";
+          if (!alreadyAsked && window.Notification.permission === "default") {
+            localStorage.setItem("sl_recording_notify_perm_requested", "1");
+            void window.Notification.requestPermission();
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
     setShowStreamEndedModal(false);
   };
@@ -3007,6 +3068,42 @@ function RoomPage() {
     nav("/settings/billing");
   };
 
+  const myPlanId =
+    typeof (myEffectiveEntitlements as any)?.planId === "string"
+      ? String((myEffectiveEntitlements as any).planId)
+      : typeof recordingPlanId === "string"
+        ? recordingPlanId
+        : null;
+
+  const showUpgradeButton = myPlanId === "free" || myPlanId === "starter" || myPlanId === "basic";
+
+  const handleUpgradePlanFromRoom = () => {
+    const recordingActive =
+      recordingStatus === "recording" ||
+      recordingStatus === "stopping" ||
+      isRecordingCountdown;
+
+    const streamingActive = streamStatus !== "idle";
+
+    const hlsStatus = String(hlsStatusData?.status || "").toLowerCase();
+    const hlsActive =
+      !!roomId &&
+      !!roomAccessToken &&
+      (hlsStatus === "starting" || hlsStatus === "live" || hlsStatus === "active");
+
+    if (recordingActive || streamingActive || hlsActive) {
+      const blockers: string[] = [];
+      if (recordingActive) blockers.push("recording");
+      if (streamingActive) blockers.push("streaming");
+      if (hlsActive) blockers.push("HLS");
+
+      alert(`You can't leave the room while ${blockers.join(", ")}${blockers.length === 1 ? " is" : " are"} running. Stop it first, then upgrade.`);
+      return;
+    }
+
+    nav("/settings/billing");
+  };
+
   return (
     <>
       <RoleChangeToast message={roleChangeMessage} />
@@ -3177,6 +3274,26 @@ function RoomPage() {
               title="Copy invite links"
             >
               🔗 Invite Links
+            </button>
+          )}
+
+          {showUpgradeButton && (
+            <button
+              onClick={handleUpgradePlanFromRoom}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                border: '1px solid rgba(251, 191, 36, 0.55)',
+                borderRadius: '0.375rem',
+                background: 'rgba(251, 191, 36, 0.08)',
+                color: '#fbbf24',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontWeight: '600'
+              }}
+              title="Upgrade your plan"
+            >
+              ⬆️ Upgrade
             </button>
           )}
 
@@ -3573,6 +3690,98 @@ function RoomPage() {
           }}
         >
           ⏱️ {recordingToast}
+        </div>
+      )}
+
+      {/* Recording background processing/ready notice */}
+      {recordingBackgroundNotice && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: recordingToast ? 74 : 24,
+            right: 24,
+            zIndex: 1201,
+            background: "rgba(15,23,42,0.98)",
+            border: "1px solid rgba(148,163,184,0.25)",
+            borderRadius: 12,
+            padding: "12px 12px",
+            color: "#e5e7eb",
+            width: "min(380px, calc(100vw - 48px))",
+            boxShadow: "0 18px 60px rgba(0,0,0,0.7)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>
+              {recordingBackgroundNotice.kind === "processing" ? "Rendering in background" : "Recording ready"}
+            </div>
+            <button
+              type="button"
+              onClick={() => setRecordingBackgroundNotice(null)}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "#94a3b8",
+                cursor: "pointer",
+                fontSize: 16,
+                lineHeight: 1,
+              }}
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div style={{ marginTop: 6, fontSize: 12, color: "#cbd5e1", lineHeight: 1.35 }}>
+            {recordingBackgroundNotice.kind === "processing"
+              ? "Your video is rendering in the background. You can keep using the room."
+              : "Your video finished rendering and is ready to download."}
+            {" "}Retrieve it in <span style={{ color: "#e5e7eb", fontWeight: 600 }}>Settings → Usage → Latest video</span>.
+          </div>
+
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() =>
+                nav("/settings/billing", {
+                  state: {
+                    openTab: "usage",
+                    usageRoomId: effectiveRoomName || undefined,
+                  },
+                })
+              }
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: "1px solid rgba(34, 197, 94, 0.35)",
+                background: "rgba(34, 197, 94, 0.12)",
+                color: "#bbf7d0",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 12,
+              }}
+            >
+              Open Settings
+            </button>
+
+            {recordingBackgroundNotice.kind === "ready" && recordingBackgroundNotice.recordingId ? (
+              <button
+                type="button"
+                onClick={() => nav(`/room-exit/${recordingBackgroundNotice.recordingId}`)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "#e5e7eb",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  fontSize: 12,
+                }}
+              >
+                Open Download Page
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
 
