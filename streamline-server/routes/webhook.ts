@@ -1051,7 +1051,7 @@ router.post("/livekit", express.raw({ type: "*/*" }), async (req, res) => {
     try {
       const roomId = typeof recordingData.roomId === "string" ? String(recordingData.roomId).trim() : "";
       if (roomId) {
-        const roomRef = firestore.collection("rooms").doc(roomId);
+        const roomRef = db.collection("rooms").doc(roomId);
         const roomSnap = await roomRef.get();
         const roomData = roomSnap.exists ? ((roomSnap.data() as any) || {}) : {};
         const currentLatest = String(roomData.latestRecordingId || "").trim();
