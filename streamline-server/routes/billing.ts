@@ -216,6 +216,47 @@ function pickPrimarySubscriptionItem(sub: any): { itemId: string; priceId: strin
   return typeof fallbackPriceId === "string" ? { itemId: items[0].id, priceId: fallbackPriceId } : null;
 }
 
+async function retrieveStripeSubscriptionSafe(id: string): Promise<any | null> {
+  const trimmed = String(id || "").trim();
+  if (!trimmed) return null;
+  try {
+    // Expand optional pointers so we can derive billing periods when fields are missing.
+    return await stripe.subscriptions.retrieve(trimmed, {
+      expand: ["latest_invoice", "latest_invoice.lines", "schedule"],
+    } as any);
+  } catch {
+    return null;
+  }
+}
+
+function extractId(maybe: any): string | null {
+  if (!maybe) return null;
+  if (typeof maybe === "string") return maybe;
+  if (typeof maybe === "object" && typeof maybe.id === "string") return maybe.id;
+  return null;
+}
+
+function pickBestSubscription(list: any): any | null {
+  const subs: any[] = Array.isArray(list?.data) ? list.data : [];
+  if (subs.length === 0) return null;
+  const scoreStatus = (status: string) => {
+    const s = String(status || "").toLowerCase();
+    // Prefer active/trialing; then states that still have a current period.
+    const order = ["active", "trialing", "past_due", "unpaid", "incomplete", "incomplete_expired", "canceled"];
+    const idx = order.indexOf(s);
+    return idx === -1 ? 999 : idx;
+  };
+  return [...subs]
+    .sort((a, b) => {
+      const sa = scoreStatus(a?.status);
+      const sb = scoreStatus(b?.status);
+      if (sa !== sb) return sa - sb;
+      const ca = Number(a?.created || 0);
+      const cb = Number(b?.created || 0);
+      return cb - ca;
+    })[0];
+}
+
 router.post("/checkout", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid;
@@ -335,11 +376,29 @@ router.post("/checkout", requireAuth, async (req, res) => {
     const useTrial = variant === "trial" && !hasHadTrial;
     const trialDays = useTrial ? DEFAULT_TRIAL_DAYS : 0;
 
-    const subscriptionId: string | undefined = userAtLock?.billing?.subscriptionId || userAtLock?.stripeSubscriptionId;
+    const subscriptionIdFromUser: string | undefined = userAtLock?.billing?.subscriptionId || userAtLock?.stripeSubscriptionId;
+    const customerIdHint: string | undefined = userAtLock?.stripeCustomerId || userAtLock?.billing?.customerId;
 
     // Fast-path: existing active subscription => apply upgrade immediately or schedule downgrade.
-    if (subscriptionId) {
-      const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    if (subscriptionIdFromUser || customerIdHint) {
+      // Prefer the stored subscriptionId, but if it's stale/missing, fall back to customer lookup.
+      let sub: any | null = null;
+      if (subscriptionIdFromUser) {
+        sub = await retrieveStripeSubscriptionSafe(subscriptionIdFromUser);
+      }
+      if (!sub && customerIdHint) {
+        try {
+          const list = await stripe.subscriptions.list({ customer: customerIdHint, status: "all", limit: 10 } as any);
+          const picked = pickBestSubscription(list);
+          const pickedId = extractId(picked?.id) || (typeof picked?.id === "string" ? picked.id : null);
+          if (pickedId) sub = await retrieveStripeSubscriptionSafe(pickedId);
+        } catch {}
+      }
+
+      if (!sub) {
+        // No subscription found. Continue to checkout creation flow below.
+      } else {
+      const subscriptionId = String(sub.id);
       const billingStatus = String((sub as any)?.status || "none");
       const billingActive = billingStatus === "active" || billingStatus === "trialing";
 
@@ -435,21 +494,54 @@ router.post("/checkout", requireAuth, async (req, res) => {
         }
 
         // Downgrade: schedule at period end.
+        const scheduleIdExistingRaw = (sub as any).schedule || (sub as any).subscription_schedule;
+        const scheduleIdExisting = extractId(scheduleIdExistingRaw);
+        let schedule: any = null;
+        try {
+          schedule = scheduleIdExisting
+            ? await stripe.subscriptionSchedules.retrieve(String(scheduleIdExisting))
+            : await stripe.subscriptionSchedules.create({ from_subscription: subscriptionId } as any);
+        } catch {}
+
         const currentPeriodEndSec = (sub as any).current_period_end as number | undefined;
-        const currentPeriodEnd = typeof currentPeriodEndSec === "number" ? currentPeriodEndSec : null;
+        let currentPeriodEnd = typeof currentPeriodEndSec === "number" ? currentPeriodEndSec : null;
         const currentPeriodStartSec = (sub as any).current_period_start as number | undefined;
-        const currentPeriodStart = typeof currentPeriodStartSec === "number" ? currentPeriodStartSec : Math.floor(now / 1000);
+        let currentPeriodStart = typeof currentPeriodStartSec === "number" ? currentPeriodStartSec : Math.floor(now / 1000);
+
+        // Some Stripe states (and/or older stored subscription ids) can yield missing period fields.
+        // Derive them from the subscription schedule (preferred) or latest invoice as a fallback.
+        if (schedule && (!currentPeriodEnd || !currentPeriodStart)) {
+          const phase = (schedule as any).current_phase || (Array.isArray((schedule as any).phases) ? (schedule as any).phases[0] : null);
+          const startFromSchedule = phase?.start_date;
+          const endFromSchedule = phase?.end_date;
+          if (typeof startFromSchedule === "number") currentPeriodStart = startFromSchedule;
+          if (typeof endFromSchedule === "number") currentPeriodEnd = endFromSchedule;
+        }
+
+        if (!currentPeriodEnd) {
+          const latestInvoiceId = extractId((sub as any).latest_invoice);
+          if (latestInvoiceId) {
+            try {
+              const inv: any = await stripe.invoices.retrieve(String(latestInvoiceId));
+              const line = Array.isArray(inv?.lines?.data) ? inv.lines.data[0] : null;
+              const startFromInv = line?.period?.start;
+              const endFromInv = line?.period?.end;
+              if (typeof startFromInv === "number") currentPeriodStart = startFromInv;
+              if (typeof endFromInv === "number") currentPeriodEnd = endFromInv;
+            } catch {}
+          }
+        }
+
         if (!currentPeriodEnd) {
           await userRef.set({ planChangeLock: null }, { merge: true });
           return res.status(500).json({ success: false, error: "subscription_period_missing" });
         }
 
-        const scheduleIdExisting = (sub as any).schedule || (sub as any).subscription_schedule;
-        const schedule = scheduleIdExisting
-          ? await stripe.subscriptionSchedules.retrieve(String(scheduleIdExisting))
-          : await stripe.subscriptionSchedules.create({ from_subscription: subscriptionId } as any);
-
-        const scheduleId = schedule.id;
+        const scheduleId = schedule?.id;
+        if (!scheduleId) {
+          await userRef.set({ planChangeLock: null }, { merge: true });
+          return res.status(500).json({ success: false, error: "subscription_schedule_missing" });
+        }
 
         await stripe.subscriptionSchedules.update(
           scheduleId,
@@ -505,6 +597,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
         );
 
         return res.json({ success: true, mode: "downgrade_scheduled", planId: currentPlanFromStripe, pendingPlan: canonicalPlan, effectiveAtMs, requestId });
+      }
       }
     }
 

@@ -1423,6 +1423,14 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
     } else if (bodyError === "plan_change_locked") {
       const label = lockUntil ? new Date(lockUntil).toLocaleTimeString() : "shortly";
       setError(`A plan change is already in progress. Try again ${lockUntil ? `after ${label}` : "in a moment"}.`);
+    } else if (bodyError === "subscription_period_missing") {
+      setError(
+        "We couldn’t determine your current billing period from Stripe. Hit Refresh Status, then try again. If it still fails, use Manage Billing (Portal) or contact support."
+      );
+    } else if (bodyError === "subscription_schedule_missing" || bodyError === "subscription_item_missing") {
+      setError(
+        "Your Stripe subscription is missing some expected fields. Hit Refresh Status, then try again. If it still fails, use Manage Billing (Portal) or contact support."
+      );
     } else if (err?.status === 403 && bodyError === "billing_disabled") {
       setError("Billing is disabled for this account. Use Test Mode plan switching instead.");
     } else if (err?.status === 403 && bodyError === "tos_not_accepted") {
