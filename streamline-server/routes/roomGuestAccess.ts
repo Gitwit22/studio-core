@@ -330,7 +330,11 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     // Policy: visibility
     const isOwner = !!user && !!ownerId && user.uid === ownerId;
-    if (visibility === "private" && !isOwner) {
+    // Private rooms are owner-only UNLESS the caller presents a valid invite token.
+    // This supports "invite someone on stage" while keeping strict access by default.
+    const inviteForRoom = tryGetLegacyInviteGuest(req, roomId);
+    const hasInviteAccess = !!inviteForRoom;
+    if (visibility === "private" && !isOwner && !hasInviteAccess) {
       return res.status(403).json({ error: "not_allowed" });
     }
 

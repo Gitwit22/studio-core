@@ -1625,8 +1625,10 @@ function RoomPage() {
 
           payload.uid = getOrCreateUid();
           payload.displayName = displayName;
-          // Invites are currently guest/participant-only (no elevated roles).
-          if (!bearerToken && inviteTokenForJoin) {
+          // Always forward invite tokens when present.
+          // This allows authenticated participants to join invite-scoped/private rooms
+          // (server will clamp roles and validate invite-room match).
+          if (inviteTokenForJoin) {
             payload.inviteToken = inviteTokenForJoin;
           }
 
@@ -1641,7 +1643,17 @@ function RoomPage() {
 
         const mode: "auth" | "invite" = bearerToken ? "auth" : payload.inviteToken ? "invite" : "auth";
         const tokenRes = bearerToken
-          ? await apiFetchAuth(endpoint, { method: "POST", body: JSON.stringify(payload) }, { allowNonOk: true })
+          ? await apiFetchAuth(
+              endpoint,
+              {
+                method: "POST",
+                headers: {
+                  ...(inviteTokenForJoin ? { "x-invite-token": inviteTokenForJoin } : {}),
+                },
+                body: JSON.stringify(payload),
+              },
+              { allowNonOk: true },
+            )
           : await apiFetch(
               endpoint,
               {
