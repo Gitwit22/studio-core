@@ -2727,9 +2727,14 @@ function RoomPage() {
       : [];
     const hasSessionKeys = Object.values(sessionKeyMap || {}).some((entry) => !!entry?.streamKey);
     const hasDirectKeys = !!(youtubeKey || facebookKey || twitchKey);
+    const hasExtraDestinations = (extraDestinations || []).some((d) => {
+      const rtmpUrl = typeof (d as any)?.rtmpUrl === "string" ? (d as any).rtmpUrl.trim() : "";
+      const streamKey = typeof (d as any)?.streamKey === "string" ? (d as any).streamKey.trim() : "";
+      return !!(rtmpUrl && streamKey);
+    });
 
-    if (!hasDirectKeys && !hasSessionKeys && destIds.length === 0) {
-      alert("Select at least one saved stream destination or enter a stream key.");
+    if (!hasDirectKeys && !hasSessionKeys && destIds.length === 0 && !hasExtraDestinations) {
+      alert("Select at least one stream destination or enter a stream key.");
       return;
     }
     const sequence = ["3", "2", "1"];
