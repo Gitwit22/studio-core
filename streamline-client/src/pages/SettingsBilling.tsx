@@ -2236,17 +2236,21 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               <div style={S.cardHeader}>
                 <h2 style={S.cardTitle}>Your Plan</h2>
                 <div style={S.cardHeaderRight}>
-                  {!isTestMode && hasStripeCustomer && (
-                    <button
-                      type="button"
-                      onClick={openPortal}
-                      style={S.manageBillingHeaderBtn}
-                      disabled={!!actionLoading}
-                      title={hasStripeCustomer ? "Open Stripe billing portal" : "Set up billing to manage your subscription"}
-                    >
-                      {actionLoading === "portal" ? "Loading…" : "Manage billing"}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={openPortal}
+                    style={S.manageBillingHeaderBtn}
+                    disabled={!!actionLoading || isTestMode}
+                    title={
+                      isTestMode
+                        ? "Billing portal is disabled in Test Mode"
+                        : hasStripeCustomer
+                          ? "Open Stripe billing portal"
+                          : "Set up billing to manage your subscription"
+                    }
+                  >
+                    {actionLoading === "portal" ? "Loading…" : hasStripeCustomer ? "Manage billing" : "Set up billing"}
+                  </button>
 
                   {isProcessing && (
                     <span style={S.processingBadge}>
