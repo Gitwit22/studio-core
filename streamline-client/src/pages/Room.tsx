@@ -1,3 +1,4 @@
+import React from "react";
 import { getFeatureErrorMessage } from "../lib/featureErrors";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { logAuthDebugContext } from "../lib/logAuthDebug";
