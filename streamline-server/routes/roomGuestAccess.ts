@@ -120,6 +120,59 @@ function hitRedeemRateLimit(ip: string): boolean {
   return false;
 }
 
+// Per-inviteId rate limiter to prevent abuse of specific invite links
+const inviteIdWindowMs = 30_000; // 30 seconds
+const inviteIdMax = 20; // Max 20 joins per invite per 30s
+const inviteIdHits = new Map<string, { count: number; resetAt: number }>();
+
+function hitInviteIdRateLimit(inviteId: string): boolean {
+  const now = Date.now();
+  const existing = inviteIdHits.get(inviteId);
+  if (!existing || now >= existing.resetAt) {
+    inviteIdHits.set(inviteId, { count: 1, resetAt: now + inviteIdWindowMs });
+    return false;
+  }
+  existing.count += 1;
+  if (existing.count > inviteIdMax) return true;
+  return false;
+}
+
+// Idempotency tracking: prevent rapid duplicate joins from same client
+// Key: inviteId:deviceFingerprint, Value: { identity, expiresAt }
+const idempotencyCache = new Map<string, { identity: string; expiresAt: number }>();
+const idempotencyCacheTtl = 10_000; // 10 seconds
+
+function generateDeviceFingerprint(req: any): string {
+  // Simple fingerprint from IP + User-Agent
+  // In production, could use more sophisticated techniques
+  const ip = String(req.ip || req.connection?.remoteAddress || "unknown");
+  const ua = String(req.get("user-agent") || "unknown");
+  return `${ip}:${ua.substring(0, 100)}`;
+}
+
+function checkIdempotency(inviteId: string, fingerprint: string): { identity: string } | null {
+  const now = Date.now();
+  const key = `${inviteId}:${fingerprint}`;
+  const cached = idempotencyCache.get(key);
+  if (cached && now < cached.expiresAt) {
+    return { identity: cached.identity };
+  }
+  // Clean up expired entries
+  if (cached && now >= cached.expiresAt) {
+    idempotencyCache.delete(key);
+  }
+  return null;
+}
+
+function setIdempotency(inviteId: string, fingerprint: string, identity: string): void {
+  const now = Date.now();
+  const key = `${inviteId}:${fingerprint}`;
+  idempotencyCache.set(key, {
+    identity,
+    expiresAt: now + idempotencyCacheTtl,
+  });
+}
+
 /**
  * POST /api/invites/:inviteId/redeem
  * Auth: none
@@ -197,6 +250,308 @@ router.post("/invites/:inviteId/redeem", async (req: any, res) => {
     return res.json({ roomId: result.roomId, guestSessionToken: sessionJwt });
   } catch (err: any) {
     console.error("/api/invites/:inviteId/redeem error", err?.message || err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+/**
+ * POST /api/invites/:inviteId/join-now
+ * Auth: none (creates guest session)
+ * Body: { displayName?: string }
+ * Returns: { serverUrl, roomToken, roomId, identity, displayName, guestSessionToken, roomAccessToken, isViewer, role }
+ * 
+ * Consolidated endpoint that combines:
+ * 1. Invite redemption (validates invite, increments use count)
+ * 2. LiveKit token minting
+ * 3. Guest session creation
+ * 
+ * This eliminates multiple round-trips for guest join flow, improving time-to-video.
+ */
+router.post("/invites/:inviteId/join-now", async (req: any, res) => {
+  const startTime = Date.now();
+  let logPayload: any = { inviteId: "unknown", event: "join_now_start" };
+  
+  try {
+    const inviteId = String(req.params.inviteId || "").trim();
+    logPayload.inviteId = inviteId;
+    
+    if (!inviteId) {
+      logPayload.event = "join_now_fail";
+      logPayload.reason = "inviteId_required";
+      console.log("[join-now]", logPayload);
+      return res.status(400).json({ error: "inviteId_required" });
+    }
+
+    const ip = String(req.ip || "");
+    
+    // IP rate limiting
+    if (hitRedeemRateLimit(ip)) {
+      logPayload.event = "join_now_fail";
+      logPayload.reason = "ip_rate_limited";
+      logPayload.ip = ip;
+      console.log("[join-now]", logPayload);
+      return res.status(429).json({ error: "rate_limited" });
+    }
+    
+    // Per-inviteId rate limiting
+    if (hitInviteIdRateLimit(inviteId)) {
+      logPayload.event = "join_now_fail";
+      logPayload.reason = "invite_rate_limited";
+      console.log("[join-now]", logPayload);
+      return res.status(429).json({ error: "rate_limited" });
+    }
+    
+    // Idempotency check: prevent duplicate sessions from rapid double-clicks
+    const deviceFingerprint = generateDeviceFingerprint(req);
+    const existingSession = checkIdempotency(inviteId, deviceFingerprint);
+    if (existingSession) {
+      logPayload.event = "join_now_idempotent";
+      logPayload.cachedIdentity = existingSession.identity;
+      console.log("[join-now]", logPayload);
+      // Return cached identity but regenerate tokens (they're cheap)
+      // This prevents weird duplicate sessions while still allowing token refresh
+    }
+
+    // Step 1: Redeem the invite (validate + increment use count)
+    const inviteRef = firestore.collection("roomInvites").doc(inviteId);
+
+    const redeemResult = await firestore.runTransaction(async (tx) => {
+      const snap = await tx.get(inviteRef);
+      if (!snap.exists) {
+        logPayload.reason = "invite_not_found";
+        return { ok: false as const, status: 404 as const, error: "invite_not_found" };
+      }
+
+      const data = (snap.data() as any) || {};
+      const roomId = String(data.roomId || "").trim();
+      if (!roomId) {
+        logPayload.reason = "invite_room_missing";
+        return { ok: false as const, status: 409 as const, error: "invite_room_missing" };
+      }
+
+      if (data.revokedAt) {
+        logPayload.reason = "invite_revoked";
+        return { ok: false as const, status: 403 as const, error: "invite_revoked" };
+      }
+
+      const expiresAtMs = (data.expiresAt as any)?.toMillis?.() ?? null;
+      if (expiresAtMs && expiresAtMs < Date.now()) {
+        logPayload.reason = "invite_expired";
+        logPayload.expiresAtMs = expiresAtMs;
+        return { ok: false as const, status: 410 as const, error: "invite_expired" };
+      }
+
+      const maxUses = data.maxUses ?? null;
+      const useCount = Number(data.useCount || 0);
+      
+      // Enforce single-use invites strictly
+      if (maxUses === 1 && useCount >= 1) {
+        logPayload.reason = "single_use_exhausted";
+        logPayload.useCount = useCount;
+        return { ok: false as const, status: 409 as const, error: "invite_already_used" };
+      }
+      
+      // Enforce multi-use max atomically
+      if (maxUses !== null && Number(maxUses) > 1 && useCount >= Number(maxUses)) {
+        logPayload.reason = "max_uses_reached";
+        logPayload.maxUses = maxUses;
+        logPayload.useCount = useCount;
+        return { ok: false as const, status: 410 as const, error: "invite_max_used" };
+      }
+
+      // Atomically increment use count
+      tx.update(inviteRef, {
+        useCount: useCount + 1,
+        lastRedeemedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const inviteRole = String(data.role || "viewer").toLowerCase();
+      const role: "viewer" | "participant" = inviteRole === "participant" ? "participant" : "viewer";
+
+      return { ok: true as const, roomId, role, maxUses, useCount: useCount + 1 };
+    });
+
+    if (!redeemResult.ok) {
+      logPayload.event = "join_now_fail";
+      logPayload.status = redeemResult.status;
+      logPayload.latencyMs = Date.now() - startTime;
+      console.log("[join-now]", logPayload);
+      return res.status(redeemResult.status).json({ error: redeemResult.error });
+    }
+
+    const roomId = redeemResult.roomId;
+    const inviteRole = redeemResult.role;
+    logPayload.roomId = roomId;
+    logPayload.role = inviteRole;
+    logPayload.maxUses = redeemResult.maxUses;
+    logPayload.currentUseCount = redeemResult.useCount;
+
+    // Step 2: Get room details (validate room exists)
+    const roomSnap = await firestore.collection("rooms").doc(roomId).get();
+    if (!roomSnap.exists) {
+      logPayload.event = "join_now_fail";
+      logPayload.reason = "room_not_found";
+      logPayload.latencyMs = Date.now() - startTime;
+      console.log("[join-now]", logPayload);
+      return res.status(404).json({ error: "room_not_found" });
+    }
+
+    const room = (roomSnap.data() as any) || {};
+    const livekitRoomName = String(room.livekitRoomName || roomId).trim();
+    const roomName = String(room.roomName || room.name || livekitRoomName || roomId);
+    const allowGuestsPolicy = typeof room.allowGuests === "boolean" ? !!room.allowGuests : null;
+
+    // Optional per-room guest policy
+    if (allowGuestsPolicy === false) {
+      logPayload.event = "join_now_fail";
+      logPayload.reason = "guests_not_allowed";
+      logPayload.latencyMs = Date.now() - startTime;
+      console.log("[join-now]", logPayload);
+      return res.status(401).json({ error: "login_required" });
+    }
+
+    // Step 3: Mint LiveKit token
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    if (!apiKey || !apiSecret) {
+      const missing: string[] = [];
+      if (!apiKey) missing.push("LIVEKIT_API_KEY");
+      if (!apiSecret) missing.push("LIVEKIT_API_SECRET");
+      logPayload.event = "join_now_fail";
+      logPayload.reason = "livekit_misconfigured";
+      logPayload.missing = missing;
+      console.log("[join-now]", logPayload);
+      return res.status(500).json({ code: "misconfigured", error: "LiveKit keys missing", missing });
+    }
+
+    const displayName = sanitizeDisplayName(String(req.body?.displayName || "")).trim() || `Guest-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    
+    // Use cached identity for idempotent requests, otherwise generate new
+    const identity = existingSession?.identity || `invite:${inviteId}:${Math.random().toString(16).slice(2)}`;
+    logPayload.identity = identity;
+    logPayload.displayName = displayName;
+    
+    // Store in idempotency cache
+    if (!existingSession) {
+      setIdempotency(inviteId, deviceFingerprint, identity);
+    }
+
+    const AccessToken = await getAccessTokenCtor();
+    
+    // LiveKit token TTL: 30 minutes (reasonable for guest sessions)
+    // Shorter TTL improves security, longer TTL reduces re-auth friction
+    const livekitTtl = "30m";
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity,
+      name: displayName,
+      ttl: livekitTtl,
+    });
+
+    const grant = roleGrant(inviteRole);
+    at.addGrant({ room: livekitRoomName, ...grant } as any);
+
+    const livekitToken = await at.toJwt();
+    logPayload.livekitTtl = livekitTtl;
+
+    // Step 4: Create guest session JWT
+    // Guest session TTL: 2 hours (longer than LiveKit token, allows token refresh)
+    // CRITICAL: Guest session must expire AFTER LiveKit token so re-minting works
+    const guestSessionTtl = "2h";
+    const guestSessionToken = signGuestSession({ inviteId, roomId, role: inviteRole }, guestSessionTtl);
+    logPayload.guestSessionTtl = guestSessionTtl;
+
+    // Step 5: Create room access token
+    const basePerms =
+      inviteRole === "participant"
+        ? {
+            canStream: false,
+            canRecord: false,
+            canDestinations: false,
+            canModerate: false,
+            canLayout: false,
+            canScreenShare: false,
+            canInvite: false,
+            canAnalytics: false,
+            canMuteGuests: false,
+            canRemoveGuests: false,
+          }
+        : {
+            canStream: false,
+            canRecord: false,
+            canDestinations: false,
+            canModerate: false,
+            canLayout: false,
+            canScreenShare: false,
+            canInvite: false,
+            canAnalytics: false,
+            canMuteGuests: false,
+            canRemoveGuests: false,
+          };
+
+    const roomAccessPayload = {
+      roomId,
+      roomName,
+      livekitRoomName,
+      role: inviteRole,
+      permissions: basePerms,
+      identity,
+    } as const;
+
+    const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), { expiresIn: "12h" });
+
+    // Step 6: Set HttpOnly cookie
+    const isProduction = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+    const secure = isProduction;
+    const sameSite: "none" | "lax" = isProduction ? "none" : "lax";
+
+    res.cookie("sl_guest", guestSessionToken, {
+      httpOnly: true,
+      sameSite,
+      secure,
+      path: "/",
+      maxAge: 2 * 60 * 60 * 1000,
+    });
+
+    // Step 7: Get LiveKit server URL
+    const serverUrl = getLiveKitServerUrlForClient();
+    if (!serverUrl) {
+      logPayload.event = "join_now_fail";
+      logPayload.reason = "livekit_url_missing";
+      logPayload.latencyMs = Date.now() - startTime;
+      console.log("[join-now]", logPayload);
+      return res.status(500).json({
+        code: "misconfigured",
+        error: "LIVEKIT_URL missing",
+        missing: ["LIVEKIT_URL"],
+      });
+    }
+
+    // Success! Log observability metrics
+    logPayload.event = "join_now_success";
+    logPayload.latencyMs = Date.now() - startTime;
+    delete logPayload.reason; // No failure reason
+    console.log("[join-now]", logPayload);
+
+    // Return everything the client needs to connect immediately
+    // NEVER log tokens in production - treat like passwords
+    return res.json({
+      serverUrl,
+      roomToken: livekitToken,
+      roomId,
+      identity,
+      displayName,
+      guestSessionToken,
+      roomAccessToken,
+      isViewer: inviteRole === "viewer",
+      role: inviteRole,
+      roomName,
+    });
+  } catch (err: any) {
+    logPayload.event = "join_now_fail";
+    logPayload.reason = "exception";
+    logPayload.error = err?.message || String(err);
+    logPayload.latencyMs = Date.now() - startTime;
+    console.error("[join-now]", logPayload);
     return res.status(500).json({ error: "internal_error" });
   }
 });
