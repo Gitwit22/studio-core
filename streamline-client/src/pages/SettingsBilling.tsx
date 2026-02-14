@@ -465,6 +465,9 @@ export default function SettingsBilling() {
       }
     };
     const onPageShow = () => {
+      // Clear caches so fresh plan/billing data is fetched after Stripe portal changes
+      clearMeCache();
+      clearPlatformFlagsCache();
       setActionLoading(null);
       loadAllData();
     };
@@ -1654,12 +1657,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
         setActionLoading(null);
         return;
       }
-      // If no Stripe customer, guide user into Checkout to create one
-      if (!hasStripeCustomer) {
-        setShowManagePicker(true);
-        setActionLoading(null);
-        return;
-      }
+      
       const res = await apiFetchWithCookieFallback("/api/billing/portal", {
         method: "POST",
       });
@@ -1671,6 +1669,7 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
           throw new Error("Billing is currently disabled for this workspace.");
         }
         if (res.status === 400 && errCode === "missing_customer") {
+          // No Stripe customer yet - guide user to create one via checkout
           setShowManagePicker(true);
           setActionLoading(null);
           return;
@@ -1683,6 +1682,8 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
 
       const url = String((data as any)?.url || "");
       if (!url) throw new Error("Portal failed");
+      
+      // Redirect to Stripe billing portal
       window.location.href = url;
     } catch (err: any) {
       setError(err.message);
@@ -2264,21 +2265,22 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
               <div style={S.cardHeader}>
                 <h2 style={S.cardTitle}>Your Plan</h2>
                 <div style={S.cardHeaderRight}>
-                  <button
-                    type="button"
-                    onClick={openPortal}
-                    style={S.manageBillingHeaderBtn}
-                    disabled={!!actionLoading || isTestMode}
-                    title={
-                      isTestMode
-                        ? "Billing portal is disabled in Test Mode"
-                        : hasStripeCustomer
-                          ? "Open Stripe billing portal"
-                          : "Set up billing to manage your subscription"
-                    }
-                  >
-                    {actionLoading === "portal" ? "Loading…" : hasStripeCustomer ? "Manage billing" : "Set up billing"}
-                  </button>
+                  {/* Only show Manage billing for users with Stripe context or paid plan history */}
+                  {(hasStripeCustomer || isPaidPlan || status === "trialing" || status === "active") && (
+                    <button
+                      type="button"
+                      onClick={openPortal}
+                      style={S.manageBillingHeaderBtn}
+                      disabled={!!actionLoading || isTestMode}
+                      title={
+                        isTestMode
+                          ? "Billing portal is disabled in Test Mode"
+                          : "Open Stripe billing portal to manage your subscription"
+                      }
+                    >
+                      {actionLoading === "portal" ? "Loading…" : "Manage billing"}
+                    </button>
+                  )}
 
                   {isProcessing && (
                     <span style={S.processingBadge}>
@@ -2740,7 +2742,16 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             </button>
                           )
                         ) : isCurrent ? (
-                          <span style={S.currentLabel}>✅ Current Plan</span>
+                          <button
+                            onClick={openPortal}
+                            style={{
+                              ...S.planUpgradeBtn,
+                              background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+                            }}
+                            disabled={!!actionLoading}
+                          >
+                            {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage billing"}
+                          </button>
                         ) : planId === "basic" && (userPlan === "free" || userPlan === "starter") ? (
                           <button
                             onClick={() => startCheckout("basic")}
@@ -2807,28 +2818,23 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             style={{
                               ...S.planUpgradeBtn,
                               background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-                              opacity: 0.85,
                             }}
                             disabled={!!actionLoading || isBlocked}
                           >
-                            Manage in Billing Portal
+                            {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage billing"}
                           </button>
-                        ) : (
+                        ) : isDowngrade ? (
                           <button
                             onClick={openPortal}
                             style={{
                               ...S.planUpgradeBtn,
                               background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-                              opacity: 0.85,
                             }}
                             disabled={!!actionLoading || isBlocked}
                           >
-                            {getPlanActionLabel(userPlan, planId as any, {
-                              isProcessing,
-                              pendingPlan: user?.pendingPlan,
-                            })}
+                            {actionLoading === "portal" ? "⏳ Loading..." : "⚙️ Manage billing"}
                           </button>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   );
