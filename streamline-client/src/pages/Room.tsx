@@ -702,6 +702,9 @@ function LiveKitShell({
       audio={!isViewer}
       video={!isViewer}
       connectOptions={isViewer ? { autoSubscribe: true } : undefined}
+      onConnected={() => {
+        console.log('[Room] LiveKit connected', { isViewer, roomId });
+      }}
       onDisconnected={onDisconnected}
       style={{
         width: "100%",
@@ -734,6 +737,27 @@ function LiveKitShell({
             }}
           >
             Guest is viewing the join page.
+          </div>
+        )}
+        {isViewer && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "8px 16px",
+              borderRadius: 999,
+              background: "rgba(15,23,42,0.95)",
+              border: "1px solid rgba(59,130,246,0.6)",
+              fontSize: 13,
+              color: "#93c5fd",
+              zIndex: 20,
+              pointerEvents: "none",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            }}
+          >
+            👀 Connected as viewer — host video will appear here
           </div>
         )}
         <div
@@ -1713,6 +1737,14 @@ function RoomPage() {
         // This matches the legacy participant join flow: /room/<roomId>?t=<inviteToken>
         // Also fall back to any locally-stored invite token for backward compatibility.
         const guestSessionToken = getGuestSessionToken(roomId);
+        console.log('[Room] Token fetch context:', {
+          hasAuth: !!bearerToken,
+          hasGuestToken: !!guestSessionToken,
+          roomId,
+          role,
+          isHost,
+          isViewer
+        });
         const inviteTokenFromUrl = new URLSearchParams(window.location.search).get("t");
         const inviteTokenForJoin = (!guestSessionToken ? (inviteTokenFromUrl || inviteToken || null) : null)?.trim?.() || null;
         const buildRoomTokenRequest = () => {
@@ -1972,6 +2004,11 @@ function RoomPage() {
     const poll = async () => {
       try {
         const guestSessionToken = getGuestSessionToken(roomId);
+        console.log('[Room] Guest polling room status', { 
+          roomId, 
+          hasGuestToken: !!guestSessionToken, 
+          hasInviteToken: !!inviteToken 
+        });
         const res = await apiFetch(
           `/api/rooms/${encodeURIComponent(roomId)}/status`,
           {
@@ -2005,10 +2042,13 @@ function RoomPage() {
 
         const data = await res.json().catch(() => null);
         const status = data?.status === "live" ? "live" : "idle";
+        console.log('[Room] Guest room status:', status);
         setRoomGateStatus(status);
 
         if (status === "idle") {
           roomGatePollRef.current = setTimeout(poll, 4000);
+        } else {
+          console.log('[Room] Room is live! Guest can now join.');
         }
       } catch {
         if (!cancelled) {
