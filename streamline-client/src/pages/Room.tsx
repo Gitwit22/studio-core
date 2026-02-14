@@ -107,11 +107,36 @@ function mapJoinErrorMessage(code: string | null): string | null {
 
 function getGuestSessionToken(roomId: string | null): string | null {
   if (!roomId) return null;
+
+  // 1. Try query param (highest priority, works in FB/IG in-app browsers)
   try {
-    return sessionStorage.getItem(`sl_guest_session:${roomId}`) || null;
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("gst");
+    if (fromQuery) return fromQuery.trim();
   } catch {
-    return null;
+    // ignore
   }
+
+  // 2. Try sessionStorage (preferred, per-room)
+  try {
+    const fromSession = sessionStorage.getItem(`sl_guest_session:${roomId}`);
+    if (fromSession) return fromSession.trim();
+  } catch {
+    // sessionStorage may fail in private browsing
+  }
+
+  // 3. Try localStorage (fallback, check if token matches roomId)
+  try {
+    const storedRoomId = localStorage.getItem("sl_guestSessionRoomId");
+    if (storedRoomId === roomId) {
+      const fromLocal = localStorage.getItem("sl_guestSessionToken");
+      if (fromLocal) return fromLocal.trim();
+    }
+  } catch {
+    // localStorage may fail in private browsing
+  }
+
+  return null;
 }
 
 type RoomPermissions = {
@@ -1743,6 +1768,8 @@ function RoomPage() {
                   "Content-Type": "application/json",
                   ...(inviteTokenForJoin ? { "x-invite-token": inviteTokenForJoin } : {}),
                   ...(guestSessionToken ? { "x-guest-session": guestSessionToken } : {}),
+                  // Also send as Authorization Bearer for maximum compatibility
+                  ...(guestSessionToken ? { "Authorization": `Bearer ${guestSessionToken}` } : {}),
                 },
                 body: JSON.stringify(payload),
               },
@@ -1951,6 +1978,8 @@ function RoomPage() {
             headers: {
               ...(!guestSessionToken && inviteToken ? { "x-invite-token": inviteToken } : {}),
               ...(guestSessionToken ? { "x-guest-session": guestSessionToken } : {}),
+              // Also send as Authorization Bearer for maximum compatibility
+              ...(guestSessionToken ? { "Authorization": `Bearer ${guestSessionToken}` } : {}),
             },
           },
           { allowNonOk: true }

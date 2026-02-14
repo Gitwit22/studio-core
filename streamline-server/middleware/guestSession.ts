@@ -21,14 +21,24 @@ export function signGuestSession(
 }
 
 function extractGuestSessionToken(req: Request): string | null {
+  // 1. Check Authorization: Bearer header first (most secure, works everywhere)
+  const authHeader = req.headers.authorization || (req.headers as any).Authorization;
+  if (typeof authHeader === "string") {
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]) return match[1].trim();
+  }
+
+  // 2. Check custom headers
   const hdr = (req.headers as any) || {};
   const fromHeader = hdr["x-guest-session"] ?? hdr["x-guest-session-token"];
   if (typeof fromHeader === "string" && fromHeader.trim()) return fromHeader.trim();
 
+  // 3. Check request body
   const fromBody = (req as any)?.body?.guestSessionToken;
   if (typeof fromBody === "string" && fromBody.trim()) return fromBody.trim();
 
-  const fromQuery = (req as any)?.query?.guestSessionToken;
+  // 4. Check query params (including 'gst' shorthand for invite links)
+  const fromQuery = (req as any)?.query?.guestSessionToken || (req as any)?.query?.gst;
   if (typeof fromQuery === "string" && fromQuery.trim()) return fromQuery.trim();
 
   return null;

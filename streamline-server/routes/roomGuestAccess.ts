@@ -180,10 +180,15 @@ router.post("/invites/:inviteId/redeem", async (req: any, res) => {
     const expiresIn = "2h";
     const sessionJwt = signGuestSession({ inviteId, roomId: result.roomId, role: "viewer" }, expiresIn);
 
-    const secure = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+    // CRITICAL: Use SameSite=None in production for cross-site compatibility (FB/IG in-app browsers).
+    // Requires Secure=true. Local dev uses Lax since localhost is same-site.
+    const isProduction = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+    const secure = isProduction;
+    const sameSite: "none" | "lax" = isProduction ? "none" : "lax";
+
     res.cookie("sl_guest", sessionJwt, {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite,
       secure,
       path: "/",
       maxAge: 2 * 60 * 60 * 1000,
@@ -227,10 +232,12 @@ router.get("/rooms/:roomId/status", async (req: any, res) => {
         guest = legacyGuest as any;
         const expiresIn = "2h";
         const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: "viewer" }, expiresIn);
-        const secure = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+        const isProduction = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+        const secure = isProduction;
+        const sameSite: "none" | "lax" = isProduction ? "none" : "lax";
         res.cookie("sl_guest", sessionJwt, {
           httpOnly: true,
-          sameSite: "lax",
+          sameSite,
           secure,
           path: "/",
           maxAge: 2 * 60 * 60 * 1000,
@@ -270,10 +277,12 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
         guest = legacyGuest as any;
         const expiresIn = "2h";
         const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: legacyGuest.role }, expiresIn);
-        const secure = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+        const isProduction = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
+        const secure = isProduction;
+        const sameSite: "none" | "lax" = isProduction ? "none" : "lax";
         res.cookie("sl_guest", sessionJwt, {
           httpOnly: true,
-          sameSite: "lax",
+          sameSite,
           secure,
           path: "/",
           maxAge: 2 * 60 * 60 * 1000,
