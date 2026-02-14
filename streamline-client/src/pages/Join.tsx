@@ -207,10 +207,9 @@ export default function Join() {
           console.log('[Join] Got inviteId, calling join-now:', inviteId);
 
           // Step 2: Call consolidated join-now endpoint (redeem + token mint in one call)
-          const joinNowRes = await fetch(`${API_BASE}/api/invites/${encodeURIComponent(inviteId)}/join-now`, {
+          const joinNowRes = await apiFetch(`/api/invites/${encodeURIComponent(inviteId)}/join-now`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            credentials: "include", // Important for cookie
             body: JSON.stringify({}),
           });
 
