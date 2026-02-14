@@ -1557,6 +1557,58 @@ function RoomPage() {
     message: string;
   } | null>(null);
 
+  // Detect in-app browsers that may block camera/mic access
+  const detectInAppBrowser = (): boolean => {
+    const ua = navigator.userAgent || "";
+    // Facebook, Instagram, TikTok, Twitter, LinkedIn in-app browsers
+    const patterns = /FBAN|FBAV|Instagram|TikTok|Twitter|LinkedInApp/i;
+    return patterns.test(ua);
+  };
+
+  // Handle media device errors and show appropriate messaging
+  const handleMediaDeviceError = (error: any) => {
+    console.error('[Room] MediaDevicesError:', error );
+
+    const errorName = error?.name || String(error);
+    
+    if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+      setMediaPermissionError({
+        type: 'denied',
+        message: '🔒 Camera/mic blocked. Tap the lock icon → allow → reload.',
+      });
+    } else if (errorName === 'NotFoundError') {
+      setMediaPermissionError({
+        type: 'notFound',
+        message: '⚠️ No camera/mic found. Check if devices are connected.',
+      });
+    } else if (errorName === 'NotReadableError') {
+      setMediaPermissionError({
+        type: 'notReadable',
+        message: '⚠️ Camera/mic in use by another app. Close other apps and reload.',
+      });
+    } else if (errorName === 'NotSupportedError' || errorName === 'OverconstrainedError') {
+      setMediaPermissionError({
+        type: 'notSupported',
+        message: '⚠️ Browser or device limitation. Try a different browser.',
+      });
+    } else {
+      setMediaPermissionError({
+        type: 'notSupported',
+        message: `⚠️ Unable to access camera/mic: ${errorName}`,
+      });
+    }
+  };
+
+  // Check for in-app browser on mount
+  React.useEffect(() => {
+    if (detectInAppBrowser()) {
+      setMediaPermissionError({
+        type: 'inAppBrowser',
+        message: '⚠️ This in-app browser may block camera/mic. Open in Chrome/Safari.',
+      });
+    }
+  }, []);
+
   const currentRole = userRole;
   const isGuestRole = currentRole === "guest";
   const can = (key: keyof RoomPermissions) => !needsReauth && (isHost || !!roomPermissions?.[key]);
@@ -1627,58 +1679,6 @@ function RoomPage() {
       }
     }
   };
-
-  // Detect in-app browsers that may block camera/mic access
-  const detectInAppBrowser = (): boolean => {
-    const ua = navigator.userAgent || "";
-    // Facebook, Instagram, TikTok, Twitter, LinkedIn in-app browsers
-    const patterns = /FBAN|FBAV|Instagram|TikTok|Twitter|LinkedInApp/i;
-    return patterns.test(ua);
-  };
-
-  // Handle media device errors and show appropriate messaging
-  const handleMediaDeviceError = (error: any) => {
-    console.error('[Room] MediaDevicesError:', error );
-
-    const errorName = error?.name || String(error);
-    
-    if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
-      setMediaPermissionError({
-        type: 'denied',
-        message: '🔒 Camera/mic blocked. Tap the lock icon → allow → reload.',
-      });
-    } else if (errorName === 'NotFoundError') {
-      setMediaPermissionError({
-        type: 'notFound',
-        message: '⚠️ No camera/mic found. Check if devices are connected.',
-      });
-    } else if (errorName === 'NotReadableError') {
-      setMediaPermissionError({
-        type: 'notReadable',
-        message: '⚠️ Camera/mic in use by another app. Close other apps and reload.',
-      });
-    } else if (errorName === 'NotSupportedError' || errorName === 'OverconstrainedError') {
-      setMediaPermissionError({
-        type: 'notSupported',
-        message: '⚠️ Browser or device limitation. Try a different browser.',
-      });
-    } else {
-      setMediaPermissionError({
-        type: 'notSupported',
-        message: `⚠️ Unable to access camera/mic: ${errorName}`,
-      });
-    }
-  };
-
-  // Check for in-app browser on mount
-  React.useEffect(() => {
-    if (detectInAppBrowser()) {
-      setMediaPermissionError({
-        type: 'inAppBrowser',
-        message: '⚠️ This in-app browser may block camera/mic. Open in Chrome/Safari.',
-      });
-    }
-  }, []);
 
   const updateRoomControls = async (patch: Partial<EffectiveControls>) => {
     if (!roomId || !roomAccessToken) return;
