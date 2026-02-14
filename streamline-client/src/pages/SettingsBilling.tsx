@@ -1361,7 +1361,8 @@ export default function SettingsBilling() {
         setLatestVideoState("none");
         setLatestVideoUrl(null);
         setEmergencyExpiresAtMs(null);
-        setEmergencyMessage("No recordings found for this room yet.");
+        const errCode = String((json as any)?.error || "");
+        setEmergencyMessage(errCode === "room_not_found" ? "Room not found. Double-check the room name." : "No recordings found for this room yet.");
       };
 
       await pollOnce(true);
@@ -1583,6 +1584,33 @@ const startCheckout = async (plan: CheckoutPlanVariant) => {
       setError(err?.body?.error || err?.message || "Failed to cancel subscription");
     } finally {
       setCloseCancelLoading(false);
+    }
+  };
+
+  const cancelPlanChange = async () => {
+    if (actionLoading === "cancel-plan-change") return;
+    setActionLoading("cancel-plan-change");
+    setError(null);
+    try {
+      const res = await apiFetchWithCookieFallback("/api/billing/cancel-plan-change", {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) {
+        throw Object.assign(new Error(data?.error || "Failed to cancel plan change"), { status: res.status, body: data });
+      }
+      setToast(data?.message || "Plan change canceled successfully");
+      // Refresh user data to clear pendingPlan and scheduledPlanChange
+      try {
+        clearMeCache();
+        const me = await loadUser({ forceRefresh: true });
+        await loadEntitlements();
+        setUser(me);
+      } catch {}
+    } catch (err: any) {
+      setError(err?.body?.error || err?.message || "Failed to cancel plan change");
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -2264,6 +2292,30 @@ const daysLeft = getDaysUntil(user?.billing?.currentPeriodEnd);
                             ? `Downgrade scheduled — stays active until ${formatDate((user as any).scheduledPlanChange.effectiveAtMs)}`
                             : `Plan change scheduled — applies on next billing date${user?.billing?.currentPeriodEnd ? ` (${formatDate(user?.billing?.currentPeriodEnd)})` : ""}`}
                     </span>
+                  )}
+
+                  {/* Cancel Plan Change Button - Shows when there's a pending plan change */}
+                  {(user?.pendingPlan || (user as any)?.scheduledPlanChange) && !upgradeProcessing && !user?.billing?.cancelAtPeriodEnd && (
+                    <button
+                      type="button"
+                      onClick={cancelPlanChange}
+                      disabled={actionLoading === "cancel-plan-change"}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 6,
+                        border: "1px solid rgba(251,191,36,0.4)",
+                        background: "rgba(251,191,36,0.1)",
+                        color: "#fbbf24",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: actionLoading === "cancel-plan-change" ? "not-allowed" : "pointer",
+                        opacity: actionLoading === "cancel-plan-change" ? 0.6 : 1,
+                        transition: "all 0.2s ease",
+                      }}
+                      title="Cancel the scheduled plan change and stay on your current plan"
+                    >
+                      {actionLoading === "cancel-plan-change" ? "⏳ Canceling..." : "✕ Cancel Plan Change"}
+                    </button>
                   )}
                 </div>
               </div>
