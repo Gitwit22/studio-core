@@ -1128,16 +1128,16 @@ function LiveKitShell({
       token={token}
       serverUrl={serverUrl}
       connect={true}
-      audio={!isViewer}
-      video={!isViewer}
-      connectOptions={isViewer ? { autoSubscribe: true } : undefined}
+      audio={true}
+      video={true}
+      connectOptions={undefined}
       onConnected={() => {
         console.log('[Room] 🔗 LiveKit onConnected callback fired', { 
           isViewer, 
           isHost,
           roomId,
-          wantsAudio: !isViewer,
-          wantsVideo: !isViewer,
+          wantsAudio: true,
+          wantsVideo: true,
         });
       }}
       onDisconnected={onDisconnected}
@@ -2217,11 +2217,8 @@ function RoomPage() {
               if (parsed.identity) setParticipantIdentity(parsed.identity);
               if (parsed.displayName) setDisplayName(parsed.displayName);
               
-              // Set viewer mode for guests
-              if (!isHost) {
-                setIsViewer(true);
-                setUserRole("viewer");
-              }
+              // Guests are RTC participants with mic+cam (not view-only)
+              // isViewer stays false (invite guests can publish)
               
               // Clear the cached token after use to prevent stale data
               sessionStorage.removeItem(`sl_lk_token:${roomId}`);
@@ -2465,12 +2462,9 @@ function RoomPage() {
         console.log("[Room] token received:", !!lkToken, "serverUrl:", finalServerUrl);
         setToken(typeof lkToken === "string" && lkToken.trim() ? lkToken : null);
         setServerUrl(finalServerUrl || null);
+        // isViewer should always be false for /room (invite guests are RTC participants)
         if (typeof data?.isViewer === "boolean") {
-          setIsViewer(data.isViewer);
-          if (data.isViewer) {
-            setIsHost(false);
-            setUserRole("viewer");
-          }
+          setIsViewer(data.isViewer); // Will be false from server for invite guests
         }
         if (typeof data?.effectiveRoleKey === "string") {
           setUserRole(data.effectiveRoleKey);
@@ -4604,21 +4598,7 @@ function RoomPage() {
           min-height: 0 !important;
         }
 
-        ${isViewer ? `
-        .sl-layout.sl-viewer .lk-control-bar .lk-button-microphone,
-        .sl-layout.sl-viewer .lk-control-bar .lk-button-camera,
-        .sl-layout.sl-viewer .lk-control-bar .lk-button-screen-share,
-        .sl-layout.sl-viewer .lk-control-bar .lk-button-start-audio,
-        .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_mic"],
-        .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_camera"],
-        .sl-layout.sl-viewer .lk-control-bar [data-lk-button="toggle_screen_share"],
-        .sl-layout.sl-viewer .lk-control-bar [data-lk-button="start_audio"],
-        .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Microphone"],
-        .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Camera"],
-        .sl-layout.sl-viewer .lk-control-bar button[aria-label*="Screen"] {
-          display: none !important;
-        }
-        ` : ""}
+        ${/* Removed sl-viewer CSS - invite guests are now RTC participants with mic+cam */ ""}
 
         /* Realtime room controls: disable screen share for roles
            whose effective controls do not allow it. */

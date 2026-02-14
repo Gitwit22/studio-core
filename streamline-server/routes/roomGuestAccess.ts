@@ -86,15 +86,18 @@ function getRoomAccessSecret() {
 }
 
 function roleGrant(role: "viewer" | "participant" | "host") {
-  const isViewer = role === "viewer";
   const isHost = role === "host";
 
-  // Minimal, stable token grants (no per-source publish restrictions)
+  // Full LiveKit grants with proper source permissions
+  // Guests (participants) can publish mic+cam by default
   return {
     roomJoin: true,
     canSubscribe: true,
-    canPublish: !isViewer,
-    canPublishData: !isViewer,
+    canPublish: true,
+    canPublishData: true,
+    canPublishSources: role === "host" 
+      ? ["microphone", "camera", "screen_share", "screen_share_audio"]
+      : ["microphone", "camera"],
     roomAdmin: isHost,
   } as const;
 }
@@ -231,7 +234,7 @@ router.post("/invites/:inviteId/redeem", async (req: any, res) => {
     }
 
     const expiresIn = "2h";
-    const sessionJwt = signGuestSession({ inviteId, roomId: result.roomId, role: "viewer" }, expiresIn);
+    const sessionJwt = signGuestSession({ inviteId, roomId: result.roomId, role: "participant" }, expiresIn);
 
     // CRITICAL: Use SameSite=None in production for cross-site compatibility (FB/IG in-app browsers).
     // Requires Secure=true. Local dev uses Lax since localhost is same-site.
@@ -365,8 +368,8 @@ router.post("/invites/:inviteId/join-now", async (req: any, res) => {
         lastRedeemedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      const inviteRole = String(data.role || "viewer").toLowerCase();
-      const role: "viewer" | "participant" = inviteRole === "participant" ? "participant" : "viewer";
+      const inviteRole = String(data.role || "participant").toLowerCase();
+      const role: "participant" | "host" = inviteRole === "host" ? "host" : "participant";
 
       return { ok: true as const, roomId, role, maxUses, useCount: useCount + 1 };
     });
@@ -542,7 +545,7 @@ router.post("/invites/:inviteId/join-now", async (req: any, res) => {
       displayName,
       guestSessionToken,
       roomAccessToken,
-      isViewer: inviteRole === "viewer",
+      isViewer: false, // All invite-based guests are RTC participants with mic+cam
       role: inviteRole,
       roomName,
     });
@@ -586,7 +589,7 @@ router.get("/rooms/:roomId/status", async (req: any, res) => {
       if (legacyGuest) {
         guest = legacyGuest as any;
         const expiresIn = "2h";
-        const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: "viewer" }, expiresIn);
+        const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: "participant" }, expiresIn);
         const isProduction = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
         const secure = isProduction;
         const sameSite: "none" | "lax" = isProduction ? "none" : "lax";
