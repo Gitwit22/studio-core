@@ -8,6 +8,7 @@ import { verifyRoomAccessToken } from "../middleware/roomAccessToken";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { signGuestSession } from "../middleware/guestSession";
+import { roleToParticipantPermission } from "../lib/livekitPermissions";
 
 export function extractInviteToken(req: any): string | null {
   const hdr = (req?.headers as any) || {};
@@ -23,7 +24,7 @@ export function extractInviteToken(req: any): string | null {
   return null;
 }
 
-export function tryGetLegacyInviteGuest(req: any, roomId: string): { inviteId: string; roomId: string; role: "viewer" | "participant" } | null {
+export function tryGetLegacyInviteGuest(req: any, roomId: string): { inviteId: string; roomId: string; role: "guest" | "participant" } | null {
   const raw = extractInviteToken(req);
   if (!raw) return null;
   try {
@@ -35,14 +36,25 @@ export function tryGetLegacyInviteGuest(req: any, roomId: string): { inviteId: s
       claims = verifyRoomAccessToken(raw) as any;
     }
     const claimRoomId = typeof claims?.roomId === "string" ? claims.roomId.trim() : "";
-    const rawRole = String(claims?.role || "guest").toLowerCase();
+    // Normalize role: defensive parse, trim whitespace, lowercase
+    const rawRole = String(claims?.role ?? "").trim().toLowerCase();
     // Never allow elevated roles through legacy invite JWTs for guest RTC join.
     // Cohost (and legacy moderator) invites must be handled by the authed flow.
     if (rawRole === "host" || rawRole === "cohost" || rawRole === "moderator") return null;
     if (!claimRoomId || claimRoomId !== roomId) return null;
 
     const inviteId = `legacy:${Buffer.from(raw).toString("base64url").slice(0, 24)}`;
-    const role: "viewer" | "participant" = rawRole === "viewer" ? "viewer" : "participant";
+    // Backward compatibility: treat old "viewer" role as "guest" for /room flows
+    // Security: Explicitly validate known roles, reject unknown/corrupted values
+    let role: "guest" | "participant";
+    if (rawRole === "participant") {
+      role = "participant";
+    } else if (rawRole === "guest" || rawRole === "viewer") {
+      role = "guest"; // Map legacy "viewer" to "guest"
+    } else {
+      // Unknown/corrupted role - reject for security
+      return null;
+    }
     return { inviteId, roomId, role };
   } catch {
     return null;
@@ -85,19 +97,17 @@ function getRoomAccessSecret() {
   return raw || "dev-secret";
 }
 
-function roleGrant(role: "viewer" | "participant" | "host") {
+function roleGrant(role: "guest" | "participant" | "host") {
+  // Use canonical roleToParticipantPermission() for consistency
+  const participantPerm = roleToParticipantPermission(role);
   const isHost = role === "host";
 
-  // Full LiveKit grants with proper source permissions
-  // Guests (participants) can publish mic+cam by default
   return {
     roomJoin: true,
-    canSubscribe: true,
-    canPublish: true,
-    canPublishData: true,
-    canPublishSources: role === "host" 
-      ? ["microphone", "camera", "screen_share", "screen_share_audio"]
-      : ["microphone", "camera"],
+    canSubscribe: participantPerm.canSubscribe,
+    canPublish: participantPerm.canPublish,
+    canPublishData: participantPerm.canPublishData,
+    canPublishSources: participantPerm.canPublishSources,
     roomAdmin: isHost,
   } as const;
 }
@@ -234,7 +244,7 @@ router.post("/invites/:inviteId/redeem", async (req: any, res) => {
     }
 
     const expiresIn = "2h";
-    const sessionJwt = signGuestSession({ inviteId, roomId: result.roomId, role: "participant" }, expiresIn);
+    const sessionJwt = signGuestSession({ inviteId, roomId: result.roomId, role: "guest" }, expiresIn);
 
     // CRITICAL: Use SameSite=None in production for cross-site compatibility (FB/IG in-app browsers).
     // Requires Secure=true. Local dev uses Lax since localhost is same-site.
@@ -368,8 +378,21 @@ router.post("/invites/:inviteId/join-now", async (req: any, res) => {
         lastRedeemedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      const inviteRole = String(data.role || "participant").toLowerCase();
-      const role: "participant" | "host" = inviteRole === "host" ? "host" : "participant";
+      // Backward compatibility: treat old "viewer" role as "guest" for /room flows
+      // Security: Explicitly validate known roles, reject unknown/corrupted values
+      // Normalize role: defensive parse, trim whitespace, lowercase
+      const inviteRole = String(data.role ?? "").trim().toLowerCase();
+      let role: "guest" | "host";
+      if (inviteRole === "host") {
+        role = "host";
+      } else if (inviteRole === "guest" || inviteRole === "participant" || inviteRole === "viewer") {
+        role = "guest"; // Map participant/viewer to guest for RTC join
+      } else {
+        // Unknown/corrupted role - reject for security
+        logPayload.reason = "invalid_role";
+        logPayload.invalidRole = data.role;
+        return { ok: false as const, status: 401 as const, error: "INVALID_ROLE" };
+      }
 
       return { ok: true as const, roomId, role, maxUses, useCount: useCount + 1 };
     });
@@ -460,12 +483,15 @@ router.post("/invites/:inviteId/join-now", async (req: any, res) => {
     // Guest session TTL: 2 hours (longer than LiveKit token, allows token refresh)
     // CRITICAL: Guest session must expire AFTER LiveKit token so re-minting works
     const guestSessionTtl = "2h";
-    const guestSessionToken = signGuestSession({ inviteId, roomId, role: inviteRole }, guestSessionTtl);
+    // Guest sessions only support "guest" | "participant" roles
+    // If invite has role="host", treat as "guest" for the unauthenticated join-now flow
+    const guestSessionRole: "guest" | "participant" = inviteRole === "host" ? "guest" : inviteRole;
+    const guestSessionToken = signGuestSession({ inviteId, roomId, role: guestSessionRole }, guestSessionTtl);
     logPayload.guestSessionTtl = guestSessionTtl;
 
     // Step 5: Create room access token
     const basePerms =
-      inviteRole === "participant"
+      inviteRole === "guest"
         ? {
             canStream: false,
             canRecord: false,
@@ -545,7 +571,7 @@ router.post("/invites/:inviteId/join-now", async (req: any, res) => {
       displayName,
       guestSessionToken,
       roomAccessToken,
-      isViewer: false, // All invite-based guests are RTC participants with mic+cam
+      isViewer: false, // All invite-based guests are RTC participants with mic+cam (guest role)
       role: inviteRole,
       roomName,
     });
@@ -589,7 +615,7 @@ router.get("/rooms/:roomId/status", async (req: any, res) => {
       if (legacyGuest) {
         guest = legacyGuest as any;
         const expiresIn = "2h";
-        const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: "participant" }, expiresIn);
+        const sessionJwt = signGuestSession({ inviteId: legacyGuest.inviteId, roomId, role: "guest" }, expiresIn);
         const isProduction = String(process.env.NODE_ENV || "development").toLowerCase() === "production";
         const secure = isProduction;
         const sameSite: "none" | "lax" = isProduction ? "none" : "lax";
@@ -724,13 +750,16 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       return res.status(500).json({ code: "misconfigured", error: "LiveKit keys missing", missing });
     }
 
-    const displayName = sanitizeDisplayName(String(req.body?.displayName || req.body?.identity || "Viewer")).trim() || "Viewer";
+    const displayName = sanitizeDisplayName(String(req.body?.displayName || req.body?.identity || "Guest")).trim() || "Guest";
 
-    const lkRole: "viewer" | "participant" | "host" = user
+    // Determine LiveKit role based on authentication
+    // - Authenticated users: host (if owner) or participant
+    // - Guest sessions: "guest" (RTC participant with mic/cam)
+    const lkRole: "guest" | "participant" | "host" = user
       ? (isOwner ? "host" : "participant")
       : guest?.role === "participant"
         ? "participant"
-        : "viewer";
+        : "guest";
     const identity = user ? user.uid : `invite:${guest!.inviteId}:${Math.random().toString(16).slice(2)}`;
     if (!identity || !String(identity).trim()) {
       return res.status(500).json({ code: "internal_error", error: "invalid_identity" });
@@ -761,7 +790,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     const token = await at.toJwt();
 
-    const effectiveRoleKey: "viewer" | "participant" | "host" = lkRole;
+    const effectiveRoleKey: "guest" | "participant" | "host" = lkRole;
     const basePerms =
       effectiveRoleKey === "host"
         ? {
@@ -829,7 +858,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       roomName: roomAccessPayload.roomName,
       roomAccessToken,
       participantIdentity: identity,
-      isViewer: lkRole === "viewer",
+      isViewer: false, // guest/participant/host all use /room route (not HLS viewer)
       role: lkRole,
       effectiveRoleKey,
     });

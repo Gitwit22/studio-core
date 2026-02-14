@@ -466,6 +466,137 @@ function WaitingForHostBanner({ isViewer }: { isViewer: boolean }) {
   );
 }
 
+function MediaPermissionErrorBanner({ 
+  error,
+  onDismiss
+}: { 
+  error: { type: 'denied' | 'notFound' | 'notReadable' | 'notSupported' | 'inAppBrowser' | null; message: string } | null;
+  onDismiss: () => void;
+}) {
+  if (!error) return null;
+
+  const handleOpenInBrowser = () => {
+    const currentUrl = window.location.href;
+    // For Android: try to open in Chrome via intent
+    if (/Android/i.test(navigator.userAgent)) {
+      // Try Chrome intent URL
+      window.location.href = `googlechrome://navigate?url=${encodeURIComponent(currentUrl)}`;
+      // Fallback after delay if Chrome not installed
+      setTimeout(() => {
+        window.open(currentUrl, '_blank');
+      }, 1500);
+    } else {
+      // For iOS: copy URL and show instructions (can't force open in Safari)
+      navigator.clipboard.writeText(currentUrl).then(() => {
+        alert('Link copied! Open Safari and paste this link to continue.');
+      }).catch(() => {
+        alert(`Copy this link and open in Safari:\n\n${currentUrl}`);
+      });
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 60,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        maxWidth: '90%',
+        width: 420,
+        padding: '14px 18px',
+        borderRadius: 12,
+        background: error.type === 'denied' ? 'rgba(220, 38, 38, 0.95)' : 'rgba(245, 158, 11, 0.95)',
+        border: `1px solid ${error.type === 'denied' ? 'rgba(220, 38, 38, 0.8)' : 'rgba(245, 158, 11, 0.8)'}`,
+        color: '#fff',
+        zIndex: 999,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+          {error.message}
+        </div>
+        <button
+          onClick={onDismiss}
+          style={{
+            background: 'rgba(255,255,255,0.2)',
+            border: 'none',
+            borderRadius: 4,
+            color: '#fff',
+            cursor: 'pointer',
+            padding: '4px 8px',
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          ✕
+        </button>
+      </div>
+      {error.type === 'inAppBrowser' && (
+        <button
+          onClick={handleOpenInBrowser}
+          style={{
+            background: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            color: error.type === 'denied' ? '#dc2626' : '#d97706',
+            cursor: 'pointer',
+            padding: '8px 16px',
+            fontSize: 13,
+            fontWeight: 600,
+            width: '100%',
+          }}
+        >
+          Open in Browser
+        </button>
+      )}
+      {error.type === 'denied' && (
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            background: 'rgba(255,255,255,0.9)',
+            border: 'none',
+            borderRadius: 8,
+            color: '#dc2626',
+            cursor: 'pointer',
+            padding: '8px 16px',
+            fontSize: 13,
+            fontWeight: 600,
+            width: '100%',
+          }}
+        >
+          Reload Page
+        </button>
+      )}
+    </div>
+  );
+}
+
+function MediaDeviceErrorHandler({ onError }: { onError: (error: any) => void }) {
+  const room = useRoomContext();
+
+  useEffect(() => {
+    if (!room) return;
+
+    const handleError = (error: any) => {
+      console.error('[MediaDeviceError]', error);
+      onError(error);
+    };
+
+    room.on(RoomEvent.MediaDevicesError, handleError);
+
+    return () => {
+      room.off(RoomEvent.MediaDevicesError, handleError);
+    };
+  }, [room, onError]);
+
+  return null;
+}
+
 function ReconnectCommandListener() {
   const room = useRoomContext();
 
@@ -1159,7 +1290,12 @@ function LiveKitShell({
         <LiveKitDebugLogger />
         <VideoElementMonitor />
         <GuestTelemetryTracker roomId={roomId} isViewer={isViewer} />
+        <MediaDeviceErrorHandler onError={handleMediaDeviceError} />
         <WaitingForHostBanner isViewer={isViewer} />
+        <MediaPermissionErrorBanner 
+          error={mediaPermissionError} 
+          onDismiss={() => setMediaPermissionError(null)}
+        />
         <ReconnectCommandListener />
         {isHost && !isViewer && (
           <div
@@ -1204,7 +1340,7 @@ function LiveKitShell({
               boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
             }}
           >
-            👀 Connected as viewer — host video will appear here
+            🎥 Connected as guest — you can enable mic/cam below
           </div>
         )}
         <div
@@ -1415,6 +1551,10 @@ function RoomPage() {
   const [liveCountdown, setLiveCountdown] = useState<string | null>(null);
   const [isLiveCountdown, setIsLiveCountdown] = useState(false);
   const liveCountdownTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const [mediaPermissionError, setMediaPermissionError] = useState<{
+    type: 'denied' | 'notFound' | 'notReadable' | 'notSupported' | 'inAppBrowser' | null;
+    message: string;
+  } | null>(null);
 
   const currentRole = userRole;
   const isGuestRole = currentRole === "guest";
@@ -1486,6 +1626,58 @@ function RoomPage() {
       }
     }
   };
+
+  // Detect in-app browsers that may block camera/mic access
+  const detectInAppBrowser = (): boolean => {
+    const ua = navigator.userAgent || "";
+    // Facebook, Instagram, TikTok, Twitter, LinkedIn in-app browsers
+    const patterns = /FBAN|FBAV|Instagram|TikTok|Twitter|LinkedInApp/i;
+    return patterns.test(ua);
+  };
+
+  // Handle media device errors and show appropriate messaging
+  const handleMediaDeviceError = (error: any) => {
+    console.error('[Room] MediaDevicesError:', error );
+
+    const errorName = error?.name || String(error);
+    
+    if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+      setMediaPermissionError({
+        type: 'denied',
+        message: '🔒 Camera/mic blocked. Tap the lock icon → allow → reload.',
+      });
+    } else if (errorName === 'NotFoundError') {
+      setMediaPermissionError({
+        type: 'notFound',
+        message: '⚠️ No camera/mic found. Check if devices are connected.',
+      });
+    } else if (errorName === 'NotReadableError') {
+      setMediaPermissionError({
+        type: 'notReadable',
+        message: '⚠️ Camera/mic in use by another app. Close other apps and reload.',
+      });
+    } else if (errorName === 'NotSupportedError' || errorName === 'OverconstrainedError') {
+      setMediaPermissionError({
+        type: 'notSupported',
+        message: '⚠️ Browser or device limitation. Try a different browser.',
+      });
+    } else {
+      setMediaPermissionError({
+        type: 'notSupported',
+        message: `⚠️ Unable to access camera/mic: ${errorName}`,
+      });
+    }
+  };
+
+  // Check for in-app browser on mount
+  React.useEffect(() => {
+    if (detectInAppBrowser()) {
+      setMediaPermissionError({
+        type: 'inAppBrowser',
+        message: '⚠️ This in-app browser may block camera/mic. Open in Chrome/Safari.',
+      });
+    }
+  }, []);
 
   const updateRoomControls = async (patch: Partial<EffectiveControls>) => {
     if (!roomId || !roomAccessToken) return;

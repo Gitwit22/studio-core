@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 export type GuestSessionClaims = {
   inviteId: string;
   roomId: string;
-  role: "viewer" | "participant";
+  role: "guest" | "participant"; // guest = invite-based, participant = authenticated
   iat?: number;
   exp?: number;
 };
@@ -55,7 +55,15 @@ export function tryGetGuestSession(req: Request): GuestSessionClaims | null {
     const decoded = jwt.verify(token, getGuestSessionSecret()) as any;
     const inviteId = typeof decoded?.inviteId === "string" ? decoded.inviteId : "";
     const roomId = typeof decoded?.roomId === "string" ? decoded.roomId : "";
-    const role = decoded?.role === "viewer" || decoded?.role === "participant" ? (decoded.role as any) : null;
+    // Backward compatibility: treat old "viewer" role as "guest" for /room flows
+    // Normalize role: defensive parse, trim whitespace, lowercase
+    const decodedRole = String(decoded?.role ?? "").trim().toLowerCase();
+    let role: "guest" | "participant" | null = null;
+    if (decodedRole === "guest" || decodedRole === "participant") {
+      role = decodedRole as any;
+    } else if (decodedRole === "viewer") {
+      role = "guest"; // Map legacy "viewer" to "guest" for RTC participants
+    }
     if (!inviteId || !roomId || !role) return null;
     return {
       inviteId,

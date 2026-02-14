@@ -26,7 +26,7 @@ export function presetToParticipantPermission(p: RealtimePreset): ParticipantPer
 
 // Optional coarse role mapping so role-based grants can share the same truth
 export function roleToParticipantPermission(
-  role: "viewer" | "participant" | "cohost" | "host",
+  role: "viewer" | "guest" | "participant" | "cohost" | "host",
 ): ParticipantPermission {
   const canSubscribe = true;
   let canPublish = false;
@@ -35,12 +35,15 @@ export function roleToParticipantPermission(
 
   switch (role) {
     case "viewer": {
+      // Reserved for HLS watch-only (future)
       canPublish = false;
       canPublishData = false;
       canPublishSources = [];
       break;
     }
+    case "guest":
     case "participant": {
+      // Invite-based guests and authenticated participants both get mic+cam
       canPublish = true;
       canPublishData = true;
       canPublishSources = ["microphone", "camera"];
