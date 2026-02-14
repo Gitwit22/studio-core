@@ -1425,9 +1425,11 @@ function RoomPage() {
                   return;
                 }
               }
-            } catch {
-              // fall through to legacy behavior
+            } catch (e) {
+              console.warn("[Room] legacy invite resolve failed; falling back to roomAccessToken", e);
             }
+            // Fallback: if legacy resolve failed, treat token as roomAccessToken
+            setRoomAccessToken(t);
           }
 
           if (tokenType !== "invite") {

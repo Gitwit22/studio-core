@@ -409,7 +409,7 @@ router.get("/:roomId/chat/stream", requireRoomAccessToken as any, async (req: an
       (snap) => {
         if (!initialized) {
           initialized = true;
-          return;
+          // Do NOT return — initial snapshot may include messages created during handoff.
         }
 
         for (const change of snap.docChanges()) {
