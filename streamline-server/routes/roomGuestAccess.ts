@@ -648,7 +648,7 @@ router.get("/rooms/:roomId/status", async (req: any, res) => {
  */
 router.post("/rooms/:roomId/token", async (req: any, res) => {
   try {
-    res.setHeader("x-sl-token-grants", "v3-no-sources");
+    res.setHeader("x-sl-token-grants", "v4-with-sources");
     const roomId = String(req.params.roomId || "").trim();
     if (!roomId) return res.status(400).json({ error: "roomId_required" });
 
@@ -864,7 +864,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     });
   } catch (err: any) {
     console.error("/api/rooms/:roomId/token error", err?.message || err);
-    res.setHeader("x-sl-token-grants", "v3-no-sources");
+    res.setHeader("x-sl-token-grants", "v4-with-sources");
     return res.status(500).json({
       code: "internal_error",
       error: "Failed to create room token",
