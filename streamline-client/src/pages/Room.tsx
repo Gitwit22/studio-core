@@ -30,6 +30,7 @@ import SafeVideoConference from "../components/SafeVideoConference";
 import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../hooks/useFeatureAccess";
 import { useHlsStatus } from "../hooks/useHlsStatus";
+import { normalizeStartLivePayloadFromDestinationsKeys } from "../hooks/useDestinationsStartPayload";
 import {
   RECONNECT_MEDIA_MESSAGE_TYPE,
   reconnectMedia,
@@ -3504,68 +3505,16 @@ function RoomPage() {
       return;
     }
     console.log("🎬 Room.tsx - handleStartMultistream called");
-    const destinationInputs = Array.isArray(keys.destinations) ? keys.destinations : [];
-    let youtubeKey = keys.youtubeKey;
-    let facebookKey = keys.facebookKey;
-    let twitchKey = keys.twitchKey;
-    let enabledTargetIds = Array.isArray(keys.enabledTargetIds) ? keys.enabledTargetIds.filter((id) => !!id) : [];
-    let sessionKeyMap: Record<string, { rtmpUrlBase?: string; streamKey?: string }> = keys.sessionKeys ? { ...keys.sessionKeys } : {};
-    const extraDestinations = Array.isArray(keys.extraDestinations) ? keys.extraDestinations : [];
-
-    if (destinationInputs.length) {
-      const fromDestinations: string[] = [];
-      destinationInputs.forEach((item) => {
-        const trimmed = (item.streamKey || "").trim();
-        if (item.source === "main" && item.destinationId) {
-          fromDestinations.push(item.destinationId);
-        }
-        if (item.source === "session" && trimmed) {
-          if (item.destinationId || item.targetId) {
-            const keyId = item.targetId || item.destinationId!;
-            sessionKeyMap[keyId] = { rtmpUrlBase: item.rtmpUrlBase, streamKey: trimmed };
-          } else {
-            if (item.platform === "youtube") youtubeKey = trimmed;
-            if (item.platform === "facebook") facebookKey = trimmed;
-            if (item.platform === "twitch") twitchKey = trimmed;
-            if (item.platform === "custom") {
-              let base = item.rtmpUrlBase;
-              let key = trimmed;
-              if (!base && trimmed.startsWith("rtmp")) {
-                const idx = trimmed.lastIndexOf("/");
-                if (idx > 8) {
-                  const maybeBase = trimmed.slice(0, idx);
-                  const maybeKey = trimmed.slice(idx + 1);
-                  if (maybeBase && maybeKey) {
-                    base = maybeBase;
-                    key = maybeKey;
-                  }
-                }
-              }
-              const keyId = `custom-${Object.keys(sessionKeyMap).length + 1}`;
-              sessionKeyMap[keyId] = { rtmpUrlBase: base, streamKey: key };
-            }
-          }
-        }
-      });
-      if (fromDestinations.length) {
-        const merged = [...enabledTargetIds];
-        fromDestinations.forEach((id) => {
-          if (!merged.includes(id)) merged.push(id);
-        });
-        enabledTargetIds = merged;
-      }
-    }
-
-    const destIds = Array.isArray(enabledTargetIds)
-      ? enabledTargetIds.filter((id) => !!id)
-      : [];
+    const startLivePayload = normalizeStartLivePayloadFromDestinationsKeys({ ...keys, presetId: selectedPresetId });
+    const destIds = Array.isArray(startLivePayload.enabledTargetIds) ? startLivePayload.enabledTargetIds : [];
+    const sessionKeyMap = startLivePayload.sessionKeys ? { ...startLivePayload.sessionKeys } : {};
     const hasSessionKeys = Object.values(sessionKeyMap || {}).some((entry) => !!entry?.streamKey);
+    const youtubeKey = startLivePayload.youtubeStreamKey;
+    const facebookKey = startLivePayload.facebookStreamKey;
+    const twitchKey = startLivePayload.twitchStreamKey;
     const hasDirectKeys = !!(youtubeKey || facebookKey || twitchKey);
-    const hasExtraDestinations = (extraDestinations || []).some((d) => {
-      const rtmpUrl = typeof (d as any)?.rtmpUrl === "string" ? (d as any).rtmpUrl.trim() : "";
-      const streamKey = typeof (d as any)?.streamKey === "string" ? (d as any).streamKey.trim() : "";
-      return !!(rtmpUrl && streamKey);
-    });
+    const extraDestinations = Array.isArray(startLivePayload.extraDestinations) ? startLivePayload.extraDestinations : [];
+    const hasExtraDestinations = extraDestinations.length > 0;
 
     if (!hasDirectKeys && !hasSessionKeys && destIds.length === 0 && !hasExtraDestinations) {
       alert("Select at least one stream destination or enter a stream key.");
@@ -3588,14 +3537,8 @@ function RoomPage() {
       try {
         setStreamStatus("starting");
         const requestBody = {
-          youtubeStreamKey: youtubeKey,
-          facebookStreamKey: facebookKey,
-          twitchStreamKey: twitchKey,
-          enabledTargetIds: destIds.length ? destIds : undefined,
-          sessionKeys: hasSessionKeys ? sessionKeyMap : undefined,
+          ...startLivePayload,
           userId: getOrCreateUid(),
-          presetId: selectedPresetId,
-          extraDestinations: extraDestinations.length ? extraDestinations : undefined,
         };
         const res = await apiFetchAuth(
           `${API_BASE}/api/multistream/${encodeURIComponent(roomId)}/start-multistream`,
