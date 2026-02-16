@@ -17,13 +17,13 @@ export default function EduTopbar() {
   const { title, subtitle } = useMemo(() => titleForPath(loc.pathname), [loc.pathname]);
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-slate-800/50 bg-slate-900/50 px-6 backdrop-blur-xl">
+    <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-slate-700 bg-slate-900/60 px-6 backdrop-blur-xl">
       <div>
         <h1 className="text-xl font-bold text-white">{title}</h1>
         {subtitle ? <p className="text-sm text-slate-400">{subtitle}</p> : null}
       </div>
       <div className="flex items-center gap-4">
-        <button className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
+        <button className="rounded-xl border border-slate-700 bg-slate-800/40 p-2 text-slate-300 transition-colors hover:bg-slate-800/70 hover:text-white">
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               strokeLinecap="round"

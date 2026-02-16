@@ -1,39 +1,29 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { computeEduEventStatus, listEduEvents } from "../state/eduEvents";
 
 export default function Dashboard() {
   const nav = useNavigate();
   const [isLive] = useState<boolean>(false);
 
-  const upcomingEvents = useMemo(
-    () => [
-      {
-        id: 1,
-        title: "Morning Announcements",
-        time: "8:00 AM",
-        date: "Today",
-        type: "announcement" as const,
-        crew: ["Alex M.", "Jordan K."],
-      },
-      {
-        id: 2,
-        title: "Winter Concert",
-        time: "7:00 PM",
-        date: "Dec 18",
+  const upcomingEvents = useMemo(() => {
+    const all = listEduEvents();
+    const next = all.filter((e) => {
+      const s = computeEduEventStatus(e);
+      return s !== "ended" && s !== "canceled";
+    });
+    return next.slice(0, 3).map((e) => {
+      const d = new Date(e.startsAt);
+      return {
+        id: e.id,
+        title: e.title,
+        time: d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+        date: d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }),
         type: "event" as const,
-        crew: ["Sarah L.", "Mike T.", "Emma R."],
-      },
-      {
-        id: 3,
-        title: "Basketball Game",
-        time: "6:30 PM",
-        date: "Dec 20",
-        type: "event" as const,
-        crew: ["Chris B.", "Taylor S."],
-      },
-    ],
-    []
-  );
+        crew: [e.producerName].filter(Boolean) as string[],
+      };
+    });
+  }, []);
 
   const recentRecordings = useMemo(
     () => [
@@ -50,7 +40,9 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         <div
           className={`rounded-2xl border p-5 ${
-            isLive ? "border-red-500/30 bg-red-500/10" : "border-slate-800/50 bg-slate-900/50"
+            isLive
+              ? "border-red-500/30 bg-red-500/10"
+              : "border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/50"
           }`}
         >
           <div className="mb-3 flex items-center justify-between">
@@ -61,19 +53,19 @@ export default function Dashboard() {
           {isLive ? <div className="mt-1 text-sm text-slate-400">127 viewers • 12:34 elapsed</div> : null}
         </div>
 
-        <div className="rounded-2xl border border-slate-800/50 bg-slate-900/50 p-5">
+        <div className="rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/50 p-5">
           <div className="mb-3 text-sm text-slate-400">Next Scheduled</div>
-          <div className="text-xl font-bold text-white">Morning Announcements</div>
+          <div className="text-xl font-bold text-white">School Network (Morning Announcements)</div>
           <div className="mt-1 text-sm text-orange-400">Tomorrow • 8:00 AM</div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800/50 bg-slate-900/50 p-5">
+        <div className="rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/50 p-5">
           <div className="mb-3 text-sm text-slate-400">Recordings This Month</div>
           <div className="text-2xl font-bold text-white">24</div>
           <div className="mt-1 text-sm text-emerald-400">↑ 8 from last month</div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800/50 bg-slate-900/50 p-5">
+        <div className="rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/50 p-5">
           <div className="mb-3 text-sm text-slate-400">Active Students</div>
           <div className="text-2xl font-bold text-white">12</div>
           <div className="mt-1 text-sm text-slate-400">3 producers • 9 talent</div>
@@ -83,7 +75,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <button
           onClick={() => nav("/streamline/edu/broadcast")}
-          className="group rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 p-6 text-left transition-colors hover:from-orange-400 hover:to-amber-500"
+          className="group rounded-2xl bg-gradient-to-r from-orange-500 via-red-600 to-violet-600 p-6 text-left transition-transform hover:-translate-y-1"
         >
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 transition-transform group-hover:scale-110">
             <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -97,15 +89,15 @@ export default function Dashboard() {
             </svg>
           </div>
           <div className="text-xl font-bold text-white">Start Broadcast</div>
-          <div className="mt-1 text-sm text-orange-100/80">Go live to your school network</div>
+          <div className="mt-1 text-sm text-white/85">Go live to your school network</div>
         </button>
 
         <button
           onClick={() => nav("/streamline/edu/events")}
-          className="group rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6 text-left transition-colors hover:border-slate-700 hover:bg-slate-800/50"
+          className="group rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/50 p-6 text-left transition-transform hover:-translate-y-1"
         >
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/20 transition-transform group-hover:scale-110">
-            <svg className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500/10 text-orange-300 transition-transform group-hover:scale-110">
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -120,10 +112,10 @@ export default function Dashboard() {
 
         <button
           onClick={() => nav("/streamline/edu/embed")}
-          className="group rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6 text-left transition-colors hover:border-slate-700 hover:bg-slate-800/50"
+          className="group rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/50 p-6 text-left transition-transform hover:-translate-y-1"
         >
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/20 transition-transform group-hover:scale-110">
-            <svg className="h-6 w-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500/10 text-orange-300 transition-transform group-hover:scale-110">
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
             </svg>
           </div>
@@ -133,7 +125,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6">
+        <div className="rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/50 p-6">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-lg font-semibold text-white">Upcoming Events</h3>
             <button onClick={() => nav("/streamline/edu/events")} className="text-sm text-orange-400 hover:text-orange-300">
@@ -142,7 +134,7 @@ export default function Dashboard() {
           </div>
           <div className="space-y-3">
             {upcomingEvents.map((event) => (
-              <div key={event.id} className="rounded-xl bg-slate-800/50 p-4 transition-colors hover:bg-slate-800">
+              <div key={event.id} className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-4 transition-colors hover:bg-slate-900/60">
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="font-medium text-white">{event.title}</div>
@@ -150,17 +142,11 @@ export default function Dashboard() {
                       {event.date} • {event.time}
                     </div>
                     <div className="mt-2 flex items-center gap-2">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
-                          event.type === "announcement" ? "bg-blue-500/20 text-blue-300" : "bg-purple-500/20 text-purple-300"
-                        }`}
-                      >
-                        {event.type === "announcement" ? "Announcement" : "Event"}
-                      </span>
-                      <span className="text-xs text-slate-500">{event.crew.length} crew assigned</span>
+                      <span className="rounded-full bg-purple-500/20 px-2 py-0.5 text-xs text-purple-300">Event</span>
+                      <span className="text-xs text-slate-500">{event.crew.length ? "Producer assigned" : "No producer assigned"}</span>
                     </div>
                   </div>
-                  <button className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white">
+                  <button className="rounded-xl border border-slate-700 bg-slate-800/40 p-2 text-slate-300 hover:bg-slate-800/70 hover:text-white">
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
@@ -171,7 +157,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6">
+        <div className="rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/50 p-6">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-lg font-semibold text-white">Recent Recordings</h3>
             <button onClick={() => nav("/streamline/edu/archive")} className="text-sm text-orange-400 hover:text-orange-300">
@@ -182,7 +168,7 @@ export default function Dashboard() {
             {recentRecordings.map((recording) => (
               <div
                 key={recording.id}
-                className="flex items-center gap-4 rounded-xl bg-slate-800/50 p-4 transition-colors hover:bg-slate-800"
+                className="flex items-center gap-4 rounded-xl border border-slate-700/60 bg-slate-900/40 p-4 transition-colors hover:bg-slate-900/60"
               >
                 <div className="flex h-10 w-16 items-center justify-center rounded-lg bg-slate-700">
                   <svg className="h-5 w-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -200,7 +186,7 @@ export default function Dashboard() {
                     {recording.duration} • {recording.date}
                   </div>
                 </div>
-                <button className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white">
+                <button className="rounded-xl border border-slate-700 bg-slate-800/40 p-2 text-slate-300 hover:bg-slate-800/70 hover:text-white">
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path
                       strokeLinecap="round"

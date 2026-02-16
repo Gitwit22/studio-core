@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { apiFetchAuth, clearAuthStorage } from "../../lib/api";
-import { setEduLane } from "../state/eduMode";
+import { setEduBypassEnabled, setEduLane } from "../state/eduMode";
 
 function validateEmail(email: string): boolean {
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -15,6 +15,16 @@ export default function EduLogin() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(false);
+
+  const canShowBypass = useMemo(() => {
+    if (import.meta.env.DEV) return true;
+    try {
+      const host = String(window.location.hostname || "").toLowerCase();
+      return host === "localhost" || host === "127.0.0.1";
+    } catch {
+      return false;
+    }
+  }, []);
 
   const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
@@ -102,92 +112,204 @@ export default function EduLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto grid min-h-screen max-w-6xl grid-cols-1 lg:grid-cols-2">
-        {/* Left panel */}
-        <div className="hidden flex-col justify-between border-r border-slate-800/60 bg-slate-950 p-10 lg:flex">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-600">
-                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                  />
-                </svg>
+    <div className="min-h-screen bg-slate-900 text-white">
+      <style>{`
+        @keyframes slEduAmbientShift { 0%,100% { transform: translate(0,0) rotate(0deg) } 50% { transform: translate(2%,2%) rotate(1deg) } }
+        @keyframes slEduTrainPass { 0% { left: -80px; opacity: 0 } 5% { opacity: 1 } 95% { opacity: 1 } 100% { left: calc(100% + 80px); opacity: 0 } }
+        @keyframes slEduFadeRight { from { opacity: 0; transform: translateX(-30px) } to { opacity: 1; transform: translateX(0) } }
+        @keyframes slEduFadeUp { from { opacity: 0; transform: translateY(30px) } to { opacity: 1; transform: translateY(0) } }
+      `}</style>
+
+      <div className="mx-auto grid min-h-screen max-w-6xl grid-cols-1 lg:grid-cols-2 overflow-hidden">
+        {/* Left Panel - Branding */}
+        <div className="relative hidden bg-slate-900 p-16 lg:flex" style={{ backgroundColor: "rgba(19, 28, 46, 1)" }}>
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(ellipse at 20% 30%, rgba(245, 158, 11, 0.08) 0%, transparent 50%), radial-gradient(ellipse at 80% 70%, rgba(124, 58, 237, 0.06) 0%, transparent 50%)",
+              animation: "slEduAmbientShift 20s ease-in-out infinite",
+            }}
+          />
+
+          {/* Tracks */}
+          <div aria-hidden className="absolute inset-0 overflow-hidden opacity-40">
+            {[20, 35, 50, 65, 80].map((topPct, idx) => (
+              <div
+                key={topPct}
+                className="absolute left-0 right-0 h-px bg-gradient-to-r from-transparent via-slate-600 to-transparent"
+                style={{ top: `${topPct}%` }}
+              >
+                <div
+                  className="absolute top-[-1px] h-[3px] w-[60px] rounded bg-gradient-to-r from-orange-500 via-red-600 to-violet-600 shadow-[0_0_20px_rgba(245,158,11,0.5)]"
+                  style={{
+                    animation: "slEduTrainPass 8s linear infinite",
+                    animationDelay: idx === 0 ? "0s" : idx === 1 ? "1.5s" : idx === 2 ? "3s" : idx === 3 ? "0.5s" : "2s",
+                    animationDuration: idx === 0 ? "8s" : idx === 1 ? "6s" : idx === 2 ? "7s" : idx === 3 ? "9s" : "5s",
+                  }}
+                />
               </div>
-              <div>
-                <div className="font-bold tracking-tight text-white">StreamLine</div>
-                <div className="text-xs font-semibold tracking-widest text-orange-400">EDU</div>
-              </div>
+            ))}
+          </div>
+
+          <div className="relative z-10 flex w-full flex-col justify-center">
+            <div className="mb-12" style={{ animation: "slEduFadeRight 0.8s ease-out" }}>
+              <img src="/edu_logo.png" alt="StreamLine EDU" className="h-20 w-auto" />
             </div>
 
-            <div className="mt-6 text-3xl font-bold text-white">School-safe broadcasting</div>
-            <ul className="mt-6 space-y-2 text-sm text-slate-400">
-              <li>• HLS embed for school websites</li>
-              <li>• Role-based access (Faculty / Students)</li>
-              <li>• Automatic recording archive</li>
+            <h1
+              className="text-4xl font-bold tracking-tight"
+              style={{ animation: "slEduFadeRight 0.8s ease-out 0.1s both" }}
+            >
+              School-safe
+              <br />
+              <span className="bg-gradient-to-r from-orange-500 via-red-600 to-violet-600 bg-clip-text text-transparent">
+                broadcasting
+              </span>
+            </h1>
+
+            <ul className="mt-10 space-y-4 text-base text-slate-300">
+              <li style={{ animation: "slEduFadeRight 0.8s ease-out 0.2s both" }} className="flex items-center gap-4">
+                <span className="h-2 w-2 flex-none rounded-full bg-orange-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]" />
+                HLS embed for school websites
+              </li>
+              <li style={{ animation: "slEduFadeRight 0.8s ease-out 0.3s both" }} className="flex items-center gap-4">
+                <span className="h-2 w-2 flex-none rounded-full bg-orange-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]" />
+                Role-based access (Faculty / Students)
+              </li>
+              <li style={{ animation: "slEduFadeRight 0.8s ease-out 0.4s both" }} className="flex items-center gap-4">
+                <span className="h-2 w-2 flex-none rounded-full bg-orange-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]" />
+                Automatic recording archive
+              </li>
             </ul>
+
+            <div className="mt-16 text-xs text-slate-500" style={{ animation: "slEduFadeRight 1s ease-out 0.6s both" }}>
+              Powered by Nxt Lvl Technology Solutions
+            </div>
           </div>
-          <div className="text-xs text-slate-500">Powered by Nxt Lvl Technology Solutions</div>
         </div>
 
-        {/* Right panel */}
-        <div className="flex items-center justify-center p-6">
-          <div className="w-full max-w-md rounded-3xl border border-slate-800/60 bg-slate-900/40 p-8">
-            <div className="mb-6">
-              <div className="mb-3 flex items-center justify-between">
-                <Link to="/streamline/edu" className="text-sm text-slate-400 hover:text-white">
-                  ← Back
-                </Link>
-                <div className="text-xs font-semibold tracking-widest text-orange-400">EDU LOGIN</div>
-              </div>
-              <h1 className="text-2xl font-bold text-white">Sign in</h1>
-              <div className="mt-1 text-sm text-slate-400">Faculty / Student access</div>
+        {/* Right Panel - Login Form */}
+        <div className="relative flex items-center justify-center p-8">
+          <div
+            aria-hidden
+            className="absolute left-0 top-[10%] hidden h-[80%] w-px bg-gradient-to-b from-transparent via-slate-700 to-transparent lg:block"
+          />
+
+          <div className="w-full max-w-[420px]" style={{ animation: "slEduFadeUp 0.8s ease-out" }}>
+            <div className="mb-8 lg:hidden">
+              <img src="/edu_logo.png" alt="StreamLine EDU" className="h-14 w-auto" />
             </div>
 
-            {error && (
-              <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-                {error}
-              </div>
-            )}
+            <div className="mb-8 flex items-center justify-between">
+              <Link to="/streamline/edu" className="group flex items-center gap-2 text-sm text-slate-400 hover:text-white">
+                <svg
+                  className="h-[18px] w-[18px] transition-transform group-hover:-translate-x-0.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M19 12H5" />
+                  <path d="M12 19l-7-7 7-7" />
+                </svg>
+                Back
+              </Link>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-slate-300">Email</label>
-                <input
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  type="email"
-                  className="mt-1 w-full rounded-2xl border border-slate-800/60 bg-slate-950/40 px-4 py-3 text-sm text-white outline-none focus:border-orange-500/60"
-                  placeholder="name@school.edu"
-                  autoComplete="email"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-300">Password</label>
-                <input
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  type="password"
-                  className="mt-1 w-full rounded-2xl border border-slate-800/60 bg-slate-950/40 px-4 py-3 text-sm text-white outline-none focus:border-orange-500/60"
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                />
-              </div>
+              <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-1.5 font-mono text-[11px] tracking-[0.2em] text-orange-300">
+                EDU LOGIN
+              </span>
+            </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 px-4 py-3 text-sm font-semibold text-white hover:from-orange-400 hover:to-amber-500 disabled:opacity-60"
-              >
-                {loading ? "Signing in…" : "Sign In"}
-              </button>
-            </form>
+            <div className="relative overflow-hidden rounded-3xl border border-slate-700 bg-gradient-to-br from-slate-800 to-slate-800/60 p-10">
+              <div aria-hidden className="absolute left-0 right-0 top-0 h-[3px] bg-gradient-to-r from-orange-500 via-red-600 to-violet-600" />
 
-            <div className="mt-6 text-xs text-slate-500">Tip: If you don’t have a school EDU role yet, ask your Faculty Admin.</div>
+              <h1 className="text-3xl font-bold tracking-tight text-white">Sign in</h1>
+              <div className="mt-1 text-sm text-slate-400">Faculty / Student access</div>
+
+              {error && (
+                <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+                  {error}
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="mt-8">
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300" htmlFor="edu-email">
+                      Email
+                    </label>
+                    <input
+                      id="edu-email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      type="email"
+                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-5 py-4 text-base text-white outline-none placeholder:text-slate-500 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10"
+                      placeholder="you@school.edu"
+                      autoComplete="email"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300" htmlFor="edu-password">
+                      Password
+                    </label>
+                    <input
+                      id="edu-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      type="password"
+                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-5 py-4 text-base text-white outline-none placeholder:text-slate-500 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10"
+                      placeholder="••••••••"
+                      autoComplete="current-password"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="group relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-orange-500 via-red-600 to-violet-600 px-4 py-4 text-base font-semibold text-white shadow-none transition-transform hover:-translate-y-0.5 hover:shadow-[0_15px_30px_-10px_rgba(245,158,11,0.4)] disabled:opacity-60"
+                  >
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-500 group-hover:translate-x-full"
+                    />
+                    <span className="relative">{loading ? "Signing in…" : "Sign In"}</span>
+                  </button>
+                </div>
+
+                <p className="mt-6 border-t border-slate-700 pt-6 text-center text-xs text-slate-500">
+                  Tip: If you don’t have a school EDU role yet, ask your Faculty Admin.
+                </p>
+              </form>
+
+              {canShowBypass ? (
+                <>
+                  <div className="my-6 flex items-center gap-4">
+                    <div className="h-px flex-1 bg-slate-700" />
+                    <div className="text-[11px] font-semibold tracking-[0.2em] text-slate-500">OR</div>
+                    <div className="h-px flex-1 bg-slate-700" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEduBypassEnabled();
+                      nav("/streamline/edu/dashboard", { replace: true });
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-600 bg-transparent px-4 py-3.5 text-sm font-medium text-slate-300 hover:border-slate-500 hover:bg-slate-800 hover:text-white"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
+                      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                      <polyline points="10 17 15 12 10 7" />
+                      <line x1="15" y1="12" x2="3" y2="12" />
+                    </svg>
+                    Bypass login (demo admin)
+                  </button>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

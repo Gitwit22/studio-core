@@ -40,6 +40,7 @@ import EduEvents from "./edu/pages/Events";
 import EduArchive from "./edu/pages/Archive";
 import EduPeople from "./edu/pages/People";
 import EduEmbed from "./edu/pages/Embed";
+import EduEmbedEventPlayer from "./edu/pages/EmbedEventPlayer";
 import EduSettings from "./edu/pages/Settings";
 
 import { clearAuthStorage } from "./lib/api";
@@ -164,6 +165,9 @@ function App() {
         <Route index element={<EduLanding />} />
         <Route path="login" element={<EduLogin />} />
 
+        {/* Public EDU embed players (no auth) */}
+        <Route path="embed/event" element={<EduEmbedEventPlayer />} />
+
         <Route
           element={
             <EduProtectedRoute>
@@ -175,7 +179,14 @@ function App() {
           <Route path="broadcast" element={<EduBroadcast />} />
           <Route path="events" element={<EduEvents />} />
           <Route path="archive" element={<EduArchive />} />
-          <Route path="people" element={<EduPeople />} />
+          <Route
+            path="people"
+            element={
+              <EduRoleGuard allow={["faculty_admin", "student_producer", "student_producer_assigned"]}>
+                <EduPeople />
+              </EduRoleGuard>
+            }
+          />
           <Route path="embed" element={<EduEmbed />} />
           <Route
             path="settings"

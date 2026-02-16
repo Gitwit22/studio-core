@@ -7,6 +7,10 @@ export const setEduLane = () => {
   } catch {}
 
   try {
+    document.body?.classList?.add("sl-edu");
+  } catch {}
+
+  try {
     document.cookie = `edu_mode=1; path=/; SameSite=Lax`;
   } catch {}
 };
@@ -26,12 +30,27 @@ export const clearEduLane = () => {
   } catch {}
 
   try {
+    document.body?.classList?.remove("sl-edu");
+  } catch {}
+
+  try {
     document.cookie = `edu_mode=; path=/; max-age=0; SameSite=Lax`;
   } catch {}
 };
 
 export const isEduBypassEnabled = () => {
-  if (!import.meta.env.DEV) return false;
+  // Allow bypass in Vite DEV, and also when running a production build on localhost.
+  // This keeps the demo bypass from being usable on real deployed domains.
+  const isLocalHost = (() => {
+    try {
+      const host = String(window.location.hostname || "").toLowerCase();
+      return host === "localhost" || host === "127.0.0.1";
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!import.meta.env.DEV && !isLocalHost) return false;
   try {
     return localStorage.getItem("sl_edu_bypass") === "1";
   } catch {
@@ -40,7 +59,15 @@ export const isEduBypassEnabled = () => {
 };
 
 export const setEduBypassEnabled = () => {
-  if (!import.meta.env.DEV) return;
+  const isLocalHost = (() => {
+    try {
+      const host = String(window.location.hostname || "").toLowerCase();
+      return host === "localhost" || host === "127.0.0.1";
+    } catch {
+      return false;
+    }
+  })();
+  if (!import.meta.env.DEV && !isLocalHost) return;
   try {
     localStorage.setItem("sl_edu_bypass", "1");
   } catch {}
