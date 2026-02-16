@@ -19,13 +19,23 @@ export default function EduAppShell() {
   const [me, setMe] = useState<MePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const bypassEnabled = useMemo(() => {
+    if (!import.meta.env.DEV) return false;
+    try {
+      return localStorage.getItem("sl_edu_bypass") === "1";
+    } catch {
+      return false;
+    }
+  }, [location.key]);
+
   const authed = useMemo(() => {
+    if (bypassEnabled) return true;
     try {
       return !!getAuthToken();
     } catch {
       return false;
     }
-  }, []);
+  }, [bypassEnabled]);
 
   useEffect(() => {
     let mounted = true;
@@ -39,6 +49,18 @@ export default function EduAppShell() {
     if (!authed) {
       setLoading(false);
       setMe(null);
+      return;
+    }
+
+    if (bypassEnabled) {
+      setError(null);
+      setMe({
+        orgType: "edu",
+        orgRole: "faculty_admin",
+        orgName: "EDU Demo",
+        id: "edu-demo",
+      });
+      setLoading(false);
       return;
     }
 
@@ -60,7 +82,7 @@ export default function EduAppShell() {
     return () => {
       mounted = false;
     };
-  }, [authed]);
+  }, [authed, bypassEnabled]);
 
   if (!authed) {
     const sp = new URLSearchParams();

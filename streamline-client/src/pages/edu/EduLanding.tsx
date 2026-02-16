@@ -1,7 +1,9 @@
 import { useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 export default function EduLanding() {
+  const nav = useNavigate();
+
   useEffect(() => {
     try {
       localStorage.setItem("sl_entry_lane", "edu");
@@ -87,6 +89,23 @@ export default function EduLanding() {
         </div>
 
         <div className="mt-10 text-xs text-slate-500">Not an EDU organization? Continue to the main platform.</div>
+
+        {import.meta.env.DEV ? (
+          <div className="mt-6">
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  localStorage.setItem("sl_edu_bypass", "1");
+                } catch {}
+                nav("/streamline/edu/dashboard");
+              }}
+              className="rounded-xl border border-slate-800/50 bg-slate-900/40 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800/50 hover:text-white"
+            >
+              DEV: Bypass login (demo)
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
