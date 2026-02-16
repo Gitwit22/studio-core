@@ -116,9 +116,10 @@ export const LoginPage: React.FC = () => {
       // Hydrate user from canonical /api/account/me. If this fails,
       // treat it as a hard error instead of redirecting into a
       // half-authed state that causes room join "blink".
+      let me: any = null;
       try {
         const meRes = await apiFetchAuth("/api/account/me");
-        const me = await meRes.json();
+        me = await meRes.json();
         try {
           localStorage.setItem("sl_user", JSON.stringify(me));
         } catch {}
@@ -131,6 +132,17 @@ export const LoginPage: React.FC = () => {
       }
 
       setLoading(false);
+
+      // EDU router: if the user belongs to an EDU org (or came through the EDU lane),
+      // always send them to the EDU dashboard.
+      try {
+        const lane = localStorage.getItem("sl_entry_lane");
+        if (me?.orgType === "edu" || lane === "edu") {
+          nav("/streamline/edu/dashboard", { replace: true });
+          return;
+        }
+      } catch {}
+
       nav(nextUrl || "/join");
     } catch (err) {
       console.error(err);

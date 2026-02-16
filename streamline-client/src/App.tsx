@@ -29,6 +29,10 @@ import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import PostStreamSummary from "./pages/PostStreamSummary";
 
+import EduLanding from "./pages/edu/EduLanding";
+import EduLogin from "./pages/edu/EduLogin";
+import EduAppShell from "./pages/edu/EduAppShell";
+
 import { clearAuthStorage } from "./lib/api";
 import { clearMeCache } from "./lib/meCache";
 import { clearPlatformFlagsCache } from "./lib/platformFlagsCache";
@@ -69,6 +73,15 @@ function App() {
 
       const path = window.location.pathname || "";
       if (path.startsWith("/login") || path.startsWith("/signup")) {
+        return;
+      }
+
+      // EDU lane should stay within EDU login.
+      if (path.startsWith("/streamline/edu")) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        const sp = new URLSearchParams();
+        sp.set("returnTo", next);
+        nav(`/streamline/edu/login?${sp.toString()}`);
         return;
       }
 
@@ -137,6 +150,11 @@ function App() {
       )}
 
       <Routes>
+      {/* EDU lane */}
+      <Route path="/streamline/edu" element={<EduLanding />} />
+      <Route path="/streamline/edu/login" element={<EduLogin />} />
+      <Route path="/streamline/edu/*" element={<EduAppShell />} />
+
       <Route path="/learnmore" element={<LearnMore />} />
 
       <Route path="/admin/usage" element={<AdminUsage />} />
