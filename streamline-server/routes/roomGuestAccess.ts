@@ -416,10 +416,10 @@ router.post("/invites/:inviteId/join-now", async (req: any, res) => {
     const roomSnap = await firestore.collection("rooms").doc(roomId).get();
     if (!roomSnap.exists) {
       logPayload.event = "join_now_fail";
-      logPayload.reason = "room_not_found";
+      logPayload.reason = PERMISSION_ERRORS.ROOM_NOT_FOUND;
       logPayload.latencyMs = Date.now() - startTime;
       console.log("[join-now]", logPayload);
-      return res.status(404).json({ error: "room_not_found" });
+      return res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
     }
 
     const room = (roomSnap.data() as any) || {};
