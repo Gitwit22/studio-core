@@ -3,6 +3,8 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
+import { loadEduOrgSettingsForUid, isEduOrgType } from "../lib/eduOrgContext";
+import { writeEduAudit } from "../lib/eduAudit";
 
 const router = express.Router();
 
@@ -37,6 +39,8 @@ router.post("/embeds/event", requireAuth, async (req, res) => {
     const uid = asString((req as any).user?.uid).trim();
     if (!uid) return res.status(401).json({ error: "unauthorized" });
 
+    const eduCtx = await loadEduOrgSettingsForUid(uid).catch(() => null);
+
     const eventId = asString(req.body?.eventId).trim();
     if (!eventId) return res.status(400).json({ error: "eventId_required" });
 
@@ -51,8 +55,19 @@ router.post("/embeds/event", requireAuth, async (req, res) => {
     const ownerUid = asString((ev as any).ownerUid).trim();
     if (ownerUid && ownerUid !== uid) return res.status(403).json({ error: "forbidden" });
 
+    // EDU org enforcement: if org policy says embeds are unlisted,
+    // do not allow public embeds (password embeds are allowed).
+    if (eduCtx?.org && isEduOrgType(eduCtx.org.orgType)) {
+      const policy = eduCtx.org.accessPolicy?.embedVisibility;
+      if (policy === "unlisted" && accessMode === "public") {
+        return res.status(403).json({ error: "embed_public_disabled_by_org_policy" });
+      }
+    }
+
     const embedId = embedIdForEvent(eventId);
     const embedRef = db.collection("embeds").doc(embedId);
+
+    const existedBefore = (await embedRef.get()).exists;
 
     const now = new Date();
     await db.runTransaction(async (tx) => {
@@ -84,6 +99,19 @@ router.post("/embeds/event", requireAuth, async (req, res) => {
 
     const finalSnap = await embedRef.get();
     const finalDoc = finalSnap.data() || {};
+
+    if (eduCtx?.orgId && eduCtx?.org && isEduOrgType(eduCtx.org.orgType)) {
+      await writeEduAudit({
+        orgId: eduCtx.orgId,
+        action: existedBefore ? "embed.updated" : "embed.created",
+        actorUid: uid,
+        actorName: eduCtx.userName || "User",
+        eventId,
+        eventTitle: typeof (ev as any).title === "string" ? String((ev as any).title) : null,
+        targetId: embedId,
+      }).catch(() => void 0);
+    }
+
     return res.json({
       embed: {
         embedId,

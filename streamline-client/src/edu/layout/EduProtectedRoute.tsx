@@ -2,7 +2,7 @@ import { ReactNode, createContext, useContext, useEffect, useMemo, useState } fr
 import { Navigate, useLocation } from "react-router-dom";
 import { getAuthToken } from "../../lib/api";
 import { fetchEduMe, type EduMe } from "../api/me";
-import { isEduBypassEnabled, isEduLane, setEduLane } from "../state/eduMode";
+import { isEduBypassEnabled, setEduLane } from "../state/eduMode";
 
 type EduAuthState = {
   me: EduMe;
@@ -79,7 +79,7 @@ export default function EduProtectedRoute({ children }: { children: ReactNode })
     return <Navigate to={`/streamline/edu/login?${sp.toString()}`} replace />;
   }
 
-  const eduAllowed = me.orgType === "edu" || isEduLane();
+  const eduAllowed = me.orgType === "edu";
   if (!eduAllowed) {
     return <Navigate to="/join" replace />;
   }

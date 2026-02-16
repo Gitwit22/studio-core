@@ -1,6 +1,7 @@
 import React, { FormEvent, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiFetchAuth, clearAuthStorage } from "../lib/api";
+import { isEduBypassEnabled } from "../edu/state/eduMode";
 
 // Email validation function
 function validateEmail(email: string): boolean {
@@ -137,7 +138,7 @@ export const LoginPage: React.FC = () => {
       // always send them to the EDU dashboard.
       try {
         const lane = localStorage.getItem("sl_entry_lane");
-        if (me?.orgType === "edu" || lane === "edu") {
+        if (me?.orgType === "edu" || (lane === "edu" && isEduBypassEnabled())) {
           nav("/streamline/edu/dashboard", { replace: true });
           return;
         }

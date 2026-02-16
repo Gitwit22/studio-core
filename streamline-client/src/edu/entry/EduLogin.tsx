@@ -2,6 +2,43 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { apiFetchAuth, clearAuthStorage } from "../../lib/api";
 import { setEduBypassEnabled, setEduLane } from "../state/eduMode";
+import { fetchOnboardingConfig } from "../api/onboarding";
+
+function ModalShell({ title, body, onContinue, onCancel }: { title: string; body: string; onContinue: () => void; onCancel: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button type="button" onClick={onCancel} className="absolute inset-0 bg-black/60" aria-label="Close" />
+      <div className="relative w-full max-w-lg rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-900 to-slate-900/40 p-6">
+        <div className="text-lg font-semibold text-white">{title}</div>
+        <div className="mt-2 text-sm text-slate-300">{body}</div>
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl border border-slate-700 bg-slate-900/30 px-4 py-2 text-sm text-slate-200 hover:border-slate-600 hover:bg-slate-800/40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onContinue}
+            className="rounded-xl bg-gradient-to-r from-orange-500 via-red-600 to-violet-600 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function validateEmail(email: string): boolean {
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -15,6 +52,8 @@ export default function EduLogin() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [showOnboardingWarn, setShowOnboardingWarn] = useState(false);
+  const [canSelfServeOnboarding, setCanSelfServeOnboarding] = useState(false);
 
   const canShowBypass = useMemo(() => {
     if (import.meta.env.DEV) return true;
@@ -43,6 +82,24 @@ export default function EduLogin() {
 
   useEffect(() => {
     setEduLane();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Default to hidden unless explicitly enabled (or dev/localhost).
+        const isDevOrLocal = import.meta.env.DEV;
+        const cfg = await fetchOnboardingConfig().catch(() => null);
+        const allow = !!cfg?.systemState?.allowSelfServeOrgCreation;
+        if (!cancelled) setCanSelfServeOnboarding(isDevOrLocal || allow);
+      } catch {
+        if (!cancelled) setCanSelfServeOnboarding(!!import.meta.env.DEV);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -284,6 +341,21 @@ export default function EduLogin() {
                 </p>
               </form>
 
+              {canSelfServeOnboarding ? (
+                <div className="mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setShowOnboardingWarn(true)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/30 px-4 py-3.5 text-sm font-medium text-slate-200 hover:border-slate-600 hover:bg-slate-800/40"
+                  >
+                    Set up a new school
+                  </button>
+                  <div className="mt-2 text-center text-[11px] text-slate-500">
+                    Controlled provisioning: may require platform approval.
+                  </div>
+                </div>
+              ) : null}
+
               {canShowBypass ? (
                 <>
                   <div className="my-6 flex items-center gap-4">
@@ -313,6 +385,18 @@ export default function EduLogin() {
           </div>
         </div>
       </div>
+
+      {showOnboardingWarn ? (
+        <ModalShell
+          title="Initialize a new school"
+          body="This will clear demo data and initialize a new school. This action is tenant-scoped (no global wipes)."
+          onCancel={() => setShowOnboardingWarn(false)}
+          onContinue={() => {
+            setShowOnboardingWarn(false);
+            nav("/streamline/edu/onboarding?step=1");
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -82,11 +82,20 @@ export default function EduLanding() {
             <img src="/edu_logo.png" alt="StreamLine EDU" className="h-[70px] w-auto object-contain" />
           </div>
 
-          <div className="hidden items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-5 py-2.5 text-sm text-slate-300 md:flex">
-            <span className="h-2 w-2 rounded-full bg-orange-500" style={{ animation: "slEduTrackPulse 2s ease-in-out infinite" }} />
-            <span>EDU Lane</span>
-            <span className="text-slate-500">•</span>
-            <span>Login required</span>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/"
+              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white"
+            >
+              Main StreamLine
+            </Link>
+
+            <div className="hidden items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-5 py-2.5 text-sm text-slate-300 md:flex">
+              <span className="h-2 w-2 rounded-full bg-orange-500" style={{ animation: "slEduTrackPulse 2s ease-in-out infinite" }} />
+              <span>EDU Lane</span>
+              <span className="text-slate-500">•</span>
+              <span>Login required</span>
+            </div>
           </div>
         </header>
 

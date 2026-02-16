@@ -38,6 +38,8 @@ import eduPeopleRoutes from "./routes/eduPeople";
 import eduSettingsRoutes from "./routes/eduSettings";
 import eduEmbedsRoutes from "./routes/eduEmbeds";
 import eduPublicRoutes from "./routes/eduPublic";
+import eduBootstrapRoutes from "./routes/eduBootstrap";
+import onboardingRoutes from "./routes/onboarding";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
 import { getLiveKitSdk } from "./lib/livekit"; // adjust path
@@ -126,6 +128,9 @@ const corsOptions: CorsOptions = {
     "Authorization",
     "X-Requested-With",
     "Cache-Control",
+    // Optional onboarding key for controlled self-serve onboarding
+    "x-onboarding-key",
+    "X-Onboarding-Key",
     // Room-level access token used by in-room APIs (HLS, multistream, controls, etc.).
     // Explicitly allow both typical header casings to satisfy browser preflight checks.
     "x-room-access-token",
@@ -188,6 +193,12 @@ app.use("/api/public/hls", publicHlsRoutes);
 app.use("/api/public/rooms", publicRoomsHlsConfigRoutes);
 // Public EDU embed data (no auth)
 app.use("/api/public/edu", eduPublicRoutes);
+
+// Internal maintenance/admin utilities
+app.use("/api/maintenance/edu", eduBootstrapRoutes);
+
+// Onboarding/reset endpoints (guarded; demo-safe)
+app.use("/api/onboarding", onboardingRoutes);
 // Recordings API - This handles GET /:id and POST /start, /stop
 app.use("/api/recordings", recordingsRoutes);
 

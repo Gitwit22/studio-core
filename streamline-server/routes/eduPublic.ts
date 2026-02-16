@@ -19,7 +19,37 @@ function coerceAccessMode(v: any): AccessMode {
 }
 
 function getJwtSecret(): string {
-  return asString(process.env.JWT_SECRET).trim() || "dev-secret";
+  const raw = asString(process.env.JWT_SECRET).trim();
+  const env = String(process.env.NODE_ENV || "development").toLowerCase();
+  if ((env === "production" || env === "staging") && (!raw || raw === "dev-secret")) {
+    throw new Error("Missing JWT_SECRET (no dev-secret in production)");
+  }
+  return raw || "dev-secret";
+}
+
+function getClientIp(req: any): string {
+  try {
+    const xfwd = String(req.headers?.["x-forwarded-for"] || "").trim();
+    if (xfwd) return xfwd.split(",")[0].trim();
+  } catch {}
+  return String(req.ip || req.connection?.remoteAddress || "unknown");
+}
+
+// Best-effort in-memory rate limiting for embed endpoints.
+// Not perfect in multi-instance deployments, but blocks obvious abuse.
+const embedWindowMs = 60_000;
+const embedHits = new Map<string, { count: number; resetAt: number }>();
+
+function hitEmbedRateLimit(key: string, max: number): boolean {
+  const now = Date.now();
+  const k = key || "unknown";
+  const existing = embedHits.get(k);
+  if (!existing || now >= existing.resetAt) {
+    embedHits.set(k, { count: 1, resetAt: now + embedWindowMs });
+    return false;
+  }
+  existing.count += 1;
+  return existing.count > max;
 }
 
 function signEmbedGrant(embedId: string): string {
@@ -150,6 +180,11 @@ router.get("/events/:eventId", async (req, res) => {
 // Returns viewer-safe metadata (no HLS URL). Token is required for unlisted/password.
 router.get("/embed/meta", async (req, res) => {
   try {
+    const ip = getClientIp(req);
+    if (hitEmbedRateLimit(`meta:${ip}`, 120)) {
+      return res.status(429).json({ error: "rate_limited" });
+    }
+
     const embedId = asString(req.query.embedId).trim();
     const token = asString(req.query.t).trim();
     if (!embedId) return res.status(400).json({ error: "embedId_required" });
@@ -204,6 +239,11 @@ router.get("/embed/meta", async (req, res) => {
 // Returns a short-lived grant token for password-protected embeds.
 router.post("/embed/auth", express.json(), async (req, res) => {
   try {
+    const ip = getClientIp(req);
+    if (hitEmbedRateLimit(`auth:${ip}`, 30)) {
+      return res.status(429).json({ error: "rate_limited" });
+    }
+
     const embedId = asString(req.body?.embedId).trim();
     const token = asString(req.body?.t).trim();
     const password = asString(req.body?.password);
@@ -239,6 +279,11 @@ router.post("/embed/auth", express.json(), async (req, res) => {
 // Returns playback data when authorized.
 router.get("/embed", async (req, res) => {
   try {
+    const ip = getClientIp(req);
+    if (hitEmbedRateLimit(`embed:${ip}`, 240)) {
+      return res.status(429).json({ error: "rate_limited" });
+    }
+
     const embedId = asString(req.query.embedId).trim();
     const token = asString(req.query.t).trim();
     const grant = asString(req.query.g).trim();

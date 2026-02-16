@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Hls from "hls.js";
+import { Loader2, RefreshCw } from "lucide-react";
 import {
   authPublicEduEmbedPassword,
   fetchPublicEduEmbed,
@@ -9,6 +10,7 @@ import {
   type PublicEduEvent,
 } from "../api/publicEmbed";
 import { setEduLane } from "../state/eduMode";
+import { useHlsReadiness } from "../../hooks/useHlsReadiness";
 
 type PlayerState = "scheduled" | "live" | "offair";
 
@@ -66,6 +68,8 @@ export default function EmbedEventPlayer() {
 
   const [tick, setTick] = useState(0);
 
+  const [playerNonce, setPlayerNonce] = useState(0);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
 
@@ -74,12 +78,17 @@ export default function EmbedEventPlayer() {
     return `sl_edu_embed_grant_${embedId}`;
   }, [embedId]);
 
-  const savedGrant = useMemo(() => {
-    if (!grantStorageKey) return "";
+  const [savedGrant, setSavedGrant] = useState("");
+
+  useEffect(() => {
+    if (!grantStorageKey) {
+      setSavedGrant("");
+      return;
+    }
     try {
-      return sessionStorage.getItem(grantStorageKey) || "";
+      setSavedGrant(sessionStorage.getItem(grantStorageKey) || "");
     } catch {
-      return "";
+      setSavedGrant("");
     }
   }, [grantStorageKey]);
 
@@ -167,6 +176,8 @@ export default function EmbedEventPlayer() {
 
   const hlsUrl = (broadcast?.hlsPlaybackUrl || "").trim();
 
+  const manifestReadiness = useHlsReadiness(hlsUrl || null, playerNonce);
+
   // HLS attach when live
   useEffect(() => {
     const video = videoRef.current;
@@ -194,11 +205,24 @@ export default function EmbedEventPlayer() {
     }
 
     if (!hlsUrl) return;
+    if (manifestReadiness !== "ready") return;
 
     if (canNativeHls(video)) {
       video.src = hlsUrl;
       video.play().catch(() => void 0);
-      return;
+      return () => {
+        try {
+          video.pause();
+        } catch {
+          // ignore
+        }
+        try {
+          video.removeAttribute("src");
+          video.load();
+        } catch {
+          // ignore
+        }
+      };
     }
 
     if (Hls.isSupported()) {
@@ -223,8 +247,20 @@ export default function EmbedEventPlayer() {
         }
         hlsRef.current = null;
       }
+
+      try {
+        video.pause();
+      } catch {
+        // ignore
+      }
+      try {
+        video.removeAttribute("src");
+        video.load();
+      } catch {
+        // ignore
+      }
     };
-  }, [computedState, hlsUrl]);
+  }, [computedState, hlsUrl, manifestReadiness, playerNonce]);
 
   const title = (event?.title || "Live Event").trim() || "Live Event";
 
@@ -269,10 +305,8 @@ export default function EmbedEventPlayer() {
                         // ignore
                       }
 
-                      // Fetch full payload after auth
-                      const data = await fetchPublicEduEmbed({ embedId, token, grant: auth.grant });
-                      setEvent(data.event);
-                      setBroadcast(data.broadcast);
+                      setSavedGrant(auth.grant);
+                      setPassword("");
                     } catch (e: any) {
                       setPasswordError(e?.message || "Invalid password");
                     } finally {
@@ -298,20 +332,48 @@ export default function EmbedEventPlayer() {
             </div>
           ) : computedState === "live" ? (
             <div className="relative">
-              <video
-                ref={videoRef}
-                className="aspect-video w-full"
-                controls
-                playsInline
-                muted
-              />
-              {!hlsUrl ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-                  <div className="rounded-xl border border-slate-800/60 bg-slate-950/60 px-4 py-3 text-sm text-slate-200">
-                    Waiting for the stream to start…
-                  </div>
+              {manifestReadiness === "ready" ? (
+                <video
+                  key={playerNonce}
+                  ref={videoRef}
+                  className="aspect-video w-full"
+                  controls
+                  playsInline
+                  muted
+                />
+              ) : (
+                <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 px-6 text-center">
+                  <img src="/logo.png" alt="StreamLine" className="h-12 w-auto opacity-95" />
+
+                  {hlsUrl ? (
+                    <>
+                      <div className="text-xl font-semibold">Stream will begin soon…</div>
+                      <div className="text-sm text-slate-400">Preparing video feed (this can take a few seconds).</div>
+                      <div className="mt-1 flex items-center gap-2 text-sm text-slate-300">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Stand by…</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-xl font-semibold">Stream is offline</div>
+                      <div className="text-sm text-slate-400">When the host goes live, playback will start automatically.</div>
+                    </>
+                  )}
                 </div>
-              ) : null}
+              )}
+
+              <div className="absolute right-3 top-3">
+                <button
+                  type="button"
+                  onClick={() => setPlayerNonce((n) => n + 1)}
+                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-medium text-white hover:bg-white/20"
+                  aria-label="Refresh stream"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Refresh stream
+                </button>
+              </div>
             </div>
           ) : computedState === "scheduled" ? (
             <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 px-6 text-center">

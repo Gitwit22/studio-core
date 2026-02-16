@@ -42,6 +42,7 @@ import EduPeople from "./edu/pages/People";
 import EduEmbed from "./edu/pages/Embed";
 import EduEmbedEventPlayer from "./edu/pages/EmbedEventPlayer";
 import EduSettings from "./edu/pages/Settings";
+import EduOnboarding from "./edu/pages/Onboarding";
 
 import { clearAuthStorage } from "./lib/api";
 import { clearMeCache } from "./lib/meCache";
@@ -164,6 +165,7 @@ function App() {
       <Route path="/streamline/edu" element={<Outlet />}>
         <Route index element={<EduLanding />} />
         <Route path="login" element={<EduLogin />} />
+        <Route path="onboarding" element={<EduOnboarding />} />
 
         {/* Public EDU embed players (no auth) */}
         <Route path="embed/event" element={<EduEmbedEventPlayer />} />

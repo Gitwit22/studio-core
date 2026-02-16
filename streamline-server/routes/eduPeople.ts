@@ -1,6 +1,7 @@
 import express from "express";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
+import { writeEduAudit } from "../lib/eduAudit";
 
 const router = express.Router();
 
@@ -165,6 +166,15 @@ router.post("/people/invite", requireAuth, async (req, res) => {
     };
 
     await db.collection("orgMembers").doc(memberId).set(doc, { merge: true });
+
+    await writeEduAudit({
+      orgId: ctx.orgId,
+      action: "org.member_invited",
+      actorUid: uid,
+      actorName: "Faculty Admin",
+      targetId: memberId,
+    }).catch(() => void 0);
+
     return res.json({ ok: true, person: normalizeMemberDoc(memberId, doc) });
   } catch (err: any) {
     console.error("POST /api/edu/people/invite error", err);
@@ -197,6 +207,15 @@ router.patch("/people/:memberId/role", requireAuth, async (req, res) => {
     if (!existingOrgId && !memberId.startsWith(`${ctx.orgId}_`)) return res.status(404).json({ error: "not_found" });
 
     await docRef.set({ role: nextRole, updatedAt: Date.now() }, { merge: true });
+
+    await writeEduAudit({
+      orgId: ctx.orgId,
+      action: "org.member_role_updated",
+      actorUid: uid,
+      actorName: "Faculty Admin",
+      targetId: memberId,
+    }).catch(() => void 0);
+
     const after = (await docRef.get()).data() || {};
     return res.json({ ok: true, person: normalizeMemberDoc(memberId, after) });
   } catch (err: any) {
@@ -227,6 +246,15 @@ router.post("/people/:memberId/disable", requireAuth, async (req, res) => {
     if (!existingOrgId && !memberId.startsWith(`${ctx.orgId}_`)) return res.status(404).json({ error: "not_found" });
 
     await docRef.set({ status: "disabled", disabledAt: Date.now(), updatedAt: Date.now() }, { merge: true });
+
+    await writeEduAudit({
+      orgId: ctx.orgId,
+      action: "org.member_disabled",
+      actorUid: uid,
+      actorName: "Faculty Admin",
+      targetId: memberId,
+    }).catch(() => void 0);
+
     const after = (await docRef.get()).data() || {};
     return res.json({ ok: true, person: normalizeMemberDoc(memberId, after) });
   } catch (err: any) {
@@ -262,6 +290,15 @@ router.post("/people/:memberId/resend", requireAuth, async (req, res) => {
     const now = Date.now();
     const prev = typeof (existing as any).inviteResendCount === "number" ? (existing as any).inviteResendCount : 0;
     await docRef.set({ invitedAt: now, inviteResendCount: prev + 1, updatedAt: now }, { merge: true });
+
+    await writeEduAudit({
+      orgId: ctx.orgId,
+      action: "org.member_invite_resent",
+      actorUid: uid,
+      actorName: "Faculty Admin",
+      targetId: memberId,
+    }).catch(() => void 0);
+
     const after = (await docRef.get()).data() || {};
     return res.json({ ok: true, person: normalizeMemberDoc(memberId, after) });
   } catch (err: any) {
