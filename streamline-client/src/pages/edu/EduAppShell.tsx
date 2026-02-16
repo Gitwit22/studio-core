@@ -125,10 +125,21 @@ export default function EduAppShell() {
     );
   }
 
+  const isFacultyAdmin = String(me?.orgRole || "") === "faculty_admin";
+
   return (
     <Routes>
       <Route path="/" element={<Navigate to="dashboard" replace />} />
-      <Route path="dashboard" element={<EduDashboard me={me} />} />
+      <Route path="dashboard" element={<EduDashboard me={me} page="dashboard" />} />
+      <Route path="broadcast" element={<EduDashboard me={me} page="broadcast" />} />
+      <Route path="events" element={<EduDashboard me={me} page="events" />} />
+      <Route path="archive" element={<EduDashboard me={me} page="archive" />} />
+      <Route path="people" element={<EduDashboard me={me} page="people" />} />
+      <Route path="embed" element={<EduDashboard me={me} page="embed" />} />
+      <Route
+        path="settings"
+        element={isFacultyAdmin ? <EduDashboard me={me} page="settings" /> : <Navigate to="/streamline/edu/dashboard" replace />}
+      />
       <Route path="*" element={<Navigate to="dashboard" replace />} />
     </Routes>
   );

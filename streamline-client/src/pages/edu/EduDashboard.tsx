@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 type Props = {
   me: any;
+  page?: string;
 };
 
 function titleForPage(page: string) {
@@ -25,8 +27,9 @@ function titleForPage(page: string) {
   }
 }
 
-export default function EduDashboard({ me }: Props) {
-  const [currentPage, setCurrentPage] = useState<string>("dashboard");
+export default function EduDashboard({ me, page }: Props) {
+  const nav = useNavigate();
+  const currentPage = page || "dashboard";
   const [isLive] = useState<boolean>(false);
 
   const role = String(me?.orgRole || me?.role || "viewer");
@@ -121,7 +124,7 @@ export default function EduDashboard({ me }: Props) {
         {navItems.map((item) => (
           <button
             key={item.id}
-            onClick={() => setCurrentPage(item.id)}
+            onClick={() => nav(`/streamline/edu/${item.id}`)}
             className={`w-full px-6 py-3 text-left transition-colors ${
               currentPage === item.id
                 ? "border-r-2 border-orange-500 bg-orange-500/10 text-orange-400"
@@ -228,7 +231,10 @@ export default function EduDashboard({ me }: Props) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <button className="group rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 p-6 text-left transition-colors hover:from-orange-400 hover:to-amber-500">
+        <button
+          onClick={() => nav("/streamline/edu/broadcast")}
+          className="group rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 p-6 text-left transition-colors hover:from-orange-400 hover:to-amber-500"
+        >
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 transition-transform group-hover:scale-110">
             <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -249,7 +255,10 @@ export default function EduDashboard({ me }: Props) {
           <div className="mt-1 text-sm text-orange-100/80">Go live to your school network</div>
         </button>
 
-        <button className="group rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6 text-left transition-colors hover:border-slate-700 hover:bg-slate-800/50">
+        <button
+          onClick={() => nav("/streamline/edu/events")}
+          className="group rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6 text-left transition-colors hover:border-slate-700 hover:bg-slate-800/50"
+        >
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/20 transition-transform group-hover:scale-110">
             <svg className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -264,7 +273,10 @@ export default function EduDashboard({ me }: Props) {
           <div className="mt-1 text-sm text-slate-400">Plan upcoming broadcasts</div>
         </button>
 
-        <button className="group rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6 text-left transition-colors hover:border-slate-700 hover:bg-slate-800/50">
+        <button
+          onClick={() => nav("/streamline/edu/embed")}
+          className="group rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6 text-left transition-colors hover:border-slate-700 hover:bg-slate-800/50"
+        >
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/20 transition-transform group-hover:scale-110">
             <svg className="h-6 w-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -284,7 +296,7 @@ export default function EduDashboard({ me }: Props) {
         <div className="rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-lg font-semibold text-white">Upcoming Events</h3>
-            <button onClick={() => setCurrentPage("events")} className="text-sm text-orange-400 hover:text-orange-300">
+            <button onClick={() => nav("/streamline/edu/events")} className="text-sm text-orange-400 hover:text-orange-300">
               View All →
             </button>
           </div>
@@ -322,7 +334,7 @@ export default function EduDashboard({ me }: Props) {
         <div className="rounded-2xl border border-slate-800/50 bg-slate-900/50 p-6">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-lg font-semibold text-white">Recent Recordings</h3>
-            <button onClick={() => setCurrentPage("archive")} className="text-sm text-orange-400 hover:text-orange-300">
+            <button onClick={() => nav("/streamline/edu/archive")} className="text-sm text-orange-400 hover:text-orange-300">
               View All →
             </button>
           </div>
