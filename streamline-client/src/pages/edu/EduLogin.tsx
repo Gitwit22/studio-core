@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { apiFetchAuth, clearAuthStorage } from "../../lib/api";
 
 function validateEmail(email: string): boolean {
@@ -133,8 +133,24 @@ export default function EduLogin() {
         {/* Left panel */}
         <div className="hidden flex-col justify-between border-r border-slate-800/60 bg-slate-950 p-10 lg:flex">
           <div>
-            <div className="text-sm font-semibold tracking-widest text-orange-400">STREAMLINE EDU</div>
-            <div className="mt-4 text-3xl font-bold text-white">School-safe broadcasting</div>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-600">
+                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                  />
+                </svg>
+              </div>
+              <div>
+                <div className="font-bold tracking-tight text-white">StreamLine</div>
+                <div className="text-xs font-semibold tracking-widest text-orange-400">EDU</div>
+              </div>
+            </div>
+
+            <div className="mt-6 text-3xl font-bold text-white">School-safe broadcasting</div>
             <ul className="mt-6 space-y-2 text-sm text-slate-400">
               <li>• HLS embed for school websites</li>
               <li>• Role-based access (Faculty / Students)</li>
@@ -148,6 +164,12 @@ export default function EduLogin() {
         <div className="flex items-center justify-center p-6">
           <div className="w-full max-w-md rounded-3xl border border-slate-800/60 bg-slate-900/40 p-8">
             <div className="mb-6">
+              <div className="mb-3 flex items-center justify-between">
+                <Link to="/streamline/edu" className="text-sm text-slate-400 hover:text-white">
+                  ← Back
+                </Link>
+                <div className="text-xs font-semibold tracking-widest text-orange-400">EDU LOGIN</div>
+              </div>
               <h1 className="text-2xl font-bold text-white">Sign in</h1>
               <div className="mt-1 text-sm text-slate-400">Faculty / Student access</div>
             </div>
@@ -187,7 +209,7 @@ export default function EduLogin() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-2xl bg-orange-500 px-4 py-3 text-sm font-semibold text-white hover:bg-orange-400 disabled:opacity-60"
+                className="w-full rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 px-4 py-3 text-sm font-semibold text-white hover:from-orange-400 hover:to-amber-500 disabled:opacity-60"
               >
                 {loading ? "Signing in…" : "Sign In"}
               </button>
