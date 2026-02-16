@@ -1,16 +1,12 @@
 import { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { setEduBypassEnabled, setEduLane } from "../state/eduMode";
 
 export default function EduLanding() {
   const nav = useNavigate();
 
   useEffect(() => {
-    try {
-      localStorage.setItem("sl_entry_lane", "edu");
-      document.cookie = "edu_mode=1; path=/; SameSite=Lax";
-    } catch {
-      // ignore
-    }
+    setEduLane();
   }, []);
 
   return (
@@ -68,11 +64,16 @@ export default function EduLanding() {
             to="/streamline/edu/login"
             className="group rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 p-6 text-left transition-colors hover:from-orange-400 hover:to-amber-500"
           >
-            <div className="mb-1 text-lg font-bold text-white">Continue to EDU Login</div>
+            <div className="mb-1 text-lg font-bold text-white">Faculty / Student Sign In</div>
             <div className="text-sm text-orange-100/80">Use your existing StreamLine account</div>
             <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-white">
               Enter →
-              <svg className="h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg
+                className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </div>
@@ -95,9 +96,7 @@ export default function EduLanding() {
             <button
               type="button"
               onClick={() => {
-                try {
-                  localStorage.setItem("sl_edu_bypass", "1");
-                } catch {}
+                setEduBypassEnabled();
                 nav("/streamline/edu/dashboard");
               }}
               className="rounded-xl border border-slate-800/50 bg-slate-900/40 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800/50 hover:text-white"

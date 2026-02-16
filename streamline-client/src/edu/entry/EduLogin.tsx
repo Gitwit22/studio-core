@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { apiFetchAuth, clearAuthStorage } from "../../lib/api";
+import { setEduLane } from "../state/eduMode";
 
 function validateEmail(email: string): boolean {
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -31,13 +32,7 @@ export default function EduLogin() {
   }, [location.search]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("sl_entry_lane", "edu");
-      localStorage.setItem("sl_mode", "edu");
-    } catch {}
-    try {
-      document.cookie = `edu_mode=1; path=/; max-age=${60 * 60 * 24 * 365}`;
-    } catch {}
+    setEduLane();
   }, []);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -90,36 +85,15 @@ export default function EduLogin() {
         localStorage.setItem("authToken", token);
       } catch {}
 
-      // Hydrate canonical /api/account/me; this is also what EDU guard uses.
-      let me: any = null;
+      // Hydrate canonical /api/account/me; this is also what EDU route guards use.
       try {
-        const meRes = await apiFetchAuth("/api/account/me", { cache: "no-store" });
-        me = await meRes.json();
-        try {
-          localStorage.setItem("sl_user", JSON.stringify(me));
-        } catch {}
-      } catch (err) {
-        console.warn("[EduLogin] /account/me after login failed", err);
+        await apiFetchAuth("/api/account/me", { cache: "no-store" });
+      } catch {
+        // ignore
       }
 
       setLoading(false);
-
-      // EDU router rules
-      const lane = (() => {
-        try {
-          return localStorage.getItem("sl_entry_lane");
-        } catch {
-          return null;
-        }
-      })();
-
-      if (me?.orgType === "edu" || lane === "edu") {
-        nav(returnTo || "/streamline/edu/dashboard", { replace: true });
-        return;
-      }
-
-      // Fallback to the regular app if they aren't EDU.
-      nav("/join", { replace: true });
+      nav(returnTo || "/streamline/edu/dashboard", { replace: true });
     } catch (err: any) {
       console.error(err);
       setError(err?.message || "Something went wrong. Try again.");
@@ -174,8 +148,6 @@ export default function EduLogin() {
               <div className="mt-1 text-sm text-slate-400">Faculty / Student access</div>
             </div>
 
-            {/* Google sign-in can be added here if/when the backend supports it. */}
-
             {error && (
               <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
                 {error}
@@ -215,9 +187,7 @@ export default function EduLogin() {
               </button>
             </form>
 
-            <div className="mt-6 text-xs text-slate-500">
-              Tip: If you don’t have a school EDU role yet, ask your Faculty Admin.
-            </div>
+            <div className="mt-6 text-xs text-slate-500">Tip: If you don’t have a school EDU role yet, ask your Faculty Admin.</div>
           </div>
         </div>
       </div>

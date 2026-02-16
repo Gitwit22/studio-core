@@ -1,43 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-type Props = {
-  me: any;
-  page?: string;
-};
-
-function titleForPage(page: string) {
-  switch (page) {
-    case "dashboard":
-      return { title: "Dashboard", subtitle: "Overview" };
-    case "broadcast":
-      return { title: "Broadcast", subtitle: "Go live and manage your stream" };
-    case "events":
-      return { title: "Events", subtitle: "Schedule and manage school broadcasts" };
-    case "archive":
-      return { title: "Archive", subtitle: "Recordings and past broadcasts" };
-    case "people":
-      return { title: "People", subtitle: "Roles and crew" };
-    case "embed":
-      return { title: "Website Embed", subtitle: "Embed your HLS stream" };
-    case "settings":
-      return { title: "Settings", subtitle: "School configuration" };
-    default:
-      return { title: "EDU", subtitle: null as string | null };
-  }
-}
-
-export default function EduDashboard({ me, page }: Props) {
+export default function Dashboard() {
   const nav = useNavigate();
-  const currentPage = page || "dashboard";
   const [isLive] = useState<boolean>(false);
 
-  const role = String(me?.orgRole || me?.role || "viewer");
-  const schoolName = String(me?.orgName || me?.org?.name || "Your School");
-
-  const isFacultyAdmin = role === "faculty_admin";
-
-  // Sample data (placeholder until wired to backend)
   const upcomingEvents = useMemo(
     () => [
       {
@@ -78,123 +45,8 @@ export default function EduDashboard({ me, page }: Props) {
     []
   );
 
-  const navItems = useMemo(
-    () =>
-      [
-        { id: "dashboard", label: "Dashboard" },
-        { id: "broadcast", label: "Broadcast" },
-        { id: "events", label: "Events" },
-        { id: "archive", label: "Archive" },
-        { id: "people", label: "People" },
-        { id: "embed", label: "Website Embed" },
-        ...(isFacultyAdmin ? [{ id: "settings", label: "Settings" }] : []),
-      ] as Array<{ id: string; label: string }>,
-    [isFacultyAdmin]
-  );
-
-  const { title, subtitle } = titleForPage(currentPage);
-
-  const Navigation = () => (
-    <nav className="fixed left-0 top-0 z-50 flex h-full w-64 flex-col border-r border-slate-800/50 bg-slate-950">
-      <div className="border-b border-slate-800/50 p-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-600">
-            <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-              />
-            </svg>
-          </div>
-          <div>
-            <div className="font-bold tracking-tight text-white">StreamLine</div>
-            <div className="text-xs font-semibold tracking-widest text-orange-400">EDU</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="border-b border-slate-800/50 bg-slate-900/30 px-6 py-4">
-        <div className="mb-1 text-xs uppercase tracking-wider text-slate-500">School</div>
-        <div className="text-sm font-medium text-white">{schoolName}</div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto py-4">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => nav(`/streamline/edu/${item.id}`)}
-            className={`w-full px-6 py-3 text-left transition-colors ${
-              currentPage === item.id
-                ? "border-r-2 border-orange-500 bg-orange-500/10 text-orange-400"
-                : "text-slate-400 hover:bg-slate-800/50 hover:text-white"
-            }`}
-          >
-            <span className="font-medium">{item.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {isLive && (
-        <div className="mx-4 mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3">
-          <div className="flex items-center gap-2">
-            <div className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
-            <span className="text-sm font-semibold text-red-400">LIVE NOW</span>
-          </div>
-          <div className="mt-1 text-xs text-slate-400">Morning Announcements</div>
-        </div>
-      )}
-
-      <div className="border-t border-slate-800/50 p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-slate-700 to-slate-800 text-sm font-semibold text-white">
-            {String(me?.displayName || "EDU")
-              .split(" ")
-              .filter(Boolean)
-              .slice(0, 2)
-              .map((p: string) => p[0]?.toUpperCase())
-              .join("") || "ED"}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-white">{String(me?.displayName || "User")}</div>
-            <div className="text-xs text-slate-500">{role}</div>
-          </div>
-        </div>
-      </div>
-    </nav>
-  );
-
-  const TopBar = ({ title, subtitle }: { title: string; subtitle?: string | null }) => (
-    <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-slate-800/50 bg-slate-900/50 px-6 backdrop-blur-xl">
-      <div>
-        <h1 className="text-xl font-bold text-white">{title}</h1>
-        {subtitle ? <p className="text-sm text-slate-400">{subtitle}</p> : null}
-      </div>
-      <div className="flex items-center gap-4">
-        {isLive && (
-          <div className="flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-4 py-2">
-            <div className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-            <span className="text-sm font-semibold text-red-400">LIVE</span>
-            <span className="text-sm text-slate-400">• 127 viewers</span>
-          </div>
-        )}
-        <button className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-            />
-          </svg>
-        </button>
-      </div>
-    </header>
-  );
-
-  const DashboardPage = () => (
-    <div className="space-y-6 p-6">
+  return (
+    <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         <div
           className={`rounded-2xl border p-5 ${
@@ -205,9 +57,7 @@ export default function EduDashboard({ me, page }: Props) {
             <span className="text-sm text-slate-400">Broadcast Status</span>
             {isLive ? <div className="h-3 w-3 animate-pulse rounded-full bg-red-500" /> : null}
           </div>
-          <div className={`text-2xl font-bold ${isLive ? "text-red-400" : "text-slate-500"}`}>
-            {isLive ? "LIVE" : "OFF AIR"}
-          </div>
+          <div className={`text-2xl font-bold ${isLive ? "text-red-400" : "text-slate-500"}`}>{isLive ? "LIVE" : "OFF AIR"}</div>
           {isLive ? <div className="mt-1 text-sm text-slate-400">127 viewers • 12:34 elapsed</div> : null}
         </div>
 
@@ -243,12 +93,7 @@ export default function EduDashboard({ me, page }: Props) {
                 strokeWidth={2}
                 d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
               />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <div className="text-xl font-bold text-white">Start Broadcast</div>
@@ -279,12 +124,7 @@ export default function EduDashboard({ me, page }: Props) {
         >
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/20 transition-transform group-hover:scale-110">
             <svg className="h-6 w-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-              />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
             </svg>
           </div>
           <div className="text-xl font-bold text-white">Website Embed</div>
@@ -395,26 +235,6 @@ export default function EduDashboard({ me, page }: Props) {
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  );
-
-  const PlaceholderPage = () => (
-    <div className="p-6">
-      <div className="rounded-2xl border border-slate-800/50 bg-slate-900/40 p-6 text-sm text-slate-400">
-        This section is a placeholder in EDU MVP.
-      </div>
-    </div>
-  );
-
-  const content = currentPage === "dashboard" ? <DashboardPage /> : <PlaceholderPage />;
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <Navigation />
-      <div className="ml-64 min-h-screen">
-        <TopBar title={title} subtitle={subtitle} />
-        {content}
       </div>
     </div>
   );

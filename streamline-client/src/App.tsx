@@ -1,6 +1,6 @@
 import PricingExplainerPage from "./pages/PricingExplainerPage";
 import { useEffect, useState } from "react";
-import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Routes, Route, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import AdminUsage from './pages/AdminUsage';
 import AdminDashboard from './pages/AdminDashboard';
 
@@ -29,9 +29,18 @@ import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import PostStreamSummary from "./pages/PostStreamSummary";
 
-import EduLanding from "./pages/edu/EduLanding";
-import EduLogin from "./pages/edu/EduLogin";
-import EduAppShell from "./pages/edu/EduAppShell";
+import EduLanding from "./edu/entry/EduLanding";
+import EduLogin from "./edu/entry/EduLogin";
+import EduProtectedRoute from "./edu/layout/EduProtectedRoute";
+import EduRoleGuard from "./edu/layout/EduRoleGuard";
+import EduShell from "./edu/layout/EduShell";
+import EduDashboard from "./edu/pages/Dashboard";
+import EduBroadcast from "./edu/pages/Broadcast";
+import EduEvents from "./edu/pages/Events";
+import EduArchive from "./edu/pages/Archive";
+import EduPeople from "./edu/pages/People";
+import EduEmbed from "./edu/pages/Embed";
+import EduSettings from "./edu/pages/Settings";
 
 import { clearAuthStorage } from "./lib/api";
 import { clearMeCache } from "./lib/meCache";
@@ -151,9 +160,35 @@ function App() {
 
       <Routes>
       {/* EDU lane */}
-      <Route path="/streamline/edu" element={<EduLanding />} />
-      <Route path="/streamline/edu/login" element={<EduLogin />} />
-      <Route path="/streamline/edu/*" element={<EduAppShell />} />
+      <Route path="/streamline/edu" element={<Outlet />}>
+        <Route index element={<EduLanding />} />
+        <Route path="login" element={<EduLogin />} />
+
+        <Route
+          element={
+            <EduProtectedRoute>
+              <EduShell />
+            </EduProtectedRoute>
+          }
+        >
+          <Route path="dashboard" element={<EduDashboard />} />
+          <Route path="broadcast" element={<EduBroadcast />} />
+          <Route path="events" element={<EduEvents />} />
+          <Route path="archive" element={<EduArchive />} />
+          <Route path="people" element={<EduPeople />} />
+          <Route path="embed" element={<EduEmbed />} />
+          <Route
+            path="settings"
+            element={
+              <EduRoleGuard allow={["faculty_admin"]}>
+                <EduSettings />
+              </EduRoleGuard>
+            }
+          />
+
+          <Route path="*" element={<Navigate to="/streamline/edu/dashboard" replace />} />
+        </Route>
+      </Route>
 
       <Route path="/learnmore" element={<LearnMore />} />
 
