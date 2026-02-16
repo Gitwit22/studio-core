@@ -2,6 +2,7 @@ import express from "express";
 import { firestore as db } from "../firebaseAdmin";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -200,7 +201,7 @@ router.get("/embed/meta", async (req, res) => {
 
     if (accessMode !== "public") {
       if (!token || !expectedToken || token !== expectedToken) {
-        return res.status(403).json({ error: "forbidden" });
+        return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
       }
     }
 
@@ -258,7 +259,7 @@ router.post("/embed/auth", express.json(), async (req, res) => {
 
     const expectedToken = asString((embed as any).token).trim();
     if (!token || !expectedToken || token !== expectedToken) {
-      return res.status(403).json({ error: "forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const passwordHash = asString((embed as any).passwordHash);
@@ -300,7 +301,7 @@ router.get("/embed", async (req, res) => {
 
     if (accessMode !== "public") {
       if (!token || !expectedToken || token !== expectedToken) {
-        return res.status(403).json({ error: "forbidden" });
+        return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
       }
     }
 

@@ -5,6 +5,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { loadEduOrgSettingsForUid, isEduOrgType } from "../lib/eduOrgContext";
 import { writeEduAudit } from "../lib/eduAudit";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -37,7 +38,7 @@ function embedIdForEvent(eventId: string): string {
 router.post("/embeds/event", requireAuth, async (req, res) => {
   try {
     const uid = asString((req as any).user?.uid).trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const eduCtx = await loadEduOrgSettingsForUid(uid).catch(() => null);
 
@@ -53,7 +54,7 @@ router.post("/embeds/event", requireAuth, async (req, res) => {
     if (!evSnap.exists) return res.status(404).json({ error: "event_not_found" });
     const ev = evSnap.data() || {};
     const ownerUid = asString((ev as any).ownerUid).trim();
-    if (ownerUid && ownerUid !== uid) return res.status(403).json({ error: "forbidden" });
+    if (ownerUid && ownerUid !== uid) return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     // EDU org enforcement: if org policy says embeds are unlisted,
     // do not allow public embeds (password embeds are allowed).

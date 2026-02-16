@@ -1,6 +1,7 @@
 import express from "express";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -161,13 +162,13 @@ async function writeAudit(params: {
 router.get("/org", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
     // Read-only: allow broadcast-capable roles to load defaults/branding.
     if (!assertRole(ctx.orgRole, ["faculty_admin", "student_producer", "student_producer_assigned"])) {
-      return res.status(403).json({ error: "forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const orgRef = db.collection("orgs").doc(ctx.orgId);
@@ -211,11 +212,11 @@ router.get("/org", requireAuth, async (req, res) => {
 router.patch("/org", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
-    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: "forbidden" });
+    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     const patch = req.body || {};
 
@@ -270,11 +271,11 @@ router.patch("/org", requireAuth, async (req, res) => {
 router.get("/storage-summary", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
-    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: "forbidden" });
+    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     let docs: any[] = [];
     try {
@@ -307,11 +308,11 @@ router.get("/storage-summary", requireAuth, async (req, res) => {
 router.get("/audit", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
-    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: "forbidden" });
+    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     const limitRaw = Number(req.query.limit);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 10;
@@ -356,13 +357,13 @@ router.get("/audit", requireAuth, async (req, res) => {
 router.post("/audit", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
     // Broadcast start/stop can be done by approved Student Producers.
     if (!assertRole(ctx.orgRole, ["faculty_admin", "student_producer", "student_producer_assigned"])) {
-      return res.status(403).json({ error: "forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const action = asString(req.body?.action).trim();

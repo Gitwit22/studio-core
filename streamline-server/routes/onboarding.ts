@@ -5,6 +5,7 @@ import admin from "firebase-admin";
 import { firestore } from "../firebaseAdmin";
 import { requireAdmin } from "../middleware/adminAuth";
 import { requireAuth } from "../middleware/requireAuth";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { writeEduAudit } from "../lib/eduAudit";
 import { buildNewUserDoc } from "../lib/newUserDefaults";
 
@@ -176,7 +177,7 @@ router.post("/reset-demo", async (req, res) => {
     let actorUid: string | null = null;
     if (!allowByKey) {
       if (!canRunUnauthedOnboarding()) {
-        return res.status(403).json({ error: "forbidden" });
+        return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
       }
       // If in non-prod we still want to allow unauth resets ONLY when key is present.
       // Otherwise, require admin to reduce accidental calls.
@@ -271,7 +272,7 @@ async function orgAlreadyHasFacultyAdmin(orgId: string): Promise<boolean> {
 router.post("/create-top-admin", async (req, res) => {
   try {
     if (!canRunUnauthedOnboarding() && !checkOnboardingKey(req)) {
-      return res.status(403).json({ error: "forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const firstName = asString(req.body?.firstName).trim();
@@ -398,7 +399,7 @@ router.post("/create-top-admin", async (req, res) => {
 router.post("/progress", requireAuth, async (req, res) => {
   try {
     const uid = (req as any).user?.uid as string | undefined;
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const stepRaw = Number((req.body as any)?.step);
     const step = Number.isFinite(stepRaw) ? Math.max(1, Math.min(5, Math.floor(stepRaw))) : null;
@@ -413,7 +414,7 @@ router.post("/progress", requireAuth, async (req, res) => {
     const mSnap = await firestore.collection("orgMembers").doc(memberId).get();
     const member = (mSnap.data() as any) || {};
     const role = String(member.role || "");
-    if (role !== "faculty_admin") return res.status(403).json({ error: "forbidden" });
+    if (role !== "faculty_admin") return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     const orgRef = firestore.collection("orgs").doc(orgId);
     const now = Date.now();

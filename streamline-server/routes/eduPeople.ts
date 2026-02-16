@@ -2,6 +2,7 @@ import express from "express";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { writeEduAudit } from "../lib/eduAudit";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -90,17 +91,62 @@ function normalizeMemberDoc(docId: string, data: any) {
   };
 }
 
+function isInviteDocId(id: string): boolean {
+  return id.includes("_inv_");
+}
+
+function statusRank(status: string): number {
+  if (status === "active") return 3;
+  if (status === "invited") return 2;
+  if (status === "disabled") return 1;
+  return 0;
+}
+
+function pickPreferredPerson(a: any, b: any): any {
+  // Prefer higher status, then prefer a real member doc over an invite stub.
+  const ar = statusRank(String(a?.status || ""));
+  const br = statusRank(String(b?.status || ""));
+  if (ar !== br) return ar > br ? a : b;
+
+  const aInvite = isInviteDocId(String(a?.id || ""));
+  const bInvite = isInviteDocId(String(b?.id || ""));
+  if (aInvite !== bInvite) return aInvite ? b : a;
+
+  return a;
+}
+
+function dedupePeopleByEmail(people: any[]): any[] {
+  const byEmail = new Map<string, any>();
+  const noEmail: any[] = [];
+
+  for (const p of people) {
+    const email = asString(p?.email).trim().toLowerCase();
+    if (!email) {
+      noEmail.push(p);
+      continue;
+    }
+    const existing = byEmail.get(email);
+    if (!existing) {
+      byEmail.set(email, p);
+      continue;
+    }
+    byEmail.set(email, pickPreferredPerson(existing, p));
+  }
+
+  return [...byEmail.values(), ...noEmail];
+}
+
 // List org members (Faculty Admin + Student Producer)
 router.get("/people", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
 
     if (!assertRole(ctx.orgRole, ["faculty_admin", "student_producer", "student_producer_assigned"])) {
-      return res.status(403).json({ error: "forbidden" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const limitRaw = Number(req.query.limit);
@@ -121,7 +167,8 @@ router.get("/people", requireAuth, async (req, res) => {
       docs = snap.docs.filter((d) => String(d.id || "").startsWith(prefix));
     }
 
-    const people = docs.map((d) => normalizeMemberDoc(d.id, d.data() || {}));
+    const rawPeople = docs.map((d) => normalizeMemberDoc(d.id, d.data() || {}));
+    const people = dedupePeopleByEmail(rawPeople);
     return res.json({ people });
   } catch (err: any) {
     console.error("GET /api/edu/people error", err);
@@ -133,11 +180,11 @@ router.get("/people", requireAuth, async (req, res) => {
 router.post("/people/invite", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
-    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: "forbidden" });
+    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     const email = coerceEmail(req.body?.email);
     if (!email) return res.status(400).json({ error: "email_invalid" });
@@ -146,6 +193,39 @@ router.post("/people/invite", requireAuth, async (req, res) => {
     if (!role || role === "faculty_admin") {
       // For now keep invites from minting additional faculty admins via demo UI.
       return res.status(400).json({ error: "role_invalid" });
+    }
+
+    // Avoid duplicate rows for the same person (common source of count mismatch).
+    // If the user is already a member: block. If an invite already exists: treat as resend.
+    try {
+      const existingSnap = await db
+        .collection("orgMembers")
+        .where("orgId", "==", ctx.orgId)
+        .where("email", "==", email)
+        .limit(5)
+        .get();
+
+      const existingDocs = existingSnap.docs || [];
+      if (existingDocs.length) {
+        const preferred = existingDocs
+          .map((d) => normalizeMemberDoc(d.id, d.data() || {}))
+          .reduce((acc, cur) => (acc ? pickPreferredPerson(acc, cur) : cur), null as any);
+
+        const preferredStatus = asString(preferred?.status).trim();
+        if (preferredStatus === "active") {
+          return res.status(409).json({ error: "already_member" });
+        }
+        if (preferredStatus === "invited") {
+          const now = Date.now();
+          const docRef = db.collection("orgMembers").doc(String(preferred.id));
+          const prev = typeof (existingDocs[0].data() as any)?.inviteResendCount === "number" ? (existingDocs[0].data() as any).inviteResendCount : 0;
+          await docRef.set({ invitedAt: now, inviteResendCount: prev + 1, updatedAt: now }, { merge: true });
+          const after = (await docRef.get()).data() || {};
+          return res.json({ ok: true, person: normalizeMemberDoc(String(preferred.id), after) });
+        }
+      }
+    } catch {
+      // If we can't check for duplicates, proceed with best-effort invite creation.
     }
 
     const assignEventId = asString(req.body?.assignEventId).trim();
@@ -186,11 +266,11 @@ router.post("/people/invite", requireAuth, async (req, res) => {
 router.patch("/people/:memberId/role", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
-    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: "forbidden" });
+    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     const memberId = asString(req.params.memberId).trim();
     if (!memberId) return res.status(400).json({ error: "memberId_required" });
@@ -228,11 +308,11 @@ router.patch("/people/:memberId/role", requireAuth, async (req, res) => {
 router.post("/people/:memberId/disable", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
-    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: "forbidden" });
+    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     const memberId = asString(req.params.memberId).trim();
     if (!memberId) return res.status(400).json({ error: "memberId_required" });
@@ -267,11 +347,11 @@ router.post("/people/:memberId/disable", requireAuth, async (req, res) => {
 router.post("/people/:memberId/resend", requireAuth, async (req, res) => {
   try {
     const uid = String((req as any).user?.uid || "").trim();
-    if (!uid) return res.status(401).json({ error: "unauthorized" });
+    if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
     const ctx = await getOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "org_required" });
-    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: "forbidden" });
+    if (!assertRole(ctx.orgRole, ["faculty_admin"])) return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
 
     const memberId = asString(req.params.memberId).trim();
     if (!memberId) return res.status(400).json({ error: "memberId_required" });
