@@ -3,6 +3,7 @@ import { apiFetchAuth } from "../../lib/api";
 export type EduOrgSettings = {
   id: string;
   name: string;
+  timezone: string;
   branding: {
     logoDataUrl: string | null;
     accentColor: string | null;

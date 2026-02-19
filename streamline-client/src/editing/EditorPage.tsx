@@ -54,6 +54,7 @@ const SAMPLE_VIDEO_URL =
   "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
 
 const PIXELS_PER_SECOND = 12;
+const TIMELINE_LEFT_GUTTER_PX = 80;
 
 // ============================================================================
 // MAIN COMPONENT
@@ -195,20 +196,53 @@ export default function EditorPage() {
         const proj = await editingApi.getProject(projectId!);
         if (proj) {
           setProjectName(proj.name);
-          const asset = await editingApi.getAsset(proj.assetId);
-          setClips([
-            {
-              id: "clip_1",
-              assetId: proj.assetId,
-              trackId: 'video_1',
-              startTime: 0,
-              duration: Math.min(asset?.duration || 60, 60),
-              inPoint: 0,
-              outPoint: Math.min(asset?.duration || 60, 60),
-              name: asset?.name || proj.name,
-              videoUrl: asset?.videoUrl || SAMPLE_VIDEO_URL,
-            },
-          ]);
+
+          const timelineClips = (proj as any)?.timeline?.clips;
+          if (Array.isArray(timelineClips) && timelineClips.length > 0) {
+            const normalized = timelineClips.map((c: any) => ({
+              id: String(c?.id || `clip_${Date.now()}`),
+              assetId: String(c?.assetId || proj.assetId),
+              trackId: typeof c?.trackId === 'string' ? c.trackId : 'video_1',
+              startTime: Number(c?.startTime || 0),
+              duration: Number(c?.duration || 0),
+              inPoint: Number(c?.inPoint || 0),
+              outPoint: Number(c?.outPoint || 0),
+              name: String(c?.name || proj.name),
+              videoUrl: String(c?.videoUrl || SAMPLE_VIDEO_URL),
+            }));
+            setClips(normalized);
+
+            setTimeout(() => {
+              const firstUrl = normalized[0]?.videoUrl;
+              if (videoRef.current && firstUrl) {
+                videoRef.current.src = firstUrl;
+                videoRef.current.load();
+              }
+            }, 50);
+          } else {
+            const asset = await editingApi.getAsset(proj.assetId);
+            const videoUrl = asset?.videoUrl || SAMPLE_VIDEO_URL;
+            setClips([
+              {
+                id: "clip_1",
+                assetId: proj.assetId,
+                trackId: 'video_1',
+                startTime: 0,
+                duration: Math.min(asset?.duration || 60, 60),
+                inPoint: 0,
+                outPoint: Math.min(asset?.duration || 60, 60),
+                name: asset?.name || proj.name,
+                videoUrl,
+              },
+            ]);
+
+            setTimeout(() => {
+              if (videoRef.current) {
+                videoRef.current.src = videoUrl;
+                videoRef.current.load();
+              }
+            }, 50);
+          }
         }
       }
     };
@@ -660,11 +694,61 @@ export default function EditorPage() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await editingApi.saveTimeline(projectId!, clips);
-      setTimeout(() => setIsSaving(false), 1000);
+      // If this is a "new" project, create a real project first.
+      let actualProjectId = projectId;
+      if (actualProjectId === "new") {
+        const firstClip = clips[0];
+        if (!firstClip?.assetId) {
+          throw new Error("Missing asset to create project");
+        }
+        const created = await editingApi.createProject({
+          name: projectName || "Untitled Project",
+          assetId: firstClip.assetId,
+        });
+        actualProjectId = created.id;
+        nav(`/editing/editor/${created.id}`, { replace: true });
+      } else {
+        // Keep server project name in sync
+        if (actualProjectId) {
+          await editingApi.updateProject(actualProjectId, { name: projectName });
+        }
+      }
+
+      await editingApi.saveTimeline(actualProjectId!, clips);
+      setTimeout(() => setIsSaving(false), 600);
     } catch (error) {
       console.error('Save failed:', error);
       setIsSaving(false);
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      // Ensure project exists + timeline is persisted before exporting
+      let actualProjectId = projectId;
+      if (actualProjectId === "new") {
+        const firstClip = clips[0];
+        if (!firstClip?.assetId) {
+          throw new Error("Missing asset to create project");
+        }
+        const created = await editingApi.createProject({
+          name: projectName || "Untitled Project",
+          assetId: firstClip.assetId,
+        });
+        actualProjectId = created.id;
+        await editingApi.saveTimeline(actualProjectId!, clips);
+        nav(`/editing/export/${created.id}`, { replace: true });
+        return;
+      }
+
+      if (actualProjectId) {
+        await editingApi.updateProject(actualProjectId, { name: projectName });
+        await editingApi.saveTimeline(actualProjectId, clips);
+        nav(`/editing/export/${actualProjectId}`);
+      }
+    } catch (e) {
+      console.error("Export prep failed:", e);
+      alert("Could not start export. Please try saving again.");
     }
   };
 
@@ -676,8 +760,9 @@ export default function EditorPage() {
     if (!timelineRef.current) return;
     const rect = timelineRef.current.getBoundingClientRect();
     const scrollLeft = timelineRef.current.scrollLeft;
-    const relX = e.clientX - rect.left + scrollLeft;
-    const newTime = relX / (PIXELS_PER_SECOND * zoom);
+    const relX = e.clientX - rect.left + scrollLeft - TIMELINE_LEFT_GUTTER_PX;
+    const clampedX = Math.max(0, relX);
+    const newTime = clampedX / (PIXELS_PER_SECOND * zoom);
     setPlayheadTime(Math.max(0, Math.min(newTime, totalDuration || 60)));
   };
 
@@ -795,7 +880,7 @@ export default function EditorPage() {
             {isSaving ? "Saving..." : "💾 Save"}
           </button>
           <button
-            onClick={() => nav(`/editing/export/${projectId}`)}
+            onClick={handleExport}
             style={{
               fontSize: '14px',
               paddingLeft: '12px',

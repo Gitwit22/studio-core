@@ -3,7 +3,7 @@ import admin from "firebase-admin";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { firestore } from "../firebaseAdmin";
-import { tryGetAuthUser, verifyInviteToken } from "../middleware/requireAuth";
+import { tryGetAuthUserAny, verifyInviteToken } from "../middleware/requireAuth";
 import { tryGetGuestSession } from "../middleware/guestSession";
 import { verifyRoomAccessToken } from "../middleware/roomAccessToken";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
@@ -45,13 +45,17 @@ export function tryGetLegacyInviteGuest(req: any, roomId: string): { inviteId: s
     if (!claimRoomId || claimRoomId !== roomId) return null;
 
     const inviteId = `legacy:${Buffer.from(raw).toString("base64url").slice(0, 24)}`;
-    // Backward compatibility: treat old "viewer" role as "guest" for /room flows
-    // Security: Explicitly validate known roles, reject unknown/corrupted values
+    // Backward compatibility:
+    // - legacy role "guest" historically behaved like an on-stage "participant"
+    // - legacy role "viewer" behaved like a view-only "guest"
+    // Security: explicitly validate known roles, reject unknown/corrupted values.
     let role: "guest" | "participant";
     if (rawRole === "participant") {
       role = "participant";
-    } else if (rawRole === "guest" || rawRole === "viewer") {
-      role = "guest"; // Map legacy "viewer" to "guest"
+    } else if (rawRole === "guest") {
+      role = "participant";
+    } else if (rawRole === "viewer") {
+      role = "guest";
     } else {
       // Unknown/corrupted role - reject for security
       return null;
@@ -776,7 +780,7 @@ router.get("/rooms/:roomId/status", async (req: any, res) => {
     const status = room.status === "live" ? "live" : "idle";
     const allowGuestsPolicy = typeof room.allowGuests === "boolean" ? !!room.allowGuests : null;
 
-    const user = tryGetAuthUser(req);
+    const user = await tryGetAuthUserAny(req);
     let guest = tryGetGuestSession(req);
 
     // Optional per-room guest policy: only enforced when explicitly set.
@@ -826,7 +830,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
     const roomId = String(req.params.roomId || "").trim();
     if (!roomId) return res.status(400).json({ error: "roomId_required" });
 
-    const user = tryGetAuthUser(req);
+    const user = await tryGetAuthUserAny(req);
     let guest = tryGetGuestSession(req);
 
     if (!user && !guest) {

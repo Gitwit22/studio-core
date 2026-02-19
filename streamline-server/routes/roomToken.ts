@@ -462,6 +462,8 @@ async function validateViewerInvite(inviteToken: string, roomId: string, session
 }
 
 router.post("/", requireAuthOrInvite, async (req, res) => {
+  let capacityLockOwner: string | null = null;
+  let capacityLockRoomId: string | null = null;
   try {
     const { roomName: rawRoomName, roomId: rawRoomId, identity: _ignoredIdentity, role: rawRole, displayName: rawDisplayName } = req.body as {
       roomName?: string;
@@ -656,23 +658,19 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     // maxGuests cap (plan-aware). This prevents bypassing guest caps via the authed token route.
     // Hold a short Firestore lock across the check + mint to reduce oversubscription races.
     const capacityBypass = !!callerIsAdmin || (!!uid && !!roomPolicy.ownerId && uid === roomPolicy.ownerId);
-    let capacityLockOwner: string | null = null;
     if (!capacityBypass) {
       const cap = await resolveMaxGuestsCap(entitlementsUid || roomPolicy.ownerId);
       if (cap !== undefined) {
         capacityLockOwner = await acquireCapacityLock(roomId);
+        capacityLockRoomId = roomId;
         if (!capacityLockOwner) {
           return res.status(503).json({ error: "capacity_check_busy" });
         }
         const participantCount = await getParticipantCount(roomName);
         if (participantCount === null) {
-          await releaseCapacityLock(roomId, capacityLockOwner);
-          capacityLockOwner = null;
           return res.status(503).json({ error: "capacity_check_unavailable" });
         }
         if (participantCount >= cap) {
-          await releaseCapacityLock(roomId, capacityLockOwner);
-          capacityLockOwner = null;
           return res.status(429).json({ error: "room_full" });
         }
       }
@@ -892,7 +890,6 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
         .catch((err) => console.error("[roomToken] audit write failed", err));
     }
 
-    await releaseCapacityLock(roomId, capacityLockOwner);
     return res.status(200).json({
       token: lkJwt,
       serverUrl,
@@ -910,25 +907,20 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     });
   } catch (err: any) {
     console.error("roomToken error:", err);
-    // Ensure any held capacity lock is released on unexpected failures.
-    try {
-      const maybeRoomId = String((req as any)?.body?.roomId || "").trim();
-      if (maybeRoomId) {
-        // We don't have access to the lock owner here in all cases; lock TTL is short.
-      }
-    } catch {
-      // ignore
-    }
     return res.status(500).json({
       code: "internal_error",
       error: "Failed to create room token",
       message: process.env.AUTH_DEBUG === "1" ? String(err?.message || err) : undefined,
     });
+  } finally {
+    await releaseCapacityLock(capacityLockRoomId || "", capacityLockOwner);
   }
 });
 
 // Public guest token: subscribe only (downgraded to viewer when over cap)
 router.post("/guest", requireAuth as any, async (req: any, res) => {
+  let capacityLockOwner: string | null = null;
+  let capacityLockRoomId: string | null = null;
   try {
     const { roomName: rawRoomName, roomId: rawRoomId, displayName, guestId, inviteToken } = req.body as {
       roomName?: string;
@@ -1043,19 +1035,17 @@ router.post("/guest", requireAuth as any, async (req: any, res) => {
     // Fail-closed on capacity check failures so outages/misconfig don't become "no cap".
     const hostUid = ownerId || (inviteClaims as any)?.uid || (inviteClaims as any)?.sub || uid;
     const cap = await resolveMaxGuestsCap(hostUid || null);
-    let capacityLockOwner: string | null = null;
     if (cap !== undefined) {
       capacityLockOwner = await acquireCapacityLock(roomId);
+      capacityLockRoomId = roomId;
       if (!capacityLockOwner) {
         return res.status(503).json({ error: "capacity_check_busy" });
       }
       const participantCount = await getParticipantCount(roomName);
       if (participantCount === null) {
-        await releaseCapacityLock(roomId, capacityLockOwner);
         return res.status(503).json({ error: "capacity_check_unavailable" });
       }
       if (participantCount >= cap) {
-        await releaseCapacityLock(roomId, capacityLockOwner);
         return res.status(429).json({ error: "room_full" });
       }
     }
@@ -1136,7 +1126,6 @@ router.post("/guest", requireAuth as any, async (req: any, res) => {
         .catch((err) => console.error("[roomToken/guest] audit write failed", err));
     }
 
-    await releaseCapacityLock(roomId, capacityLockOwner);
     return res.status(200).json({
       token: lkJwt,
       serverUrl,
@@ -1157,6 +1146,8 @@ router.post("/guest", requireAuth as any, async (req: any, res) => {
       error: "Failed to create guest token",
       message: process.env.AUTH_DEBUG === "1" ? String(err?.message || err) : undefined,
     });
+  } finally {
+    await releaseCapacityLock(capacityLockRoomId || "", capacityLockOwner);
   }
 });
 

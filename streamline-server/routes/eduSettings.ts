@@ -9,6 +9,7 @@ type EduOrgRole = "faculty_admin" | "student_producer" | "student_producer_assig
 
 type OrgDoc = {
   name: string;
+  timezone?: string;
   branding?: {
     logoDataUrl?: string | null;
     accentColor?: string | null;
@@ -94,6 +95,15 @@ function coerceEmbedVisibility(v: any): "public" | "unlisted" {
   return raw === "unlisted" ? "unlisted" : "public";
 }
 
+function coerceTimezone(v: any): string {
+  const tz = asString(v).trim();
+  if (!tz) return "America/New_York";
+  // Minimal sanity check for IANA tz names (e.g. America/Detroit)
+  if (tz === "UTC") return "UTC";
+  if (/^[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/.test(tz)) return tz;
+  return "America/New_York";
+}
+
 function coerceRetentionDays(v: any): number | null {
   if (v === null) return null;
   const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN;
@@ -114,6 +124,7 @@ function normalizeOrgDoc(docId: string, data: any): any {
   return {
     id: docId,
     name: typeof d.name === "string" ? d.name : "",
+    timezone: typeof d.timezone === "string" && d.timezone.trim() ? d.timezone.trim() : "America/New_York",
     branding: {
       logoDataUrl: typeof d.branding?.logoDataUrl === "string" ? d.branding?.logoDataUrl : null,
       accentColor: typeof d.branding?.accentColor === "string" ? d.branding?.accentColor : null,
@@ -177,6 +188,7 @@ router.get("/org", requireAuth, async (req, res) => {
     if (!snap.exists) {
       const created: OrgDoc = {
         name: ctx.orgName || "Your School",
+        timezone: "America/New_York",
         branding: {
           logoDataUrl: null,
           accentColor: null,
@@ -222,6 +234,7 @@ router.patch("/org", requireAuth, async (req, res) => {
 
     const next: Partial<OrgDoc> = {
       name: typeof patch?.name === "string" && patch.name.trim() ? patch.name.trim() : undefined,
+      timezone: typeof patch?.timezone === "string" ? coerceTimezone(patch.timezone) : undefined,
       branding: {
         logoDataUrl:
           typeof patch?.branding?.logoDataUrl === "string" ? String(patch.branding.logoDataUrl) : null,

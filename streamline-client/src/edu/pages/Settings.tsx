@@ -100,6 +100,7 @@ function readDemoState(): { org: EduOrgSettings; audit: EduAuditAction[]; storag
     org: {
       id: "edu-demo-org",
       name: "EDU Demo",
+      timezone: "America/New_York",
       branding: {
         logoDataUrl: null,
         accentColor: null,
@@ -131,8 +132,13 @@ function readDemoState(): { org: EduOrgSettings; audit: EduAuditAction[]; storag
     if (!raw) return defaults;
     const parsed = JSON.parse(raw);
     if (!parsed?.org) return defaults;
+    const tzRaw = (parsed.org as { timezone?: unknown })?.timezone;
+    const timezone = typeof tzRaw === "string" && tzRaw.trim() ? tzRaw.trim() : "America/New_York";
     return {
-      org: parsed.org as EduOrgSettings,
+      org: {
+        ...(parsed.org as EduOrgSettings),
+        timezone,
+      },
       audit: Array.isArray(parsed.audit) ? (parsed.audit as EduAuditAction[]) : [],
       storage: parsed.storage
         ? ({
@@ -186,6 +192,7 @@ export default function Settings() {
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string | null>(null);
   const [playerTitleText, setPlayerTitleText] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState<string>("America/New_York");
 
   const [publishToWebsite, setPublishToWebsite] = useState<boolean>(true);
   const [recordToArchive, setRecordToArchive] = useState<boolean>(true);
@@ -211,6 +218,7 @@ export default function Settings() {
       setLogoDataUrl(demo.org.branding?.logoDataUrl || null);
       setAccentColor(demo.org.branding?.accentColor || null);
       setPlayerTitleText(demo.org.branding?.playerTitleText || null);
+      setTimezone(String(demo.org.timezone || "America/New_York"));
 
       setPublishToWebsite(!!demo.org.defaults?.publishToWebsite);
       setRecordToArchive(!!demo.org.defaults?.recordToArchive);
@@ -246,6 +254,7 @@ export default function Settings() {
         setLogoDataUrl(orgRes.branding?.logoDataUrl || null);
         setAccentColor(orgRes.branding?.accentColor || null);
         setPlayerTitleText(orgRes.branding?.playerTitleText || null);
+        setTimezone(String(orgRes.timezone || "America/New_York"));
 
         setPublishToWebsite(!!orgRes.defaults?.publishToWebsite);
         setRecordToArchive(!!orgRes.defaults?.recordToArchive);
@@ -292,6 +301,7 @@ export default function Settings() {
         const nextOrg: EduOrgSettings = {
           ...base,
           name: name,
+          timezone: timezone.trim() ? timezone.trim() : "America/New_York",
           branding: {
             logoDataUrl,
             accentColor,
@@ -341,6 +351,7 @@ export default function Settings() {
 
       const next = await patchEduOrg({
         name: name,
+        timezone: timezone.trim() ? timezone.trim() : "America/New_York",
         branding: {
           logoDataUrl,
           accentColor,
@@ -452,6 +463,17 @@ export default function Settings() {
               placeholder="Your School"
               className="mt-2 w-full rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-orange-500/40"
             />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-white">School timezone</label>
+            <input
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              placeholder="America/New_York"
+              className="mt-2 w-full rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-orange-500/40"
+            />
+            <div className="mt-1 text-xs text-slate-400">Use an IANA timezone like <span className="text-slate-300">America/New_York</span>.</div>
           </div>
 
           <div>

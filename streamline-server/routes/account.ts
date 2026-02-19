@@ -610,6 +610,10 @@ router.get("/me", async (req, res) => {
 
       const transcodeLimitRaw = (limits as any).transcodeMinutes;
 
+      // Editing access comes from the Firestore plan doc's `editing` object.
+      // This is intentionally separate from the legacy `features` map.
+      const planEditingAccess = Boolean((plan.raw as any)?.editing?.access === true);
+
       effectiveEntitlements = {
         planId: entitlements.planId,
         planName: plan.name || entitlements.planId,
@@ -629,6 +633,13 @@ router.get("/me", async (req, res) => {
 
           // Optional: surface for client gating (e.g. Overages toggle).
           overagesAllowed: !!(features as any).overagesAllowed,
+
+          // Editing (plans are truth)
+          editing: planEditingAccess,
+          // Segmented editing surfaces (until a separate segmented plan matrix exists)
+          contentLibrary: planEditingAccess,
+          projects: planEditingAccess,
+          editor: planEditingAccess,
         },
         limits: {
           // Canonical numeric usage/feature caps
@@ -641,6 +652,10 @@ router.get("/me", async (req, res) => {
           // Client gating relies on presence (typeof === "number").
           transcodeMinutes: typeof transcodeLimitRaw === "number" ? Number(transcodeLimitRaw) : undefined,
           maxRecordingMinutesPerClip: Number(limits.maxRecordingMinutesPerClip || 0),
+
+          // Editing limits (optional client UX)
+          editingMaxProjects: Number((plan.raw as any)?.editing?.maxProjects ?? 0),
+          editingMaxTracks: Number((plan.raw as any)?.editing?.maxTracks ?? 0),
         },
         caps: entitlements.caps || {},
       };

@@ -2,6 +2,7 @@ import React, { FormEvent, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiFetchAuth, clearAuthStorage } from "../lib/api";
 import { isEduBypassEnabled } from "../edu/state/eduMode";
+import { firebaseSendPasswordReset, firebaseSignInWithCustomToken, isFirebaseWebConfigured } from "../lib/firebaseClient";
 
 // Email validation function
 function validateEmail(email: string): boolean {
@@ -72,47 +73,84 @@ export const LoginPage: React.FC = () => {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email, password }),
-      });
+      // Prefer Firebase lazy-migration login when Firebase is configured.
+      // Keep legacy /api/auth/login as fallback so dev envs without Firebase config don't brick.
+      if (!isFirebaseWebConfigured()) {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ email, password }),
+        });
 
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          clearAuthStorage();
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            clearAuthStorage();
+          }
+          const ct = res.headers.get("content-type") || "";
+          const err = ct.includes("application/json")
+            ? await res.json().catch(() => ({}))
+            : { error: "Login failed: backend returned non-JSON (check API base / server)" };
+          setError((err as any)?.error || "Invalid credentials");
+          setLoading(false);
+          return;
         }
-        const ct = res.headers.get("content-type") || "";
-        const err = ct.includes("application/json")
-          ? await res.json().catch(() => ({}))
-          : { error: "Login failed: backend returned non-JSON (check API base / server)" };
-        setError((err as any)?.error || "Invalid credentials");
-        setLoading(false);
-        return;
-      }
 
-      // LOGIN SUCCEEDED — capture JWT from the response body so we
-      // can fall back to header-based auth when cookies are blocked.
-      let loginBody: any = null;
-      try {
-        const ctLogin = res.headers.get("content-type") || "";
-        loginBody = ctLogin.includes("application/json") ? await res.json() : null;
-      } catch {
-        loginBody = null;
-      }
+        let loginBody: any = null;
+        try {
+          const ctLogin = res.headers.get("content-type") || "";
+          loginBody = ctLogin.includes("application/json") ? await res.json() : null;
+        } catch {
+          loginBody = null;
+        }
 
-      const token = (loginBody as any)?.token as string | undefined;
-      if (!token) {
-        clearAuthStorage();
-        setError("Login failed: missing token from server");
-        setLoading(false);
-        return;
-      }
+        const token = (loginBody as any)?.token as string | undefined;
+        if (!token) {
+          clearAuthStorage();
+          setError("Login failed: missing token from server");
+          setLoading(false);
+          return;
+        }
 
-      try {
-        localStorage.setItem("authToken", token);
-      } catch {}
+        try {
+          localStorage.setItem("authToken", token);
+        } catch {}
+
+      } else {
+        const res = await fetch(`${API_BASE}/api/auth/legacy-login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ email, password }),
+        });
+
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            clearAuthStorage();
+          }
+          const ct = res.headers.get("content-type") || "";
+          const errBody = ct.includes("application/json") ? await res.json().catch(() => ({})) : {};
+          const msg = (errBody as any)?.error || (res.status === 409 ? "Email conflict. Contact support." : "Invalid credentials");
+          setError(msg);
+          setLoading(false);
+          return;
+        }
+
+        const payload = await res.json().catch(() => null as any);
+        const customToken = String(payload?.customToken || "").trim();
+        if (!customToken) {
+          setError("Login failed: missing customToken");
+          setLoading(false);
+          return;
+        }
+
+        // Clear legacy header token so we don't send stale Authorization values.
+        try {
+          localStorage.removeItem("authToken");
+        } catch {}
+
+        await firebaseSignInWithCustomToken(customToken);
+      }
 
       // Hydrate user from canonical /api/account/me. If this fails,
       // treat it as a hard error instead of redirecting into a
@@ -145,10 +183,32 @@ export const LoginPage: React.FC = () => {
       } catch {}
 
       nav(nextUrl || "/join");
+      return;
     } catch (err) {
       console.error(err);
       setError("Something went wrong. Try again.");
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setError("");
+    const emailNorm = String(email || "").trim().toLowerCase();
+    if (!validateEmail(emailNorm)) {
+      setError("Enter your email above, then click Forgot password.");
+      return;
+    }
+
+    try {
+      const continueUrl = String(import.meta.env.VITE_FIREBASE_CONTINUE_URL || "").trim();
+      const actionCodeSettings = continueUrl
+        ? { url: continueUrl, handleCodeInApp: false }
+        : { url: window.location.origin + "/login", handleCodeInApp: false };
+      await firebaseSendPasswordReset(emailNorm, actionCodeSettings as any);
+      setError("Password reset email sent (check your inbox).");
+    } catch (err: any) {
+      const msg = String(err?.code || err?.message || "reset_failed");
+      setError(msg);
     }
   };
 
@@ -436,6 +496,10 @@ export const LoginPage: React.FC = () => {
                 color: "#9ca3af",
                 textDecoration: "none",
                 transition: "color 0.3s ease",
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleForgotPassword();
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.color = "#ef4444";

@@ -1,6 +1,7 @@
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { getAuthToken } from "../../lib/api";
+import { onFirebaseAuthStateChanged } from "../../lib/firebaseClient";
 import { fetchEduMe, type EduMe } from "../api/me";
 import { isEduBypassEnabled, setEduLane } from "../state/eduMode";
 
@@ -19,15 +20,22 @@ export default function EduProtectedRoute({ children }: { children: ReactNode })
   const loc = useLocation();
   const [me, setMe] = useState<EduMe | null>(null);
   const [loading, setLoading] = useState(true);
+  const [firebaseAuthed, setFirebaseAuthed] = useState(false);
+
+  useEffect(() => {
+    return onFirebaseAuthStateChanged((user) => {
+      setFirebaseAuthed(!!user);
+    });
+  }, []);
 
   const authed = useMemo(() => {
     if (isEduBypassEnabled()) return true;
     try {
-      return !!getAuthToken();
+      return !!getAuthToken() || firebaseAuthed;
     } catch {
       return false;
     }
-  }, [loc.key]);
+  }, [loc.key, firebaseAuthed]);
 
   useEffect(() => {
     setEduLane();

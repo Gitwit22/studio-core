@@ -10,54 +10,77 @@ export default function RenderAndUploadPage() {
   const [renderProgress, setRenderProgress] = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load project
-    if (projectId) {
-      editingApi.getProject(projectId).then((proj) => {
-        if (proj) {
-          setProject(proj as Project);
+    let cancelled = false;
+
+    const start = async () => {
+      setLoading(true);
+      setError(null);
+      setDownloadUrl(null);
+      setRenderProgress(0);
+      setUploadProgress(0);
+
+      if (!projectId) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const proj = await editingApi.getProject(projectId);
+        if (cancelled) return;
+        if (!proj) {
+          setProject(null);
+          setLoading(false);
+          return;
         }
-      });
-    }
-    setLoading(false);
+        setProject(proj as Project);
+
+        const started = await editingApi.startExport(
+          projectId,
+          { format: 'mp4', resolution: '1080p' } as any
+        );
+
+        if (cancelled) return;
+        if (typeof (started as any)?.progress === 'number') {
+          setRenderProgress((started as any).progress);
+        }
+
+        if ((started as any)?.status === 'complete') {
+          setRenderProgress(100);
+          setUploadProgress(100);
+          setDownloadUrl(((started as any)?.downloadUrl as string) || null);
+          setLoading(false);
+          return;
+        }
+
+        const finalJob = await editingApi.waitForExport((started as any).id, (job: any) => {
+          if (cancelled) return;
+          if (typeof job?.progress === 'number') {
+            setRenderProgress(job.progress);
+          }
+        });
+
+        if (cancelled) return;
+        setRenderProgress(100);
+        setUploadProgress(100);
+        setDownloadUrl((finalJob as any)?.downloadUrl || null);
+        setLoading(false);
+      } catch (e: any) {
+        if (cancelled) return;
+        setError(e?.message || String(e));
+        setLoading(false);
+      }
+    };
+
+    start();
+
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
-
-  // Simulate render progress
-  useEffect(() => {
-    if (renderProgress >= 100) return;
-
-    const interval = setInterval(() => {
-      setRenderProgress((prev) => {
-        const next = prev + Math.random() * 8;
-        if (next >= 100) {
-          clearInterval(interval);
-          return 100;
-        }
-        return next;
-      });
-    }, 300);
-
-    return () => clearInterval(interval);
-  }, [renderProgress]);
-
-  // Simulate upload progress after render completes
-  useEffect(() => {
-    if (renderProgress < 100 || uploadProgress >= 100) return;
-
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        const next = prev + Math.random() * 4;
-        if (next >= 100) {
-          clearInterval(interval);
-          return 100;
-        }
-        return next;
-      });
-    }, 200);
-
-    return () => clearInterval(interval);
-  }, [renderProgress, uploadProgress]);
 
   const isRendering = renderProgress < 100;
   const isUploading = renderProgress === 100 && uploadProgress < 100;
@@ -78,7 +101,14 @@ export default function RenderAndUploadPage() {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <div className="text-center">
-          <p className="text-zinc-400 mb-6">Project not found</p>
+          {error ? (
+            <>
+              <p className="text-red-400 mb-2">Export failed</p>
+              <p className="text-zinc-400 mb-6">{error}</p>
+            </>
+          ) : (
+            <p className="text-zinc-400 mb-6">Project not found</p>
+          )}
           <button
             onClick={() => navigate('/editing/projects')}
             className="px-6 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition"
@@ -116,8 +146,8 @@ export default function RenderAndUploadPage() {
                   />
                 </svg>
               </div>
-              <h1 className="text-3xl font-bold mb-2">Uploading to Platforms</h1>
-              <p className="text-zinc-400">Publishing to your connected accounts...</p>
+              <h1 className="text-3xl font-bold mb-2">Finalizing Export</h1>
+              <p className="text-zinc-400">Preparing your download...</p>
             </>
           )}
           {isComplete && (
@@ -125,8 +155,8 @@ export default function RenderAndUploadPage() {
               <div className="w-20 h-20 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center mx-auto mb-6">
                 <CheckCircle className="w-10 h-10" />
               </div>
-              <h1 className="text-3xl font-bold mb-2">Upload Complete! 🎉</h1>
-              <p className="text-zinc-400">Your video is now live on all platforms</p>
+              <h1 className="text-3xl font-bold mb-2">Export Complete</h1>
+              <p className="text-zinc-400">Your video is ready to download</p>
             </>
           )}
         </div>
@@ -185,9 +215,18 @@ export default function RenderAndUploadPage() {
                 </div>
               )}
               {isComplete && (
-                <button className="text-sm text-blue-400 hover:text-blue-300 underline">
-                  View on YouTube →
-                </button>
+                downloadUrl ? (
+                  <a
+                    href={downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm text-blue-400 hover:text-blue-300 underline"
+                  >
+                    Download video →
+                  </a>
+                ) : (
+                  <span className="text-sm text-zinc-500">Download link unavailable</span>
+                )
               )}
             </div>
 
@@ -223,9 +262,7 @@ export default function RenderAndUploadPage() {
                 </div>
               )}
               {isComplete && (
-                <button className="text-sm text-blue-400 hover:text-blue-300 underline">
-                  View on Facebook →
-                </button>
+                <span className="text-sm text-zinc-500">Upload not configured</span>
               )}
             </div>
 

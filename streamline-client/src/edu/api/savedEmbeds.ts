@@ -28,7 +28,18 @@ export async function createEduSavedEmbed(params: {
       description: params.description,
       hlsConfig: params.hlsConfig,
     }),
-  });
+  }, { allowNonOk: true, suppressAuthSideEffects: true });
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const body: any = await res.json();
+      msg = String(body?.error || body?.message || msg);
+    } catch {
+      // ignore
+    }
+    throw Object.assign(new Error(msg), { status: res.status });
+  }
 
   const data = (await res.json()) as any;
   const embed = data?.embed || data;

@@ -47,24 +47,6 @@ function persistCreateDraft(draft: HlsCreateDraft) {
   }
 }
 
-function getAuthToken(): string | null {
-  try {
-    return window.localStorage.getItem("authToken");
-  } catch {
-    return null;
-  }
-}
-
-function buildAuthHeaders(extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(extra || {}),
-  };
-  const token = getAuthToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
-
 function absoluteViewerUrlFromPath(viewerPath: string, fallbackId?: string): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const base = origin.replace(/\/$/, "");
@@ -172,7 +154,6 @@ export default function SettingsHlsSetup({
         method: "GET",
         credentials: "include",
         cache: "no-store",
-        headers: buildAuthHeaders(),
       }, { allowNonOk: true });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
@@ -218,7 +199,7 @@ export default function SettingsHlsSetup({
       const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embedId)}`, {
         method: "PUT",
         credentials: "include",
-        headers: buildAuthHeaders(),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ archived: true }),
       }, { allowNonOk: true });
       const payload = await res.json().catch(() => null);
@@ -257,7 +238,7 @@ export default function SettingsHlsSetup({
       const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds/${encodeURIComponent(embed.embedId)}`, {
         method: "PUT",
         credentials: "include",
-        headers: buildAuthHeaders(),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ archived: true }),
       }, { allowNonOk: true });
       const payload = await res.json().catch(() => null);
@@ -328,7 +309,7 @@ export default function SettingsHlsSetup({
       const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds/${encodeURIComponent(editingEmbed.embedId)}`, {
         method: "PUT",
         credentials: "include",
-        headers: buildAuthHeaders(),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
           description: description || "",
@@ -383,7 +364,7 @@ export default function SettingsHlsSetup({
       const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds`, {
         method: "POST",
         credentials: "include",
-        headers: buildAuthHeaders(),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
           description: description || undefined,
@@ -734,7 +715,7 @@ export default function SettingsHlsSetup({
                           const res = await apiFetchAuth(`${API_BASE}/api/saved-embeds`, {
                             method: "POST",
                             credentials: "include",
-                            headers: buildAuthHeaders(),
+                            headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
                               name: `${embed.label} (Copy)`,
                             }),

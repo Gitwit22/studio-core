@@ -1,51 +1,108 @@
+import { useEffect, useMemo, useState } from "react";
+import { getMeCached } from "../lib/meCache";
+import { API_BASE } from "../lib/apiBase";
+import { apiFetchAuth } from "../lib/api";
+
+type EditingFeatures = {
+  editing: { access: boolean; maxTracks: number; maxProjects: number };
+  ai: { autocut: boolean; captions: boolean; highlights: boolean };
+  export: { maxResolution: "720p" | "1080p" | "4k"; formats: string[] };
+};
+
+const FALLBACK_FEATURES: EditingFeatures = {
+  editing: { access: false, maxTracks: 0, maxProjects: 0 },
+  ai: { autocut: false, captions: false, highlights: false },
+  export: { maxResolution: "720p", formats: ["mp4"] },
+};
+
+function pickMaxResolution(raw: any): "720p" | "1080p" | "4k" {
+  const v = String(raw || "").toLowerCase();
+  if (v === "4k") return "4k";
+  if (v === "1080p") return "1080p";
+  return "720p";
+}
+
 export function useEditingFeatures() {
-  const user = localStorage.getItem("sl_user");
-  const userData = user ? JSON.parse(user) : null;
-  const planId = userData?.plan || "free";
+  const [planId, setPlanId] = useState("free");
+  const [features, setFeatures] = useState<EditingFeatures>(FALLBACK_FEATURES);
 
-  const FEATURE_MATRIX = {
-    free: {
-      editing: { access: true, maxTracks: 2, maxProjects: 3 },
-      ai: { autocut: false, captions: false, highlights: false },
-      export: { maxResolution: "720p", formats: ["mp4"] },
-    },
-    starter: {
-      editing: { access: true, maxTracks: 4, maxProjects: 10 },
-      ai: { autocut: false, captions: false, highlights: false },
-      export: { maxResolution: "1080p", formats: ["mp4", "webm"] },
-    },
-    pro: {
-      editing: { access: true, maxTracks: 8, maxProjects: 100 },
-      ai: { autocut: true, captions: true, highlights: true },
-      export: { maxResolution: "4k", formats: ["mp4", "webm", "mov"] },
-    },
-    enterprise: {
-      editing: { access: true, maxTracks: 16, maxProjects: 1000 },
-      ai: { autocut: true, captions: true, highlights: true },
-      export: { maxResolution: "4k", formats: ["mp4", "webm", "mov", "prores"] },
-    },
-  };
+  useEffect(() => {
+    let cancelled = false;
 
-  const features = FEATURE_MATRIX[planId as keyof typeof FEATURE_MATRIX] || FEATURE_MATRIX.free;
+    (async () => {
+      try {
+        const me = await getMeCached();
+        const pid = String(me?.planId || me?.effectiveEntitlements?.planId || "free");
+        if (cancelled) return;
+        setPlanId(pid);
 
-  return {
-    planId,
-    features,
-    canUseFeature: (path: string) => {
-      const keys = path.split(".");
-      let val: any = features;
-      for (const key of keys) {
-        val = val?.[key];
+        const resp = await apiFetchAuth(`${API_BASE}/plans/${encodeURIComponent(pid)}`, {}, { allowNonOk: true });
+        if (!resp.ok) {
+          if (!cancelled) setFeatures(FALLBACK_FEATURES);
+          return;
+        }
+        const body = await resp.json();
+        const plan = body?.plan;
+        const rawEditing = plan?.raw?.editing || plan?.editing || {};
+
+        const access = rawEditing?.access === true;
+        const maxTracks = Number(rawEditing?.maxTracks ?? 0);
+        const maxProjects = Number(rawEditing?.maxProjects ?? 0);
+        const maxResolution = pickMaxResolution(rawEditing?.maxResolution);
+
+        const next: EditingFeatures = {
+          editing: {
+            access,
+            maxTracks: Number.isFinite(maxTracks) ? Math.max(0, Math.round(maxTracks)) : 0,
+            maxProjects: Number.isFinite(maxProjects) ? Math.max(0, Math.round(maxProjects)) : 0,
+          },
+          ai: {
+            autocut: rawEditing?.ai?.autoCut === true || rawEditing?.ai?.autocut === true,
+            captions: rawEditing?.ai?.captions === true,
+            highlights: rawEditing?.ai?.highlights === true,
+          },
+          export: {
+            maxResolution,
+            formats: ["mp4"],
+          },
+        };
+
+        if (!cancelled) setFeatures(next);
+      } catch {
+        if (!cancelled) {
+          setPlanId("free");
+          setFeatures(FALLBACK_FEATURES);
+        }
       }
-      return !!val;
-    },
-    getFeatureValue: (path: string) => {
-      const keys = path.split(".");
-      let val: any = features;
-      for (const key of keys) {
-        val = val?.[key];
-      }
-      return val;
-    },
-  };
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const api = useMemo(() => {
+    return {
+      planId,
+      features,
+      canUseFeature: (path: string) => {
+        const keys = path.split(".");
+        let val: any = features;
+        for (const key of keys) {
+          val = val?.[key];
+        }
+        return !!val;
+      },
+      getFeatureValue: (path: string) => {
+        const keys = path.split(".");
+        let val: any = features;
+        for (const key of keys) {
+          val = val?.[key];
+        }
+        return val;
+      },
+    };
+  }, [planId, features]);
+
+  return api;
 }

@@ -224,11 +224,6 @@ export default function StreamSetupModalV2({
       )}`
     : "";
 
-  const authHeaders = useMemo(() => {
-    const token = typeof window !== "undefined" ? window.localStorage.getItem("authToken") : null;
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, []);
-
   useEffect(() => {
     setRecordingMode(defaultRecordingMode);
   }, [defaultRecordingMode]);
@@ -309,9 +304,6 @@ export default function StreamSetupModalV2({
           `${API_BASE}/api/rooms/${encodeURIComponent(hlsRoomId)}/active-embed`,
           {
             cache: "no-store",
-            headers: {
-              ...authHeaders,
-            },
           },
           { allowNonOk: true }
         );
@@ -333,7 +325,7 @@ export default function StreamSetupModalV2({
     return () => {
       cancelled = true;
     };
-  }, [open, hlsRoomReady, hlsRoomId, authHeaders]);
+  }, [open, hlsRoomReady, hlsRoomId]);
 
   // Resolve basic embed metadata for the bound embed so we can show
   // a friendly connection label + viewer URL. This uses the public

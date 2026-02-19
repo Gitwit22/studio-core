@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEduMe } from "../layout/EduProtectedRoute";
 import { createEduSavedEmbed } from "../api/savedEmbeds";
+import { fetchEduOrg } from "../api/settings";
 import { fetchDestinations, type DestinationItem } from "../../services/destinations";
+import { isEduBypassEnabled } from "../state/eduMode";
 import {
   cancelEduEvent,
   computeEduEventStatus,
@@ -17,16 +19,158 @@ import {
 
 type TabId = "upcoming" | "past";
 
-function formatDateTime(iso: string) {
+const DEMO_STATE_KEY = "sl_edu_demo_settings_v1";
+
+function readDemoTimezone(): string | null {
+  try {
+    const raw = localStorage.getItem(DEMO_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const tz = String(parsed?.org?.timezone || "").trim();
+    return tz || null;
+  } catch {
+    return null;
+  }
+}
+
+function formatDateTime(iso: string, tz?: string) {
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return iso;
-  return d.toLocaleString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: tz,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(d);
+  } catch {
+    return d.toLocaleString([], {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+}
+
+function formatTimeLabel(hhmm: string): string {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm);
+  if (!m) return hhmm;
+  const hour24 = Number(m[1]);
+  const minute = m[2];
+  const ampm = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = ((hour24 + 11) % 12) + 1;
+  return `${hour12}:${minute} ${ampm}`;
+}
+
+function timeOptions(stepMinutes = 15) {
+  const out: { value: string; label: string }[] = [];
+  for (let minutes = 0; minutes < 24 * 60; minutes += stepMinutes) {
+    const hh = String(Math.floor(minutes / 60)).padStart(2, "0");
+    const mm = String(minutes % 60).padStart(2, "0");
+    const value = `${hh}:${mm}`;
+    out.push({ value, label: formatTimeLabel(value) });
+  }
+  return out;
+}
+
+function addMinutesToTime(timeHHMM: string, minutesToAdd: number): string {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(timeHHMM);
+  if (!m) return timeHHMM;
+  const baseMinutes = Number(m[1]) * 60 + Number(m[2]);
+  const next = Math.max(0, Math.min(24 * 60 - 1, baseMinutes + minutesToAdd));
+  const hh = String(Math.floor(next / 60)).padStart(2, "0");
+  const mm = String(next % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function getTimeZoneOffsetMs(timeZone: string, utcDate: Date): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
   });
+  const parts = dtf.formatToParts(utcDate);
+  const map: Record<string, string> = {};
+  for (const p of parts) {
+    if (p.type !== "literal") map[p.type] = p.value;
+  }
+  const asUtc = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second)
+  );
+  return asUtc - utcDate.getTime();
+}
+
+function zonedWallTimeToUtcIso(input: { date: string; time: string; timeZone: string }): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.date);
+  const t = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(input.time);
+  if (!m || !t) return "";
+  const y = Number(m[1]);
+  const mon = Number(m[2]);
+  const d = Number(m[3]);
+  const hh = Number(t[1]);
+  const mm = Number(t[2]);
+
+  const wallAsUtc = Date.UTC(y, mon - 1, d, hh, mm, 0);
+  let utcMs = wallAsUtc;
+  for (let i = 0; i < 2; i += 1) {
+    const offset = getTimeZoneOffsetMs(input.timeZone, new Date(utcMs));
+    utcMs = wallAsUtc - offset;
+  }
+  const out = new Date(utcMs);
+  return Number.isFinite(out.getTime()) ? out.toISOString() : "";
+}
+
+function isoToZonedParts(iso: string, timeZone: string): { date: string; time: string } {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return { date: "", time: "" };
+  try {
+    const dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = dtf.formatToParts(d);
+    const map: Record<string, string> = {};
+    for (const p of parts) {
+      if (p.type !== "literal") map[p.type] = p.value;
+    }
+    return {
+      date: `${map.year}-${map.month}-${map.day}`,
+      time: `${map.hour}:${map.minute}`,
+    };
+  } catch {
+    const local = d.toISOString();
+    return { date: local.slice(0, 10), time: local.slice(11, 16) };
+  }
+}
+
+function roundUpToNextStep(timeHHMM: string, stepMinutes = 15): string {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(timeHHMM);
+  if (!m) return timeHHMM;
+  const minutes = Number(m[1]) * 60 + Number(m[2]);
+  const rounded = Math.ceil(minutes / stepMinutes) * stepMinutes;
+  if (rounded >= 24 * 60) return "23:45";
+  const hh = String(Math.floor(rounded / 60)).padStart(2, "0");
+  const mm = String(rounded % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
 function typeLabel(t: EduEventType) {
@@ -238,6 +382,32 @@ export default function Events() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
 
+  const [orgTimezone, setOrgTimezone] = useState<string>("America/New_York");
+
+  useEffect(() => {
+    let cancelled = false;
+    const isBypass = isEduBypassEnabled();
+
+    if (isBypass) {
+      const tz = readDemoTimezone();
+      if (tz && !cancelled) setOrgTimezone(tz);
+    }
+
+    fetchEduOrg()
+      .then((o) => {
+        if (cancelled) return;
+        const tz = String(o?.timezone || "").trim();
+        setOrgTimezone(tz || "America/New_York");
+      })
+      .catch(() => {
+        // ignore; keep default/demo
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const events = useMemo(() => {
     void eventsVersion;
     const all = listEduEvents();
@@ -359,7 +529,7 @@ export default function Events() {
                     <span className={`rounded-full px-2 py-0.5 text-xs ${typeBadgeClass(ev.type)}`}>{typeLabel(ev.type)}</span>
                     <span className={`rounded-full border px-2 py-0.5 text-xs ${badge.cls}`}>{badge.label}</span>
                   </div>
-                  <div className="mt-1 text-sm text-slate-400">{formatDateTime(ev.startsAt)}</div>
+                  <div className="mt-1 text-sm text-slate-400">{formatDateTime(ev.startsAt, ev.timezone || orgTimezone)}</div>
                   <div className="mt-2 text-sm text-slate-300">
                     <span className="text-slate-400">Crew:</span> {crewLine}
                   </div>
@@ -432,6 +602,7 @@ export default function Events() {
       {scheduleOpen ? (
         <ScheduleEventModal
           isFacultyAdmin={isFacultyAdmin}
+          orgTimezone={orgTimezone}
           onClose={() => setScheduleOpen(false)}
           onCreated={async (ev) => {
             setScheduleOpen(false);
@@ -467,6 +638,7 @@ export default function Events() {
           isFacultyAdmin={isFacultyAdmin}
           isStudentProducer={isStudentProducer}
           event={selectedEvent}
+          orgTimezone={orgTimezone}
           onClose={() => setDetailId(null)}
           onChange={(next) => {
             upsertEduEvent(next);
@@ -490,10 +662,12 @@ export default function Events() {
 
 function ScheduleEventModal({
   isFacultyAdmin,
+  orgTimezone,
   onClose,
   onCreated,
 }: {
   isFacultyAdmin: boolean;
+  orgTimezone: string;
   onClose: () => void;
   onCreated: (ev: EduEvent) => void | Promise<void>;
 }) {
@@ -501,7 +675,13 @@ function ScheduleEventModal({
 
   const [title, setTitle] = useState<string>("");
   const [type, setType] = useState<EduEventType>("concert");
-  const [startsAtLocal, setStartsAtLocal] = useState<string>("");
+
+  const times = useMemo(() => timeOptions(15), []);
+
+  const [date, setDate] = useState<string>("");
+  const [startTime, setStartTime] = useState<string>("");
+  const [endTime, setEndTime] = useState<string>("");
+  const [endTouched, setEndTouched] = useState(false);
 
   const [producerName, setProducerName] = useState<string>("");
   const [talentCsv, setTalentCsv] = useState<string>("");
@@ -512,14 +692,28 @@ function ScheduleEventModal({
 
   const [error, setError] = useState<string | null>(null);
 
-  function toIsoFromLocal(dtLocal: string) {
-    if (!dtLocal) return "";
-    const d = new Date(dtLocal);
-    if (!Number.isFinite(d.getTime())) return "";
-    return d.toISOString();
-  }
+  useEffect(() => {
+    const { date: nowDate, time: nowTime } = isoToZonedParts(new Date().toISOString(), orgTimezone);
+    const roundedStart = roundUpToNextStep(nowTime || "09:00", 15);
+    setDate((v) => v || nowDate);
+    setStartTime((v) => v || roundedStart);
+  }, [orgTimezone]);
 
-  const startsAtIso = useMemo(() => toIsoFromLocal(startsAtLocal), [startsAtLocal]);
+  useEffect(() => {
+    if (!date || !startTime) return;
+    if (endTouched) return;
+    setEndTime(addMinutesToTime(startTime, 60));
+  }, [date, startTime, endTouched]);
+
+  const startsAtIso = useMemo(() => {
+    if (!date || !startTime) return "";
+    return zonedWallTimeToUtcIso({ date, time: startTime, timeZone: orgTimezone });
+  }, [date, startTime, orgTimezone]);
+
+  const endsAtIso = useMemo(() => {
+    if (!date || !endTime) return "";
+    return zonedWallTimeToUtcIso({ date, time: endTime, timeZone: orgTimezone });
+  }, [date, endTime, orgTimezone]);
 
   async function create() {
     setError(null);
@@ -528,8 +722,13 @@ function ScheduleEventModal({
       setStep(1);
       return;
     }
-    if (!startsAtIso) {
-      setError("Date/time is required");
+    if (!startsAtIso || !endsAtIso) {
+      setError("Date, start time, and end time are required");
+      setStep(1);
+      return;
+    }
+    if (new Date(endsAtIso).getTime() <= new Date(startsAtIso).getTime()) {
+      setError("End time must be after start time");
       setStep(1);
       return;
     }
@@ -542,6 +741,8 @@ function ScheduleEventModal({
       title: title.trim(),
       type,
       startsAt: startsAtIso,
+      endsAt: endsAtIso,
+      timezone: orgTimezone,
       producerName: producerName.trim() || null,
       talent,
       studentProducerCanStart: false,
@@ -592,13 +793,52 @@ function ScheduleEventModal({
               </select>
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-200">Date/time</label>
-              <input
-                type="datetime-local"
-                value={startsAtLocal}
-                onChange={(e) => setStartsAtLocal(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-800/50 bg-slate-950 px-4 py-2 text-sm text-white focus:outline-none"
-              />
+              <label className="text-sm font-medium text-slate-200">Schedule</label>
+              <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div>
+                  <div className="text-xs font-medium text-slate-400">Date</div>
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-800/50 bg-slate-950 px-4 py-2 text-sm text-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-400">Start</div>
+                  <select
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-800/50 bg-slate-950 px-4 py-2 text-sm text-white focus:outline-none"
+                  >
+                    <option value="">Select</option>
+                    {times.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-400">End</div>
+                  <select
+                    value={endTime}
+                    onChange={(e) => {
+                      setEndTouched(true);
+                      setEndTime(e.target.value);
+                    }}
+                    className="mt-1 w-full rounded-xl border border-slate-800/50 bg-slate-950 px-4 py-2 text-sm text-white focus:outline-none"
+                  >
+                    <option value="">Select</option>
+                    {times.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-slate-500">Timezone: {orgTimezone || "America/New_York"} (locked to school)</div>
             </div>
           </div>
         ) : null}
@@ -688,6 +928,7 @@ function EventDetailDrawer({
   isFacultyAdmin,
   isStudentProducer,
   event,
+  orgTimezone,
   onClose,
   onChange,
   onCancel,
@@ -698,6 +939,7 @@ function EventDetailDrawer({
   isFacultyAdmin: boolean;
   isStudentProducer: boolean;
   event: EduEvent;
+  orgTimezone: string;
   onClose: () => void;
   onChange: (next: EduEvent) => void;
   onCancel: () => void;
@@ -708,8 +950,26 @@ function EventDetailDrawer({
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   const [destinations, setDestinations] = useState<DestinationItem[]>([]);
   const [destLoading, setDestLoading] = useState(false);
+  const [endTouched, setEndTouched] = useState(false);
 
-  useEffect(() => setDraft(event), [event]);
+  useEffect(() => {
+    setDraft(event);
+    setEndTouched(false);
+  }, [event]);
+
+  const lockedTz = String(orgTimezone || draft.timezone || "America/New_York").trim() || "America/New_York";
+
+  const startParts = useMemo(() => isoToZonedParts(draft.startsAt, lockedTz), [draft.startsAt, lockedTz]);
+  const endParts = useMemo(() => isoToZonedParts(draft.endsAt, lockedTz), [draft.endsAt, lockedTz]);
+  const times = useMemo(() => timeOptions(15), []);
+
+  const scheduleError = useMemo(() => {
+    const a = new Date(draft.startsAt).getTime();
+    const b = new Date(draft.endsAt).getTime();
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return "Invalid date/time";
+    if (b <= a) return "End time must be after start time";
+    return null;
+  }, [draft.endsAt, draft.startsAt]);
 
   const status = computeEduEventStatus(draft);
   const badge = statusBadge(status);
@@ -779,16 +1039,69 @@ function EventDetailDrawer({
               />
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-200">Date/time</label>
-              <input
-                value={new Date(draft.startsAt).toISOString().slice(0, 16)}
-                onChange={(e) => {
-                  const iso = new Date(e.target.value).toISOString();
-                  setDraft((d) => ({ ...d, startsAt: iso }));
-                }}
-                type="datetime-local"
-                className="mt-2 w-full rounded-xl border border-slate-800/50 bg-slate-950 px-4 py-2 text-sm text-white focus:outline-none"
-              />
+              <label className="text-sm font-medium text-slate-200">Schedule</label>
+              <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div>
+                  <div className="text-xs font-medium text-slate-400">Date</div>
+                  <input
+                    type="date"
+                    value={startParts.date}
+                    onChange={(e) => {
+                      const nextDate = e.target.value;
+                      const nextStartIso = zonedWallTimeToUtcIso({ date: nextDate, time: startParts.time, timeZone: lockedTz });
+                      const currentDurationMs = Math.max(0, new Date(draft.endsAt).getTime() - new Date(draft.startsAt).getTime());
+                      const durationMs = currentDurationMs || 60 * 60_000;
+                      const nextEndIso = endTouched
+                        ? zonedWallTimeToUtcIso({ date: nextDate, time: endParts.time, timeZone: lockedTz })
+                        : new Date(new Date(nextStartIso).getTime() + durationMs).toISOString();
+                      setDraft((d) => ({ ...d, startsAt: nextStartIso, endsAt: nextEndIso, timezone: lockedTz }));
+                    }}
+                    className="mt-1 w-full rounded-xl border border-slate-800/50 bg-slate-950 px-4 py-2 text-sm text-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-400">Start</div>
+                  <select
+                    value={startParts.time}
+                    onChange={(e) => {
+                      const nextTime = e.target.value;
+                      const nextStartIso = zonedWallTimeToUtcIso({ date: startParts.date, time: nextTime, timeZone: lockedTz });
+                      const currentDurationMs = Math.max(0, new Date(draft.endsAt).getTime() - new Date(draft.startsAt).getTime());
+                      const durationMs = currentDurationMs || 60 * 60_000;
+                      const nextEndIso = endTouched ? draft.endsAt : new Date(new Date(nextStartIso).getTime() + durationMs).toISOString();
+                      setDraft((d) => ({ ...d, startsAt: nextStartIso, endsAt: nextEndIso, timezone: lockedTz }));
+                    }}
+                    className="mt-1 w-full rounded-xl border border-slate-800/50 bg-slate-950 px-4 py-2 text-sm text-white focus:outline-none"
+                  >
+                    {times.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-400">End</div>
+                  <select
+                    value={endParts.time}
+                    onChange={(e) => {
+                      setEndTouched(true);
+                      const nextTime = e.target.value;
+                      const nextEndIso = zonedWallTimeToUtcIso({ date: startParts.date, time: nextTime, timeZone: lockedTz });
+                      setDraft((d) => ({ ...d, endsAt: nextEndIso, timezone: lockedTz }));
+                    }}
+                    className="mt-1 w-full rounded-xl border border-slate-800/50 bg-slate-950 px-4 py-2 text-sm text-white focus:outline-none"
+                  >
+                    {times.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-slate-500">Timezone: {lockedTz} (locked to school)</div>
+              {scheduleError ? <div className="mt-2 text-sm text-red-200">{scheduleError}</div> : null}
             </div>
             <div>
               <label className="text-sm font-medium text-slate-200">Type</label>
@@ -955,9 +1268,10 @@ function EventDetailDrawer({
             <button
               type="button"
               onClick={() => {
-                onChange(draft);
+                onChange({ ...draft, timezone: lockedTz });
                 onClose();
               }}
+              disabled={!!scheduleError}
               className="rounded-xl bg-gradient-to-r from-orange-500 via-red-600 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-transform hover:-translate-y-0.5 hover:from-orange-400 hover:via-red-500 hover:to-violet-500"
             >
               Save changes

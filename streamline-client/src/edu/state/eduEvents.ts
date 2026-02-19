@@ -14,6 +14,8 @@ export type EduEvent = {
   title: string;
   type: EduEventType;
   startsAt: string; // ISO
+  endsAt: string; // ISO
+  timezone: string; // IANA, locked to school timezone
 
   notes?: string;
 
@@ -39,6 +41,16 @@ const EVENTS_KEY = "sl_edu_events_v1";
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function addMinutesIso(iso: string, minutes: number): string {
+  try {
+    const base = new Date(iso).getTime();
+    if (!Number.isFinite(base)) return iso;
+    return new Date(base + minutes * 60_000).toISOString();
+  } catch {
+    return iso;
+  }
 }
 
 export function randomId(prefix: string) {
@@ -67,6 +79,8 @@ function normalizeEvent(x: any): EduEvent | null {
   const title = typeof x.title === "string" ? x.title : "";
   const type = x.type as EduEventType;
   const startsAt = typeof x.startsAt === "string" ? x.startsAt : "";
+  const timezone = typeof x.timezone === "string" && x.timezone.trim() ? x.timezone.trim() : "America/New_York";
+  const endsAt = typeof x.endsAt === "string" && x.endsAt ? x.endsAt : addMinutesIso(startsAt, 60);
 
   if (!id || !title || !startsAt) return null;
   if (type !== "concert" && type !== "game" && type !== "assembly" && type !== "address") return null;
@@ -89,6 +103,8 @@ function normalizeEvent(x: any): EduEvent | null {
     title,
     type,
     startsAt,
+    endsAt,
+    timezone,
     notes: typeof x.notes === "string" ? x.notes : "",
     producerName: typeof x.producerName === "string" ? x.producerName : null,
     talent,
@@ -145,17 +161,23 @@ export function createEduEvent(params: {
   title: string;
   type: EduEventType;
   startsAt: string;
+  endsAt?: string;
+  timezone?: string;
   producerName?: string | null;
   talent?: string[];
   studentProducerCanStart?: boolean;
   outputs?: Partial<EduEventOutputs>;
 }): EduEvent {
   const createdAt = nowIso();
+  const timezone = (params.timezone || "").trim() ? String(params.timezone).trim() : "America/New_York";
+  const endsAt = typeof params.endsAt === "string" && params.endsAt ? params.endsAt : addMinutesIso(params.startsAt, 60);
   const ev: EduEvent = {
     id: randomId("edu_event"),
     title: params.title.trim(),
     type: params.type,
     startsAt: params.startsAt,
+    endsAt,
+    timezone,
     notes: "",
     producerName: (params.producerName || "").trim() ? String(params.producerName).trim() : null,
     talent: (params.talent || []).filter(Boolean).map((s) => String(s).trim()).filter(Boolean),

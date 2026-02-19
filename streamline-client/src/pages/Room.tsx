@@ -2080,7 +2080,7 @@ function RoomPage() {
 
   // Token-only routing support: /room?t=<token>
   // Prefer treating `t` as a room access/share token and resolving it via
-  // /api/rooms/resolve using Authorization headers. If resolution fails,
+  // /api/rooms/resolve using x-room-access-token. If resolution fails,
   // fall back to treating it as an invite token for older links.
   useEffect(() => {
     const t = String(searchParams.get("t") || "").trim();
@@ -2093,7 +2093,7 @@ function RoomPage() {
         const res = await fetch(`${API_BASE}/api/rooms/resolve`, {
           method: "GET",
           headers: {
-            Authorization: `Bearer ${t}`,
+            "x-room-access-token": t,
           },
           credentials: "include",
         });
@@ -2497,8 +2497,6 @@ function RoomPage() {
                   "Content-Type": "application/json",
                   ...(inviteTokenForJoin ? { "x-invite-token": inviteTokenForJoin } : {}),
                   ...(guestSessionToken ? { "x-guest-session": guestSessionToken } : {}),
-                  // Also send as Authorization Bearer for maximum compatibility
-                  ...(guestSessionToken ? { "Authorization": `Bearer ${guestSessionToken}` } : {}),
                 },
                 body: JSON.stringify(payload),
               },
@@ -2721,8 +2719,6 @@ function RoomPage() {
             headers: {
               ...(!guestSessionToken && inviteToken ? { "x-invite-token": inviteToken } : {}),
               ...(guestSessionToken ? { "x-guest-session": guestSessionToken } : {}),
-              // Also send as Authorization Bearer for maximum compatibility
-              ...(guestSessionToken ? { "Authorization": `Bearer ${guestSessionToken}` } : {}),
             },
           },
           { allowNonOk: true }
