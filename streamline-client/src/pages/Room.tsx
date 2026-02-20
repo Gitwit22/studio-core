@@ -3433,6 +3433,39 @@ function RoomPage() {
     }
   };
 
+  const bestEffortStopHls = async (reason: string) => {
+    if (!roomId) return;
+    if (!canManageStream) return;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      console.warn(`bestEffortStopHls(${reason}) timed out; aborting`);
+      controller.abort();
+    }, 8000);
+    try {
+      const res = await apiFetchAuth(
+        `${API_BASE}/api/hls/stop/${encodeURIComponent(roomId)}`,
+        {
+          method: "POST",
+          headers: roomAccessToken ? { "x-room-access-token": roomAccessToken } : undefined,
+          signal: controller.signal,
+        },
+        { allowNonOk: true }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.warn(`bestEffortStopHls(${reason}) non-ok`, res.status, text);
+      }
+    } catch (err) {
+      if ((err as any)?.name === "AbortError") {
+        console.warn(`bestEffortStopHls(${reason}) aborted due to timeout`, err);
+      } else {
+        console.warn(`bestEffortStopHls(${reason}) failed`, err);
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  };
+
   const handleEndStream = async () => {
     if (canManageStream && streamStatus === "live") {
       alert("⏹️ Stream is still live. Stop the stream first.");
@@ -3442,6 +3475,8 @@ function RoomPage() {
       alert("⏹️ Recording is still active. Stop the stream first.");
       return;
     }
+    // Best-effort cleanup: prevent lingering HLS egress from a prior session.
+    await bestEffortStopHls("end-stream");
     // At this point stream/recording are stopped. Exit to Join.
     handleLeftRoom();
   };
@@ -3692,6 +3727,7 @@ function RoomPage() {
       setEgressId(null);
       setStreamStatus("idle");
       streamEgressRef.current = null;
+      void bestEffortStopHls("stop-multistream");
       if (recordingStatus === "recording") {
         console.log("ℹ️ Stream stopped but recording still active");
       }
