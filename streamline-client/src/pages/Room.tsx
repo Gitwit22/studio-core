@@ -9,6 +9,7 @@ import {
   LiveKitRoom,
   useRoomContext,
   useLocalParticipant,
+  useLocalParticipantPermissions,
   useParticipants,
 } from "@livekit/components-react";
 import { RoomEvent, Track, ConnectionState } from "livekit-client";
@@ -838,10 +839,16 @@ function ThankYouScreen({ showHomeButton = false, onHome }: { showHomeButton?: b
 
 function PermissionsDebugOverlay({ dashboardRole }: { dashboardRole: "host" | "participant" }) {
   const { localParticipant } = useLocalParticipant();
-  const localPermissions: any =
-    (localParticipant as any)?.permissions || (localParticipant as any)?.participant?.permissions;
+  const perms = useLocalParticipantPermissions();
+  const localPermissions: any = perms || (localParticipant as any)?.permissions || (localParticipant as any)?.participant?.permissions;
   const rawRolePresetId = ((localParticipant as any)?.identityMetadata as any)?.rolePresetId;
   const normalizedRolePresetId = normalizeUiRolePresetId(rawRolePresetId);
+
+  useEffect(() => {
+    // Fastest “why are controls missing” signal.
+    // If canPublish is false, LiveKit Components will hide mic/cam controls.
+    console.log("[Room] LiveKit local permissions:", perms);
+  }, [perms]);
 
   return (
     <div
@@ -1349,6 +1356,7 @@ function LiveKitShell({
       <div ref={mediaRootRef} style={{ width: "100%", height: "100%", position: "relative" }}>
         <LiveKitDebugLogger />
         <VideoElementMonitor />
+        {DEV_CONTROLS && <PermissionsDebugOverlay dashboardRole={dashboardRole === "host" ? "host" : "participant"} />}
         <GuestTelemetryTracker roomId={roomId} isViewer={isViewer} />
         <MediaDeviceErrorHandler onError={handleMediaDeviceError} />
         <WaitingForHostBanner isViewer={isViewer} />
