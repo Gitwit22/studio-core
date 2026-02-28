@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useEduMe } from "./EduProtectedRoute";
 import { apiFetch, clearAuthStorage } from "../../lib/api";
+import { logout } from "../../lib/logout";
 
 type NavItem = { id: string; label: string; path: string };
 
@@ -54,8 +55,7 @@ export default function EduSidebar() {
     };
   }, [menuOpen]);
 
-  import { logout } from "../../lib/logout";
-// ... existing code ...
+
   async function onLogout() {
     if (loggingOut) return;
     setLoggingOut(true);
