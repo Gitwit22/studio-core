@@ -2413,7 +2413,6 @@ function RoomPage() {
 
           payload.uid = getOrCreateUid();
           payload.displayName = displayName;
-          payload.identity = payload.uid;
           // Always forward invite tokens when present.
           // This allows authenticated participants to join invite-scoped/private rooms
           // (server will clamp roles and validate invite-room match).
