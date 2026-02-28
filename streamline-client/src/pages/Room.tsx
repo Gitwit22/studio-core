@@ -2400,7 +2400,7 @@ function RoomPage() {
         const buildRoomTokenRequest = () => {
           const canonicalRoomId = roomId || "";
           const endpoint = `${API_BASE}/api/rooms/${encodeURIComponent(canonicalRoomId)}/token`;
-          const payload: any = { identity: displayName };
+          const payload: any = { identity: getOrCreateUid() };
 
           // New API uses the URL roomId; keep displayName in the body so
           // participant name is set in LiveKit.
@@ -2413,6 +2413,7 @@ function RoomPage() {
 
           payload.uid = getOrCreateUid();
           payload.displayName = displayName;
+          payload.identity = payload.uid;
           // Always forward invite tokens when present.
           // This allows authenticated participants to join invite-scoped/private rooms
           // (server will clamp roles and validate invite-room match).

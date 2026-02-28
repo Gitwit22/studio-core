@@ -54,19 +54,12 @@ export default function EduSidebar() {
     };
   }, [menuOpen]);
 
+  import { logout } from "../../lib/logout";
+// ... existing code ...
   async function onLogout() {
     if (loggingOut) return;
     setLoggingOut(true);
-    try {
-      await apiFetch("/api/auth/logout", { method: "POST" }, { allowNonOk: true });
-    } catch {
-      // ignore network errors; we'll still clear client state
-    }
-    try {
-      clearAuthStorage();
-    } catch {
-      // best-effort
-    }
+    await logout();
     setMenuOpen(false);
     setLoggingOut(false);
     nav("/streamline/edu/login", { replace: true });
