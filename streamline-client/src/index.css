@@ -28,6 +28,16 @@
   display: none !important;
 }
 
+/* Always show participant names on LiveKit tiles (useful for broadcast/recording context). */
+.lk-participant-tile .lk-participant-metadata {
+  opacity: 1 !important;
+}
+
+.lk-participant-tile .lk-participant-name {
+  display: block !important;
+  opacity: 1 !important;
+}
+
 .join-instructions {
   color: #ffffff !important;
 }

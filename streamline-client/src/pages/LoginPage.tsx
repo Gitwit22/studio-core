@@ -1,6 +1,6 @@
 import React, { FormEvent, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { apiFetchAuth, clearAuthStorage } from "../lib/api";
+import { apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
 import { isEduBypassEnabled } from "../edu/state/eduMode";
 import { firebaseSendPasswordReset, firebaseSignInWithCustomToken, isFirebaseWebConfigured } from "../lib/firebaseClient";
 
@@ -27,7 +27,6 @@ export const LoginPage: React.FC = () => {
   const [password, setPassword] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
-  const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
   const accountDeleted = useMemo(() => {
     try {
@@ -76,12 +75,15 @@ export const LoginPage: React.FC = () => {
       // Prefer Firebase lazy-migration login when Firebase is configured.
       // Keep legacy /api/auth/login as fallback so dev envs without Firebase config don't brick.
       if (!isFirebaseWebConfigured()) {
-        const res = await fetch(`${API_BASE}/api/auth/login`, {
+        const res = await apiFetch(
+          "/api/auth/login",
+          {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({ email, password }),
-        });
+          },
+          { allowNonOk: true }
+        );
 
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
@@ -117,12 +119,15 @@ export const LoginPage: React.FC = () => {
         } catch {}
 
       } else {
-        const res = await fetch(`${API_BASE}/api/auth/legacy-login`, {
+        const res = await apiFetch(
+          "/api/auth/legacy-login",
+          {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({ email, password }),
-        });
+          },
+          { allowNonOk: true }
+        );
 
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {

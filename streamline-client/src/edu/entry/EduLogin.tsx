@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { apiFetchAuth, clearAuthStorage } from "../../lib/api";
+import { apiFetch, apiFetchAuth, clearAuthStorage } from "../../lib/api";
 import { firebaseSendPasswordReset, firebaseSignInWithCustomToken, isFirebaseWebConfigured } from "../../lib/firebaseClient";
 import { setEduBypassEnabled, setEduLane } from "../state/eduMode";
 import { fetchOnboardingConfig } from "../api/onboarding";
@@ -66,8 +66,6 @@ export default function EduLogin() {
     }
   }, []);
 
-  const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
-
   const returnTo = useMemo(() => {
     try {
       const sp = new URLSearchParams(location.search || "");
@@ -116,12 +114,15 @@ export default function EduLogin() {
 
     try {
       if (!isFirebaseWebConfigured()) {
-        const res = await fetch(`${API_BASE}/api/auth/login`, {
+        const res = await apiFetch(
+          "/api/auth/login",
+          {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({ email, password }),
-        });
+          },
+          { allowNonOk: true }
+        );
 
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
@@ -154,12 +155,15 @@ export default function EduLogin() {
           localStorage.setItem("authToken", token);
         } catch {}
       } else {
-        const res = await fetch(`${API_BASE}/api/auth/legacy-login`, {
+        const res = await apiFetch(
+          "/api/auth/legacy-login",
+          {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({ email, password }),
-        });
+          },
+          { allowNonOk: true }
+        );
 
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {

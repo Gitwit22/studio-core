@@ -11,66 +11,35 @@ type FetchResponse = {
   text?: () => Promise<string>;
 };
 
-let destroyedCount = 0;
-
-vi.mock("hls.js", () => {
-  class HlsMock {
-    static Events = {
-      MANIFEST_PARSED: "MANIFEST_PARSED",
-      ERROR: "ERROR",
-      FRAG_BUFFERED: "FRAG_BUFFERED",
-      LEVEL_SWITCHED: "LEVEL_SWITCHED",
-    };
-
-    static isSupported() {
-      return true;
-    }
-    loadSource() {}
-    attachMedia() {}
-    on() {}
-    startLoad() {}
-    destroy() {
-      destroyedCount += 1;
-    }
-  }
-
-  return { default: HlsMock };
-});
-
-function flushMicrotasks() {
-  return new Promise<void>((resolve) => {
-    queueMicrotask(() => resolve());
-  });
+async function tick(ms = 0) {
+  await vi.advanceTimersByTimeAsync(ms);
+  await Promise.resolve();
 }
 
-async function spinUntil(fn: () => void, opts?: { stepMs?: number; maxSteps?: number }) {
-  const stepMs = opts?.stepMs ?? 50;
-  const maxSteps = opts?.maxSteps ?? 120;
-  let lastErr: unknown = null;
-  for (let i = 0; i < maxSteps; i++) {
-    try {
-      fn();
-      return;
-    } catch (e) {
-      lastErr = e;
-    }
-    await vi.advanceTimersByTimeAsync(stepMs);
-    await flushMicrotasks();
+async function spinUntil(cond: () => boolean, totalMs = 2000, stepMs = 50) {
+  const steps = Math.ceil(totalMs / stepMs);
+  for (let i = 0; i < steps; i++) {
+    if (cond()) return;
+    await tick(stepMs);
   }
-  throw lastErr;
+  throw new Error("spinUntil timeout");
 }
 
 describe("Live viewer stop cascade", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
-    destroyedCount = 0;
+    (globalThis as any).__sl_hls_supported = true;
+    (globalThis as any).__sl_hls_destroyedCount = 0;
   });
 
   it(
     "host starts, viewer watches, host stops -> viewer ends + player destroyed",
     async () => {
       vi.useFakeTimers();
+
+      (globalThis as any).__sl_hls_supported = true;
+      (globalThis as any).__sl_hls_destroyedCount = 0;
 
       const savedEmbedId = "embed_abc";
       const roomId = "room_123";
@@ -82,6 +51,12 @@ describe("Live viewer stop cascade", () => {
       const fetchMock = vi.fn(async (input: any, init?: any): Promise<FetchResponse> => {
         const url = String(typeof input === "string" ? input : input?.url || "");
         const method = String(init?.method || "GET").toUpperCase();
+
+        // Viewer tests must never call private (auth) HLS endpoints.
+        // If this ever triggers, it means viewer code started bleeding into host-only paths.
+        if (url.includes("/api/hls/start/") || url.includes("/api/hls/stop/") || url.includes("/api/hls/status/")) {
+          throw new Error(`[viewer-test] unexpected private HLS call: ${method} ${url}`);
+        }
 
         // Resolve savedEmbedId -> activeRoomId
         if (url.includes(`/api/saved-embeds/public/${encodeURIComponent(savedEmbedId)}`) && method === "GET") {
@@ -158,51 +133,38 @@ describe("Live viewer stop cascade", () => {
         </MemoryRouter>
       );
 
-      await flushMicrotasks();
+      await tick(0);
 
       // Initial state: offline (not live yet)
-      await spinUntil(() => {
-        expect(screen.getByText("Starting soon")).toBeInTheDocument();
-      });
+      await spinUntil(() => screen.queryByText("Starting soon") != null);
 
       // Host starts the stream
       isLive = true;
-      await flushMicrotasks();
+      await tick(0);
 
       // Let viewer poll + readiness probe complete.
-      await vi.advanceTimersByTimeAsync(3500);
-      await flushMicrotasks();
+      await tick(3500);
 
-      await spinUntil(() => {
-        expect(screen.getByText("Watching live")).toBeInTheDocument();
-      });
+      await spinUntil(() => screen.queryByText("Watching live") != null);
 
-      await spinUntil(() => {
-        const video = container.querySelector("video");
-        expect(video).toBeTruthy();
-      });
+      await spinUntil(() => container.querySelector("video") != null);
 
       // Host stops
       isLive = false;
-      await flushMicrotasks();
+      await tick(0);
 
       // Next poll should observe offline + ended.
-      await vi.advanceTimersByTimeAsync(3500);
-      await flushMicrotasks();
+      await tick(3500);
 
-      await spinUntil(() => {
-        expect(screen.getByText("Stream ended.")).toBeInTheDocument();
-      });
+      await spinUntil(() => screen.queryByText("Stream ended.") != null);
 
       // Player teardown: hls.js destroyed, and <video> src cleared.
-      await spinUntil(() => {
-        expect(destroyedCount).toBeGreaterThanOrEqual(1);
-      });
+      await spinUntil(() => Number((globalThis as any).__sl_hls_destroyedCount || 0) >= 1);
 
-      await spinUntil(() => {
-        const video = container.querySelector("video") as HTMLVideoElement | null;
-        expect(video).toBeNull();
-      });
+      await spinUntil(() => container.querySelector("video") == null);
+
+      expect(screen.queryByText("Stream ended.")).toBeInTheDocument();
+      expect(Number((globalThis as any).__sl_hls_destroyedCount || 0)).toBeGreaterThanOrEqual(1);
 
       // Sanity: we exercised viewer poll endpoint.
       expect(fetchMock).toHaveBeenCalled();

@@ -4,20 +4,6 @@ import { MemoryRouter } from "react-router-dom";
 
 import EmbedEventPlayer from "../EmbedEventPlayer";
 
-vi.mock("hls.js", () => {
-  class HlsMock {
-    static isSupported() {
-      return false;
-    }
-    destroy() {}
-    loadSource() {}
-    attachMedia() {}
-    on() {}
-  }
-
-  return { default: HlsMock };
-});
-
 vi.mock("../../state/eduMode", () => ({
   setEduLane: () => undefined,
 }));
@@ -52,11 +38,15 @@ function flushMicrotasks() {
 describe("EDU EmbedEventPlayer HLS readiness", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    (globalThis as any).__sl_hls_supported = true;
+    (globalThis as any).__sl_hls_destroyedCount = 0;
   });
 
   it(
     "shows starting placeholder until manifest is ready, then renders the video",
     async () => {
+    (globalThis as any).__sl_hls_supported = false;
+
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: false })

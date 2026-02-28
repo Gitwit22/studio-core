@@ -813,7 +813,7 @@ router.post(
     }
 
     const resolvedLayout = resolveCompositeLayoutFromRoom({ roomDoc, requestLayout: undefined, defaultMode: "speaker" });
-    const layout = resolvedLayout.mode;
+    const layout = `${resolvedLayout.mode}-dark`;
     const mode = rawMode === "dual" ? "dual" : "cloud";
 
     // Optional: emergency recordings have special retention rules.

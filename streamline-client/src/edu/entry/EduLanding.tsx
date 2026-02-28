@@ -1,11 +1,36 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
+import { useAuthMe } from "../../hooks/useAuthMe";
 import { setEduLane } from "../state/eduMode";
 
 export default function EduLanding() {
+  const { user } = useAuthMe();
+
   useEffect(() => {
     setEduLane();
   }, []);
+
+  const pilotHref = useMemo(() => {
+    const subject = "StreamLine EDU Pilot";
+    const email = typeof user?.email === "string" ? user.email.trim() : "";
+    const bodyLines = [
+      "Hi StreamLine team,",
+      "",
+      "I’d like to request an EDU pilot.",
+      "",
+      `My email: ${email || ""}`,
+      "",
+      "School / Organization:",
+      "",
+      "Notes:",
+      "",
+    ];
+
+    const qs = new URLSearchParams();
+    qs.set("subject", subject);
+    qs.set("body", bodyLines.join("\n"));
+    return `mailto:nxtlvltechllc@gmail.com?${qs.toString()}`;
+  }, [user?.email]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-900 text-white">
@@ -255,12 +280,19 @@ export default function EduLanding() {
             </Link>
 
             <a
-              href="mailto:pilot@streamline.edu?subject=StreamLine%20EDU%20Pilot"
+              href={pilotHref}
               className="group rounded-3xl border border-slate-700 bg-slate-800 p-10"
               style={{ animation: "slEduFadeUp 0.8s ease-out 1s both" }}
             >
               <h3 className="text-2xl font-bold">Request a Pilot</h3>
               <p className="mt-2 text-sm text-slate-400">Get your school onboarded with EDU access</p>
+              {typeof user?.email === "string" && user.email.trim() ? (
+                <div className="mt-3 text-xs text-slate-500">
+                  Your email: <span className="font-mono text-slate-300">{user.email.trim()}</span>
+                </div>
+              ) : (
+                <div className="mt-3 text-xs text-slate-500">Sign in to include your email automatically.</div>
+              )}
               <div className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-orange-300">
                 <span>Contact</span>
                 <svg

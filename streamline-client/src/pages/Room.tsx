@@ -19,8 +19,6 @@ import {
   apiFetch,
   apiFetchAuth,
   getAuthToken,
-  apiGetRoomPolicy,
-  apiUpdateRoomPolicy,
 } from "../lib/api";
 import { logTelemetry, markTiming, measureTiming } from "../lib/telemetry";
 import RoleOverlay from "../components/RoleOverlay";
@@ -1535,26 +1533,10 @@ function RoomPage() {
       // ignore parse errors and fall back
     }
     const cachedName = localStorage.getItem("sl_displayName") ?? "";
-    
-    // Auto-generate name for guests to bypass name form and speed up join
-    if (!cachedName) {
-      // Check if this is a guest invite (has guest session token)
-      const roomId = new URLSearchParams(window.location.search).get('roomId') || 
-                     decodeURIComponent(window.location.pathname.split('/room/')[1] || '');
-      const guestToken = getGuestSessionToken(roomId);
-      
-      if (guestToken) {
-        const autoName = `Guest-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-        console.log('[Room] Auto-generated guest name:', autoName);
-        try {
-          localStorage.setItem("sl_displayName", autoName);
-        } catch {
-          // ignore localStorage errors
-        }
-        return autoName;
-      }
-    }
-    
+
+    // Do NOT auto-generate names for guests. If a visitor arrives via an invite
+    // link (even with a guest session token), require them to pick a name once
+    // on entry unless they already have a cached/profile name.
     return cachedName;
   });
   const [pendingName, setPendingName] = useState(displayName);
@@ -1563,9 +1545,6 @@ function RoomPage() {
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [showStreamSetup, setShowStreamSetup] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [allowGuests, setAllowGuests] = useState<boolean | null>(null);
-  const [allowGuestsLoading, setAllowGuestsLoading] = useState(false);
-  const [allowGuestsSaving, setAllowGuestsSaving] = useState(false);
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
@@ -1810,50 +1789,6 @@ function RoomPage() {
     roomId: roomId || "",
     roomAccessToken: roomAccessToken || "",
   });
-
-  useEffect(() => {
-    if (!inviteModalOpen) return;
-    if (!roomId || !roomAccessToken) return;
-    if (!isHost) return;
-
-    let cancelled = false;
-    (async () => {
-      setAllowGuestsLoading(true);
-      try {
-        const data = await apiGetRoomPolicy(roomId, roomAccessToken);
-        if (cancelled) return;
-        setAllowGuests(typeof (data as any)?.allowGuests === "boolean" ? (data as any).allowGuests : null);
-      } catch {
-        if (!cancelled) setAllowGuests(null);
-      } finally {
-        if (!cancelled) setAllowGuestsLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [inviteModalOpen, roomId, roomAccessToken, isHost]);
-
-  const setAllowGuestsPolicy = async (next: boolean) => {
-    if (!roomId || !roomAccessToken) return;
-    if (needsReauth) {
-      setNeedsReauth(true);
-      return;
-    }
-
-    setAllowGuestsSaving(true);
-    try {
-      const resp = await apiUpdateRoomPolicy(roomId, roomAccessToken, { allowGuests: next });
-      setAllowGuests(resp.allowGuests);
-    } catch (err: any) {
-      if (err?.status === 401 || err?.status === 403 || err?.name === "ApiUnauthorizedError") {
-        setNeedsReauth(true);
-      }
-    } finally {
-      setAllowGuestsSaving(false);
-    }
-  };
 
   useEffect(() => {
     // New room => allow fresh host tools hydration
@@ -2413,13 +2348,23 @@ function RoomPage() {
           if (cachedTokenData) {
             const parsed = JSON.parse(cachedTokenData);
             const age = Date.now() - (parsed.fetchedAt || 0);
-            // Use cached token if less than 5 minutes old
-            if (age < 5 * 60 * 1000 && parsed.serverUrl && parsed.token) {
-              console.log('[Room] Using pre-fetched LiveKit token (age:', Math.round(age / 1000), 'seconds)');
+            const cachedName = typeof parsed.displayName === "string" ? parsed.displayName.trim() : "";
+            const chosenName = String(displayName || "").trim();
+            const canUseCached =
+              age < 5 * 60 * 1000 &&
+              !!parsed.serverUrl &&
+              !!parsed.token &&
+              !!cachedName &&
+              !!chosenName &&
+              cachedName.toLowerCase() === chosenName.toLowerCase();
+
+            // Use cached token only if it's fresh AND matches the name the user entered.
+            // This ensures prefetch never overrides the display name selection flow.
+            if (canUseCached) {
+              console.log('[Room] Using pre-fetched LiveKit token (name matched; age:', Math.round(age / 1000), 'seconds)');
               setToken(parsed.token);
               setServerUrl(parsed.serverUrl);
               if (parsed.identity) setParticipantIdentity(parsed.identity);
-              if (parsed.displayName) setDisplayName(parsed.displayName);
               
               // Guests are RTC participants with mic+cam (not view-only)
               // isViewer stays false (invite guests can publish)
@@ -2428,7 +2373,7 @@ function RoomPage() {
               sessionStorage.removeItem(`sl_lk_token:${roomId}`);
               return;
             } else {
-              console.log('[Room] Pre-fetched token expired or incomplete, fetching fresh token');
+              console.log('[Room] Pre-fetched token expired, incomplete, or name mismatch; fetching fresh token');
               sessionStorage.removeItem(`sl_lk_token:${roomId}`);
             }
           }
@@ -4396,43 +4341,8 @@ function RoomPage() {
             </div>
 
             <p style={{ marginTop: 0, marginBottom: 14, color: "#94a3b8", fontSize: 13 }}>
-              Copy a participant link to invite someone on stage.
+              Room invites are participant-only. Copy the link to invite someone on stage.
             </p>
-
-            {isHost && roomId && roomAccessToken && (
-              <div
-                style={{
-                  marginBottom: 14,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #1f2937",
-                  background: "rgba(255,255,255,0.02)",
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Guest access</div>
-                <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, cursor: allowGuestsSaving ? "not-allowed" : "pointer" }}>
-                  <input
-                    type="checkbox"
-                    disabled={allowGuestsLoading || allowGuestsSaving}
-                    checked={allowGuests !== false}
-                    onChange={(e) => {
-                      const next = !!(e.target as HTMLInputElement).checked;
-                      void setAllowGuestsPolicy(next);
-                    }}
-                  />
-                  <span>Allow guests to join without signing in</span>
-                </label>
-                <div style={{ marginTop: 6, fontSize: 12, color: "#9ca3af", lineHeight: 1.4 }}>
-                  {allowGuestsLoading
-                    ? "Loading guest access policy…"
-                    : allowGuests === false
-                      ? "Guests are currently disabled for this room."
-                      : allowGuests === true
-                        ? "Guests are enabled for this room (still subject to server settings and room live status)."
-                        : "Not configured yet — currently treated as enabled for compatibility."}
-                </div>
-              </div>
-            )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div
@@ -4767,42 +4677,11 @@ function RoomPage() {
           100% { opacity: 0; transform: scale(0.94); }
         }
 
-        /* Ensure LiveKit prefab fills the available room height */
-        .sl-layout .lk-video-conference,
-        .sl-layout .lk-video-conference-inner,
-        .sl-layout .lk-grid-layout-wrapper,
-        .sl-layout .lk-focus-layout-wrapper {
-          height: 100% !important;
-          min-height: 0 !important;
-        }
+        
 
         ${/* Removed sl-viewer CSS - invite guests are now RTC participants with mic+cam */ ""}
 
-        /* Realtime room controls: disable screen share for roles
-           whose effective controls do not allow it. */
-        .sl-layout.sl-controls-no-screen .lk-control-bar .lk-button-screen-share,
-        .sl-layout.sl-controls-no-screen .lk-control-bar [data-lk-button="toggle_screen_share"],
-        .sl-layout.sl-controls-no-screen .lk-control-bar button[aria-label*="Screen"] {
-          opacity: 0.6 !important;
-          filter: grayscale(1);
-        }
-
-        /* Realtime room controls (Phase 1): disable guest mic UI */
-        .sl-layout.sl-controls-no-audio .lk-control-bar .lk-button-microphone,
-        .sl-layout.sl-controls-no-audio .lk-control-bar [data-lk-button="toggle_mic"],
-        .sl-layout.sl-controls-no-audio .lk-control-bar button[aria-label*="Microphone"] {
-          pointer-events: none !important;
-          opacity: 0.35 !important;
-          filter: grayscale(1);
-        }
-
-        /* Best-effort self-tile fade (LiveKit DOM varies by version) */
-        .sl-layout.sl-controls-hide-self [data-lk-local-participant="true"],
-        .sl-layout.sl-controls-hide-self [data-lk-participant-tile][data-lk-local-participant="true"],
-        .sl-layout.sl-controls-hide-self .lk-participant-tile[data-lk-local-participant="true"] {
-          opacity: 0.08 !important;
-          pointer-events: none !important;
-        }
+       
       `}</style>
     </>
   );
