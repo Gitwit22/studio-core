@@ -94,19 +94,43 @@ function App() {
 
   useEffect(() => {
     const onUnauthorized = () => {
+      const path = window.location.pathname || "";
+
+      // ── Public / auth pages: suppress ALL side-effects ──────────────
+      // These pages don't require auth, so a 401 is expected and
+      // must NOT clear tokens or flash the "Session expired" banner —
+      // otherwise we race with a freshly-stored login token.
+      if (
+        path.startsWith("/login") || path.startsWith("/signup") ||
+        path.startsWith("/demo") || path === "/welcome" ||
+        path.startsWith("/privacy") || path.startsWith("/terms") ||
+        path.startsWith("/support") || path.startsWith("/learnmore") ||
+        path.startsWith("/i/") || path.startsWith("/invite/") ||
+        path.startsWith("/billing/")
+      ) {
+        return;
+      }
+      if (DEMO_LANDING_ENABLED && path === "/") {
+        return;
+      }
+
+      // ── Room / live / join pages: show banner but do NOT redirect ──
+      // The Room page manages its own `needsReauth` state and shows an
+      // in-room re-auth prompt.  Clearing storage here would destroy
+      // the room-access-token and force-boot the user.
+      if (
+        path.startsWith("/room") || path.startsWith("/join") ||
+        path.startsWith("/live") || path.startsWith("/ig/")
+      ) {
+        setShowUnauthorized(true);
+        return;
+      }
+
+      // ── Protected pages: full logout + redirect ─────────────────────
       clearAuthStorage();
       clearMeCache();
       clearPlatformFlagsCache();
       setShowUnauthorized(true);
-
-      const path = window.location.pathname || "";
-      if (path.startsWith("/login") || path.startsWith("/signup") || path.startsWith("/demo") || path === "/welcome") {
-        return;
-      }
-      // When Demo is the landing page, "/" is public — skip redirect
-      if (DEMO_LANDING_ENABLED && path === "/") {
-        return;
-      }
 
       // EDU lane should stay within EDU login.
       if (path.startsWith("/streamline/edu")) {

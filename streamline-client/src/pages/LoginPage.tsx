@@ -167,6 +167,12 @@ export const LoginPage: React.FC = () => {
         try {
           localStorage.setItem("sl_user", JSON.stringify(me));
         } catch {}
+
+        // Notify hooks (useEffectiveEntitlements) that auth state changed
+        // so they re-fetch entitlements with the new token.
+        try {
+          window.dispatchEvent(new CustomEvent("sl:auth-changed"));
+        } catch {}
       } catch (err) {
         console.warn("[Login] /account/me after login failed", err);
         clearAuthStorage();

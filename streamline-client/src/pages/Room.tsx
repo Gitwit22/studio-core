@@ -2787,9 +2787,15 @@ function RoomPage() {
           const platformFlags = (me as any)?.platformFlags || {};
           applyEntitlementsAndPlatform(eff, platformFlags);
         }
-      } catch (err) {
+      } catch (err: any) {
         if (!cancelled) {
           console.error("[Room] failed to load media prefs/entitlements", err);
+          // If the error is a 401 (token expired / missing), enter the
+          // in-room re-auth flow instead of silently degrading.
+          if (err?.status === 401 || err?.name === "ApiUnauthorizedError") {
+            setAuthStatus("guest");
+            setNeedsReauth(true);
+          }
           setMediaPresets((prev) =>
             prev.length
               ? prev
@@ -3052,8 +3058,13 @@ function RoomPage() {
         setDestinations(items);
         const connectedEnabled = items.filter((d) => d.enabled && d.status === "connected");
         setDestinationsReady(connectedEnabled.length > 0);
-      } catch (e) {
+      } catch (e: any) {
         console.error("destinations load failed", e);
+        // Enter in-room re-auth flow on 401 so the user sees the
+        // re-authenticate prompt instead of a broken host panel.
+        if (e?.status === 401 || e?.name === "ApiUnauthorizedError") {
+          setNeedsReauth(true);
+        }
         setDestinationsReady(false);
       } finally {
         setDestinationsLoading(false);
@@ -3076,8 +3087,11 @@ function RoomPage() {
       setDestinations(items);
       const connectedEnabled = items.filter((d) => d.enabled && d.status === "connected");
       setDestinationsReady(connectedEnabled.length > 0);
-    } catch (e) {
-      // no-op
+    } catch (e: any) {
+      // no-op — but enter re-auth on 401
+      if (e?.status === 401 || e?.name === "ApiUnauthorizedError") {
+        setNeedsReauth(true);
+      }
     }
   }
 
@@ -3093,8 +3107,11 @@ function RoomPage() {
         setPreflightResult(res);
         const connected = (res.destinations || []).filter((d: any) => d.status === "connected");
         setCanGoLive(connected.length > 0);
-      } catch (e) {
+      } catch (e: any) {
         console.error("preflight failed", e);
+        if (e?.status === 401 || e?.name === "ApiUnauthorizedError") {
+          setNeedsReauth(true);
+        }
         setCanGoLive(false);
       } finally {
         setPreflightLoading(false);
