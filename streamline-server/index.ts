@@ -39,6 +39,13 @@ import eduSettingsRoutes from "./routes/eduSettings";
 import eduEmbedsRoutes from "./routes/eduEmbeds";
 import eduPublicRoutes from "./routes/eduPublic";
 import eduBootstrapRoutes from "./routes/eduBootstrap";
+import corpMeRoutes from "./routes/corpMe";
+import corpBroadcastsRoutes from "./routes/corpBroadcasts";
+import corpCallsRoutes from "./routes/corpCalls";
+import corpTrainingRoutes from "./routes/corpTraining";
+import corpDocumentsRoutes from "./routes/corpDocuments";
+import corpChatRoutes from "./routes/corpChat";
+import corpAdminRoutes from "./routes/corpAdmin";
 import onboardingRoutes from "./routes/onboarding";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
@@ -261,6 +268,15 @@ app.use("/api/edu", eduPeopleRoutes);
 app.use("/api/edu", eduSettingsRoutes);
 // EDU embed docs (authenticated admin UI)
 app.use("/api/edu", eduEmbedsRoutes);
+
+// Corporate lane routes
+app.use("/api/corp", corpMeRoutes);
+app.use("/api/corp", corpBroadcastsRoutes);
+app.use("/api/corp", corpCallsRoutes);
+app.use("/api/corp", corpTrainingRoutes);
+app.use("/api/corp", corpDocumentsRoutes);
+app.use("/api/corp", corpChatRoutes);
+app.use("/api/corp", corpAdminRoutes);
 
 // Billing routes
 app.use("/api/billing", billingRoutes);

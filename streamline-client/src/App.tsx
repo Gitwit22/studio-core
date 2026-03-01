@@ -28,6 +28,7 @@ import BillingCanceled from "./pages/BillingCanceled";
 import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import PostStreamSummary from "./pages/PostStreamSummary";
+import Demo from "./pages/Demo";
 
 import EduLanding from "./edu/entry/EduLanding";
 import EduLogin from "./edu/entry/EduLogin";
@@ -43,6 +44,21 @@ import EduEmbed from "./edu/pages/Embed";
 import EduEmbedEventPlayer from "./edu/pages/EmbedEventPlayer";
 import EduSettings from "./edu/pages/Settings";
 import EduOnboarding from "./edu/pages/Onboarding";
+
+import CorporateLanding from "./corporate/entry/CorporateLanding";
+import CorporateLogin from "./corporate/entry/CorporateLogin";
+import CorporateProtectedRoute from "./corporate/layout/CorporateProtectedRoute";
+import CorporateShell from "./corporate/layout/CorporateShell";
+import CorporateDashboard from "./corporate/pages/Dashboard";
+import CorporateCalls from "./corporate/pages/Calls";
+import CorporateBroadcasts from "./corporate/pages/Broadcasts";
+import CorporateChat from "./corporate/pages/Chat";
+import CorporateTraining from "./corporate/pages/Training";
+import CorporateDocuments from "./corporate/pages/Documents";
+import CorporateAnalytics from "./corporate/pages/Analytics";
+import CorporateAdmin from "./corporate/pages/Admin";
+import CorporateBroadcastStudio from "./corporate/pages/BroadcastStudio";
+import CorporateBroadcastViewer from "./corporate/pages/BroadcastViewer";
 
 import { clearAuthStorage } from "./lib/api";
 import { clearMeCache } from "./lib/meCache";
@@ -93,6 +109,14 @@ function App() {
         const sp = new URLSearchParams();
         sp.set("returnTo", next);
         nav(`/streamline/edu/login?${sp.toString()}`);
+        return;
+      }
+
+      if (path.startsWith("/streamline/corporate")) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        const sp = new URLSearchParams();
+        sp.set("returnTo", next);
+        nav(`/streamline/corporate/login?${sp.toString()}`);
         return;
       }
 
@@ -161,6 +185,36 @@ function App() {
       )}
 
       <Routes>
+      {/* Demo Switchboard */}
+      <Route path="/demo" element={<Demo />} />
+
+      {/* Corporate lane */}
+      <Route path="/streamline/corporate" element={<Outlet />}>
+        <Route index element={<CorporateLanding />} />
+        <Route path="landing" element={<CorporateLanding />} />
+        <Route path="login" element={<CorporateLogin />} />
+
+        <Route
+          element={
+            <CorporateProtectedRoute>
+              <CorporateShell />
+            </CorporateProtectedRoute>
+          }
+        >
+          <Route path="dashboard" element={<CorporateDashboard />} />
+          <Route path="calls" element={<CorporateCalls />} />
+          <Route path="broadcasts" element={<CorporateBroadcasts />} />
+          <Route path="broadcasts/:id/studio" element={<CorporateBroadcastStudio />} />
+          <Route path="broadcasts/:id/watch" element={<CorporateBroadcastViewer />} />
+          <Route path="chat" element={<CorporateChat />} />
+          <Route path="training" element={<CorporateTraining />} />
+          <Route path="documents" element={<CorporateDocuments />} />
+          <Route path="analytics" element={<CorporateAnalytics />} />
+          <Route path="admin" element={<CorporateAdmin />} />
+          <Route path="*" element={<Navigate to="/streamline/corporate/dashboard" replace />} />
+        </Route>
+      </Route>
+
       {/* EDU lane */}
       <Route path="/streamline/edu" element={<Outlet />}>
         <Route index element={<EduLanding />} />

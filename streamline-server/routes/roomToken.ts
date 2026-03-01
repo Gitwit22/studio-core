@@ -906,11 +906,16 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       platformFlags,
     });
   } catch (err: any) {
-    console.error("roomToken error:", err);
+    console.error("[roomToken] Critical error during token creation for room:", req.params.roomId);
+    console.error("[roomToken] Error Object:", err);
+    console.error("[roomToken] Error Message:", err.message);
+    console.error("[roomToken] Stack Trace:", err.stack);
+
     return res.status(500).json({
       code: "internal_error",
       error: "Failed to create room token",
-      message: process.env.AUTH_DEBUG === "1" ? String(err?.message || err) : undefined,
+      // For client-side debugging, include the room ID
+      roomId: req.params.roomId,
     });
   } finally {
     await releaseCapacityLock(capacityLockRoomId || "", capacityLockOwner);
