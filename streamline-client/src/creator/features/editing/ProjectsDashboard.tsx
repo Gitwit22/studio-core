@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { editingApi, type Project as EditProject, type Asset } from "../lib/editingApi";
-import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
-import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { editingApi, type Project as EditProject, type Asset } from "../../../lib/editingApi";
+import { useEffectiveEntitlements } from "../../../hooks/useEffectiveEntitlements";
+import { useFeatureAccess } from "../../../hooks/useFeatureAccess";
 
 type Project = EditProject;
 

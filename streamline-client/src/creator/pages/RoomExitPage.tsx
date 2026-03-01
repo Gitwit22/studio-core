@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { apiFetchAuth } from "../lib/api";
-import { editingApi } from "../lib/editingApi";
-import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
-import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { apiFetchAuth } from "../../lib/api";
+import { editingApi } from "../../lib/editingApi";
+import { useEffectiveEntitlements } from "../../hooks/useEffectiveEntitlements";
+import { useFeatureAccess } from "../../hooks/useFeatureAccess";
 // downloadService no longer used for direct downloads; we rely on signed links
 
 /**

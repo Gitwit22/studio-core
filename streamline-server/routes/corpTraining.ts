@@ -3,6 +3,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { getCorpOrgContext, assertCorpRole, asString, coerceMillis } from "../lib/corpOrg";
 import { writeCorpAudit } from "../lib/corpAudit";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ function normalizeModule(docId: string, data: any) {
  */
 router.get("/training", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
@@ -85,13 +86,13 @@ router.get("/training", requireAuth, async (req, res) => {
  */
 router.post("/training", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin", "manager"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const title = asString(req.body.title).trim();
@@ -141,7 +142,7 @@ router.post("/training", requireAuth, async (req, res) => {
  */
 router.patch("/training/:id/progress", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
@@ -184,13 +185,13 @@ router.patch("/training/:id/progress", requireAuth, async (req, res) => {
  */
 router.post("/training/:id/assign", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin", "manager"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const moduleId = req.params.id;

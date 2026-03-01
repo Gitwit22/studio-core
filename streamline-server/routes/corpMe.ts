@@ -2,6 +2,7 @@ import express from "express";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { getCorpOrgContext, asString } from "../lib/corpOrg";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -10,7 +11,7 @@ const router = express.Router();
  */
 router.get("/me", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);

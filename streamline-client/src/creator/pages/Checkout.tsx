@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { apiFetchAuth } from "../lib/api";
+import { apiFetchAuth } from "../../lib/api";
 
 function useQuery() {
   return new URLSearchParams(useLocation().search);

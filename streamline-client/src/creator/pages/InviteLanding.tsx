@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { API_BASE } from "../lib/apiBase";
+import { API_BASE } from "../../lib/apiBase";
 
 type ResolveResponse = {
   roomId?: string;

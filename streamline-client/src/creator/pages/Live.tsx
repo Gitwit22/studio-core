@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import Hls from "hls.js";
-import { API_BASE } from "../lib/apiBase";
-import { getPublicHls } from "../services/hls";
-import { useHlsReadiness } from "../hooks/useHlsReadiness";
+import { API_BASE } from "../../lib/apiBase";
+import { getPublicHls } from "../../services/hls";
+import { useHlsReadiness } from "../../hooks/useHlsReadiness";
 import {
   Radio,
   RefreshCw,

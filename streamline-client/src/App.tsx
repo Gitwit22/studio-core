@@ -1,35 +1,17 @@
-import PricingExplainerPage from "./pages/PricingExplainerPage";
 import { useEffect, useState } from "react";
-import { Routes, Route, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
-import AdminUsage from './pages/AdminUsage';
-import AdminDashboard from './pages/AdminDashboard';
-
-import Welcome from "./pages/Welcome";
+import { Routes, Route, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
-import Join from "./pages/Join";
-import Room from "./pages/Room";
-import InviteLanding from "./pages/InviteLanding";
-import InviteRedeem from "./pages/InviteRedeem";
-import Live from "./pages/Live";
-import SettingsDestinations from "./pages/SettingsDestinations";
-import RoomExitPage from "./pages/RoomExitPage";
-import AssetLibrary from "./editing/AssetLibrary";
-import ProjectsDashboard from "./editing/ProjectsDashboard";
-import EditorPage from "./editing/EditorPage";
-import RenderAndUploadPage from "./editing/pages/RenderAndUploadPage";
-import EditorDisabled from "./pages/EditorDisabled";
-import LearnMore from "./pages/LearnMore";
-import Checkout from "./pages/Checkout";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
 import Support from "./pages/Support";
 import BillingCanceled from "./pages/BillingCanceled";
 import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import PostStreamSummary from "./pages/PostStreamSummary";
 import Demo from "./pages/Demo";
 import { DEMO_LANDING_ENABLED } from "./config/demoLanding";
+
+import { creatorRoutes } from "./creator/routes";
 
 import EduLanding from "./edu/entry/EduLanding";
 import EduLogin from "./edu/entry/EduLogin";
@@ -66,11 +48,6 @@ import { clearMeCache } from "./lib/meCache";
 import { clearPlatformFlagsCache } from "./lib/platformFlagsCache";
 import { useFeatureAccess } from "./hooks/useFeatureAccess";
 import { useEffectiveEntitlements } from "./hooks/useEffectiveEntitlements";
-
-
-// Stripe/Billing pages
-import SettingsBilling from "./pages/SettingsBilling";
-import MyContentDisabled from "./pages/MyContentDisabled";
 
 
 function App() {
@@ -286,100 +263,22 @@ function App() {
         </Route>
       </Route>
 
-      <Route path="/learnmore" element={<LearnMore />} />
-
-      <Route path="/admin/usage" element={<AdminUsage />} />
       {/* Public / auth flow */}
-      <Route path="/" element={DEMO_LANDING_ENABLED ? <Demo /> : <Welcome />} />
-      <Route path="/welcome" element={<Welcome />} />
+      <Route path="/" element={DEMO_LANDING_ENABLED ? <Demo /> : <Navigate to="/welcome" replace />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
-      <Route path="/checkout" element={<Checkout />} />
-
-      {/* Invite landing */}
-      <Route path="/i/:inviteToken" element={<InviteLanding />} />
-      {/* New guest invite flow (Firestore-backed) */}
-      <Route path="/invite/:inviteId" element={<InviteRedeem />} />
-      {/* Policy & Support */}
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/support" element={<Support />} />
-      {/* Stripe Checkout return routes */}
       <Route path="/billing/canceled" element={<BillingCanceled />} />
       <Route path="/billing/success" element={<BillingSuccess />} />
-      <Route path="/admin/dashboard" element={<AdminDashboard />} />
-      {/* Streaming flow */}
-      <Route path="/join" element={<Join />} />
-      <Route
-        path="/my-content"
-        element={canMyContent && myContentTarget ? <Navigate to={myContentTarget} replace /> : <MyContentDisabled />}
-      />
-      <Route path="/room" element={<Room />} />
-      <Route path="/room/:roomName" element={<Room />} />
-      <Route path="/live" element={<Live />} />
-      {/* New stable viewer URL: /live/:savedEmbedId */}
-      <Route path="/live/:savedEmbedId" element={<Live />} />
-      {/* Instagram-only viewer URL (fullscreen, minimal UI): /ig/:savedEmbedId */}
-      <Route path="/ig/:savedEmbedId" element={<Live />} />
-      <Route path="/settings/destinations" element={<SettingsDestinations />} />
-      <Route path="/room-exit/:recordingId" element={<RoomExitPage />} />
 
-      {/* Legacy: /stream-summary -> canonical /room-exit */}
-      <Route path="/stream-summary/:recordingId" element={<LegacyStreamSummaryRedirect />} />
-      <Route
-        path="/editing/post-stream"
-        element={<PostStreamSummary />}
-      />
-      
-      {/* Thank You / Post-Stream */}
-      <Route path="/thanks" element={<Navigate to="/room-exit/unknown" replace />} />
+      {/* Creator lane */}
+      {creatorRoutes({ canContentLibrary, canMyContentRecordings, canProjects, canEditor, canMyContent, myContentTarget })}
 
-      {/* Blocked Editing Routes - Coming Soon */}
-      <Route path="/edit" element={<EditorDisabled />} />
-      <Route path="/edit/:id" element={<EditorDisabled />} />
-      <Route path="/editor" element={<EditorDisabled />} />
-      <Route path="/editor/:id" element={<EditorDisabled />} />
-
-      {/* Segmented feature routes */}
-      <Route
-        path="/content"
-        element={(canContentLibrary || canMyContentRecordings) ? <AssetLibrary /> : <Navigate to="/join" replace />}
-      />
-      <Route
-        path="/projects"
-        element={canProjects ? <ProjectsDashboard /> : <Navigate to="/join" replace />}
-      />
-
-      {/* Legacy aliases */}
-      <Route
-        path="/editing/assets"
-        element={(canContentLibrary || canMyContentRecordings) ? <Navigate to="/content" replace /> : <Navigate to="/join" replace />}
-      />
-      <Route
-        path="/editing/projects"
-        element={canProjects ? <Navigate to="/projects" replace /> : <Navigate to="/join" replace />}
-      />
-      <Route
-        path="/editing/editor/:projectId"
-        element={canEditor ? <EditorPage /> : <EditorDisabled />}
-      />
-      <Route
-        path="/editing/export/:projectId"
-        element={canEditor ? <RenderAndUploadPage /> : <EditorDisabled />}
-      />
-
-      {/* Stripe/Billing routes */}
-      <Route path="/settings/billing" element={<SettingsBilling />} />
-      <Route path="/pricing/explainer" element={<PricingExplainerPage />} />
-      
       </Routes>
     </>
   );
-}
-function LegacyStreamSummaryRedirect() {
-  const { recordingId } = useParams<{ recordingId: string }>();
-  const target = recordingId ? `/room-exit/${encodeURIComponent(recordingId)}` : '/room-exit/unknown';
-  return <Navigate to={target} replace state={{ exitRole: 'host' }} />;
 }
 
 export default App;

@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { editingApi, type Recording } from "../lib/editingApi";
-import VideoUploadModal from "../components/VideoUploadModal";
-import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
-import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { editingApi, type Recording } from "../../../lib/editingApi";
+import VideoUploadModal from "../../components/VideoUploadModal";
+import { useEffectiveEntitlements } from "../../../hooks/useEffectiveEntitlements";
+import { useFeatureAccess } from "../../../hooks/useFeatureAccess";
 
 export default function AssetLibrary() {
   const nav = useNavigate();

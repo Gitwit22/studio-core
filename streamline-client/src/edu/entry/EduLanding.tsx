@@ -29,7 +29,7 @@ export default function EduLanding() {
     const qs = new URLSearchParams();
     qs.set("subject", subject);
     qs.set("body", bodyLines.join("\n"));
-    return `mailto:nxtlvltechllc@gmail.com?${qs.toString()}`;
+    return `mailto:nxtlvl@gmail.com?${qs.toString()}`;
   }, [user?.email]);
 
   return (

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { fetchDestinations, createDestination, validateDestinationPreCreate, preflight, updateDestination, deleteDestination, type DestinationItem } from "../services/destinations";
-import { getMeCached } from "../lib/meCache";
-import { useFeatureAccess } from "../hooks/useFeatureAccess";
+import { fetchDestinations, createDestination, validateDestinationPreCreate, preflight, updateDestination, deleteDestination, type DestinationItem } from "../../services/destinations";
+import { getMeCached } from "../../lib/meCache";
+import { useFeatureAccess } from "../../hooks/useFeatureAccess";
 
 function StatusBadge({ status, reason }: { status: string; reason?: string | null }) {
   const color = status === "connected" ? "#16a34a" : status === "disconnected" ? "#6b7280" : "#f59e0b";

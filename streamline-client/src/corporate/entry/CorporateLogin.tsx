@@ -135,7 +135,7 @@ export default function CorporateLogin() {
           )}
 
           <p className="lf-footer">
-            Need access? <a href="#">Contact your administrator</a>
+            Need access? <a href="mailto:nxtlvl@gmail.com?subject=StreamLine%20Corporate%20Access%20Request">Contact us</a>
           </p>
           <div className="security-badges">
             <div className="sec-badge">

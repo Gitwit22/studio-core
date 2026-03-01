@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
-import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
-import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
-import { API_BASE } from "../lib/apiBase";
-import { logAuthDebugContext } from "../lib/logAuthDebug";
+import { useAuthMe, isAuthUserInTestMode } from "../../hooks/useAuthMe";
+import { PLAN_IDS, PlanId, isPlanId } from "../../lib/planIds";
+import { API_BASE } from "../../lib/apiBase";
+import { logAuthDebugContext } from "../../lib/logAuthDebug";
 import { useNavigate, useSearchParams,} from "react-router-dom";
-import { apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
-import { useFeatureAccess } from "../hooks/useFeatureAccess";
-import { useEffectiveEntitlements } from "../hooks/useEffectiveEntitlements";
+import { apiFetch, apiFetchAuth, clearAuthStorage } from "../../lib/api";
+import { useFeatureAccess } from "../../hooks/useFeatureAccess";
+import { useEffectiveEntitlements } from "../../hooks/useEffectiveEntitlements";
 
 type SavedEmbedSummary = {
   embedId: string;

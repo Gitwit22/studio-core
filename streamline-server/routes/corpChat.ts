@@ -2,6 +2,7 @@ import express from "express";
 import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { getCorpOrgContext, asString, coerceMillis } from "../lib/corpOrg";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -37,7 +38,7 @@ function normalizeMessage(docId: string, data: any) {
  */
 router.get("/chat/rooms", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
@@ -63,7 +64,7 @@ router.get("/chat/rooms", requireAuth, async (req, res) => {
  */
 router.get("/chat/rooms/:id/messages", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
@@ -74,7 +75,7 @@ router.get("/chat/rooms/:id/messages", requireAuth, async (req, res) => {
 
     // Verify room belongs to org
     const roomSnap = await db.collection("corpChatRooms").doc(roomId).get();
-    if (!roomSnap.exists) return res.status(404).json({ error: "room_not_found" });
+    if (!roomSnap.exists) return res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
     const room = roomSnap.data() as any;
     if (room.orgId !== ctx.orgId) return res.status(403).json({ error: "wrong_org" });
 
@@ -103,7 +104,7 @@ router.get("/chat/rooms/:id/messages", requireAuth, async (req, res) => {
  */
 router.post("/chat/rooms/:id/messages", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
@@ -115,7 +116,7 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res) => {
 
     // Verify room
     const roomSnap = await db.collection("corpChatRooms").doc(roomId).get();
-    if (!roomSnap.exists) return res.status(404).json({ error: "room_not_found" });
+    if (!roomSnap.exists) return res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
     const room = roomSnap.data() as any;
     if (room.orgId !== ctx.orgId) return res.status(403).json({ error: "wrong_org" });
 
@@ -153,7 +154,7 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res) => {
  */
 router.post("/chat/rooms", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);

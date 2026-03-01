@@ -8,6 +8,7 @@ import { ensureRoomDoc, setHlsStarting, setHlsLive, setHlsIdle } from "../servic
 import { startHlsEgress, stopEgress } from "../services/livekitEgress";
 import { deletePrefix } from "../lib/storageClient";
 import { getLiveKitSdk } from "../lib/livekit";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -35,7 +36,7 @@ function normalizeBroadcast(docId: string, data: any) {
  */
 router.get("/broadcasts", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
@@ -68,13 +69,13 @@ router.get("/broadcasts", requireAuth, async (req, res) => {
  */
 router.post("/broadcasts", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin", "manager"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const title = asString(req.body.title).trim();
@@ -122,13 +123,13 @@ router.post("/broadcasts", requireAuth, async (req, res) => {
  */
 router.patch("/broadcasts/:id", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin", "manager"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const broadcastId = req.params.id;
@@ -174,13 +175,13 @@ router.patch("/broadcasts/:id", requireAuth, async (req, res) => {
  */
 router.delete("/broadcasts/:id", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const broadcastId = req.params.id;
@@ -257,13 +258,13 @@ async function getParticipantCount(livekitRoomName: string | undefined | null): 
  */
 router.post("/broadcasts/:id/go-live", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin", "manager"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const broadcastId = req.params.id;
@@ -391,13 +392,13 @@ router.post("/broadcasts/:id/go-live", requireAuth, async (req, res) => {
  */
 router.post("/broadcasts/:id/stop", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin", "manager"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const broadcastId = req.params.id;
@@ -459,7 +460,7 @@ router.post("/broadcasts/:id/stop", requireAuth, async (req, res) => {
  */
 router.get("/broadcasts/:id/watch", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);

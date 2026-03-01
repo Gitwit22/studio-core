@@ -37,7 +37,7 @@ export default function CorporateLanding() {
               StreamLine provides a unified platform for internal broadcasts, secure meetings, and compliance-ready media management.
             </p>
             <div className="hero-ctas">
-              <Link to="/streamline/corporate/login" className="btn btn-primary btn-xl">Request a Demo</Link>
+              <a href="mailto:nxtlvl@gmail.com?subject=StreamLine%20Corporate%20Demo%20Request&body=Hi%20StreamLine%20team%2C%0A%0AI'd%20like%20to%20request%20a%20demo%20of%20StreamLine%20Corporate.%0A%0AOrganization%3A%0AName%3A%0ARole%3A%0A" className="btn btn-primary btn-xl">Request a Demo</a>
               <a href="#features" className="btn btn-outline btn-xl">Explore Features</a>
             </div>
             <div className="hero-trust">

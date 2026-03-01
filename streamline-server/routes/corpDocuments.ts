@@ -3,6 +3,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { requireAuth } from "../middleware/requireAuth";
 import { getCorpOrgContext, assertCorpRole, asString, coerceMillis } from "../lib/corpOrg";
 import { writeCorpAudit } from "../lib/corpAudit";
+import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 
 const router = express.Router();
 
@@ -31,7 +32,7 @@ function normalizeDocument(docId: string, data: any) {
  */
 router.get("/documents", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
@@ -64,13 +65,13 @@ router.get("/documents", requireAuth, async (req, res) => {
  */
 router.post("/documents", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin", "manager"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const title = asString(req.body.title).trim();
@@ -119,13 +120,13 @@ router.post("/documents", requireAuth, async (req, res) => {
  */
 router.delete("/documents/:id", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);
     if (!ctx) return res.status(403).json({ error: "not_corporate_member" });
     if (!assertCorpRole(ctx.orgRole, ["admin"])) {
-      return res.status(403).json({ error: "insufficient_role" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     const docId = req.params.id;
@@ -157,7 +158,7 @@ router.delete("/documents/:id", requireAuth, async (req, res) => {
  */
 router.post("/documents/:id/acknowledge", requireAuth, async (req, res) => {
   const uid = String((req as any).user?.uid || "").trim();
-  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   try {
     const ctx = await getCorpOrgContext(uid);

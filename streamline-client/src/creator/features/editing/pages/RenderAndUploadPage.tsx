@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CheckCircle, Youtube, Facebook, Twitter } from 'lucide-react';
-import { editingApi, type Project } from '../../lib/editingApi';
+import { editingApi, type Project } from '../../../../lib/editingApi';
 
 export default function RenderAndUploadPage() {
   const { projectId } = useParams<{ projectId: string }>();

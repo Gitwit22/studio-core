@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api";
-import { formatLimitLabel } from "../lib/entitlements";
-import { isFeatureAvailable, isPlatformEnabled } from "../lib/featureAvailability";
+import { apiFetch } from "../../lib/api";
+import { formatLimitLabel } from "../../lib/entitlements";
+import { isFeatureAvailable, isPlatformEnabled } from "../../lib/featureAvailability";
 
 type ApiPlan = {
   id: string;
@@ -469,7 +469,7 @@ export const PricingExplainerPage: React.FC = () => {
             Questions about pricing?
           </p>
           <a
-            href="/contact"
+            href="mailto:nxtlvl@gmail.com?subject=StreamLine%20Pricing%20Question"
             style={{
               display: "inline-flex",
               alignItems: "center",

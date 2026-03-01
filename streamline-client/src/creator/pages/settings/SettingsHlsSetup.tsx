@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { API_BASE } from "../../lib/apiBase";
+import { API_BASE } from "../../../lib/apiBase";
 import { S } from "../SettingsBilling.styles";
-import { apiFetchAuth } from "../../lib/api";
+import { apiFetchAuth } from "../../../lib/api";
 
 type SavedEmbed = {
   embedId: string;

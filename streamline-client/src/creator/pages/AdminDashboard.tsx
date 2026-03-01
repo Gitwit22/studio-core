@@ -6,7 +6,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useMemo } from "react";
-import { useAuthMe } from "../hooks/useAuthMe";
+import { useAuthMe } from "../../hooks/useAuthMe";
 import { useNavigate } from "react-router-dom";
 
 // Normalize base so if you set VITE_API_BASE to ".../api" it won't double up.

@@ -2,19 +2,19 @@
 
 
 import React, { useEffect, useRef, useState } from "react";
-import { PLAN_IDS, PlanId, isPlanId } from "../lib/planIds";
+import { PLAN_IDS, PlanId, isPlanId } from "../../lib/planIds";
 import { useLocation, useNavigate } from "react-router-dom";
 import "./SettingsBilling.css";
 import { S } from "./SettingsBilling.styles";
 import SettingsDestinations from "./SettingsDestinations";
-import { ApiUnauthorizedError, apiFetch, apiFetchAuth, clearAuthStorage, type RoomLayout, type RoomLayoutMode } from "../lib/api";
-import { useAuthMe, isAuthUserInTestMode } from "../hooks/useAuthMe";
-import { formatLimitLabel } from "../lib/entitlements";
+import { ApiUnauthorizedError, apiFetch, apiFetchAuth, clearAuthStorage, type RoomLayout, type RoomLayoutMode } from "../../lib/api";
+import { useAuthMe, isAuthUserInTestMode } from "../../hooks/useAuthMe";
+import { formatLimitLabel } from "../../lib/entitlements";
 import SettingsHlsSetup from "./settings/SettingsHlsSetup";
-import { getMeCached, clearMeCache } from "../lib/meCache";
-import { clearPlatformFlagsCache } from "../lib/platformFlagsCache";
-import { isFeatureAvailable, isPlatformEnabled } from "../lib/featureAvailability";
-import { getUsageGating, usageLabels, usageTooltips } from "../lib/usageLabels";
+import { getMeCached, clearMeCache } from "../../lib/meCache";
+import { clearPlatformFlagsCache } from "../../lib/platformFlagsCache";
+import { isFeatureAvailable, isPlatformEnabled } from "../../lib/featureAvailability";
+import { getUsageGating, usageLabels, usageTooltips } from "../../lib/usageLabels";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 

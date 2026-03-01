@@ -1,8 +1,8 @@
 import React from "react";
 import { useParticipants, useLocalParticipant, useRoomContext } from "@livekit/components-react";
-import { normalizeUiRolePresetId } from "../lib/roles";
-import { apiFetchAuth } from "../lib/api";
-import { encodeReconnectMediaMessage, reconnectMedia } from "../lib/mediaRecovery";
+import { normalizeUiRolePresetId } from "../../lib/roles";
+import { apiFetchAuth } from "../../lib/api";
+import { encodeReconnectMediaMessage, reconnectMedia } from "../../lib/mediaRecovery";
 
 // Normalize API base to avoid trailing slashes that cause "//api/..." URLs
 const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");

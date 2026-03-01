@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getHlsStatus, type HlsStatusResponse } from "../services/hls";
+import { getHlsStatus, type HlsStatusResponse } from "../../services/hls";
 
 type UseHlsStatusArgs = {
   apiBase: string;

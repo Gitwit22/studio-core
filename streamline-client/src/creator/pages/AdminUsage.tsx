@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiFetchAuth } from "../lib/api";
+import { apiFetchAuth } from "../../lib/api";
 
 interface UsageData {
   userId: string;

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { type DestinationItem } from "../services/destinations";
-import { formatLimitLabel } from "../lib/entitlements";
-import { API_BASE } from "../lib/apiBase";
-import { apiFetchAuth } from "../lib/api";
-import { APP_BASE } from "../lib/appBase";
-import { getHlsStatus, startHls, stopHls } from "../services/hls";
+import { type DestinationItem } from "../../services/destinations";
+import { formatLimitLabel } from "../../lib/entitlements";
+import { API_BASE } from "../../lib/apiBase";
+import { apiFetchAuth } from "../../lib/api";
+import { APP_BASE } from "../../lib/appBase";
+import { getHlsStatus, startHls, stopHls } from "../../services/hls";
 import { useDestinationsStartPayload } from "../hooks/useDestinationsStartPayload";
 import CollapsibleSection from "./CollapsibleSection";
-import { getFeatureErrorMessage } from "../lib/featureErrors";
+import { getFeatureErrorMessage } from "../../lib/featureErrors";
 
 type PlatformKey = "youtube" | "facebook" | "twitch" | "instagram" | "custom";
 

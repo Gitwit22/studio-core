@@ -16,8 +16,8 @@ import {
   Unlock,
   Link2
 } from "lucide-react";
-import { editingApi } from "../lib/editingApi";
-import { apiFetchAuth } from "../lib/api";
+import { editingApi } from "../../../lib/editingApi";
+import { apiFetchAuth } from "../../../lib/api";
 import { useEditingFeatures } from "./useEditingFeatures";
 
 // ============================================================================

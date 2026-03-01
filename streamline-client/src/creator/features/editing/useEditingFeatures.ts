@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { getMeCached } from "../lib/meCache";
-import { API_BASE } from "../lib/apiBase";
-import { apiFetchAuth } from "../lib/api";
+import { getMeCached } from "../../../lib/meCache";
+import { API_BASE } from "../../../lib/apiBase";
+import { apiFetchAuth } from "../../../lib/api";
 
 type EditingFeatures = {
   editing: { access: boolean; maxTracks: number; maxProjects: number };

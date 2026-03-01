@@ -1,7 +1,7 @@
 // src/pages/LearnMore.tsx
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { usePlatformFlags } from "../hooks/usePlatformFlags";
+import { usePlatformFlags } from "../../hooks/usePlatformFlags";
 
 /**
  * STREAMLINE LEARN MORE PAGE

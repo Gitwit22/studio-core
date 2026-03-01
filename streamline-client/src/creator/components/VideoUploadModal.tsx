@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { apiFetchAuth } from "../lib/api";
+import { apiFetchAuth } from "../../lib/api";
 
 interface VideoUploadModalProps {
   isOpen: boolean;
