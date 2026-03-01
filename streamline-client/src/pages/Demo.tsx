@@ -26,7 +26,7 @@ export default function Demo() {
               <li>Multistream + overlays</li>
               <li>Guest invites</li>
             </ul>
-            <Link to="/">
+            <Link to="/welcome">
               <Button className="w-full">
                 View Creator Landing <ArrowRight className="ml-2 h-4 w-4" />
               </Button>

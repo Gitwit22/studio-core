@@ -29,6 +29,7 @@ import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import PostStreamSummary from "./pages/PostStreamSummary";
 import Demo from "./pages/Demo";
+import { DEMO_LANDING_ENABLED } from "./config/demoLanding";
 
 import EduLanding from "./edu/entry/EduLanding";
 import EduLogin from "./edu/entry/EduLogin";
@@ -99,7 +100,11 @@ function App() {
       setShowUnauthorized(true);
 
       const path = window.location.pathname || "";
-      if (path.startsWith("/login") || path.startsWith("/signup")) {
+      if (path.startsWith("/login") || path.startsWith("/signup") || path.startsWith("/demo") || path === "/welcome") {
+        return;
+      }
+      // When Demo is the landing page, "/" is public — skip redirect
+      if (DEMO_LANDING_ENABLED && path === "/") {
         return;
       }
 
@@ -261,7 +266,8 @@ function App() {
 
       <Route path="/admin/usage" element={<AdminUsage />} />
       {/* Public / auth flow */}
-      <Route path="/" element={<Welcome />} />
+      <Route path="/" element={DEMO_LANDING_ENABLED ? <Demo /> : <Welcome />} />
+      <Route path="/welcome" element={<Welcome />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/checkout" element={<Checkout />} />
