@@ -1,6 +1,7 @@
 
 import { API_BASE } from "./apiBase";
 import { getFirebaseIdToken } from "./firebaseClient";
+import { LANES_ENABLED } from "../config/lanes";
 
 /**
  * Read the auth token from localStorage for header-based auth fallback.
@@ -143,11 +144,13 @@ export async function apiFetchAuth(
   const headers = new Headers(init.headers || {});
   const hadExplicitAuthHeader = headers.has("Authorization");
 
-  /* ── Demo / bypass mode ───────────────────────────────────────────────── */
-  const demoLane = getDemoBypassLane();
-  if (demoLane) {
-    headers.set("x-sl-demo", demoLane);
-    return apiFetch(path, { ...init, headers }, { allowNonOk: options?.allowNonOk });
+  /* ── Demo / bypass mode (only when lanes are active) ─────────────────── */
+  if (LANES_ENABLED) {
+    const demoLane = getDemoBypassLane();
+    if (demoLane) {
+      headers.set("x-sl-demo", demoLane);
+      return apiFetch(path, { ...init, headers }, { allowNonOk: options?.allowNonOk });
+    }
   }
 
   let token: string | null = null;
