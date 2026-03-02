@@ -546,6 +546,59 @@ router.post(
             },
             { merge: true }
           );
+
+          // ── Reset usage counters on invoice.paid (new billing period) ──
+          if (event.type === "invoice.paid" && isActive) {
+            const monthKey = getCurrentMonthKey();
+            const usageDocId = `${uid}_${monthKey}`;
+            const usageRef = db.collection("usageMonthly").doc(usageDocId);
+            const usageSnap = await usageRef.get();
+
+            if (usageSnap.exists) {
+              const existing = usageSnap.data() as any;
+              const prevUsage = existing?.usage || {};
+              const prevYtd = existing?.ytd || {};
+              const prevMinutes = prevUsage.minutes || {};
+
+              // Zero out currentPeriod counters; preserve lifetime/ytd totals
+              await usageRef.set(
+                {
+                  usage: {
+                    participantMinutes: 0,
+                    transcodeMinutes: 0,
+                    hlsMinutes: 0,
+                    minutes: {
+                      live: {
+                        currentPeriod: 0,
+                        lifetime: Number(prevMinutes.live?.lifetime || prevYtd.minutes?.live?.lifetime || 0),
+                      },
+                      transcode: {
+                        currentPeriod: 0,
+                        lifetime: Number(prevMinutes.transcode?.lifetime || prevYtd.minutes?.transcode?.lifetime || 0),
+                      },
+                      recording: {
+                        currentPeriod: 0,
+                        lifetime: Number(prevMinutes.recording?.lifetime || prevYtd.minutes?.recording?.lifetime || 0),
+                      },
+                    },
+                  },
+                  lastBillingReset: Date.now(),
+                  updatedAt: Date.now(),
+                },
+                { merge: true }
+              );
+            }
+
+            // Also reset legacy usage field so it doesn't seed stale data
+            await getUserRef(uid).update({
+              "usage.hoursStreamedThisMonth": 0,
+              "usage.hoursStreamedToday": 0,
+            });
+
+            console.log(
+              `[stripe-webhook] Reset usage counters for uid=${uid}, monthKey=${monthKey}`
+            );
+          }
           break;
         }
 
