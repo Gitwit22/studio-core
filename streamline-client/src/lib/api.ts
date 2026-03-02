@@ -49,6 +49,20 @@ export class ApiUnauthorizedError extends Error {
   }
 }
 
+/**
+ * Returns "edu" | "corporate" when the current session is a demo / bypass
+ * session (set via localStorage flags on the EDU or Corporate login pages).
+ * Returns null when the user is in a normal authenticated session.
+ */
+export function getDemoBypassLane(): "edu" | "corporate" | null {
+  try {
+    if (typeof window === "undefined") return null;
+    if (window.localStorage.getItem("sl_edu_bypass") === "true") return "edu";
+    if (window.localStorage.getItem("sl_corporate_bypass") === "true") return "corporate";
+  } catch { /* private browsing */ }
+  return null;
+}
+
 function emitUnauthorizedEventOnce(detail?: string) {
   if (typeof window === "undefined") return;
   const w = window as any;
@@ -128,6 +142,13 @@ export async function apiFetchAuth(
 
   const headers = new Headers(init.headers || {});
   const hadExplicitAuthHeader = headers.has("Authorization");
+
+  /* ── Demo / bypass mode ───────────────────────────────────────────────── */
+  const demoLane = getDemoBypassLane();
+  if (demoLane) {
+    headers.set("x-sl-demo", demoLane);
+    return apiFetch(path, { ...init, headers }, { allowNonOk: options?.allowNonOk });
+  }
 
   let token: string | null = null;
   let tokenSource: "firebase" | "legacy" | "explicit" | null = null;

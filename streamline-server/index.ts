@@ -46,6 +46,7 @@ import corpTrainingRoutes from "./routes/corpTraining";
 import corpDocumentsRoutes from "./routes/corpDocuments";
 import corpChatRoutes from "./routes/corpChat";
 import corpAdminRoutes from "./routes/corpAdmin";
+import { LANES_ENABLED } from "./config/lanes";
 import onboardingRoutes from "./routes/onboarding";
 import { firestore as db } from "./firebaseAdmin";
 import path from "path";
@@ -199,10 +200,15 @@ app.use("/api/public/hls", publicHlsRoutes);
 // Public viewer-safe HLS config (no auth)
 app.use("/api/public/rooms", publicRoomsHlsConfigRoutes);
 // Public EDU embed data (no auth)
-app.use("/api/public/edu", eduPublicRoutes);
+// Public EDU embed data (no auth) — only when lanes enabled
+if (LANES_ENABLED) {
+  app.use("/api/public/edu", eduPublicRoutes);
+}
 
 // Internal maintenance/admin utilities
-app.use("/api/maintenance/edu", eduBootstrapRoutes);
+if (LANES_ENABLED) {
+  app.use("/api/maintenance/edu", eduBootstrapRoutes);
+}
 
 // Onboarding/reset endpoints (guarded; demo-safe)
 app.use("/api/onboarding", onboardingRoutes);
@@ -261,22 +267,29 @@ app.use("/api/live", liveRoutes);
 app.use("/api/saved-embeds", savedEmbedsRoutes);
 
 // EDU events (authenticated admin UI)
-app.use("/api/edu", eduEventsRoutes);
-// EDU people (authenticated admin UI)
-app.use("/api/edu", eduPeopleRoutes);
-// EDU org settings + audit (authenticated admin UI)
-app.use("/api/edu", eduSettingsRoutes);
-// EDU embed docs (authenticated admin UI)
-app.use("/api/edu", eduEmbedsRoutes);
+if (LANES_ENABLED) {
+  app.use("/api/edu", eduEventsRoutes);
+  // EDU people (authenticated admin UI)
+  app.use("/api/edu", eduPeopleRoutes);
+  // EDU org settings + audit (authenticated admin UI)
+  app.use("/api/edu", eduSettingsRoutes);
+  // EDU embed docs (authenticated admin UI)
+  app.use("/api/edu", eduEmbedsRoutes);
 
-// Corporate lane routes
-app.use("/api/corp", corpMeRoutes);
-app.use("/api/corp", corpBroadcastsRoutes);
-app.use("/api/corp", corpCallsRoutes);
-app.use("/api/corp", corpTrainingRoutes);
-app.use("/api/corp", corpDocumentsRoutes);
-app.use("/api/corp", corpChatRoutes);
-app.use("/api/corp", corpAdminRoutes);
+  // Corporate lane routes
+  app.use("/api/corp", corpMeRoutes);
+  app.use("/api/corp", corpBroadcastsRoutes);
+  app.use("/api/corp", corpCallsRoutes);
+  app.use("/api/corp", corpTrainingRoutes);
+  app.use("/api/corp", corpDocumentsRoutes);
+  app.use("/api/corp", corpChatRoutes);
+  app.use("/api/corp", corpAdminRoutes);
+} else {
+  // Lanes disabled — reject any requests that slip through.
+  app.use("/api/edu", (_req, res) => res.status(404).json({ error: "lane_disabled" }));
+  app.use("/api/corp", (_req, res) => res.status(404).json({ error: "lane_disabled" }));
+  console.log("[lanes] EDU and Corporate API lanes are DISABLED");
+}
 
 // Billing routes
 app.use("/api/billing", billingRoutes);
