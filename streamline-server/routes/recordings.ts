@@ -928,46 +928,20 @@ router.post(
     const now = new Date();
     const recordingId = firestore.collection("recordings").doc().id;
 
-    // Best-effort: detect EDU context for storage routing + attach orgId for EDU reporting.
-    // This is intentionally non-fatal and remains compatible with legacy datasets.
+    // Best-effort: attach orgId for reporting.
     let orgId: string | null = null;
-    let orgType: string | null = null;
-    let orgRole: string | null = null;
     try {
       const uSnap = await firestore.collection("users").doc(uid).get();
       if (uSnap.exists) {
         const u = (uSnap.data() as any) || {};
         const rawOrgId = u?.orgId ?? u?.org?.id ?? u?.org?.orgId;
         orgId = typeof rawOrgId === "string" && rawOrgId.trim() ? rawOrgId.trim() : null;
-
-        const rawOrgType = u?.orgType ?? u?.org?.orgType;
-        orgType = typeof rawOrgType === "string" && rawOrgType.trim() ? rawOrgType.trim() : null;
-      }
-
-      if (orgId) {
-        const memberId = `${orgId}_${uid}`;
-        const memberSnap = await firestore.collection("orgMembers").doc(memberId).get().catch(() => null as any);
-        const member = memberSnap && memberSnap.exists ? (memberSnap.data() as any) : null;
-        orgRole = member && typeof member.role === "string" && String(member.role).trim() ? String(member.role).trim() : null;
       }
     } catch {
       // non-fatal
     }
 
-    const roleLower = String(orgRole || "").toLowerCase();
-    const isEduByRole =
-      roleLower === "faculty_admin" ||
-      roleLower === "student_producer" ||
-      roleLower === "student_producer_assigned" ||
-      roleLower === "talent" ||
-      roleLower === "viewer";
-    const typeLower = String(orgType || "").toLowerCase();
-    const isEduByType = typeLower.includes("edu");
-    const useEduPrefix = isEduByType || isEduByRole;
-
-    const eduRootPrefix = useEduPrefix ? normalizeRootPrefix(process.env.R2_EDU_RECORDINGS_PREFIX ?? "edu/") : "";
-
-    const { objectKey, prefix: r2Prefix } = generateRecordingPath(uid, roomId, recordingId, eduRootPrefix);
+    const { objectKey, prefix: r2Prefix } = generateRecordingPath(uid, roomId, recordingId, "");
     const recordingRef = firestore.collection("recordings").doc(recordingId);
 
     const isEmergency = recordingClass === "emergency";

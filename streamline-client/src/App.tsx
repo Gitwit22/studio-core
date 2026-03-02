@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import Privacy from "./pages/Privacy";
@@ -8,41 +8,7 @@ import Support from "./pages/Support";
 import BillingCanceled from "./pages/BillingCanceled";
 import BillingSuccess from "./pages/BillingSuccess";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import Demo from "./pages/Demo";
-import { DEMO_LANDING_ENABLED } from "./config/demoLanding";
-import { LANES_ENABLED } from "./config/lanes";
-
 import { creatorRoutes } from "./creator/routes";
-
-import EduLanding from "./edu/entry/EduLanding";
-import EduLogin from "./edu/entry/EduLogin";
-import EduProtectedRoute from "./edu/layout/EduProtectedRoute";
-import EduRoleGuard from "./edu/layout/EduRoleGuard";
-import EduShell from "./edu/layout/EduShell";
-import EduDashboard from "./edu/pages/Dashboard";
-import EduBroadcast from "./edu/pages/Broadcast";
-import EduEvents from "./edu/pages/Events";
-import EduArchive from "./edu/pages/Archive";
-import EduPeople from "./edu/pages/People";
-import EduEmbed from "./edu/pages/Embed";
-import EduEmbedEventPlayer from "./edu/pages/EmbedEventPlayer";
-import EduSettings from "./edu/pages/Settings";
-import EduOnboarding from "./edu/pages/Onboarding";
-
-import CorporateLanding from "./corporate/entry/CorporateLanding";
-import CorporateLogin from "./corporate/entry/CorporateLogin";
-import CorporateProtectedRoute from "./corporate/layout/CorporateProtectedRoute";
-import CorporateShell from "./corporate/layout/CorporateShell";
-import CorporateDashboard from "./corporate/pages/Dashboard";
-import CorporateCalls from "./corporate/pages/Calls";
-import CorporateBroadcasts from "./corporate/pages/Broadcasts";
-import CorporateChat from "./corporate/pages/Chat";
-import CorporateTraining from "./corporate/pages/Training";
-import CorporateDocuments from "./corporate/pages/Documents";
-import CorporateAnalytics from "./corporate/pages/Analytics";
-import CorporateAdmin from "./corporate/pages/Admin";
-import CorporateBroadcastStudio from "./corporate/pages/BroadcastStudio";
-import CorporateBroadcastViewer from "./corporate/pages/BroadcastViewer";
 
 import { clearAuthStorage } from "./lib/api";
 import { clearMeCache } from "./lib/meCache";
@@ -80,15 +46,12 @@ function App() {
       // otherwise we race with a freshly-stored login token.
       if (
         path.startsWith("/login") || path.startsWith("/signup") ||
-        path.startsWith("/demo") || path === "/welcome" ||
+        path === "/welcome" || path === "/" ||
         path.startsWith("/privacy") || path.startsWith("/terms") ||
         path.startsWith("/support") || path.startsWith("/learnmore") ||
         path.startsWith("/i/") || path.startsWith("/invite/") ||
         path.startsWith("/billing/")
       ) {
-        return;
-      }
-      if (DEMO_LANDING_ENABLED && path === "/") {
         return;
       }
 
@@ -109,23 +72,6 @@ function App() {
       clearMeCache();
       clearPlatformFlagsCache();
       setShowUnauthorized(true);
-
-      // EDU lane should stay within EDU login.
-      if (path.startsWith("/streamline/edu")) {
-        const next = `${window.location.pathname}${window.location.search}`;
-        const sp = new URLSearchParams();
-        sp.set("returnTo", next);
-        nav(`/streamline/edu/login?${sp.toString()}`);
-        return;
-      }
-
-      if (path.startsWith("/streamline/corporate")) {
-        const next = `${window.location.pathname}${window.location.search}`;
-        const sp = new URLSearchParams();
-        sp.set("returnTo", next);
-        nav(`/streamline/corporate/login?${sp.toString()}`);
-        return;
-      }
 
       const next = `${window.location.pathname}${window.location.search}`;
       const sp = new URLSearchParams();
@@ -192,88 +138,13 @@ function App() {
       )}
 
       <Routes>
-      {/* Demo Switchboard */}
-      {LANES_ENABLED && <Route path="/demo" element={<Demo />} />}
-
-      {/* Corporate lane — only when LANES_ENABLED */}
-      {LANES_ENABLED ? (
-      <Route path="/streamline/corporate" element={<Outlet />}>
-        <Route index element={<CorporateLanding />} />
-        <Route path="landing" element={<CorporateLanding />} />
-        <Route path="login" element={<CorporateLogin />} />
-
-        <Route
-          element={
-            <CorporateProtectedRoute>
-              <CorporateShell />
-            </CorporateProtectedRoute>
-          }
-        >
-          <Route path="dashboard" element={<CorporateDashboard />} />
-          <Route path="calls" element={<CorporateCalls />} />
-          <Route path="broadcasts" element={<CorporateBroadcasts />} />
-          <Route path="broadcasts/:id/studio" element={<CorporateBroadcastStudio />} />
-          <Route path="broadcasts/:id/watch" element={<CorporateBroadcastViewer />} />
-          <Route path="chat" element={<CorporateChat />} />
-          <Route path="training" element={<CorporateTraining />} />
-          <Route path="documents" element={<CorporateDocuments />} />
-          <Route path="analytics" element={<CorporateAnalytics />} />
-          <Route path="admin" element={<CorporateAdmin />} />
-          <Route path="*" element={<Navigate to="/streamline/corporate/dashboard" replace />} />
-        </Route>
-      </Route>
-      ) : (
-        <Route path="/streamline/corporate/*" element={<Navigate to="/welcome" replace />} />
-      )}
-
-      {/* EDU lane — only when LANES_ENABLED */}
-      {LANES_ENABLED ? (
-      <Route path="/streamline/edu" element={<Outlet />}>
-        <Route index element={<EduLanding />} />
-        <Route path="login" element={<EduLogin />} />
-        <Route path="onboarding" element={<EduOnboarding />} />
-
-        {/* Public EDU embed players (no auth) */}
-        <Route path="embed/event" element={<EduEmbedEventPlayer />} />
-
-        <Route
-          element={
-            <EduProtectedRoute>
-              <EduShell />
-            </EduProtectedRoute>
-          }
-        >
-          <Route path="dashboard" element={<EduDashboard />} />
-          <Route path="broadcast" element={<EduBroadcast />} />
-          <Route path="events" element={<EduEvents />} />
-          <Route path="archive" element={<EduArchive />} />
-          <Route
-            path="people"
-            element={
-              <EduRoleGuard allow={["faculty_admin", "student_producer", "student_producer_assigned"]}>
-                <EduPeople />
-              </EduRoleGuard>
-            }
-          />
-          <Route path="embed" element={<EduEmbed />} />
-          <Route
-            path="settings"
-            element={
-              <EduRoleGuard allow={["faculty_admin"]}>
-                <EduSettings />
-              </EduRoleGuard>
-            }
-          />
-
-          <Route path="*" element={<Navigate to="/streamline/edu/dashboard" replace />} />
-        </Route>
-      </Route>
-      ) : (
-        <Route path="/streamline/edu/*" element={<Navigate to="/welcome" replace />} />
-      )}
+      {/* Redirect legacy lane paths to creator welcome */}
+      <Route path="/streamline/corporate/*" element={<Navigate to="/welcome" replace />} />
+      <Route path="/streamline/edu/*" element={<Navigate to="/welcome" replace />} />
+      <Route path="/demo" element={<Navigate to="/welcome" replace />} />
 
       {/* Public / auth flow */}
-      <Route path="/" element={DEMO_LANDING_ENABLED ? <Demo /> : <Navigate to="/welcome" replace />} />
+      <Route path="/" element={<Navigate to="/welcome" replace />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/privacy" element={<Privacy />} />

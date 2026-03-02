@@ -1,8 +1,6 @@
 import React, { FormEvent, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiFetch, apiFetchAuth, clearAuthStorage } from "../lib/api";
-import { isEduBypassEnabled } from "../edu/state/eduMode";
-import { LANES_ENABLED } from "../config/lanes";
 import { firebaseSendPasswordReset, firebaseSignInWithCustomToken, isFirebaseWebConfigured } from "../lib/firebaseClient";
 
 // Email validation function
@@ -183,18 +181,6 @@ export const LoginPage: React.FC = () => {
       }
 
       setLoading(false);
-
-      // EDU router: if the user belongs to an EDU org (or came through the EDU lane),
-      // always send them to the EDU dashboard.
-      if (LANES_ENABLED) {
-        try {
-          const lane = localStorage.getItem("sl_entry_lane");
-          if (me?.orgType === "edu" || (lane === "edu" && isEduBypassEnabled())) {
-            nav("/streamline/edu/dashboard", { replace: true });
-            return;
-          }
-        } catch {}
-      }
 
       nav(nextUrl || "/join");
       return;

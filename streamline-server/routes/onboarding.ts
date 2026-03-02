@@ -6,7 +6,6 @@ import { firestore } from "../firebaseAdmin";
 import { requireAdmin } from "../middleware/adminAuth";
 import { requireAuth } from "../middleware/requireAuth";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
-import { writeEduAudit } from "../lib/eduAudit";
 import { buildNewUserDoc } from "../lib/newUserDefaults";
 
 const router = Router();
@@ -225,14 +224,6 @@ router.post("/reset-demo", async (req, res) => {
       createdAt: org?.createdAt || Date.now(),
     }, { merge: true });
 
-    await writeEduAudit({
-      orgId: demoOrgId,
-      action: "onboarding.reset_demo",
-      actorUid: actorUid || "system",
-      actorName: actorUid ? "Platform Admin" : "System",
-      targetId: demoOrgId,
-    }).catch(() => void 0);
-
     return res.json({
       ok: true,
       deleted: {
@@ -374,14 +365,6 @@ router.post("/create-top-admin", async (req, res) => {
     const token = jwt.sign({ uid }, getJwtSecret(), { expiresIn: "7d" });
     (res as any).cookie("token", token, cookieOptions());
 
-    await writeEduAudit({
-      orgId,
-      action: "onboarding.create_top_admin",
-      actorUid: uid,
-      actorName: displayName,
-      targetId: memberId,
-    }).catch(() => void 0);
-
     return res.json({
       ok: true,
       token,
@@ -426,14 +409,6 @@ router.post("/progress", requireAuth, async (req, res) => {
       },
       { merge: true },
     );
-
-    await writeEduAudit({
-      orgId,
-      action: "onboarding.progress",
-      actorUid: uid,
-      actorName: typeof user.displayName === "string" && user.displayName ? user.displayName : typeof user.name === "string" ? user.name : "User",
-      targetId: `step:${step}`,
-    }).catch(() => void 0);
 
     return res.json({ ok: true, orgId, step });
   } catch (err: any) {

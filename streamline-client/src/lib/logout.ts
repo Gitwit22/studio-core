@@ -1,4 +1,3 @@
-import { clearEduLane } from "../edu/state/eduMode";
 import { apiFetch, clearAuthStorage } from "../lib/api";
 
 export async function logout() {
@@ -9,7 +8,6 @@ export async function logout() {
   }
   try {
     clearAuthStorage();
-    clearEduLane();
   } catch {
     // best-effort
   }
