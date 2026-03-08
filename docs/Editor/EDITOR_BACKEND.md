@@ -1,8 +1,8 @@
 # Editor Backend + API Wiring (Condensed)
 
-Date: 2026-02-03
+Date: 2026-02-03 (updated 2026-03-08)
 
-This doc captures the **actual API surface** that the editor and recording/download flows rely on, plus what’s missing.
+This doc captures the **actual API surface** that the editor and recording/download flows rely on.
 
 ---
 
@@ -11,28 +11,27 @@ This doc captures the **actual API surface** that the editor and recording/downl
 ### Client expects (editing projects)
 Client wrapper: `streamline-client/src/lib/editingApi.ts`
 
-Projects + timeline endpoints expected:
-- `GET /api/editing/projects` (list)
-- `POST /api/editing/projects` (create)
-- `GET /api/editing/projects/:id` (missing on server today)
-- `PATCH /api/editing/projects/:id` (missing)
-- `DELETE /api/editing/projects/:id` (missing)
-- `PUT /api/editing/projects/:id/timeline` (missing)
+Projects + timeline endpoints:
+- `GET /api/editing/projects` (list) ✅
+- `POST /api/editing/projects` (create) ✅
+- `GET /api/editing/projects/:id` ✅
+- `PATCH /api/editing/projects/:id` ✅
+- `DELETE /api/editing/projects/:id` ✅
+- `PUT /api/editing/projects/:id/timeline` ✅
 
-Export endpoints expected:
-- `POST /api/editing/export` (missing)
-- `GET /api/editing/exports/:exportId` (missing)
+Export endpoints:
+- `POST /api/editing/export` ✅
+- `GET /api/editing/exports/:exportId` ✅
 
 ### Server currently provides (editing)
 Server router: `streamline-server/routes/editing.ts`
 
-Implemented:
-- `GET /api/editing/projects`
-- `POST /api/editing/projects` (initializes `timeline: []`)
+All endpoints above are implemented, including:
+- Full project CRUD (list, create, get, update, delete)
+- Timeline save/load with track state persistence
 - Recording library helpers (list + recording details)
 - `POST /api/editing/render` (recording-centric render/upload path)
-
-Net: the editor can work in-memory, but **Save/Reload/Export-as-project are not end-to-end yet**.
+- Export job creation and status polling
 
 ---
 
@@ -48,7 +47,7 @@ Implemented:
 Key behavior:
 - ownership is enforced
 - expired links return 410
-- signed URL generation failure suggests “Emergency Download” fallback
+- signed URL generation failure suggests "Emergency Download" fallback
 
 ---
 
@@ -60,24 +59,17 @@ Firestore: `recordings/{recordingId}`
 
 ### Editing projects
 Firestore: `editing_projects/{projectId}`
-- currently created with `{ userId, name, assetId, timeline: [] }`
-- needs full CRUD + timeline persistence endpoints to be useful
+- Full CRUD + timeline persistence endpoints implemented
+- Timeline data includes clips (with trackId) and track state (mute/lock/solo/link)
 
 ---
 
-## Recommended next backend work (minimum)
+## Remaining backend work
 
-1) Implement missing project endpoints in `streamline-server/routes/editing.ts`:
-- `GET/PATCH/DELETE /api/editing/projects/:id`
-- `PUT /api/editing/projects/:id/timeline`
+1) Export pipeline:
+- `POST /api/editing/export` creates a job document but actual render/encode is not yet wired to a worker queue
+- Short-term: wire UI to existing `POST /api/editing/render` for a recording render story
 
-2) Validate + persist a canonical timeline model:
-- clips should include `trackId` if multi-track is real
-- clamp negative times/durations
-
-3) Decide export direction:
-- **Project-based export jobs** (new endpoints + job persistence), or
-- wire UI to existing `POST /api/editing/render` for a short-term “recording render” story
-
-For the detailed status + execution order, see:
-- `docs/Editor/EDITING_TIMELINE_AUDIT_STATUS.md`
+2) Validation hardening:
+- Asset existence checks on clip references
+- Rate limiting on upload/export endpoints
