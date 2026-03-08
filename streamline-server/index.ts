@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors, { type CorsOptions } from "cors";
 import cookieParser from "cookie-parser";
+import pinoHttp from "pino-http";
 import webhookRouter from "./routes/webhook";
 import authRoutes from "./routes/auth";
 import adminRoutes from './routes/admin';
@@ -56,6 +57,18 @@ import { requireRoomAccessToken, type RoomAccessClaims, getRoomAccess } from "./
 
 import { requireAdmin } from "./middleware/adminAuth";
 
+// Horizon / observability imports
+import { logger } from "./lib/logger";
+import { requestIdMiddleware } from "./middleware/requestId";
+import { globalErrorHandler } from "./middleware/errorHandler";
+import horizonApiRoutes from "./routes/horizonApi";
+import platformHealthRoutes from "./routes/platformHealth";
+import diagnosticsRoutes from "./routes/diagnostics";
+import alertRoutes from "./routes/alertRoutes";
+import skillsIntegrationRoutes from "./routes/skillsIntegration";
+import supportActionsRoutes from "./routes/supportActions";
+import supportTicketsRoutes from "./routes/supportTickets";
+import { attachHorizonWs } from "./routes/horizonWs";
 
 import { uploadVideo } from "./lib/storageClient";
 
@@ -133,7 +146,7 @@ const corsOptions: CorsOptions = {
     "x-invite-token",
     "X-Invite-Token",
   ],
-  exposedHeaders: ["x-sl-auth-fallback", "x-sl-auth-header-invalid"],
+  exposedHeaders: ["x-sl-auth-fallback", "x-sl-auth-header-invalid", "X-Request-Id"],
   optionsSuccessStatus: 204,
 };
 
@@ -141,9 +154,24 @@ app.use(cors(corsOptions));
 // Preflight
 app.options(/.*/, cors(corsOptions));
 
+// ── Observability middleware (before all routes, including webhooks) ──
+// Request ID must be first so every log line / response includes it.
+app.use(requestIdMiddleware);
 
-
-
+// Structured request logging via pino-http.
+// Skip noisy health-check endpoints to keep logs clean.
+app.use(
+  pinoHttp({
+    logger,
+    genReqId: (req: any) => req.id, // reuse requestId middleware value
+    autoLogging: {
+      ignore: (req: any) => {
+        const url = req.url || "";
+        return url === "/api/health" || url === "/" || url === "/api";
+      },
+    },
+  })
+);
 
 // Stripe/Billing webhooks MUST run before JSON body parsing so Stripe
 // webhook signature verification can use the raw request body.
@@ -258,6 +286,17 @@ app.use("/api/plans", plansRoutes);
 app.use("/api/stats", statsRoutes);
 // Lightweight telemetry events
 app.use("/api/telemetry", telemetryRoutes);
+
+// =============================================================================
+// HORIZON / ADMIN MONITORING ROUTES — all admin-only
+// =============================================================================
+app.use("/api/horizon", requireAdmin, horizonApiRoutes);
+app.use("/api/horizon/health", requireAdmin, platformHealthRoutes);
+app.use("/api/horizon/diagnostics", requireAdmin, diagnosticsRoutes);
+app.use("/api/horizon/alerts", requireAdmin, alertRoutes);
+app.use("/api/horizon/skills", requireAdmin, skillsIntegrationRoutes);
+app.use("/api/horizon/support/actions", requireAdmin, supportActionsRoutes);
+app.use("/api/horizon/support/tickets", requireAdmin, supportTicketsRoutes);
 
 // Protected config health (helps diagnose env drift across Render services)
 app.get("/api/health/config", requireAuth, (req, res) => {
@@ -1153,17 +1192,61 @@ app.use((req, res) => {
   res.status(404).json({ error: "Not found", path: req.originalUrl });
 });
 
+// =============================================================================
+// GLOBAL ERROR HANDLER — must be registered after all routes
+// =============================================================================
+app.use(globalErrorHandler);
 
+// =============================================================================
+// SERVER STARTUP + GRACEFUL SHUTDOWN
+// =============================================================================
 
-app.listen(PORT, () => {
-  console.log(`✅ Server listening on http://localhost:${PORT}`);
-  console.log("[config-health]", {
-    env: String(process.env.NODE_ENV || "development"),
-    tokenGrants: "v3-no-sources",
-    hasLivekitUrl: !!process.env.LIVEKIT_URL,
-    hasLivekitApiKey: !!process.env.LIVEKIT_API_KEY,
-    hasLivekitApiSecret: !!process.env.LIVEKIT_API_SECRET,
-    hasJwtSecret: !!process.env.JWT_SECRET,
-    hasRoomAccessTokenSecret: !!process.env.ROOM_ACCESS_TOKEN_SECRET,
-  });
+const server = app.listen(PORT, () => {
+  logger.info(
+    {
+      port: PORT,
+      env: String(process.env.NODE_ENV || "development"),
+      tokenGrants: "v3-no-sources",
+      hasLivekitUrl: !!process.env.LIVEKIT_URL,
+      hasLivekitApiKey: !!process.env.LIVEKIT_API_KEY,
+      hasLivekitApiSecret: !!process.env.LIVEKIT_API_SECRET,
+      hasJwtSecret: !!process.env.JWT_SECRET,
+      hasRoomAccessTokenSecret: !!process.env.ROOM_ACCESS_TOKEN_SECRET,
+    },
+    `Server listening on http://localhost:${PORT}`
+  );
 });
+
+// Attach Horizon WebSocket (authenticated admin-only WS)
+attachHorizonWs(server);
+
+// =============================================================================
+// PROCESS-LEVEL HANDLERS
+// =============================================================================
+
+process.on("unhandledRejection", (reason: unknown) => {
+  logger.error({ err: reason }, "Unhandled promise rejection");
+});
+
+process.on("uncaughtException", (err: Error) => {
+  logger.fatal({ err }, "Uncaught exception — exiting");
+  // Flush logs then exit.  pino is sync-by-default to stdout, so a short
+  // timeout is sufficient to let any async transport finish.
+  setTimeout(() => process.exit(1), 500);
+});
+
+function gracefulShutdown(signal: string) {
+  logger.info({ signal }, "Received shutdown signal — closing server");
+  server.close(() => {
+    logger.info("HTTP server closed");
+    process.exit(0);
+  });
+  // Force exit if server hasn't closed in 10 s
+  setTimeout(() => {
+    logger.warn("Forcing exit after shutdown timeout");
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

@@ -27,6 +27,7 @@ import MyContentDisabled from "./pages/MyContentDisabled";
 import EditorDisabled from "./pages/EditorDisabled";
 import AdminUsage from "./pages/AdminUsage";
 import AdminDashboard from "./pages/AdminDashboard";
+import SupportDashboard from "./pages/SupportDashboard";
 
 // ── Editing sub-lane (creator-only) ──────────────────────────────────
 import AssetLibrary from "./features/editing/AssetLibrary";
@@ -82,6 +83,7 @@ export function creatorRoutes(flags: CreatorRouteFlags) {
       {/* Admin */}
       <Route path="/admin/usage" element={<AdminUsage />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
+      <Route path="/admin/support" element={<SupportDashboard />} />
 
       {/* Streaming flow */}
       <Route path="/join" element={<Join />} />
