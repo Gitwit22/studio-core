@@ -176,9 +176,6 @@ app.use(
 // Stripe/Billing webhooks MUST run before JSON body parsing so Stripe
 // webhook signature verification can use the raw request body.
 app.use("/api/webhooks", webhookRouter);
-// Stripe/Billing webhooks MUST run before JSON body parsing so Stripe
-// webhook signature verification can use the raw request body.
-app.use("/api/webhooks", webhookRouter);
 
 // Body parsers for the rest of the API
 app.use(express.json());

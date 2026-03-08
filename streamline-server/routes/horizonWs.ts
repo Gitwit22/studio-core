@@ -9,7 +9,6 @@
  */
 import type { Server as HttpServer, IncomingMessage } from "node:http";
 import { parse as parseUrl } from "node:url";
-import cookie from "cookie-parser";
 import { WebSocketServer, WebSocket } from "ws";
 import { verifyToken } from "../lib/verifyToken";
 import { isAdmin } from "../middleware/adminAuth";

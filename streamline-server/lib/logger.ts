@@ -16,17 +16,8 @@ export const logger = pino({
     paths: [
       "req.headers.authorization",
       "req.headers.cookie",
-      "req.headers[\"x-room-access-token\"]",
+      'req.headers["x-room-access-token"]',
     ],
     censor: "[REDACTED]",
   },
-  ...(isProduction
-    ? {}
-    : {
-        // Pretty-print in local development for readability.
-        transport: {
-          target: "pino/file",
-          options: { destination: 1 }, // stdout
-        },
-      }),
 });
