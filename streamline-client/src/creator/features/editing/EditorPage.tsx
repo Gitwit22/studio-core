@@ -205,8 +205,8 @@ export default function EditorPage() {
           // Restore saved track state if available
           const savedTracks = (proj as any)?.timeline?.tracks;
           if (Array.isArray(savedTracks) && savedTracks.length > 0) {
-            const restoredTracks: Track[] = savedTracks.map((t: any) => ({
-              id: String(t?.id || `track_${Date.now()}`),
+            const restoredTracks: Track[] = savedTracks.map((t: any, idx: number) => ({
+              id: String(t?.id || `track_${idx}`),
               name: String(t?.name || 'Track'),
               type: t?.type === 'audio' ? 'audio' as const : 'video' as const,
               muted: !!t?.muted,

@@ -851,10 +851,10 @@ router.put("/projects/:id/timeline", async (req: Request, res: Response) => {
 
     const sanitized = clips
       .map((c: any) => {
-        const startTime = Math.max(0, Number(c?.startTime || 0));
-        const duration = Math.max(0, Number(c?.duration || 0));
-        const inPoint = Math.max(0, Number(c?.inPoint || 0));
-        const outPoint = Math.max(inPoint, Number(c?.outPoint || 0));
+        const startTime = Math.max(0, Number(c?.startTime ?? 0));
+        const duration = Math.max(0, Number(c?.duration ?? 0));
+        const inPoint = Math.max(0, Number(c?.inPoint ?? 0));
+        const outPoint = Math.max(inPoint, Number(c?.outPoint ?? 0));
         return {
           id: String(c?.id || ""),
           assetId: String(c?.assetId || ""),
