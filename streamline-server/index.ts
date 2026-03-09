@@ -69,6 +69,7 @@ import skillsIntegrationRoutes from "./routes/skillsIntegration";
 import supportActionsRoutes from "./routes/supportActions";
 import supportTicketsRoutes from "./routes/supportTickets";
 import { attachHorizonWs } from "./routes/horizonWs";
+import horizonRoomHooks from "./routes/horizon/roomHooks";
 
 import { uploadVideo } from "./lib/storageClient";
 
@@ -257,6 +258,8 @@ app.use("/api/rooms", roomsPolicyRoutes);
 app.use("/api/rooms", roomControlsRoutes);
 // Per-session persistent chat (roomAccessToken scoped)
 app.use("/api/rooms", roomChatRoutes);
+// Horizon ↔ room hooks (chat-events, voice-stream, agent chat response)
+app.use("/api/rooms", horizonRoomHooks);
 // Persistent room layout config (controls viewer layout; recordings inherit)
 app.use("/api/rooms", roomsLayoutRoutes);
 // Latest recording state + reconcile helpers

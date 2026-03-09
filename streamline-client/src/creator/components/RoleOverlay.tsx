@@ -768,6 +768,66 @@ function ParticipantPanel({
   );
 }
 
+/* ── localStorage cache helpers for chat persistence ────────────────── */
+const CHAT_CACHE_PREFIX = "sl_chat_";
+const CHAT_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours — matches server session TTL
+
+type ChatMsg = {
+  id: string;
+  text: string;
+  createdAtMs: number | null;
+  sender?: { name?: string | null; role?: string | null };
+};
+
+function chatCacheKey(roomId: string): string {
+  return `${CHAT_CACHE_PREFIX}${roomId}`;
+}
+
+function readChatCache(roomId: string): { sessionId: string; messages: ChatMsg[] } | null {
+  try {
+    const raw = localStorage.getItem(chatCacheKey(roomId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Expire stale caches
+    if (
+      typeof parsed?.ts === "number" &&
+      Date.now() - parsed.ts > CHAT_CACHE_MAX_AGE_MS
+    ) {
+      localStorage.removeItem(chatCacheKey(roomId));
+      return null;
+    }
+    if (!parsed?.sessionId || !Array.isArray(parsed?.messages)) return null;
+    return { sessionId: parsed.sessionId, messages: parsed.messages };
+  } catch {
+    return null;
+  }
+}
+
+function writeChatCache(
+  roomId: string,
+  sessionId: string,
+  messages: ChatMsg[],
+): void {
+  try {
+    // Only keep the last 200 messages in cache to keep storage bounded
+    const capped = messages.slice(-200);
+    localStorage.setItem(
+      chatCacheKey(roomId),
+      JSON.stringify({ sessionId, messages: capped, ts: Date.now() }),
+    );
+  } catch {
+    // localStorage full or unavailable — silently ignore
+  }
+}
+
+function clearChatCache(roomId: string): void {
+  try {
+    localStorage.removeItem(chatCacheKey(roomId));
+  } catch {
+    // ignore
+  }
+}
+
 function ChatPanel({
   roomId,
   roomAccessToken,
@@ -779,16 +839,27 @@ function ChatPanel({
   displayName?: string;
   allowEndSession: boolean;
 }) {
-  const [sessionId, setSessionId] = React.useState<string | null>(null);
+  // Hydrate from localStorage cache immediately (before any async fetch)
+  const cached = React.useMemo(() => readChatCache(roomId), [roomId]);
+
+  const [sessionId, setSessionId] = React.useState<string | null>(cached?.sessionId ?? null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [messages, setMessages] = React.useState<
-    Array<{ id: string; text: string; createdAtMs: number | null; sender?: { name?: string | null; role?: string | null } }>
-  >([]);
+  const [messages, setMessages] = React.useState<ChatMsg[]>(cached?.messages ?? []);
   const [draft, setDraft] = React.useState("");
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
   const eventSourceRef = React.useRef<EventSource | null>(null);
-  const seenIdsRef = React.useRef<Set<string>>(new Set());
+  const seenIdsRef = React.useRef<Set<string>>(
+    new Set(cached?.messages?.map((m) => m.id) ?? []),
+  );
+  const reconnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Persist messages to localStorage whenever they change
+  React.useEffect(() => {
+    if (sessionId && messages.length > 0) {
+      writeChatCache(roomId, sessionId, messages);
+    }
+  }, [roomId, sessionId, messages]);
 
   const loadSessionAndHistory = React.useCallback(async () => {
     if (!roomId || !roomAccessToken) return;
@@ -809,8 +880,11 @@ function ChatPanel({
       const sessionData = sessionText ? JSON.parse(sessionText) : {};
       if (!sessionRes.ok) {
         setError(sessionData?.error || "Failed to load chat session");
-        setSessionId(null);
-        setMessages([]);
+        // Keep cached messages visible on error instead of clearing
+        if (!cached) {
+          setSessionId(null);
+          setMessages([]);
+        }
         return;
       }
       const sid = typeof sessionData?.sessionId === "string" ? sessionData.sessionId : null;
@@ -835,12 +909,12 @@ function ChatPanel({
       const msgData = msgText ? JSON.parse(msgText) : {};
       if (!msgRes.ok) {
         setError(msgData?.error || "Failed to load chat messages");
-        setMessages([]);
+        // Keep cached messages visible on error
         return;
       }
 
       const rows = Array.isArray(msgData?.messages) ? msgData.messages : [];
-      const next = rows
+      const next: ChatMsg[] = rows
         .map((m: any) => ({
           id: String(m?.id || ""),
           text: typeof m?.text === "string" ? m.text : "",
@@ -854,8 +928,11 @@ function ChatPanel({
       seenIdsRef.current = seen;
     } catch (e: any) {
       setError(e?.message || "Failed to load chat");
-      setSessionId(null);
-      setMessages([]);
+      // Don't wipe session/messages on network error — keep cached data visible
+      if (!cached && messages.length === 0) {
+        setSessionId(null);
+        setMessages([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -867,6 +944,10 @@ function ChatPanel({
         if (eventSourceRef.current) {
           eventSourceRef.current.close();
           eventSourceRef.current = null;
+        }
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
         }
 
         // EventSource can't send headers, so we pass the room access token via query param `t`.
@@ -882,7 +963,7 @@ function ChatPanel({
             if (seenIdsRef.current.has(id)) return;
             seenIdsRef.current.add(id);
 
-            const nextMsg = {
+            const nextMsg: ChatMsg = {
               id,
               text: typeof payload?.text === "string" ? payload.text : "",
               createdAtMs: typeof payload?.createdAtMs === "number" ? payload.createdAtMs : null,
@@ -893,6 +974,20 @@ function ChatPanel({
           } catch {
             // ignore
           }
+        });
+
+        // Auto-reconnect on SSE error/close with exponential backoff
+        es.addEventListener("error", () => {
+          try {
+            es.close();
+          } catch {
+            // ignore
+          }
+          eventSourceRef.current = null;
+          // Reconnect after 3 seconds
+          reconnectTimerRef.current = setTimeout(() => {
+            connectStream(sid);
+          }, 3_000);
         });
       } catch {
         // ignore
@@ -962,6 +1057,7 @@ function ChatPanel({
 
       setSessionId(null);
       setMessages([]);
+      clearChatCache(roomId);
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
@@ -973,10 +1069,15 @@ function ChatPanel({
     }
   }, [allowEndSession, roomId, roomAccessToken]);
 
+  // Load session + history on mount / token change
   React.useEffect(() => {
     void loadSessionAndHistory();
     return () => {
       try {
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
         if (eventSourceRef.current) {
           eventSourceRef.current.close();
           eventSourceRef.current = null;
@@ -987,11 +1088,16 @@ function ChatPanel({
     };
   }, [loadSessionAndHistory]);
 
+  // Connect SSE stream when session is active
   React.useEffect(() => {
     if (!sessionId) return;
     connectStream(sessionId);
     return () => {
       try {
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
         if (eventSourceRef.current) {
           eventSourceRef.current.close();
           eventSourceRef.current = null;
@@ -1001,6 +1107,18 @@ function ChatPanel({
       }
     };
   }, [sessionId, connectStream]);
+
+  // Reconnect SSE + refresh messages when tab becomes visible again
+  React.useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && sessionId) {
+        // Refresh from server to pick up any messages missed while hidden
+        void loadSessionAndHistory();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [sessionId, loadSessionAndHistory]);
 
   React.useEffect(() => {
     try {
