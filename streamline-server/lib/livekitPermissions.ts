@@ -5,6 +5,9 @@
 // We intentionally emit *string* sources here so UI code (and LiveKit Components)
 // can reliably compare `canPublishSources` against `Track.Source.*`.
 
+import type { PresenceMode } from "./presenceMode";
+import { getPresenceModeDefaults } from "./presenceMode";
+
 export type LiveKitTrackSource =
   | "camera"
   | "microphone"
@@ -93,5 +96,25 @@ export function roleToParticipantPermission(
     canPublish,
     canPublishData,
     canPublishSources,
+  };
+}
+
+/**
+ * Apply presence-mode restrictions on top of the base role grant.
+ * Silent and invisible modes disable publish and data (chat) capabilities
+ * while preserving subscribe so the participant can still monitor the room.
+ */
+export function applyPresenceModeToGrant(
+  base: LiveKitGrant,
+  mode: PresenceMode,
+): LiveKitGrant {
+  if (mode === "normal") return base;
+
+  const defaults = getPresenceModeDefaults(mode);
+  return {
+    canSubscribe: base.canSubscribe, // always keep subscribe for monitoring
+    canPublish: defaults.canPublishAudio || defaults.canPublishVideo,
+    canPublishData: defaults.canSendChat,
+    canPublishSources: [],
   };
 }

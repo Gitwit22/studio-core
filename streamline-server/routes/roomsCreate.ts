@@ -5,13 +5,14 @@ import { ensureRoomDoc } from "../services/rooms";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { normalizeRoomLayout, type RoomLayout } from "../lib/roomLayout";
+import { isValidPresenceMode, type PresenceMode } from "../lib/presenceMode";
 
 const router = Router();
 
 /**
  * POST /api/rooms/create
  * Creates a new Firestore room document and returns its id.
- * Body: { livekitRoomName?: string, roomType?: "rtc" | "hls" }
+ * Body: { livekitRoomName?: string, roomType?: "rtc" | "hls", presenceMode?: PresenceMode }
  *
  * roomId is generated from Firestore (roomsRef.doc().id).
  */
@@ -20,6 +21,12 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
   if (!uid) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
 
   const roomType = (req.body?.roomType || "rtc") as "rtc" | "hls";
+
+  // Presence mode for the room creator (normal/silent/invisible)
+  const rawPresenceMode = req.body?.presenceMode;
+  const presenceMode: PresenceMode = isValidPresenceMode(rawPresenceMode)
+    ? rawPresenceMode
+    : "normal";
 
   // Optional room access policy (secure defaults are applied in ensureRoomDoc).
   const visibilityRaw = String(req.body?.visibility || "").trim().toLowerCase();
@@ -75,6 +82,7 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
       roomId,
       livekitRoomName: data.livekitRoomName || livekitRoomName,
       roomType: data.roomType || roomType,
+      presenceMode,
     });
   } catch (err) {
     console.error("/api/rooms/create ensureRoomDoc failed", err);

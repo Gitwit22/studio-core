@@ -9,7 +9,8 @@ import { verifyRoomAccessToken } from "../middleware/roomAccessToken";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { signGuestSession } from "../middleware/guestSession";
-import { roleToParticipantPermission } from "../lib/livekitPermissions";
+import { roleToParticipantPermission, applyPresenceModeToGrant } from "../lib/livekitPermissions";
+import { isValidPresenceMode, buildPresenceMetadata, type PresenceMode } from "../lib/presenceMode";
 
 export function extractInviteToken(req: any): string | null {
   const hdr = (req?.headers as any) || {};
@@ -247,10 +248,15 @@ function getRoomAccessSecret() {
   return raw || "dev-secret";
 }
 
-function roleGrant(role: "guest" | "participant" | "host") {
+function roleGrant(role: "guest" | "participant" | "host", presenceMode?: PresenceMode) {
   // Use canonical roleToParticipantPermission() for consistency
   const participantPerm = roleToParticipantPermission(role);
   const isHost = role === "host";
+
+  // Apply presence-mode restrictions when joining as silent/invisible.
+  const effectivePerm = presenceMode
+    ? applyPresenceModeToGrant(participantPerm, presenceMode)
+    : participantPerm;
 
   // NOTE: canPublishSources is intentionally omitted from the LiveKit grant.
   // livekit-server-sdk v2.x expects TrackSource enum (protobuf int) values, not
@@ -259,9 +265,9 @@ function roleGrant(role: "guest" | "participant" | "host") {
   // source control is enforced at the application layer via our own permissions.
   return {
     roomJoin: true,
-    canSubscribe: participantPerm.canSubscribe,
-    canPublish: participantPerm.canPublish,
-    canPublishData: participantPerm.canPublishData,
+    canSubscribe: effectivePerm.canSubscribe,
+    canPublish: effectivePerm.canPublish,
+    canPublishData: effectivePerm.canPublishData,
     roomAdmin: isHost,
   } as const;
 }
@@ -946,6 +952,15 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     const displayName = sanitizeDisplayName(String(req.body?.displayName || req.body?.identity || "Guest")).trim() || "Guest";
 
+    // Validate and normalize presence mode (default to "normal")
+    // Authenticated room owners (and future moderator/cohost roles) may use
+    // non-normal presence modes.  Guests cannot.
+    const rawPresenceMode = req.body?.presenceMode;
+    const presenceMode: PresenceMode =
+      user && isOwner && isValidPresenceMode(rawPresenceMode)
+        ? rawPresenceMode
+        : "normal";
+
     // Determine LiveKit role based on authentication
     // - Authenticated users: host (if owner) or participant
     // - Guest sessions: "guest" (RTC participant with mic/cam)
@@ -993,8 +1008,18 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       name: displayName,
     });
 
-    const grant = roleGrant(lkRole);
+    const grant = roleGrant(lkRole, presenceMode);
     at.addGrant({ room: livekitRoomName, ...grant } as any);
+
+    // Attach presence metadata so the frontend can filter the roster
+    if (presenceMode !== "normal") {
+      at.metadata = JSON.stringify(
+        buildPresenceMetadata({
+          role: lkRole,
+          presenceMode,
+        }),
+      );
+    }
 
     const token = await at.toJwt();
 
@@ -1046,6 +1071,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       role: effectiveRoleKey,
       permissions: basePerms,
       identity,
+      presenceMode,
     } as const;
 
     const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), { expiresIn: "12h" });
@@ -1069,6 +1095,7 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       isViewer: false, // guest/participant/host all use /room route (not HLS viewer)
       role: lkRole,
       effectiveRoleKey,
+      presenceMode,
     });
     } finally {
       if (capLockOwner) {
