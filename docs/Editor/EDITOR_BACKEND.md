@@ -1,6 +1,6 @@
 # Editor Backend + API Wiring (Condensed)
 
-Date: 2026-02-03 (updated 2026-03-08)
+Date: 2026-02-03 (updated 2026-03-10)
 
 This doc captures the **actual API surface** that the editor and recording/download flows rely on.
 
@@ -17,6 +17,7 @@ Projects + timeline endpoints:
 - `GET /api/editing/projects/:id` ✅
 - `PATCH /api/editing/projects/:id` ✅
 - `DELETE /api/editing/projects/:id` ✅
+- `POST /api/editing/projects/:id/duplicate` ✅
 - `PUT /api/editing/projects/:id/timeline` ✅
 
 Export endpoints:
@@ -27,7 +28,7 @@ Export endpoints:
 Server router: `streamline-server/routes/editing.ts`
 
 All endpoints above are implemented, including:
-- Full project CRUD (list, create, get, update, delete)
+- Full project CRUD (list, create, get, update, delete, duplicate)
 - Timeline save/load with track state persistence
 - Recording library helpers (list + recording details)
 - `POST /api/editing/render` (recording-centric render/upload path)
@@ -59,7 +60,7 @@ Firestore: `recordings/{recordingId}`
 
 ### Editing projects
 Firestore: `editing_projects/{projectId}`
-- Full CRUD + timeline persistence endpoints implemented
+- Full CRUD + timeline persistence + duplicate endpoints implemented
 - Timeline data includes clips (with trackId) and track state (mute/lock/solo/link)
 
 ---

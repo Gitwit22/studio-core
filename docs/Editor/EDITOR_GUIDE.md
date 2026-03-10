@@ -1,16 +1,18 @@
 # Editor Guide (User + UI Flow)
 
-Date: 2026-02-03
+Date: 2026-02-03 (updated 2026-03-10)
 
 ## What the editor is
 
-Streamline’s editor is a browser-based, non-destructive timeline editor:
+Streamline's editor is a browser-based, non-destructive timeline editor:
 - clips on tracks
 - playhead-based operations (split/trim/delete)
+- draggable trim handles and drag-to-move clips
+- undo/redo (Ctrl+Z / Ctrl+Shift+Z)
 - zoom + click-to-seek
-- export UI (backend export wiring is still in progress)
+- export UI (backend export job creation works; render pipeline in progress)
 
-Primary client file: `streamline-client/src/editing/EditorPage.tsx`
+Primary client file: `streamline-client/src/creator/features/editing/EditorPage.tsx`
 
 ---
 
@@ -26,7 +28,7 @@ Primary client file: `streamline-client/src/editing/EditorPage.tsx`
 - Download UX includes progress reporting (percent, speed, time remaining).
 
 ### 3) Exit page → Go to editor
-- “Go to editor” navigates to an editor route with `recordingId` in query params.
+- "Go to editor" navigates to an editor route with `recordingId` in query params.
 - The editor loads the recording and constructs initial timeline clips.
 
 ---
@@ -34,7 +36,7 @@ Primary client file: `streamline-client/src/editing/EditorPage.tsx`
 ## Editor UI map (quick)
 
 - **Top bar**: project name, save, export, back to projects
-- **Left sidebar**: edit operations (split/trim/delete) + clip info
+- **Left sidebar**: undo/redo, edit operations (split/trim/delete) + clip info + track management
 - **Center**: video preview + transport controls
 - **Bottom**: timeline ruler + clips + playhead + zoom
 - **Right sidebar**: export settings (resolution/format)
@@ -48,21 +50,26 @@ Primary client file: `streamline-client/src/editing/EditorPage.tsx`
 - `Delete` / `Backspace`: Delete selected clip
 - `←` / `→`: Seek 1s
 - `Shift+←` / `Shift+→`: Seek 5s
+- `Ctrl+Z` / `Cmd+Z`: Undo
+- `Ctrl+Shift+Z` / `Cmd+Shift+Z`: Redo
 
 ---
 
-## What’s solid vs what’s still WIP
+## What's solid vs what's still WIP
 
 Solid in-session behavior:
 - timeline ruler + markers + grid
 - clip rendering + selection
 - playhead rendering + playback sync
 - split/trim/delete operations update UI state
+- draggable trim handles (left/right edge drag)
+- drag-to-move clips on timeline
+- undo/redo for destructive operations
+- save timeline + reload (server endpoints fully implemented)
+- project duplicate from dashboard
 
 Still WIP / not end-to-end:
-- “Save timeline” persistence + reload (server endpoints not fully implemented)
-- project-based export jobs (client expects endpoints that don’t exist yet)
-- draggable trim handles / drag-to-reorder (handles are currently visual-only)
+- export render pipeline (job creation works, actual video processing not yet connected)
 
 For the authoritative current status and remaining work, see:
 - `docs/Editor/EDITING_TIMELINE_AUDIT_STATUS.md`
@@ -75,5 +82,7 @@ For the authoritative current status and remaining work, see:
 2. Create a short recording.
 3. Open editor via the exit/summary flow.
 4. Verify: video loads, timeline shows clips, playhead moves, split works.
-
-If Save/Export fails, that’s expected until backend wiring is completed.
+5. Drag trim handles to resize clips. Drag clip bodies to reposition.
+6. Use Ctrl+Z to undo, Ctrl+Shift+Z to redo.
+7. Click Save → see "Saved" confirmation.
+8. Reload page → timeline loads exactly as saved.

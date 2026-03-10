@@ -14,7 +14,9 @@ import {
   VolumeX,
   Lock,
   Unlock,
-  Link2
+  Link2,
+  Undo2,
+  Redo2
 } from "lucide-react";
 import { editingApi } from "../../../lib/editingApi";
 import { apiFetchAuth } from "../../../lib/api";
@@ -57,6 +59,17 @@ const PIXELS_PER_SECOND = 12;
 const TIMELINE_LEFT_GUTTER_PX = 80;
 
 // ============================================================================
+// UNDO / REDO TYPES
+// ============================================================================
+
+type HistorySnapshot = {
+  clips: TimelineClip[];
+  tracks: Track[];
+};
+
+const MAX_UNDO_HISTORY = 50;
+
+// ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
@@ -85,10 +98,58 @@ export default function EditorPage() {
   const [exportResolution, setExportResolution] = useState("720p");
   const [exportFormat, setExportFormat] = useState("mp4");
 
+  // Undo/redo state
+  const undoStack = useRef<HistorySnapshot[]>([]);
+  const redoStack = useRef<HistorySnapshot[]>([]);
+
+  // Drag state for trim handles and clip reorder
+  const [dragState, setDragState] = useState<{
+    type: 'trim-left' | 'trim-right' | 'move';
+    clipId: string;
+    startX: number;
+    originalClip: TimelineClip;
+  } | null>(null);
+
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const playAnimationRef = useRef<number | null>(null);
+
+  // ============================================================================
+  // UNDO / REDO HELPERS
+  // ============================================================================
+
+  const pushUndoSnapshot = useCallback(() => {
+    undoStack.current = [
+      ...undoStack.current.slice(-(MAX_UNDO_HISTORY - 1)),
+      { clips: clips.map(c => ({ ...c })), tracks: tracks.map(t => ({ ...t })) },
+    ];
+    redoStack.current = [];
+  }, [clips, tracks]);
+
+  const handleUndo = useCallback(() => {
+    if (undoStack.current.length === 0) return;
+    const prev = undoStack.current[undoStack.current.length - 1];
+    undoStack.current = undoStack.current.slice(0, -1);
+    redoStack.current = [
+      ...redoStack.current,
+      { clips: clips.map(c => ({ ...c })), tracks: tracks.map(t => ({ ...t })) },
+    ];
+    setClips(prev.clips);
+    setTracks(prev.tracks);
+  }, [clips, tracks]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStack.current.length === 0) return;
+    const next = redoStack.current[redoStack.current.length - 1];
+    redoStack.current = redoStack.current.slice(0, -1);
+    undoStack.current = [
+      ...undoStack.current,
+      { clips: clips.map(c => ({ ...c })), tracks: tracks.map(t => ({ ...t })) },
+    ];
+    setClips(next.clips);
+    setTracks(next.tracks);
+  }, [clips, tracks]);
 
   // ============================================================================
   // COMPUTED VALUES
@@ -448,6 +509,19 @@ export default function EditorPage() {
       // Don't trigger if typing in an input
       if (e.target instanceof HTMLInputElement) return;
 
+      // Undo: Ctrl+Z / Cmd+Z
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+      // Redo: Ctrl+Shift+Z / Cmd+Shift+Z  or  Ctrl+Y / Cmd+Y
+      if ((e.ctrlKey || e.metaKey) && ((e.key === "z" && e.shiftKey) || e.key === "y")) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
       switch (e.key) {
         case " ":
           e.preventDefault();
@@ -476,7 +550,7 @@ export default function EditorPage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedClipId, totalDuration]);
+  }, [selectedClipId, totalDuration, handleUndo, handleRedo]);
 
   // ============================================================================
   // TRACK MANAGEMENT
@@ -611,6 +685,8 @@ export default function EditorPage() {
       return; // Track locked, cannot edit
     }
 
+    pushUndoSnapshot();
+
     const splitPoint = playheadTime - clipAtPlayhead.startTime;
 
     const clip1: TimelineClip = {
@@ -650,7 +726,7 @@ export default function EditorPage() {
     }
 
     setClips(newClips);
-  }, [clips, playheadTime, tracks]);
+  }, [clips, playheadTime, tracks, pushUndoSnapshot]);
 
   const handleTrim = useCallback(() => {
     if (!selectedClipId) return;
@@ -665,6 +741,7 @@ export default function EditorPage() {
 
     // Trim from playhead to end of clip
     if (playheadTime > clip.startTime && playheadTime < clip.startTime + clip.duration) {
+      pushUndoSnapshot();
       const newDuration = playheadTime - clip.startTime;
       let newClips = clips.map((c) =>
         c.id === selectedClipId
@@ -686,7 +763,7 @@ export default function EditorPage() {
 
       setClips(newClips);
     }
-  }, [clips, selectedClipId, playheadTime, tracks]);
+  }, [clips, selectedClipId, playheadTime, tracks, pushUndoSnapshot]);
 
   const handleDelete = useCallback(() => {
     if (!selectedClipId) return;
@@ -698,6 +775,8 @@ export default function EditorPage() {
     if (!clipTrack || clipTrack.locked) {
       return; // Track locked, cannot edit
     }
+
+    pushUndoSnapshot();
 
     let clipsToRemove = [selectedClipId];
 
@@ -711,7 +790,7 @@ export default function EditorPage() {
 
     setClips(clips.filter((c) => !clipsToRemove.includes(c.id)));
     setSelectedClipId(null);
-  }, [clips, selectedClipId, tracks]);
+  }, [clips, selectedClipId, tracks, pushUndoSnapshot]);
 
   const handleSave = async () => {
     setSaveStatus('saving');
@@ -775,6 +854,75 @@ export default function EditorPage() {
       alert("Could not start export. Please try saving again.");
     }
   };
+
+  // ============================================================================
+  // DRAG HANDLERS (TRIM + MOVE)
+  // ============================================================================
+
+  const handleDragStart = useCallback((
+    e: React.MouseEvent,
+    type: 'trim-left' | 'trim-right' | 'move',
+    clip: TimelineClip,
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const clipTrack = tracks.find(t => t.id === clip.trackId);
+    if (clipTrack?.locked) return;
+    pushUndoSnapshot();
+    setDragState({ type, clipId: clip.id, startX: e.clientX, originalClip: { ...clip } });
+  }, [tracks, pushUndoSnapshot]);
+
+  useEffect(() => {
+    if (!dragState) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const dx = e.clientX - dragState.startX;
+      const timeDelta = dx / (PIXELS_PER_SECOND * zoom);
+      const orig = dragState.originalClip;
+
+      setClips(prev => prev.map(c => {
+        if (c.id !== dragState.clipId) return c;
+
+        if (dragState.type === 'trim-left') {
+          const newStart = Math.max(0, orig.startTime + timeDelta);
+          const maxShift = orig.duration - 0.1; // keep min 0.1s duration
+          const clampedShift = Math.min(newStart - orig.startTime, maxShift);
+          return {
+            ...c,
+            startTime: orig.startTime + clampedShift,
+            duration: orig.duration - clampedShift,
+            inPoint: orig.inPoint + clampedShift,
+          };
+        }
+
+        if (dragState.type === 'trim-right') {
+          const newDuration = Math.max(0.1, orig.duration + timeDelta);
+          return {
+            ...c,
+            duration: newDuration,
+            outPoint: orig.inPoint + newDuration,
+          };
+        }
+
+        // move
+        return {
+          ...c,
+          startTime: Math.max(0, orig.startTime + timeDelta),
+        };
+      }));
+    };
+
+    const handleMouseUp = () => {
+      setDragState(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragState, zoom]);
 
   // ============================================================================
   // TIMELINE INTERACTION
@@ -941,6 +1089,25 @@ export default function EditorPage() {
             Tools
           </h3>
           <div className="space-y-2">
+            {/* Undo / Redo */}
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={handleUndo}
+                disabled={undoStack.current.length === 0}
+                className="flex-1 px-3 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center justify-center gap-1"
+                title="Undo (Ctrl+Z)"
+              >
+                <Undo2 size={14} /> Undo
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={redoStack.current.length === 0}
+                className="flex-1 px-3 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition flex items-center justify-center gap-1"
+                title="Redo (Ctrl+Shift+Z)"
+              >
+                <Redo2 size={14} /> Redo
+              </button>
+            </div>
             <button
               onClick={handleSplit}
               className="w-full px-3 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 rounded-lg transition flex items-center gap-2"
@@ -1392,11 +1559,19 @@ export default function EditorPage() {
                                   e.stopPropagation();
                                   if (!track.locked) setSelectedClipId(clip.id);
                                 }}
-                                className={`absolute rounded-lg cursor-pointer transition-all group ${
+                                onMouseDown={(e) => {
+                                  // Only initiate move from the body area (not trim handles)
+                                  if ((e.target as HTMLElement).dataset.trimHandle) return;
+                                  if (e.button !== 0) return;
+                                  handleDragStart(e, 'move', clip);
+                                }}
+                                className={`absolute rounded-lg cursor-grab transition-all group ${
+                                  dragState?.clipId === clip.id ? 'cursor-grabbing opacity-80 z-20' : ''
+                                } ${
                                   selectedClipId === clip.id
                                     ? "bg-gradient-to-b from-indigo-400 to-indigo-600 ring-2 ring-indigo-300 ring-offset-2 ring-offset-zinc-950 shadow-lg shadow-indigo-500/50"
                                     : "bg-gradient-to-b from-indigo-500/90 to-indigo-700/90 hover:from-indigo-400/90 hover:to-indigo-600/90 shadow-md shadow-indigo-900/50"
-                                } ${track.locked ? 'opacity-60' : ''}`}
+                                } ${track.locked ? 'opacity-60 cursor-not-allowed' : ''}`}
                                 style={{
                                   top: `${trackY + 12}px`,
                                   height: `${TRACK_HEIGHT - 24}px`,
@@ -1415,9 +1590,15 @@ export default function EditorPage() {
                                     </span>
                                   </div>
                                 </div>
-                                {/* Trim Handles */}
-                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-r from-yellow-400 to-yellow-400/0 cursor-ew-resize opacity-0 hover:opacity-100 group-hover:opacity-50 transition" />
-                                <div className="absolute right-0 top-0 bottom-0 w-1 bg-gradient-to-l from-yellow-400 to-yellow-400/0 cursor-ew-resize opacity-0 hover:opacity-100 group-hover:opacity-50 transition" />
+                                {/* Trim Handles - interactive */}
+                                <div
+                                  className="absolute left-0 top-0 bottom-0 w-2 bg-gradient-to-r from-yellow-400 to-yellow-400/0 cursor-ew-resize opacity-0 hover:opacity-100 group-hover:opacity-50 transition z-10"
+                                  onMouseDown={(e) => handleDragStart(e, 'trim-left', clip)}
+                                />
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-2 bg-gradient-to-l from-yellow-400 to-yellow-400/0 cursor-ew-resize opacity-0 hover:opacity-100 group-hover:opacity-50 transition z-10"
+                                  onMouseDown={(e) => handleDragStart(e, 'trim-right', clip)}
+                                />
                                 {selectedClipId === clip.id && (
                                   <div className="absolute -left-1.5 top-1/2 -translate-y-1/2 w-2 h-2 bg-yellow-300 rounded-full shadow-md" />
                                 )}
@@ -1505,7 +1686,7 @@ export default function EditorPage() {
             <p>Duration: {formatTime(totalDuration)}</p>
             <p>Clips: {clips.length}</p>
             <p className="mt-2 text-zinc-600">
-              Tip: Press Space to play/pause
+              Tip: Ctrl+Z to undo, Space to play
             </p>
           </div>
         </div>

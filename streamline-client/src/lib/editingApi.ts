@@ -414,6 +414,22 @@ export const projectsApi = {
       throw error;
     }
   },
+
+  async duplicate(id: string): Promise<Project> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${id}/duplicate`, {
+        method: 'POST',
+      }, { allowNonOk: true });
+      if (!response.ok) {
+        throw new Error(`Failed to duplicate project: HTTP ${response.status}`);
+      }
+      return handleResponse<Project>(response);
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Duplicate project failed:', error);
+      throw error;
+    }
+  },
 };
 
 // ============================================================================
@@ -505,6 +521,7 @@ export const editingApi = {
   updateProject: (id: string, data: Partial<Project>) => projectsApi.update(id, data),
   saveTimeline: (id: string, clips: TimelineClip[], tracks?: TimelineTrack[]) => projectsApi.saveTimeline(id, clips, tracks),
   deleteProject: (id: string) => projectsApi.delete(id),
+  duplicateProject: (id: string) => projectsApi.duplicate(id),
 
   // Export
   startExport: (projectId: string, settings: ExportSettings) => exportApi.start(projectId, settings),

@@ -818,6 +818,77 @@ router.delete("/projects/:id", async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/editing/projects/:id/duplicate - Duplicate a project
+router.post("/projects/:id/duplicate", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    const { id } = req.params;
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!(await assertSegmentEnabled(res, "projectsEnabled"))) {
+      return;
+    }
+    if (!(await assertSegmentEnabled(res, "editorEnabled"))) {
+      return;
+    }
+
+    const access = await assertEditingAccess(req, res);
+    if (!access) return;
+
+    // Enforce max projects
+    if (access.plan.maxProjects > 0) {
+      const existingSnap = await db
+        .collection("editing_projects")
+        .where("userId", "==", userId)
+        .get();
+      if (existingSnap.size >= access.plan.maxProjects) {
+        return res.status(409).json({
+          error: LIMIT_ERRORS.LIMIT_EXCEEDED,
+          reason: "Max projects limit reached",
+          limit: access.plan.maxProjects,
+        });
+      }
+    }
+
+    const ref = db.collection("editing_projects").doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const data = snap.data() as any;
+    if (data?.userId !== userId) {
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
+    }
+
+    const now = new Date();
+    const duplicated = {
+      userId,
+      name: `${String(data.name || "Untitled").trim()} (Copy)`,
+      assetId: data.assetId || "",
+      createdAt: now,
+      updatedAt: now,
+      duration: data.duration || 0,
+      status: "draft",
+      timeline: data.timeline || { clips: [], tracks: 2 },
+    };
+
+    const newRef = await db.collection("editing_projects").add(duplicated);
+
+    return res.json({
+      id: newRef.id,
+      ...duplicated,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      lastModified: now.toISOString(),
+    });
+  } catch (err: any) {
+    console.error("Duplicate project error:", err);
+    res.status(500).json({ error: "Failed to duplicate project" });
+  }
+});
+
 // PUT /api/editing/projects/:id/timeline - Persist timeline clips
 router.put("/projects/:id/timeline", async (req: Request, res: Response) => {
   try {
