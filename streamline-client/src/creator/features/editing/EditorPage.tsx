@@ -122,7 +122,7 @@ export default function EditorPage() {
   const pushUndoSnapshot = useCallback(() => {
     undoStack.current = [
       ...undoStack.current.slice(-(MAX_UNDO_HISTORY - 1)),
-      { clips: clips.map(c => ({ ...c })), tracks: tracks.map(t => ({ ...t })) },
+      { clips: structuredClone(clips), tracks: structuredClone(tracks) },
     ];
     redoStack.current = [];
   }, [clips, tracks]);
@@ -133,7 +133,7 @@ export default function EditorPage() {
     undoStack.current = undoStack.current.slice(0, -1);
     redoStack.current = [
       ...redoStack.current,
-      { clips: clips.map(c => ({ ...c })), tracks: tracks.map(t => ({ ...t })) },
+      { clips: structuredClone(clips), tracks: structuredClone(tracks) },
     ];
     setClips(prev.clips);
     setTracks(prev.tracks);
@@ -145,7 +145,7 @@ export default function EditorPage() {
     redoStack.current = redoStack.current.slice(0, -1);
     undoStack.current = [
       ...undoStack.current,
-      { clips: clips.map(c => ({ ...c })), tracks: tracks.map(t => ({ ...t })) },
+      { clips: structuredClone(clips), tracks: structuredClone(tracks) },
     ];
     setClips(next.clips);
     setTracks(next.tracks);
@@ -1563,6 +1563,7 @@ export default function EditorPage() {
                                   // Only initiate move from the body area (not trim handles)
                                   if ((e.target as HTMLElement).dataset.trimHandle) return;
                                   if (e.button !== 0) return;
+                                  if (track.locked) return;
                                   handleDragStart(e, 'move', clip);
                                 }}
                                 className={`absolute rounded-lg cursor-grab transition-all group ${
@@ -1592,10 +1593,12 @@ export default function EditorPage() {
                                 </div>
                                 {/* Trim Handles - interactive */}
                                 <div
+                                  data-trim-handle="left"
                                   className="absolute left-0 top-0 bottom-0 w-2 bg-gradient-to-r from-yellow-400 to-yellow-400/0 cursor-ew-resize opacity-0 hover:opacity-100 group-hover:opacity-50 transition z-10"
                                   onMouseDown={(e) => handleDragStart(e, 'trim-left', clip)}
                                 />
                                 <div
+                                  data-trim-handle="right"
                                   className="absolute right-0 top-0 bottom-0 w-2 bg-gradient-to-l from-yellow-400 to-yellow-400/0 cursor-ew-resize opacity-0 hover:opacity-100 group-hover:opacity-50 transition z-10"
                                   onMouseDown={(e) => handleDragStart(e, 'trim-right', clip)}
                                 />

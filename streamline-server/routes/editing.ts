@@ -865,7 +865,7 @@ router.post("/projects/:id/duplicate", async (req: Request, res: Response) => {
     const now = new Date();
     const duplicated = {
       userId,
-      name: `${String(data.name || "Untitled").trim()} (Copy)`,
+      name: `${(data.name || "Untitled").trim()} (Copy)`,
       assetId: data.assetId || "",
       createdAt: now,
       updatedAt: now,
