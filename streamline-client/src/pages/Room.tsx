@@ -1574,6 +1574,17 @@ function RoomPage() {
   );
   const [roomTokenMode, setRoomTokenMode] = useState<"unknown" | "auth" | "guest">("unknown");
   const roomTokenMintInFlightRef = useRef(false);
+
+  // Presence mode: passed from Join page via route state or localStorage
+  const [presenceMode, setPresenceMode] = useState<"normal" | "silent" | "invisible">(() => {
+    const fromState = (location.state as any)?.presenceMode;
+    if (fromState === "silent" || fromState === "invisible") return fromState;
+    try {
+      const stored = localStorage.getItem("sl_presence_mode");
+      if (stored === "silent" || stored === "invisible") return stored;
+    } catch { /* ignore */ }
+    return "normal";
+  });
   const [roomGateStatus, setRoomGateStatus] = useState<"unknown" | "idle" | "live" | "blocked">("unknown");
   const roomGatePollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hostToolsHydratedKeyRef = useRef<string | null>(null);
@@ -2413,6 +2424,10 @@ function RoomPage() {
 
           payload.uid = getOrCreateUid();
           payload.displayName = displayName;
+          // Include presence mode so the backend can restrict grants accordingly.
+          if (presenceMode !== "normal") {
+            payload.presenceMode = presenceMode;
+          }
           // Always forward invite tokens when present.
           // This allows authenticated participants to join invite-scoped/private rooms
           // (server will clamp roles and validate invite-room match).

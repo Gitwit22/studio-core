@@ -151,6 +151,9 @@ export default function Join() {
 
   const [joinMode, setJoinMode] = useState<"new" | "saved">("new");
 
+  // Presence mode: controls how the host joins (normal, silent, invisible)
+  const [hostPresenceMode, setHostPresenceMode] = useState<"normal" | "silent" | "invisible">("normal");
+
   // Platform-level HLS flag (controls enablement of Saved Room join when HLS is disabled)
   // Default to false so HLS-only UI is disabled until account flags load.
   const [platformHlsEnabled, setPlatformHlsEnabled] = useState<boolean>(false);
@@ -543,6 +546,7 @@ export default function Join() {
             livekitRoomName: roomLabel,
             roomType: "rtc",
             savedEmbedId: undefined,
+            presenceMode: hostPresenceMode,
           }),
         }, { allowNonOk: true });
 
@@ -574,9 +578,14 @@ export default function Join() {
         localStorage.setItem("sl_last_room", livekitRoomName);
         localStorage.setItem("sl_last_room_ts", String(Date.now()));
         localStorage.setItem("sl_current_role", "host");
+        if (hostPresenceMode !== "normal") {
+          localStorage.setItem("sl_presence_mode", hostPresenceMode);
+        } else {
+          localStorage.removeItem("sl_presence_mode");
+        }
 
         nav(`/room/${encodeURIComponent(roomId)}`, {
-          state: { livekitRoomName },
+          state: { livekitRoomName, presenceMode: hostPresenceMode },
         });
         return;
       } catch (err) {
@@ -1231,6 +1240,57 @@ export default function Join() {
                     Use Saved Room
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* HOST: Presence mode selector (how you join the room) */}
+            {!isParticipant && (
+              <div style={{ marginBottom: "20px" }}>
+                <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>Start as</div>
+                <div
+                  style={{
+                    display: "inline-flex",
+                    padding: "3px",
+                    borderRadius: "999px",
+                    background: "rgba(15,23,42,0.85)",
+                    border: "1px solid rgba(55,65,81,0.9)",
+                    gap: "4px",
+                  }}
+                >
+                  {([
+                    { value: "normal" as const, label: "Normal Host" },
+                    { value: "silent" as const, label: "Silent Mod" },
+                    { value: "invisible" as const, label: "Invisible Mod" },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setHostPresenceMode(opt.value)}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: "999px",
+                        border: "none",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                        background: hostPresenceMode === opt.value ? "#f97316" : "transparent",
+                        color: hostPresenceMode === opt.value ? "#111827" : "#e5e7eb",
+                        fontWeight: hostPresenceMode === opt.value ? 700 : 500,
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {hostPresenceMode === "silent" && (
+                  <div style={{ marginTop: "6px", fontSize: "11px", color: "#9ca3af" }}>
+                    In room, visible to admins, no mic/camera/chat.
+                  </div>
+                )}
+                {hostPresenceMode === "invisible" && (
+                  <div style={{ marginTop: "6px", fontSize: "11px", color: "#9ca3af" }}>
+                    Hidden from participants, room control access only.
+                  </div>
+                )}
               </div>
             )}
 

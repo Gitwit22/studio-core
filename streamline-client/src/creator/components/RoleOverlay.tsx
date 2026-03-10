@@ -1,6 +1,6 @@
 import React from "react";
 import { useParticipants, useLocalParticipant, useRoomContext } from "@livekit/components-react";
-import { normalizeUiRolePresetId } from "../../lib/roles";
+import { normalizeUiRolePresetId, isParticipantHidden, extractPresenceMetadata, presenceModeLabel } from "../../lib/roles";
 import { apiFetchAuth } from "../../lib/api";
 import { encodeReconnectMediaMessage, reconnectMedia } from "../../lib/mediaRecovery";
 
@@ -473,7 +473,7 @@ function HostPanel({
           </button>
         </div>
         <ParticipantList
-          participants={parts}
+          participants={parts.filter((p) => !isParticipantHidden(p as any))}
           onRemove={(id) => apiRemove(roomName, id, roomAccessToken)}
           onMute={(id, muted) => apiMute(roomName, id, muted, roomAccessToken)}
           onReconnectGuest={handleReconnectGuest}
@@ -487,6 +487,21 @@ function HostPanel({
           roleByIdentity={roleByIdentity}
           roleStatus={roleStatus}
         />
+
+        {/* Hidden attendees: only shown to hosts/admins */}
+        {(() => {
+          const hidden = parts.filter((p) => isParticipantHidden(p as any));
+          if (hidden.length === 0) return null;
+          return (
+            <HiddenAttendeesSection
+              participants={hidden}
+              canModerate={!!canModerate}
+              onRemove={(id) => apiRemove(roomName, id, roomAccessToken)}
+              localIdentity={localParticipant?.identity || null}
+              canRemoveGuests={canRemoveGuests}
+            />
+          );
+        })()}
 
         {muteLock && (
           <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'rgba(248, 250, 252, 0.7)' }}>
@@ -1260,6 +1275,102 @@ function Section({
     <div>
       <div style={{ fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.5rem', color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{title}</div>
       <div style={{ borderRadius: '0.375rem', border: '1px solid rgba(220, 38, 38, 0.2)', padding: '0.75rem', background: 'rgba(31, 41, 55, 0.3)', color: 'rgba(255, 255, 255, 0.9)' }}>{children}</div>
+    </div>
+  );
+}
+
+/** Collapsed section visible only to hosts/admins listing hidden participants. */
+function HiddenAttendeesSection({
+  participants,
+  canModerate,
+  onRemove,
+  localIdentity,
+  canRemoveGuests,
+}: {
+  participants: ReturnType<typeof useParticipants>;
+  canModerate?: boolean;
+  onRemove?: (identity: string) => void;
+  localIdentity?: string | null;
+  canRemoveGuests?: boolean;
+}) {
+  const [expanded, setExpanded] = React.useState(false);
+  if (!participants.length) return null;
+
+  return (
+    <div style={{ marginTop: '0.75rem' }}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: '#9ca3af',
+          cursor: 'pointer',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+          padding: 0,
+        }}
+      >
+        <span style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+        Hidden attendees ({participants.length})
+      </button>
+      {expanded && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
+          {participants.map((p) => {
+            const meta = extractPresenceMetadata(p as any);
+            const modeLabel = meta?.presenceMode ? presenceModeLabel(meta.presenceMode) : "Hidden";
+            return (
+              <div
+                key={p.identity}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  borderRadius: '0.375rem',
+                  border: '1px solid rgba(148, 163, 184, 0.15)',
+                  padding: '0.4rem 0.5rem',
+                  background: 'rgba(31, 41, 55, 0.15)',
+                  gap: '0.5rem',
+                }}
+              >
+                <div style={{ fontSize: '0.8rem', flex: 1 }}>
+                  <div style={{ fontWeight: 600, color: '#94a3b8' }}>
+                    {p.name || "Guest"}
+                    <span style={{ marginLeft: '0.5rem', fontSize: '0.65rem', color: '#6b7280', fontWeight: 400 }}>
+                      {modeLabel}
+                    </span>
+                  </div>
+                  {canModerate && (
+                    <div style={{ opacity: 0.5, fontSize: '0.7rem', wordBreak: 'break-all', color: '#6b7280' }}>
+                      {p.identity}
+                    </div>
+                  )}
+                </div>
+                {canRemoveGuests !== false && localIdentity && p.identity !== localIdentity && (
+                  <button
+                    style={{
+                      borderRadius: '0.25rem',
+                      border: '1px solid rgba(220, 38, 38, 0.4)',
+                      padding: '0.2rem 0.5rem',
+                      fontSize: '0.65rem',
+                      background: 'rgba(220, 38, 38, 0.12)',
+                      color: '#f87171',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                    }}
+                    onClick={() => onRemove?.(p.identity)}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
