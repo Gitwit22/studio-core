@@ -952,8 +952,9 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     const displayName = sanitizeDisplayName(String(req.body?.displayName || req.body?.identity || "Guest")).trim() || "Guest";
 
-    // Validate and normalise presence mode (default to "normal")
-    // Only authenticated room owners may use non-normal presence modes.
+    // Validate and normalize presence mode (default to "normal")
+    // Authenticated room owners (and future moderator/cohost roles) may use
+    // non-normal presence modes.  Guests cannot.
     const rawPresenceMode = req.body?.presenceMode;
     const presenceMode: PresenceMode =
       user && isOwner && isValidPresenceMode(rawPresenceMode)

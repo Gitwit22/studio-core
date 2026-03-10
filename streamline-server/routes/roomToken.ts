@@ -483,7 +483,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     const uid = (req as any).user?.uid as string | undefined;
     const invite = (req as any).invite as InviteClaims | undefined;
 
-    // Validate and normalise presence mode (default to "normal")
+    // Validate and normalize presence mode (default to "normal")
     const presenceMode: PresenceMode = isValidPresenceMode(rawPresenceMode)
       ? rawPresenceMode
       : "normal";
