@@ -70,6 +70,8 @@ function formatDefaultRoomName(displayName: string) {
   return `${prefix} – ${stamp}`;
 }
 
+const INVITE_INVALID_MSG = "This invite link is invalid or has expired. Please ask the host for a new link.";
+
 export default function Join() {
   // Log auth/user info when arriving at join page
   useEffect(() => { logAuthDebugContext("Arrive Join Page"); }, []);
@@ -200,7 +202,7 @@ export default function Join() {
 
           if (!resolveRes.ok) {
             console.warn('[Join] Invite resolve failed:', resolveRes.status);
-            if (!cancelled) setInviteError("This invite link is invalid or has expired. Please ask the host for a new link.");
+            if (!cancelled) setInviteError(INVITE_INVALID_MSG);
             return;
           }
           const resolveData = await resolveRes.json().catch(() => null as any);
@@ -208,7 +210,7 @@ export default function Join() {
 
           const inviteId = String(resolveData?.inviteId || "").trim();
           if (!inviteId) {
-            if (!cancelled) setInviteError("This invite link is invalid or has expired. Please ask the host for a new link.");
+            if (!cancelled) setInviteError(INVITE_INVALID_MSG);
             return;
           }
           
@@ -282,7 +284,7 @@ export default function Join() {
           return;
         } catch (err) {
           console.error('[Join] Consolidated flow error:', err);
-          if (!cancelled) setInviteError("Something went wrong joining this stream. Please try again or ask the host for a new invite link.");
+          if (!cancelled) setInviteError(INVITE_INVALID_MSG);
           return;
         }
       }
