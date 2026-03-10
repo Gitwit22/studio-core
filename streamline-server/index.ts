@@ -1218,6 +1218,17 @@ const server = app.listen(PORT, () => {
     },
     `Server listening on http://localhost:${PORT}`
   );
+
+  // Start the export render worker (background Firestore poller).
+  // Set EXPORT_WORKER_ENABLED=0 to disable on instances that should not render.
+  const workerEnabled = String(process.env.EXPORT_WORKER_ENABLED ?? "1").trim();
+  if (workerEnabled !== "0" && workerEnabled.toLowerCase() !== "false") {
+    import("./lib/renderWorker.js").then(({ startExportWorker }) => {
+      startExportWorker();
+    }).catch((err) => {
+      logger.warn({ err: (err as any)?.message }, "Export worker failed to start (non-fatal)");
+    });
+  }
 });
 
 // Attach Horizon WebSocket (authenticated admin-only WS)

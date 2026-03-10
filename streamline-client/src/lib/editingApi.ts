@@ -85,12 +85,17 @@ export type ExportSettings = {
 
 export type ExportJob = {
   id: string;
-  projectId: string;
-  status: "queued" | "processing" | "complete" | "failed";
+  projectId?: string;
+  status: "queued" | "preparing" | "rendering" | "uploading" | "completed" | "complete" | "failed" | "canceled";
   progress: number;
+  progressPercent?: number;
+  currentStep?: string;
   downloadUrl?: string;
+  outputUrl?: string;
   error?: string;
+  attemptCount?: number;
   createdAt: string;
+  startedAt?: string;
   completedAt?: string;
 };
 
@@ -470,6 +475,7 @@ export const exportApi = {
     onProgress?: (job: ExportJob) => void,
     pollInterval = 2000
   ): Promise<ExportJob> {
+    const TERMINAL_STATUSES = ["completed", "complete", "failed", "canceled"];
     return new Promise((resolve, reject) => {
       const poll = async () => {
         try {
@@ -479,10 +485,12 @@ export const exportApi = {
             onProgress(job);
           }
 
-          if (job.status === 'complete') {
+          if (job.status === 'completed' || job.status === 'complete') {
             resolve(job);
           } else if (job.status === 'failed') {
             reject(new Error(job.error || 'Export failed'));
+          } else if (job.status === 'canceled') {
+            reject(new Error('Export was canceled'));
           } else {
             setTimeout(poll, pollInterval);
           }
@@ -493,6 +501,21 @@ export const exportApi = {
 
       poll();
     });
+  },
+
+  async cancel(exportId: string): Promise<void> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/editing/exports/${exportId}/cancel`, {
+        method: 'POST',
+      }, { allowNonOk: true });
+      if (!response.ok) {
+        throw new Error('Failed to cancel export');
+      }
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Cancel export failed:', error);
+      throw error;
+    }
   },
 };
 
@@ -528,6 +551,7 @@ export const editingApi = {
   getExportStatus: (id: string) => exportApi.getStatus(id),
   waitForExport: (id: string, onProgress?: (job: ExportJob) => void) =>
     exportApi.waitForComplete(id, onProgress),
+  cancelExport: (id: string) => exportApi.cancel(id),
 };
 
 export default editingApi;

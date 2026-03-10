@@ -10,7 +10,7 @@ Streamline's editor is a browser-based, non-destructive timeline editor:
 - draggable trim handles and drag-to-move clips
 - undo/redo (Ctrl+Z / Ctrl+Shift+Z)
 - zoom + click-to-seek
-- export UI (backend export job creation works; render pipeline in progress)
+- export with FFmpeg render pipeline (background worker, progress tracking, R2 upload)
 
 Primary client file: `streamline-client/src/creator/features/editing/EditorPage.tsx`
 
@@ -30,6 +30,14 @@ Primary client file: `streamline-client/src/creator/features/editing/EditorPage.
 ### 3) Exit page → Go to editor
 - "Go to editor" navigates to an editor route with `recordingId` in query params.
 - The editor loads the recording and constructs initial timeline clips.
+
+### 4) Editor → Export
+- Click "Export Video" in the right sidebar.
+- RenderAndUploadPage starts an export job (`POST /api/editing/export`).
+- Backend creates a durable job record and the render worker picks it up.
+- UI polls for status, showing progress bar with current step.
+- On completion, a download link is shown.
+- User can cancel mid-export or retry on failure.
 
 ---
 
@@ -55,27 +63,6 @@ Primary client file: `streamline-client/src/creator/features/editing/EditorPage.
 
 ---
 
-## What's solid vs what's still WIP
-
-Solid in-session behavior:
-- timeline ruler + markers + grid
-- clip rendering + selection
-- playhead rendering + playback sync
-- split/trim/delete operations update UI state
-- draggable trim handles (left/right edge drag)
-- drag-to-move clips on timeline
-- undo/redo for destructive operations
-- save timeline + reload (server endpoints fully implemented)
-- project duplicate from dashboard
-
-Still WIP / not end-to-end:
-- export render pipeline (job creation works, actual video processing not yet connected)
-
-For the authoritative current status and remaining work, see:
-- `docs/Editor/EDITING_TIMELINE_AUDIT_STATUS.md`
-
----
-
 ## Quick smoke test (local)
 
 1. Run client + server.
@@ -86,3 +73,5 @@ For the authoritative current status and remaining work, see:
 6. Use Ctrl+Z to undo, Ctrl+Shift+Z to redo.
 7. Click Save → see "Saved" confirmation.
 8. Reload page → timeline loads exactly as saved.
+9. Click Export Video → RenderAndUploadPage shows progress.
+10. Once complete, download link appears.

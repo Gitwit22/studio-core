@@ -23,6 +23,7 @@ Projects + timeline endpoints:
 Export endpoints:
 - `POST /api/editing/export` ✅
 - `GET /api/editing/exports/:exportId` ✅
+- `POST /api/editing/exports/:exportId/cancel` ✅
 
 ### Server currently provides (editing)
 Server router: `streamline-server/routes/editing.ts`
@@ -32,7 +33,45 @@ All endpoints above are implemented, including:
 - Timeline save/load with track state persistence
 - Recording library helpers (list + recording details)
 - `POST /api/editing/render` (recording-centric render/upload path)
-- Export job creation and status polling
+- Export pipeline: durable job creation, progress tracking, cancel support
+
+### Export Pipeline Architecture
+
+```
+POST /api/editing/export
+  → validates request + auth + plan access
+  → builds ExportTimeline from project timeline (resolves asset URLs)
+  → creates job record in Firestore (editing_exports) with status "queued"
+  → returns { id, status: "queued" }
+
+Background Render Worker (lib/renderWorker.ts)
+  → polls Firestore for queued jobs (EXPORT_WORKER_POLL_MS, default 5s)
+  → claims oldest queued job (atomic status transition to "preparing")
+  → downloads source assets to temp directory
+  → builds FFmpeg command from timeline edit decision list
+  → runs FFmpeg with progress parsing (time= regex on stderr)
+  → uploads rendered file to R2 (exports/{userId}/{projectId}/{timestamp}.ext)
+  → updates job to "completed" with outputUrl
+  → on error: sets status to "failed" with errorMessage
+  → cleans up temp files
+
+GET /api/editing/exports/:exportId
+  → returns full job state: status, progressPercent, currentStep, outputUrl, etc.
+
+POST /api/editing/exports/:exportId/cancel
+  → transitions non-terminal jobs to "canceled"
+```
+
+Key modules:
+- `lib/exportTypes.ts` — ExportJobDoc, ExportTimeline, resolution/format helpers
+- `lib/exportQueue.ts` — Firestore-backed queue: createExportJob, claimNextJob, updateExportJob, failJob, completeJob, cancelJob
+- `lib/renderWorker.ts` — processExportJob, startExportWorker, stopExportWorker
+
+Environment variables:
+- `EXPORT_WORKER_ENABLED` — set to "0" to disable the background worker (default: enabled)
+- `EXPORT_WORKER_POLL_MS` — poll interval in ms (default: 5000)
+- `FFMPEG_PATH` — path to ffmpeg binary (default: "ffmpeg")
+- `FFPROBE_PATH` — path to ffprobe binary (default: "ffprobe")
 
 ---
 
@@ -63,14 +102,8 @@ Firestore: `editing_projects/{projectId}`
 - Full CRUD + timeline persistence + duplicate endpoints implemented
 - Timeline data includes clips (with trackId) and track state (mute/lock/solo/link)
 
----
-
-## Remaining backend work
-
-1) Export pipeline:
-- `POST /api/editing/export` creates a job document but actual render/encode is not yet wired to a worker queue
-- Short-term: wire UI to existing `POST /api/editing/render` for a recording render story
-
-2) Validation hardening:
-- Asset existence checks on clip references
-- Rate limiting on upload/export endpoints
+### Export jobs
+Firestore: `editing_exports/{jobId}`
+- Created by POST /api/editing/export
+- Updated by render worker throughout the pipeline
+- Fields: status, progressPercent, currentStep, errorMessage, attemptCount, outputUrl, outputPath, settings, timeline, createdAt, startedAt, completedAt
