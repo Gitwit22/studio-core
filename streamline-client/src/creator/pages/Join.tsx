@@ -106,6 +106,7 @@ export default function Join() {
   const [didEditDisplayName, setDidEditDisplayName] = useState(false);
   const [roomName, setRoomName] = useState("");
   const [inviteRoomId, setInviteRoomId] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [showLegacyJoinToast, setShowLegacyJoinToast] = useState(false);
   const [hideLegacyJoinToast, setHideLegacyJoinToast] = useState(() => {
     try {
@@ -197,12 +198,19 @@ export default function Join() {
             body: JSON.stringify({ inviteToken: inviteTokenParam }),
           });
 
-          if (!resolveRes.ok) return;
+          if (!resolveRes.ok) {
+            console.warn('[Join] Invite resolve failed:', resolveRes.status);
+            if (!cancelled) setInviteError("This invite link is invalid or has expired. Please ask the host for a new link.");
+            return;
+          }
           const resolveData = await resolveRes.json().catch(() => null as any);
           if (!resolveData || cancelled) return;
 
           const inviteId = String(resolveData?.inviteId || "").trim();
-          if (!inviteId) return;
+          if (!inviteId) {
+            if (!cancelled) setInviteError("This invite link is invalid or has expired. Please ask the host for a new link.");
+            return;
+          }
           
           console.log('[Join] Got inviteId, calling join-now:', inviteId);
 
@@ -274,6 +282,7 @@ export default function Join() {
           return;
         } catch (err) {
           console.error('[Join] Consolidated flow error:', err);
+          if (!cancelled) setInviteError("Something went wrong joining this stream. Please try again or ask the host for a new invite link.");
           return;
         }
       }
@@ -1018,6 +1027,24 @@ export default function Join() {
             }}
           />
         </div>
+
+        {/* INVITE ERROR */}
+        {inviteError && (
+          <div
+            style={{
+              marginBottom: "24px",
+              textAlign: "center",
+              background: "rgba(220, 38, 38, 0.12)",
+              border: "1px solid rgba(239, 68, 68, 0.4)",
+              borderRadius: "10px",
+              padding: "16px 20px",
+            }}
+          >
+            <p style={{ color: "#fca5a5", fontSize: "15px", fontWeight: 600, margin: 0 }}>
+              {inviteError}
+            </p>
+          </div>
+        )}
 
         {/* WELCOME MESSAGE */}
         {user && (

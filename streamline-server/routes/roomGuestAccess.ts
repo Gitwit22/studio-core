@@ -836,6 +836,12 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     const user = await tryGetAuthUserAny(req);
     let guest = tryGetGuestSession(req);
+    // Track whether the guest had a pre-existing session (e.g. sl_guest cookie
+    // from a prior join-now call) vs being newly promoted from a legacy invite
+    // token below.  Pre-existing sessions prove prior authorization and allow
+    // the guest to refresh tokens without the ALLOW_GUEST_RTC_JOIN env-var gate
+    // and without requiring the room to be "live".
+    const hadPreExistingSession = !!guest;
 
     if (!user && !guest) {
       const legacyGuest = tryGetLegacyInviteGuest(req, roomId);
@@ -893,12 +899,16 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       return res.status(401).json({ error: "login_required" });
     }
 
-    // If not authed, guest access must be explicitly enabled and backed by a verified guest session
+    // If not authed, must have a verified guest session scoped to this room.
+    // Guests with a pre-existing session (issued by join-now after invite
+    // validation) can refresh tokens without the ALLOW_GUEST_RTC_JOIN env-var
+    // gate — the session IS the proof of prior authorization.
+    // Only newly-promoted legacy-invite guests are gated by the env var.
     if (!user) {
-      if (!allowGuestJoin) {
+      if (!guest || guest.roomId !== roomId) {
         return res.status(401).json({ error: "login_required" });
       }
-      if (!guest || guest.roomId !== roomId) {
+      if (!hadPreExistingSession && !allowGuestJoin) {
         return res.status(401).json({ error: "login_required" });
       }
     }
@@ -918,8 +928,10 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
       return res.status(402).json({ error: "payment_required" });
     }
 
-    // Guests can only join once room is live.
-    if (!user && roomStatus !== "live") {
+    // First-time guests (no pre-existing session) can only join once room is live.
+    // Guests with pre-existing sessions (already in the room via join-now) can
+    // refresh tokens during brief room status changes to avoid disconnections.
+    if (!user && roomStatus !== "live" && !hadPreExistingSession) {
       return res.status(409).json({ error: "room_not_live" });
     }
 
