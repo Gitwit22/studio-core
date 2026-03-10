@@ -81,8 +81,9 @@ export async function getExportJob(jobId: string): Promise<ExportJobDoc | null> 
 // ============================================================================
 
 /**
- * Claim the oldest queued job (FIFO). Atomically transitions status to
- * "preparing" so no two workers pick the same job.
+ * Claim the oldest queued job (FIFO). Uses a Firestore transaction to
+ * atomically verify status is still "queued" before transitioning to
+ * "preparing", preventing two workers from claiming the same job.
  *
  * Returns null when the queue is empty.
  */
@@ -98,27 +99,37 @@ export async function claimNextJob(): Promise<ExportJobDoc | null> {
 
   const docSnap = snap.docs[0];
   const ref = docSnap.ref;
-
-  // Optimistic claim: set status + startedAt. If two workers race, the
-  // second one's write is harmless (idempotent status check at worker level).
   const now = new Date();
-  await ref.set(
-    {
-      status: "preparing",
-      currentStep: "Downloading assets",
-      startedAt: now,
-      attemptCount: (docSnap.data()?.attemptCount || 0) + 1,
-    },
-    { merge: true }
-  );
 
-  return {
-    id: docSnap.id,
-    ...docSnap.data(),
-    status: "preparing" as ExportJobStatus,
-    currentStep: "Downloading assets",
-    startedAt: now,
-  } as ExportJobDoc;
+  try {
+    const claimed = await db.runTransaction(async (txn) => {
+      const freshSnap = await txn.get(ref);
+      if (!freshSnap.exists) return null;
+      const data = freshSnap.data() as any;
+      if (data.status !== "queued") return null; // another worker claimed it
+
+      txn.update(ref, {
+        status: "preparing",
+        currentStep: "Downloading assets",
+        startedAt: now,
+        attemptCount: (data.attemptCount || 0) + 1,
+      });
+
+      return {
+        id: freshSnap.id,
+        ...data,
+        status: "preparing" as ExportJobStatus,
+        currentStep: "Downloading assets",
+        startedAt: now,
+        attemptCount: (data.attemptCount || 0) + 1,
+      } as ExportJobDoc;
+    });
+
+    return claimed;
+  } catch (err) {
+    logger.warn({ err: (err as any)?.message, jobId: docSnap.id }, "Failed to claim export job");
+    return null;
+  }
 }
 
 /**

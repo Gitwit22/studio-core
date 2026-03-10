@@ -86,7 +86,7 @@ export type ExportSettings = {
 export type ExportJob = {
   id: string;
   projectId?: string;
-  status: "queued" | "preparing" | "rendering" | "uploading" | "completed" | "complete" | "failed" | "canceled";
+  status: "queued" | "preparing" | "rendering" | "uploading" | "completed" | "failed" | "canceled";
   progress: number;
   progressPercent?: number;
   currentStep?: string;
@@ -98,6 +98,11 @@ export type ExportJob = {
   startedAt?: string;
   completedAt?: string;
 };
+
+/** Statuses that indicate a job is finished (no more polling needed). */
+export const EXPORT_TERMINAL_STATUSES: ExportJob["status"][] = [
+  "completed", "failed", "canceled",
+];
 
 // ============================================================================
 // AUTH HELPERS
@@ -475,7 +480,6 @@ export const exportApi = {
     onProgress?: (job: ExportJob) => void,
     pollInterval = 2000
   ): Promise<ExportJob> {
-    const TERMINAL_STATUSES = ["completed", "complete", "failed", "canceled"];
     return new Promise((resolve, reject) => {
       const poll = async () => {
         try {
@@ -485,7 +489,7 @@ export const exportApi = {
             onProgress(job);
           }
 
-          if (job.status === 'completed' || job.status === 'complete') {
+          if (job.status === 'completed') {
             resolve(job);
           } else if (job.status === 'failed') {
             reject(new Error(job.error || 'Export failed'));

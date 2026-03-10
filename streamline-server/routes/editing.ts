@@ -1145,15 +1145,17 @@ router.get("/exports/:exportId", async (req: Request, res: Response) => {
       return String(d);
     };
 
+    const url = job.outputUrl || undefined;
+
     return res.json({
       id: job.id,
       projectId: job.projectId,
       status: job.status,
-      progress: job.progressPercent,
       progressPercent: job.progressPercent,
+      progress: job.progressPercent,       // alias for backward compat
       currentStep: job.currentStep,
-      downloadUrl: job.outputUrl || undefined,
-      outputUrl: job.outputUrl || undefined,
+      outputUrl: url,
+      downloadUrl: url,                    // alias for backward compat
       error: job.errorMessage || undefined,
       attemptCount: job.attemptCount,
       createdAt: toISO(job.createdAt),

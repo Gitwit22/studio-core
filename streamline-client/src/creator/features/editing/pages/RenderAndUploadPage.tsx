@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CheckCircle, XCircle, AlertCircle } from 'lucide-react';
-import { editingApi, type Project, type ExportJob } from '../../../../lib/editingApi';
+import { editingApi, type Project, type ExportJob, EXPORT_TERMINAL_STATUSES } from '../../../../lib/editingApi';
 
 export default function RenderAndUploadPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -46,8 +46,7 @@ export default function RenderAndUploadPage() {
         setLoading(false);
 
         // If already terminal, stop
-        const terminal = ['completed', 'complete', 'failed', 'canceled'];
-        if (terminal.includes(started.status)) return;
+        if (EXPORT_TERMINAL_STATUSES.includes(started.status)) return;
 
         // Poll for updates
         const finalJob = await editingApi.waitForExport(started.id, (job) => {
@@ -73,8 +72,8 @@ export default function RenderAndUploadPage() {
   const currentStep = exportJob?.currentStep || '';
   const status = exportJob?.status || '';
   const downloadUrl = exportJob?.outputUrl || exportJob?.downloadUrl || null;
-  const isTerminal = ['completed', 'complete', 'failed', 'canceled'].includes(status);
-  const isSuccess = status === 'completed' || status === 'complete';
+  const isTerminal = EXPORT_TERMINAL_STATUSES.includes(status as ExportJob["status"]);
+  const isSuccess = status === 'completed';
   const isFailed = status === 'failed';
   const isCanceled = status === 'canceled';
 

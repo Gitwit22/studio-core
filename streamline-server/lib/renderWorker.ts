@@ -70,7 +70,7 @@ function downloadFile(url: string, destPath: string): Promise<string> {
       })
       .on("error", (err) => {
         file.close();
-        try { fs.unlinkSync(destPath); } catch {}
+        try { fs.unlinkSync(destPath); } catch { /* cleanup best-effort */ }
         reject(err);
       });
   });
@@ -238,8 +238,14 @@ export async function processExportJob(job: ExportJobDoc): Promise<void> {
 
     if (videoClips.length === 1) {
       // Simple case: one clip, direct output with scaling
+      const scaleFilter = [
+        `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+        `fps=${fps}`,
+      ].join(",");
+
       ffmpegArgs.push(
-        "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=${fps}`,
+        "-vf", scaleFilter,
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
@@ -251,15 +257,25 @@ export async function processExportJob(job: ExportJobDoc): Promise<void> {
       );
     } else {
       // Multiple clips: use concat filter
-      let filterComplex = "";
+      const scaleFilter = [
+        `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+        `fps=${fps}`,
+        "setpts=PTS-STARTPTS",
+      ].join(",");
+
+      const filterParts: string[] = [];
       for (let i = 0; i < videoClips.length; i++) {
-        filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=${fps},setpts=PTS-STARTPTS[v${i}];`;
-        filterComplex += `[${i}:a]aresample=48000[a${i}];`;
+        filterParts.push(`[${i}:v]${scaleFilter}[v${i}]`);
+        filterParts.push(`[${i}:a]aresample=48000[a${i}]`);
       }
+
       const vConcat = videoClips.map((_, i) => `[v${i}]`).join("");
       const aConcat = videoClips.map((_, i) => `[a${i}]`).join("");
-      filterComplex += `${vConcat}concat=n=${videoClips.length}:v=1:a=0[outv];`;
-      filterComplex += `${aConcat}concat=n=${videoClips.length}:v=0:a=1[outa]`;
+      filterParts.push(`${vConcat}concat=n=${videoClips.length}:v=1:a=0[outv]`);
+      filterParts.push(`${aConcat}concat=n=${videoClips.length}:v=0:a=1[outa]`);
+
+      const filterComplex = filterParts.join(";");
 
       ffmpegArgs.push(
         "-filter_complex", filterComplex,
