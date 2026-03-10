@@ -1574,6 +1574,11 @@ function RoomPage() {
   );
   const [roomTokenMode, setRoomTokenMode] = useState<"unknown" | "auth" | "guest">("unknown");
   const roomTokenMintInFlightRef = useRef(false);
+  // Guest direct-join state (no invite required)
+  const [guestJoinMode, setGuestJoinMode] = useState<"select" | "name-input">("select");
+  const [guestJoinLoading, setGuestJoinLoading] = useState(false);
+  const [guestJoinError, setGuestJoinError] = useState<string | null>(null);
+  const [publicRoomInfo, setPublicRoomInfo] = useState<{ roomName: string; status: string; allowGuests: boolean } | null>(null);
   const [roomGateStatus, setRoomGateStatus] = useState<"unknown" | "idle" | "live" | "blocked">("unknown");
   const roomGatePollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hostToolsHydratedKeyRef = useRef<string | null>(null);
@@ -1838,6 +1843,23 @@ function RoomPage() {
     setWatermarkEnabled(false);
     setMaxGuestsAllowed(null);
     setMaxRecordingMinutesPerClip(null);
+  }, [roomId]);
+
+  // Fetch public room info for the join page (no auth required)
+  useEffect(() => {
+    if (!roomId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/info`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setPublicRoomInfo(data);
+      } catch {
+        // non-critical — join page still works without this
+      }
+    })();
+    return () => { cancelled = true; };
   }, [roomId]);
 
   useEffect(() => {
@@ -3767,7 +3789,81 @@ function RoomPage() {
 
   // ==================== RENDER ====================
 
+  // Determine join context for the name entry page
+  const hasAuth = !!getAuthToken();
+  const hasGuestSession = !!getGuestSessionToken(roomId);
+  const hasInviteContext = hasGuestSession || !!inviteToken || !!searchParams.get("t");
+  const isDirectGuest = !hasAuth && !hasInviteContext;
+
   if (!displayName) {
+    const joinRoomName = publicRoomInfo?.roomName || roomName || routeRoomId || "this room";
+    const roomIsLive = publicRoomInfo?.status === "live";
+    const guestsAllowed = publicRoomInfo?.allowGuests !== false;
+
+    const handleGuestDirectJoin = async (name: string) => {
+      if (!roomId || !name.trim()) return;
+      setGuestJoinLoading(true);
+      setGuestJoinError(null);
+      try {
+        const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(roomId)}/join-guest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ displayName: name.trim() }),
+        });
+        const ct = res.headers.get("content-type") || "";
+        const data = ct.includes("application/json") ? await res.json() : null;
+
+        if (!res.ok) {
+          const errCode = data?.error || `HTTP ${res.status}`;
+          if (errCode === "room_not_live") {
+            setGuestJoinError("This room isn't live yet. Please wait for the host to start.");
+          } else if (errCode === "guests_not_allowed") {
+            setGuestJoinError("This room requires an account to join.");
+          } else if (errCode === "room_full") {
+            setGuestJoinError("This room is full. Please try again later.");
+          } else if (errCode === "rate_limited") {
+            setGuestJoinError("Too many attempts. Please wait a moment.");
+          } else {
+            setGuestJoinError(errCode);
+          }
+          return;
+        }
+
+        if (!data?.roomToken || !data?.serverUrl) {
+          setGuestJoinError("Failed to get connection details.");
+          return;
+        }
+
+        // Store guest session for subsequent token refreshes
+        if (data.guestSessionToken) {
+          try {
+            sessionStorage.setItem(`sl_guest_session:${roomId}`, data.guestSessionToken);
+          } catch { /* ignore */ }
+          try {
+            localStorage.setItem("sl_guestSessionToken", data.guestSessionToken);
+            localStorage.setItem("sl_guestSessionRoomId", roomId);
+          } catch { /* ignore */ }
+        }
+
+        // Pre-populate token + serverUrl so the existing useEffect doesn't re-fetch
+        setToken(data.roomToken);
+        setServerUrl(data.serverUrl);
+        if (data.identity) setParticipantIdentity(data.identity);
+        if (data.roomAccessToken) setRoomAccessToken(data.roomAccessToken);
+        if (data.roomName) setRoomName(data.roomName);
+        if (data.roomId) setFirestoreRoomId(data.roomId);
+
+        // Now set displayName to exit this early return and enter the room
+        localStorage.setItem("sl_displayName", name.trim());
+        setDisplayName(name.trim());
+      } catch (err: any) {
+        setGuestJoinError("Unable to connect. Please try again.");
+      } finally {
+        setGuestJoinLoading(false);
+      }
+    };
+
     return (
       <div style={{
         minHeight: '100vh',
@@ -3813,84 +3909,313 @@ function RoomPage() {
           }
         `}</style>
 
-        <form
-          style={{
-            background: 'rgba(39, 39, 42, 0.5)',
-            borderRadius: '1rem',
-            padding: '2rem',
-            width: '100%',
-            maxWidth: '400px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '1.5rem',
-            border: '1px solid rgba(63, 63, 70, 0.8)',
-            backdropFilter: 'blur(20px)',
-            position: 'relative',
-            zIndex: 1,
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
-          }}
-          onSubmit={(e) => {
-            e.preventDefault();
-            const name = pendingName.trim();
-            if (!name) return;
-            localStorage.setItem("sl_displayName", name);
-            setDisplayName(name);
-          }}
-        >
-          <h1
+        {/* Room header info */}
+        <div style={{
+          textAlign: 'center',
+          marginBottom: '1.5rem',
+          position: 'relative',
+          zIndex: 1,
+        }}>
+          <h2 style={{
+            fontSize: '1.25rem',
+            fontWeight: '600',
+            color: 'rgba(255, 255, 255, 0.9)',
+            marginBottom: '0.25rem',
+          }}>
+            {joinRoomName}
+          </h2>
+          {roomIsLive && (
+            <span style={{
+              display: 'inline-block',
+              background: '#e53e3e',
+              color: 'white',
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              padding: '3px 10px',
+              borderRadius: '20px',
+              letterSpacing: '0.5px',
+            }}>
+              ● LIVE
+            </span>
+          )}
+        </div>
+
+        {/* === Authenticated or invite-based user: simple name entry === */}
+        {!isDirectGuest && (
+          <form
             style={{
+              background: 'rgba(39, 39, 42, 0.5)',
+              borderRadius: '1rem',
+              padding: '2rem',
+              width: '100%',
+              maxWidth: '400px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.5rem',
+              border: '1px solid rgba(63, 63, 70, 0.8)',
+              backdropFilter: 'blur(20px)',
+              position: 'relative',
+              zIndex: 1,
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+            }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = pendingName.trim();
+              if (!name) return;
+              localStorage.setItem("sl_displayName", name);
+              setDisplayName(name);
+            }}
+          >
+            <h1 style={{
               fontSize: '1.5rem',
               fontWeight: '600',
               textAlign: 'center',
               marginBottom: '0.5rem',
               color: '#ffffff'
+            }}>
+              Enter your name to join
+            </h1>
+
+            <input
+              type="text"
+              style={{
+                width: '100%',
+                padding: '0.875rem',
+                borderRadius: '0.75rem',
+                background: 'rgba(31, 41, 55, 0.8)',
+                color: '#ffffff',
+                border: '1px solid rgba(75, 85, 99, 0.5)',
+                outline: 'none',
+                transition: 'all 0.3s ease',
+                backdropFilter: 'blur(10px)'
+              }}
+              onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
+              onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+              placeholder={`Enter your name to join "${joinRoomName}"`}
+              value={pendingName}
+              onChange={(e) => setPendingName(e.target.value)}
+              autoFocus
+            />
+
+            <button
+              type="submit"
+              disabled={!pendingName.trim()}
+              style={{
+                width: '100%',
+                padding: '0.875rem',
+                borderRadius: '0.75rem',
+                background: !pendingName.trim()
+                  ? 'rgba(75, 85, 99, 0.5)'
+                  : 'linear-gradient(135deg, #dc2626, #ef4444)',
+                color: '#ffffff',
+                fontWeight: '600',
+                border: 'none',
+                cursor: !pendingName.trim() ? 'not-allowed' : 'pointer',
+                transition: 'all 0.3s ease',
+                opacity: !pendingName.trim() ? 0.6 : 1,
+              }}
+            >
+              Join Room
+            </button>
+          </form>
+        )}
+
+        {/* === Direct guest (no auth, no invite): Join as Guest / Login === */}
+        {isDirectGuest && guestJoinMode === "select" && (
+          <div
+            style={{
+              background: 'rgba(39, 39, 42, 0.5)',
+              borderRadius: '1rem',
+              padding: '2rem',
+              width: '100%',
+              maxWidth: '400px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1rem',
+              border: '1px solid rgba(63, 63, 70, 0.8)',
+              backdropFilter: 'blur(20px)',
+              position: 'relative',
+              zIndex: 1,
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
             }}
           >
-            Enter your name to join
-          </h1>
-
-          <input
-            type="text"
-            style={{
-              width: '100%',
-              padding: '0.875rem',
-              borderRadius: '0.75rem',
-              background: 'rgba(31, 41, 55, 0.8)',
-              color: '#ffffff',
-              border: '1px solid rgba(75, 85, 99, 0.5)',
-              outline: 'none',
-              transition: 'all 0.3s ease',
-              backdropFilter: 'blur(10px)'
-            }}
-            onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
-            onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
-            placeholder={`Enter your name to join "${roomName}"`}
-            value={pendingName}
-            onChange={(e) => setPendingName(e.target.value)}
-            autoFocus
-          />
-
-          <button
-            type="submit"
-            disabled={!pendingName.trim()}
-            style={{
-              width: '100%',
-              padding: '0.875rem',
-              borderRadius: '0.75rem',
-              background: !pendingName.trim()
-                ? 'rgba(75, 85, 99, 0.5)'
-                : 'linear-gradient(135deg, #dc2626, #ef4444)',
-              color: '#ffffff',
+            <h1 style={{
+              fontSize: '1.5rem',
               fontWeight: '600',
-              border: 'none',
-              cursor: !pendingName.trim() ? 'not-allowed' : 'pointer',
-              transition: 'all 0.3s ease',
-              opacity: !pendingName.trim() ? 0.6 : 1,
+              textAlign: 'center',
+              color: '#ffffff'
+            }}>
+              Join Room
+            </h1>
+
+            {guestsAllowed && (
+              <button
+                type="button"
+                onClick={() => setGuestJoinMode("name-input")}
+                style={{
+                  width: '100%',
+                  padding: '0.875rem',
+                  borderRadius: '0.75rem',
+                  background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+                  color: '#ffffff',
+                  fontWeight: '600',
+                  border: 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontSize: '1rem',
+                }}
+              >
+                Join as Guest
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = `${location.pathname}${location.search}`;
+                nav(`/login?next=${encodeURIComponent(next)}`);
+              }}
+              style={{
+                width: '100%',
+                padding: '0.875rem',
+                borderRadius: '0.75rem',
+                background: 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                fontWeight: '600',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontSize: '1rem',
+              }}
+            >
+              Login to Join
+            </button>
+
+            {!guestsAllowed && (
+              <p style={{
+                fontSize: '0.85rem',
+                color: 'rgba(255, 255, 255, 0.5)',
+                textAlign: 'center',
+              }}>
+                This room requires an account to join.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* === Direct guest: name input step === */}
+        {isDirectGuest && guestJoinMode === "name-input" && (
+          <form
+            style={{
+              background: 'rgba(39, 39, 42, 0.5)',
+              borderRadius: '1rem',
+              padding: '2rem',
+              width: '100%',
+              maxWidth: '400px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.5rem',
+              border: '1px solid rgba(63, 63, 70, 0.8)',
+              backdropFilter: 'blur(20px)',
+              position: 'relative',
+              zIndex: 1,
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+            }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = pendingName.trim();
+              if (!name || guestJoinLoading) return;
+              handleGuestDirectJoin(name);
             }}
           >
-            Join Room
-          </button>
-        </form>
+            <h1 style={{
+              fontSize: '1.5rem',
+              fontWeight: '600',
+              textAlign: 'center',
+              marginBottom: '0.5rem',
+              color: '#ffffff'
+            }}>
+              Enter your name
+            </h1>
+
+            {guestJoinError && (
+              <div style={{
+                background: 'rgba(229, 62, 62, 0.15)',
+                border: '1px solid rgba(229, 62, 62, 0.3)',
+                color: '#fc8181',
+                padding: '10px 14px',
+                borderRadius: '0.5rem',
+                fontSize: '0.875rem',
+              }}>
+                {guestJoinError}
+              </div>
+            )}
+
+            <input
+              type="text"
+              style={{
+                width: '100%',
+                padding: '0.875rem',
+                borderRadius: '0.75rem',
+                background: 'rgba(31, 41, 55, 0.8)',
+                color: '#ffffff',
+                border: '1px solid rgba(75, 85, 99, 0.5)',
+                outline: 'none',
+                transition: 'all 0.3s ease',
+                backdropFilter: 'blur(10px)',
+                boxSizing: 'border-box',
+              }}
+              onFocus={(e) => (e.target as HTMLInputElement).style.borderColor = '#dc2626'}
+              onBlur={(e) => (e.target as HTMLInputElement).style.borderColor = 'rgba(75, 85, 99, 0.5)'}
+              placeholder="Your display name"
+              value={pendingName}
+              onChange={(e) => setPendingName(e.target.value)}
+              maxLength={50}
+              autoFocus
+              disabled={guestJoinLoading}
+            />
+
+            <button
+              type="submit"
+              disabled={!pendingName.trim() || guestJoinLoading}
+              style={{
+                width: '100%',
+                padding: '0.875rem',
+                borderRadius: '0.75rem',
+                background: !pendingName.trim() || guestJoinLoading
+                  ? 'rgba(75, 85, 99, 0.5)'
+                  : 'linear-gradient(135deg, #dc2626, #ef4444)',
+                color: '#ffffff',
+                fontWeight: '600',
+                border: 'none',
+                cursor: !pendingName.trim() || guestJoinLoading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.3s ease',
+                opacity: !pendingName.trim() || guestJoinLoading ? 0.6 : 1,
+              }}
+            >
+              {guestJoinLoading ? "Connecting..." : "Join Room"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setGuestJoinMode("select");
+                setGuestJoinError(null);
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'rgba(255, 255, 255, 0.5)',
+                padding: '4px',
+                fontSize: '0.875rem',
+                cursor: 'pointer',
+                textAlign: 'center',
+              }}
+            >
+              ← Back
+            </button>
+          </form>
+        )}
 
         <p style={{
           fontSize: '0.875rem',
