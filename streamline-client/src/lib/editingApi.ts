@@ -85,14 +85,24 @@ export type ExportSettings = {
 
 export type ExportJob = {
   id: string;
-  projectId: string;
-  status: "queued" | "processing" | "complete" | "failed";
+  projectId?: string;
+  status: "queued" | "preparing" | "rendering" | "uploading" | "completed" | "failed" | "canceled";
   progress: number;
+  progressPercent?: number;
+  currentStep?: string;
   downloadUrl?: string;
+  outputUrl?: string;
   error?: string;
+  attemptCount?: number;
   createdAt: string;
+  startedAt?: string;
   completedAt?: string;
 };
+
+/** Statuses that indicate a job is finished (no more polling needed). */
+export const EXPORT_TERMINAL_STATUSES: ExportJob["status"][] = [
+  "completed", "failed", "canceled",
+];
 
 // ============================================================================
 // AUTH HELPERS
@@ -414,6 +424,22 @@ export const projectsApi = {
       throw error;
     }
   },
+
+  async duplicate(id: string): Promise<Project> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${id}/duplicate`, {
+        method: 'POST',
+      }, { allowNonOk: true });
+      if (!response.ok) {
+        throw new Error(`Failed to duplicate project: HTTP ${response.status}`);
+      }
+      return handleResponse<Project>(response);
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Duplicate project failed:', error);
+      throw error;
+    }
+  },
 };
 
 // ============================================================================
@@ -463,10 +489,12 @@ export const exportApi = {
             onProgress(job);
           }
 
-          if (job.status === 'complete') {
+          if (job.status === 'completed') {
             resolve(job);
           } else if (job.status === 'failed') {
             reject(new Error(job.error || 'Export failed'));
+          } else if (job.status === 'canceled') {
+            reject(new Error('Export was canceled'));
           } else {
             setTimeout(poll, pollInterval);
           }
@@ -477,6 +505,21 @@ export const exportApi = {
 
       poll();
     });
+  },
+
+  async cancel(exportId: string): Promise<void> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/editing/exports/${exportId}/cancel`, {
+        method: 'POST',
+      }, { allowNonOk: true });
+      if (!response.ok) {
+        throw new Error('Failed to cancel export');
+      }
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Cancel export failed:', error);
+      throw error;
+    }
   },
 };
 
@@ -505,12 +548,14 @@ export const editingApi = {
   updateProject: (id: string, data: Partial<Project>) => projectsApi.update(id, data),
   saveTimeline: (id: string, clips: TimelineClip[], tracks?: TimelineTrack[]) => projectsApi.saveTimeline(id, clips, tracks),
   deleteProject: (id: string) => projectsApi.delete(id),
+  duplicateProject: (id: string) => projectsApi.duplicate(id),
 
   // Export
   startExport: (projectId: string, settings: ExportSettings) => exportApi.start(projectId, settings),
   getExportStatus: (id: string) => exportApi.getStatus(id),
   waitForExport: (id: string, onProgress?: (job: ExportJob) => void) =>
     exportApi.waitForComplete(id, onProgress),
+  cancelExport: (id: string) => exportApi.cancel(id),
 };
 
 export default editingApi;

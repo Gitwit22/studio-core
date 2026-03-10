@@ -229,7 +229,11 @@ export default function ProjectsDashboard() {
                     console.error('Failed to delete project:', err);
                     alert('Failed to delete project. Please try again.');
                   }
-                }} 
+                }}
+                onDuplicate={async () => {
+                  const dup = await editingApi.duplicateProject(proj.id);
+                  setProjects((prev) => [...prev, dup]);
+                }}
               />
             ))}
           </div>
@@ -433,10 +437,12 @@ function ProjectCard({
   project,
   canEditor,
   onDelete,
+  onDuplicate,
 }: {
   project: Project;
   canEditor: boolean;
   onDelete: () => Promise<void>;
+  onDuplicate: () => Promise<void>;
 }) {
   const nav = useNavigate();
   
@@ -574,7 +580,13 @@ function ProjectCard({
             {canEditor ? '✏️ Open' : '🚫 Editor disabled'}
           </button>
           <button
-            onClick={() => alert("Duplicate coming soon")}
+            onClick={async () => {
+              try {
+                await onDuplicate();
+              } catch (err) {
+                alert("Failed to duplicate project");
+              }
+            }}
             style={{
               padding: '0.75rem 1rem',
               border: '1px solid rgba(255, 255, 255, 0.2)',
@@ -596,7 +608,7 @@ function ProjectCard({
               target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
               target.style.background = 'transparent';
             }}
-            title="Duplicate coming soon"
+            title="Duplicate project"
           >
             📋 Dup
           </button>
