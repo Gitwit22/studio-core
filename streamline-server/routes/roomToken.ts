@@ -12,11 +12,12 @@ import { SIMPLE_ROLE_DEFAULTS } from "./account";
 import { intersectPermissionsWithEntitlements } from "../lib/rolePermissions";
 import { resolveRoomIdentity } from "../lib/roomIdentity";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
-import { roleToParticipantPermission } from "../lib/livekitPermissions";
+import { roleToParticipantPermission, applyPresenceModeToGrant } from "../lib/livekitPermissions";
 import jwt from "jsonwebtoken";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
+import { isValidPresenceMode, buildPresenceMetadata, type PresenceMode } from "../lib/presenceMode";
 
 // Dynamic import for AccessToken constructor
 async function getAccessTokenCtor() {
@@ -120,7 +121,7 @@ type ViewerInvite = {
   createdBy?: string;
 };
 
-function roleToGrant(role: GrantRole) {
+function roleToGrant(role: GrantRole, presenceMode?: PresenceMode) {
   // Start from the shared ParticipantPermission mapper so join-time
   // grants and realtime updateParticipant calls stay aligned for
   // publish/subscribe/data capabilities.
@@ -133,11 +134,16 @@ function roleToGrant(role: GrantRole) {
 
   const participantPerm = roleToParticipantPermission(permissionRole);
 
+  // Apply presence-mode restrictions when joining as silent/invisible.
+  const effectivePerm = presenceMode
+    ? applyPresenceModeToGrant(participantPerm, presenceMode)
+    : participantPerm;
+
   const base = {
     roomJoin: true,
-    canSubscribe: participantPerm.canSubscribe,
-    canPublish: participantPerm.canPublish,
-    canPublishData: participantPerm.canPublishData,
+    canSubscribe: effectivePerm.canSubscribe,
+    canPublish: effectivePerm.canPublish,
+    canPublishData: effectivePerm.canPublishData,
   } as const;
 
   if (role === "viewer") {
@@ -465,16 +471,22 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
   let capacityLockOwner: string | null = null;
   let capacityLockRoomId: string | null = null;
   try {
-    const { roomName: rawRoomName, roomId: rawRoomId, identity: _ignoredIdentity, role: rawRole, displayName: rawDisplayName } = req.body as {
+    const { roomName: rawRoomName, roomId: rawRoomId, identity: _ignoredIdentity, role: rawRole, displayName: rawDisplayName, presenceMode: rawPresenceMode } = req.body as {
       roomName?: string;
       roomId?: string;
       identity?: string;
       inviteToken?: string;
       role?: string;
       displayName?: string;
+      presenceMode?: string;
     };
     const uid = (req as any).user?.uid as string | undefined;
     const invite = (req as any).invite as InviteClaims | undefined;
+
+    // Validate and normalize presence mode (default to "normal")
+    const presenceMode: PresenceMode = isValidPresenceMode(rawPresenceMode)
+      ? rawPresenceMode
+      : "normal";
 
     // Default: RTC token issuance requires authentication.
     // Invite tokens may still be supplied for role/authorization context,
@@ -840,8 +852,20 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     const at = new AccessToken(apiKey, apiSecret, { identity: tokenIdentity, name: displayName });
     at.addGrant({
       room: livekitRoomName,
-      ...roleToGrant(grantRole),
+      ...roleToGrant(grantRole, presenceMode),
     });
+
+    // Attach presence metadata so the frontend can filter the roster
+    if (presenceMode !== "normal") {
+      at.metadata = JSON.stringify(
+        buildPresenceMetadata({
+          role: effectiveRoleKey,
+          presenceMode,
+          rolePresetId: effectiveRoleKey === "cohost" ? "cohost" : "participant",
+        }),
+      );
+    }
+
     const lkJwt = await at.toJwt();
     console.log("✅ roomToken jwt typeof:", typeof lkJwt, "len:", lkJwt.length);
 
@@ -864,6 +888,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       permissions,
       identity: tokenIdentity,
       adminOverride: callerIsAdmin && !!roomPolicy.ownerId && !!uid && uid !== roomPolicy.ownerId,
+      presenceMode,
     } as const;
 
     const roomAccessToken = jwt.sign(roomAccessPayload, getRoomAccessSecret(), {
@@ -904,6 +929,7 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
       adminOverride: callerIsAdmin && !!roomPolicy.ownerId && !!uid && uid !== roomPolicy.ownerId,
       effectiveEntitlements: effectiveEntitlementsPayload,
       platformFlags,
+      presenceMode,
     });
   } catch (err: any) {
     console.error("[roomToken] Critical error during token creation for room:", req.params.roomId);
