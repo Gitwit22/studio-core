@@ -9,6 +9,23 @@ import { assertPlatformTranscodeEnabled } from "../lib/platformFlags";
 import { requireAuth } from "../middleware/requireAuth";
 import { LIMIT_ERRORS } from "../lib/limitErrors";
 import { canAccessFeature } from "./featureAccess";
+import { logger } from "../lib/logger";
+import {
+  normalizeExportSettings,
+  resolutionToDimensions,
+  formatToContainer,
+} from "../lib/exportTypes";
+import type {
+  ExportSettingsInput,
+  ExportTimeline,
+  ExportTimelineClip,
+  ExportTimelineTrack,
+} from "../lib/exportTypes";
+import {
+  createExportJob,
+  getExportJob,
+  cancelJob,
+} from "../lib/exportQueue";
 
 const router = Router();
 
@@ -818,6 +835,77 @@ router.delete("/projects/:id", async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/editing/projects/:id/duplicate - Duplicate a project
+router.post("/projects/:id/duplicate", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    const { id } = req.params;
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    if (!(await assertSegmentEnabled(res, "projectsEnabled"))) {
+      return;
+    }
+    if (!(await assertSegmentEnabled(res, "editorEnabled"))) {
+      return;
+    }
+
+    const access = await assertEditingAccess(req, res);
+    if (!access) return;
+
+    // Enforce max projects
+    if (access.plan.maxProjects > 0) {
+      const existingSnap = await db
+        .collection("editing_projects")
+        .where("userId", "==", userId)
+        .get();
+      if (existingSnap.size >= access.plan.maxProjects) {
+        return res.status(409).json({
+          error: LIMIT_ERRORS.LIMIT_EXCEEDED,
+          reason: "Max projects limit reached",
+          limit: access.plan.maxProjects,
+        });
+      }
+    }
+
+    const ref = db.collection("editing_projects").doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const data = snap.data() as any;
+    if (data?.userId !== userId) {
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
+    }
+
+    const now = new Date();
+    const duplicated = {
+      userId,
+      name: `${(data.name || "Untitled").trim()} (Copy)`,
+      assetId: data.assetId || "",
+      createdAt: now,
+      updatedAt: now,
+      duration: data.duration || 0,
+      status: "draft",
+      timeline: data.timeline || { clips: [], tracks: 2 },
+    };
+
+    const newRef = await db.collection("editing_projects").add(duplicated);
+
+    return res.json({
+      id: newRef.id,
+      ...duplicated,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      lastModified: now.toISOString(),
+    });
+  } catch (err: any) {
+    console.error("Duplicate project error:", err);
+    res.status(500).json({ error: "Failed to duplicate project" });
+  }
+});
+
 // PUT /api/editing/projects/:id/timeline - Persist timeline clips
 router.put("/projects/:id/timeline", async (req: Request, res: Response) => {
   try {
@@ -923,7 +1011,7 @@ router.post("/export", async (req: Request, res: Response) => {
     const access = await assertEditingAccess(req, res);
     if (!access) return;
 
-    const { projectId, settings } = (req.body || {}) as any;
+    const { projectId, settings: rawSettings } = (req.body || {}) as any;
     if (!projectId || typeof projectId !== "string") {
       return res.status(400).json({ error: "projectId is required" });
     }
@@ -937,56 +1025,99 @@ router.post("/export", async (req: Request, res: Response) => {
       return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
-    const jobRef = db.collection("editing_exports").doc();
-    const createdAt = new Date();
+    // Normalise settings
+    const settings = normalizeExportSettings(rawSettings);
+    const { width, height } = resolutionToDimensions(settings.resolution);
 
-    // MVP: return the source asset's videoUrl as the downloadable output.
-    let downloadUrl: string | undefined;
-    try {
-      const assetId = String(project.assetId || "");
-      if (assetId) {
-        const recordingSnap = await db.collection("recordings").doc(assetId).get();
-        if (recordingSnap.exists) {
-          const d = recordingSnap.data() as any;
-          if (d?.userId === userId) downloadUrl = d?.videoUrl || d?.publicExportUrl;
-        } else {
-          const uploadSnap = await db.collection("editing_assets").doc(assetId).get();
-          if (uploadSnap.exists) {
-            const d = uploadSnap.data() as any;
-            if (d?.userId === userId) downloadUrl = d?.videoUrl;
-          }
+    // Build the render timeline from the saved project timeline
+    let exportTimeline: ExportTimeline | null = null;
+    const savedTimeline = project?.timeline;
+
+    if (savedTimeline && Array.isArray(savedTimeline.clips) && savedTimeline.clips.length > 0) {
+      // Resolve source URLs for each clip
+      const resolvedClips: ExportTimelineClip[] = [];
+      for (const c of savedTimeline.clips) {
+        const clip: ExportTimelineClip = {
+          id: String(c.id || ""),
+          assetId: String(c.assetId || ""),
+          trackId: String(c.trackId || "video_1"),
+          startMs: Math.round(Number(c.startTime || 0) * 1000),
+          endMs: Math.round((Number(c.startTime || 0) + Number(c.duration || 0)) * 1000),
+          sourceInMs: Math.round(Number(c.inPoint || 0) * 1000),
+          sourceOutMs: Math.round(Number(c.outPoint || 0) * 1000),
+          sourceUrl: typeof c.videoUrl === "string" ? c.videoUrl : "",
+          name: typeof c.name === "string" ? c.name : "Clip",
+        };
+
+        // If videoUrl is missing, try to resolve from asset collections
+        if (!clip.sourceUrl && clip.assetId) {
+          try {
+            const recSnap = await db.collection("recordings").doc(clip.assetId).get();
+            if (recSnap.exists) {
+              const d = recSnap.data() as any;
+              if (d?.userId === userId) clip.sourceUrl = d?.videoUrl || d?.publicExportUrl || "";
+            }
+            if (!clip.sourceUrl) {
+              const assetSnap = await db.collection("editing_assets").doc(clip.assetId).get();
+              if (assetSnap.exists) {
+                const d = assetSnap.data() as any;
+                if (d?.userId === userId) clip.sourceUrl = d?.videoUrl || "";
+              }
+            }
+          } catch {}
         }
-      }
-    } catch {}
 
-    const jobDoc: any = {
-      id: jobRef.id,
+        resolvedClips.push(clip);
+      }
+
+      // Build tracks
+      const savedTracks = Array.isArray(savedTimeline.tracks) ? savedTimeline.tracks : [];
+      const trackMap = new Map<string, ExportTimelineTrack>();
+
+      for (const clip of resolvedClips) {
+        if (!trackMap.has(clip.trackId)) {
+          const savedTrack = savedTracks.find((t: any) => t.id === clip.trackId);
+          trackMap.set(clip.trackId, {
+            id: clip.trackId,
+            kind: savedTrack?.type === "audio" ? "audio" : "video",
+            muted: savedTrack?.muted === true,
+            clips: [],
+          });
+        }
+        trackMap.get(clip.trackId)!.clips.push(clip);
+      }
+
+      const durationMs = resolvedClips.reduce(
+        (max, c) => Math.max(max, c.endMs), 0
+      );
+
+      exportTimeline = {
+        width,
+        height,
+        fps: 30,
+        durationMs,
+        tracks: Array.from(trackMap.values()),
+      };
+    }
+
+    // Create the durable export job
+    const job = await createExportJob({
       userId,
       projectId,
-      settings: settings || null,
-      status: downloadUrl ? "complete" : "failed",
-      progress: downloadUrl ? 100 : 0,
-      downloadUrl: downloadUrl || null,
-      error: downloadUrl ? null : "No source video URL available",
-      createdAt,
-      completedAt: downloadUrl ? new Date() : null,
-    };
-
-    await jobRef.set(jobDoc);
+      settings,
+      timeline: exportTimeline,
+    });
 
     return res.json({
-      id: jobDoc.id,
-      projectId: jobDoc.projectId,
-      status: jobDoc.status,
-      progress: jobDoc.progress,
-      downloadUrl: jobDoc.downloadUrl || undefined,
-      error: jobDoc.error || undefined,
-      createdAt: createdAt.toISOString(),
-      completedAt: jobDoc.completedAt ? jobDoc.completedAt.toISOString() : undefined,
+      id: job.id,
+      status: job.status,
+      progressPercent: job.progressPercent,
+      currentStep: job.currentStep,
+      createdAt: job.createdAt instanceof Date ? job.createdAt.toISOString() : String(job.createdAt),
     });
   } catch (err: any) {
-    console.error("Export error:", err);
-    res.status(500).json({ error: err.message || "Failed to start export" });
+    logger.error({ err: err?.message || String(err) }, "Export creation error");
+    res.status(500).json({ error: "Failed to start export" });
   }
 });
 
@@ -999,32 +1130,70 @@ router.get("/exports/:exportId", async (req: Request, res: Response) => {
       return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
-    const access = await assertEditingAccess(req, res);
-    if (!access) return;
-
-    const snap = await db.collection("editing_exports").doc(exportId).get();
-    if (!snap.exists) {
+    const job = await getExportJob(exportId);
+    if (!job) {
       return res.status(404).json({ error: "Export job not found" });
     }
-
-    const data = snap.data() as any;
-    if (data?.userId !== userId) {
+    if (job.userId !== userId) {
       return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
+    const toISO = (d: any) => {
+      if (!d) return undefined;
+      if (d instanceof Date) return d.toISOString();
+      if (typeof d?.toDate === "function") return d.toDate().toISOString();
+      return String(d);
+    };
+
+    const url = job.outputUrl || undefined;
+
     return res.json({
-      id: snap.id,
-      projectId: data?.projectId,
-      status: data?.status,
-      progress: Number(data?.progress || 0),
-      downloadUrl: data?.downloadUrl || undefined,
-      error: data?.error || undefined,
-      createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || new Date().toISOString(),
-      completedAt: data?.completedAt?.toDate?.()?.toISOString?.() || undefined,
+      id: job.id,
+      projectId: job.projectId,
+      status: job.status,
+      progressPercent: job.progressPercent,
+      progress: job.progressPercent,       // alias for backward compat
+      currentStep: job.currentStep,
+      outputUrl: url,
+      downloadUrl: url,                    // alias for backward compat
+      error: job.errorMessage || undefined,
+      attemptCount: job.attemptCount,
+      createdAt: toISO(job.createdAt),
+      startedAt: toISO(job.startedAt),
+      completedAt: toISO(job.completedAt),
     });
   } catch (err: any) {
-    console.error("Get export status error:", err);
+    logger.error({ err: err?.message || String(err) }, "Get export status error");
     res.status(500).json({ error: "Failed to fetch export status" });
+  }
+});
+
+// POST /api/editing/exports/:exportId/cancel - Cancel a pending export
+router.post("/exports/:exportId/cancel", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    const { exportId } = req.params;
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    const job = await getExportJob(exportId);
+    if (!job) {
+      return res.status(404).json({ error: "Export job not found" });
+    }
+    if (job.userId !== userId) {
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
+    }
+
+    const canceled = await cancelJob(exportId);
+    if (!canceled) {
+      return res.status(409).json({ error: "Job cannot be canceled (already terminal)" });
+    }
+
+    return res.json({ id: exportId, status: "canceled" });
+  } catch (err: any) {
+    logger.error({ err: err?.message || String(err) }, "Cancel export error");
+    res.status(500).json({ error: "Failed to cancel export" });
   }
 });
 
