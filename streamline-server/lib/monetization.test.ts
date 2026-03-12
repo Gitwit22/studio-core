@@ -15,10 +15,15 @@ const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 12;
 
 function generateAccessCode(): string {
-  const bytes = crypto.randomBytes(CODE_LENGTH);
+  const maxValid = Math.floor(256 / CODE_CHARS.length) * CODE_CHARS.length;
   let code = "";
-  for (let i = 0; i < CODE_LENGTH; i++) {
-    code += CODE_CHARS[bytes[i] % CODE_CHARS.length];
+  while (code.length < CODE_LENGTH) {
+    const bytes = crypto.randomBytes(CODE_LENGTH * 2);
+    for (let i = 0; i < bytes.length && code.length < CODE_LENGTH; i++) {
+      if (bytes[i] < maxValid) {
+        code += CODE_CHARS[bytes[i] % CODE_CHARS.length];
+      }
+    }
   }
   return code;
 }

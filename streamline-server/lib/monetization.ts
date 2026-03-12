@@ -96,10 +96,17 @@ function getCodeSalt(): string {
 }
 
 export function generateAccessCode(): string {
-  const bytes = crypto.randomBytes(CODE_LENGTH);
+  // Use rejection sampling to avoid modulo bias.
+  // CODE_CHARS has 30 characters; largest multiple of 30 ≤ 255 is 240.
+  const maxValid = Math.floor(256 / CODE_CHARS.length) * CODE_CHARS.length;
   let code = "";
-  for (let i = 0; i < CODE_LENGTH; i++) {
-    code += CODE_CHARS[bytes[i] % CODE_CHARS.length];
+  while (code.length < CODE_LENGTH) {
+    const bytes = crypto.randomBytes(CODE_LENGTH * 2); // over-provision
+    for (let i = 0; i < bytes.length && code.length < CODE_LENGTH; i++) {
+      if (bytes[i] < maxValid) {
+        code += CODE_CHARS[bytes[i] % CODE_CHARS.length];
+      }
+    }
   }
   return code;
 }
