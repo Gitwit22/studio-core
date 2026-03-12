@@ -116,7 +116,7 @@ export default function ProjectsDashboard() {
             </h1>
             <p style={{ fontSize: '1rem', color: '#9ca3af', marginTop: '0.5rem' }}>
               {planInfo
-                ? `${planInfo.currentProjects} / ${planInfo.maxProjects || '∞'} projects used`
+                ? `${planInfo.currentProjects} / ${planInfo.maxProjects || 'unlimited'} projects used`
                 : `${projects.length} projects`}
             </p>
           </div>

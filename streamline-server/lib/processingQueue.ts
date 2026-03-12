@@ -48,6 +48,7 @@ export interface ProcessingJobDoc {
 }
 
 const COLLECTION = "processing_jobs";
+const MAX_ERROR_MESSAGE_LENGTH = 500;
 
 // ── Write helpers ───────────────────────────────────────────────────────────
 
@@ -189,7 +190,7 @@ export async function failProcessingJob(jobId: string, errorMessage: string): Pr
   await updateProcessingJob(jobId, {
     status: "failed",
     currentStep: "Failed",
-    errorMessage: (errorMessage || "Unknown error").slice(0, 500),
+    errorMessage: (errorMessage || "Unknown error").slice(0, MAX_ERROR_MESSAGE_LENGTH),
     completedAt: new Date(),
   });
 }

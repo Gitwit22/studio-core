@@ -36,7 +36,7 @@ export interface NormalizedProject {
 const EDITING_PROJECTS = "editing_projects";
 const PROJECTS = "projects";
 
-function toIso(field: any): string {
+function timestampToISOString(field: any): string {
   if (!field) return new Date().toISOString();
   if (typeof field.toDate === "function") return field.toDate().toISOString();
   if (field instanceof Date) return field.toISOString();
@@ -166,7 +166,7 @@ function normalizeEditingProject(docId: string, data: any): NormalizedProject {
     assetId: data.assetId || "",
     status: data.status || "draft",
     lastModified:
-      toIso(data.updatedAt) || toIso(data.createdAt) || new Date().toISOString(),
+      timestampToISOString(data.updatedAt) || timestampToISOString(data.createdAt) || new Date().toISOString(),
     duration: data.duration || 0,
     thumbnail: data.thumbnail || data.thumbnailUrl || null,
     userId: data.userId,
@@ -183,7 +183,7 @@ function normalizeNewProject(docId: string, data: any, userId: string): Normaliz
     name: data.name || "Untitled Project",
     assetId: "",
     status: data.status === "archived" ? "archived" : "draft",
-    lastModified: toIso(data.updatedAt) || toIso(data.createdAt),
+    lastModified: timestampToISOString(data.updatedAt) || timestampToISOString(data.createdAt),
     duration: 0,
     thumbnail: data.thumbnail || null,
     userId: userId,
