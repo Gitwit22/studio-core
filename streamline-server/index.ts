@@ -70,6 +70,7 @@ import supportActionsRoutes from "./routes/supportActions";
 import supportTicketsRoutes from "./routes/supportTickets";
 import { attachHorizonWs } from "./routes/horizonWs";
 import horizonRoomHooks from "./routes/horizon/roomHooks";
+import horizonBotApi from "./routes/horizon/botApi";
 
 import { uploadVideo } from "./lib/storageClient";
 
@@ -289,6 +290,11 @@ app.use("/api/plans", plansRoutes);
 app.use("/api/stats", statsRoutes);
 // Lightweight telemetry events
 app.use("/api/telemetry", telemetryRoutes);
+
+// =============================================================================
+// HORIZON BOT API — bot-accessible via HORIZON_WEBHOOK_SECRET bearer token
+// =============================================================================
+app.use("/api/horizon/bot", horizonBotApi);
 
 // =============================================================================
 // HORIZON / ADMIN MONITORING ROUTES — all admin-only

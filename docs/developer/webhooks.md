@@ -4,6 +4,130 @@ StreamLine uses webhooks for event-driven integrations with external services. T
 
 ## Inbound Webhooks
 
+### Horizon Bot Webhook
+
+**Endpoint:** `POST /api/horizon/bot/events`
+
+The Horizon AI agent POSTs events to StreamLine via this endpoint. It uses dual authentication: a Bearer token and HMAC-SHA256 signature verification.
+
+#### Authentication
+
+All bot API endpoints require a Bearer token:
+
+```
+Authorization: Bearer <HORIZON_WEBHOOK_SECRET>
+```
+
+The inbound webhook POST additionally requires an HMAC-SHA256 signature of the request body:
+
+```
+X-Horizon-Signature: sha256=<hex-digest>
+```
+
+The signature is computed as `HMAC-SHA256(HORIZON_WEBHOOK_SECRET, raw_request_body)`.
+
+#### Rate Limiting
+
+60 requests per 60-second window per IP address. Returns `429` with `retryAfterMs` when exceeded.
+
+#### Inbound Event Types
+
+| Event Type | Description |
+|---|---|
+| `support.alert` | Support system alert from Horizon |
+| `chat.response` | Bot chat response to a user query |
+| `monitoring.heartbeat` | Periodic health/status heartbeat |
+| `skill.result` | Result from a Horizon skill execution |
+| `ack` | Acknowledgement of a previously sent event |
+
+#### Inbound Payload Format
+
+```json
+{
+  "id": "evt_abc123",
+  "type": "chat.response",
+  "timestamp": "2025-01-15T10:30:00Z",
+  "data": {
+    "roomId": "room-id",
+    "message": "Here is the meeting summary..."
+  }
+}
+```
+
+#### Webhook Flow
+
+```
+Horizon → POST /api/horizon/bot/events
+                │
+                ├── Rate limit check (60 req/min per IP)
+                │
+                ├── Parse raw body (preserves bytes for HMAC)
+                │
+                ├── Verify Bearer token
+                │
+                ├── Verify HMAC-SHA256 signature (X-Horizon-Signature)
+                │
+                ├── Parse JSON body
+                │
+                ├── Route by event type
+                │
+                └── Return { ok: true, type, id }
+```
+
+### Horizon Support API
+
+The bot can query StreamLine for room and chat data.
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/horizon/bot/support/status` | Health check / connection test |
+| `GET /api/horizon/bot/support/rooms` | List active rooms (optional `?status=live&limit=50`) |
+| `GET /api/horizon/bot/support/rooms/:roomId` | Room detail |
+| `GET /api/horizon/bot/support/rooms/:roomId/chat` | Recent chat messages (optional `?limit=50&sessionId=...`) |
+
+All support API endpoints require: `Authorization: Bearer <HORIZON_WEBHOOK_SECRET>`
+
+#### Status Response
+
+```json
+{
+  "ok": true,
+  "service": "StreamLine Horizon Integration",
+  "version": "1.0.0",
+  "timestamp": "2025-01-15T10:30:00Z",
+  "capabilities": ["chat.message", "voice.room_started", "support.alert", "..."],
+  "endpoints": {
+    "inbound": "POST /api/horizon/bot/events",
+    "outboundChat": "POST /api/rooms/:roomId/chat-events",
+    "outboundVoice": "POST /api/rooms/:roomId/voice-stream",
+    "agentChat": "POST /api/rooms/:roomId/chat",
+    "supportStatus": "GET /api/horizon/bot/support/status",
+    "supportRooms": "GET /api/horizon/bot/support/rooms",
+    "supportRoomDetail": "GET /api/horizon/bot/support/rooms/:roomId",
+    "supportRoomChat": "GET /api/horizon/bot/support/rooms/:roomId/chat"
+  }
+}
+```
+
+### Horizon Agent Chat Posting
+
+**Endpoint:** `POST /api/rooms/:roomId/chat`
+
+Allows the Horizon agent to post messages directly into a room's active chat session. Messages appear in real time via the existing SSE `/chat/stream` endpoint.
+
+**Auth:** `Authorization: Bearer <HORIZON_WEBHOOK_SECRET>`
+
+**Payload:**
+```json
+{
+  "userId": "horizon-agent",
+  "username": "Horizon",
+  "message": "Meeting summary: ..."
+}
+```
+
+---
+
 ### Stripe Webhooks
 
 **Endpoint:** `POST /api/webhooks/stripe`
@@ -65,36 +189,42 @@ StreamLine forwards room events to the Horizon AI agent service via outbound web
 #### Chat Events
 
 **Outbound URL:** Configured via `HORIZON_CHAT_EVENT_URL`
+**Trigger Endpoint:** `POST /api/rooms/:roomId/chat-events` (requires room access token)
 
-When a chat message is sent in a room, StreamLine can forward the message to Horizon for AI processing.
+When a chat message is sent in a room, StreamLine forwards it to Horizon. Messages containing triggers (`@horizon`, `horizon:`, `hey horizon`) are flagged as commands.
 
 **Payload:**
 ```json
 {
-  "type": "chat_event",
+  "event": "message",
   "roomId": "room-id",
-  "identity": "user-identity",
+  "userId": "user-uid",
+  "username": "display-name",
   "message": "hey horizon, summarize this meeting",
-  "timestamp": "2025-01-15T10:30:00Z"
+  "timestamp": "2025-01-15T10:30:00Z",
+  "mentions": ["horizon"],
+  "isCommand": true,
+  "matchedTrigger": "hey horizon",
+  "commandText": "summarize this meeting",
+  "originalText": "hey horizon, summarize this meeting"
 }
 ```
 
 #### Voice Events
 
 **Outbound URL:** Configured via `HORIZON_VOICE_EVENT_URL`
+**Trigger Endpoint:** `POST /api/rooms/:roomId/voice-stream` (requires room access token)
 
-Voice commands detected in a room can be forwarded to Horizon for processing.
+Audio chunks (up to 5 MB, `audio/wav` or `application/octet-stream`) are forwarded to Horizon with speaker metadata in headers:
 
-**Payload:**
-```json
-{
-  "type": "voice_event",
-  "roomId": "room-id",
-  "identity": "user-identity",
-  "command": "start recording",
-  "timestamp": "2025-01-15T10:30:00Z"
-}
-```
+| Header | Description |
+|---|---|
+| `X-Room-Id` | Room identifier |
+| `X-User-Id` | Speaker user ID |
+| `X-Username` | Speaker display name |
+| `X-Timestamp` | ISO-8601 timestamp |
+| `X-Request-Id` | Correlation ID |
+| `Authorization` | `Bearer <HORIZON_WEBHOOK_SECRET>` |
 
 #### Authentication
 
@@ -105,6 +235,8 @@ Authorization: Bearer <HORIZON_WEBHOOK_SECRET>
 ```
 
 The receiving service verifies the token using `verifyHorizonSecret()`.
+
+For inbound events (Horizon → StreamLine), HMAC-SHA256 signature verification is also required via the `X-Horizon-Signature` header. Use `signPayload()` from `lib/horizon/hmacVerify.ts` to generate signatures.
 
 #### Retry Logic
 
