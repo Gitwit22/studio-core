@@ -28,7 +28,7 @@ export interface PresenceMetadata {
 }
 
 /**
- * Normalise a raw presence mode value.
+ * Normalize a raw presence mode value.
  * Maps the legacy "silent" to "invisible"; unknown values → "normal".
  */
 export function normalizePresenceMode(v: unknown): PresenceMode {

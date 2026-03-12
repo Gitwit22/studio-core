@@ -81,7 +81,7 @@ const PRESENCE_POLICIES: Record<PresenceMode, PresencePolicy> = {
 };
 
 /**
- * Returns true when the value is a recognised presence mode literal.
+ * Returns true when the value is a recognized presence mode literal.
  * Accepts the legacy "silent" value for backwards compatibility
  * (callers should follow up with {@link normalizePresenceMode}).
  */
@@ -90,7 +90,7 @@ export function isValidPresenceMode(v: unknown): v is PresenceMode {
 }
 
 /**
- * Normalise a raw presence mode value.
+ * Normalize a raw presence mode value.
  * Maps the legacy "silent" value to "invisible"; unknown values
  * fall back to "normal".
  */
