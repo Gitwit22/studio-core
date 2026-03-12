@@ -102,6 +102,7 @@ router.use(horizonRateLimit);
 
 router.post(
   "/events",
+  horizonRateLimit,
   express.raw({ type: "application/json", limit: "256kb" }),
   requireBotAuth,
   async (req: Request, res: Response) => {
@@ -189,7 +190,7 @@ router.post(
  * GET /support/status — Health / connection test
  * ═══════════════════════════════════════════════════════════════════════ */
 
-router.get("/support/status", requireBotAuth, (_req: Request, res: Response) => {
+router.get("/support/status", horizonRateLimit, requireBotAuth, (_req: Request, res: Response) => {
   res.json({
     ok: true,
     service: "StreamLine Horizon Integration",
@@ -222,7 +223,7 @@ router.get("/support/status", requireBotAuth, (_req: Request, res: Response) => 
  * GET /support/rooms — List active rooms
  * ═══════════════════════════════════════════════════════════════════════ */
 
-router.get("/support/rooms", requireBotAuth, async (req: Request, res: Response) => {
+router.get("/support/rooms", horizonRateLimit, requireBotAuth, async (req: Request, res: Response) => {
   const requestId = (req as any).id ?? "no-req-id";
 
   try {
@@ -263,7 +264,7 @@ router.get("/support/rooms", requireBotAuth, async (req: Request, res: Response)
  * GET /support/rooms/:roomId — Room detail
  * ═══════════════════════════════════════════════════════════════════════ */
 
-router.get("/support/rooms/:roomId", requireBotAuth, async (req: Request, res: Response) => {
+router.get("/support/rooms/:roomId", horizonRateLimit, requireBotAuth, async (req: Request, res: Response) => {
   const requestId = (req as any).id ?? "no-req-id";
   const roomId = typeof req.params.roomId === "string" ? req.params.roomId.trim() : "";
 
@@ -309,7 +310,7 @@ router.get("/support/rooms/:roomId", requireBotAuth, async (req: Request, res: R
  * GET /support/rooms/:roomId/chat — Recent chat messages
  * ═══════════════════════════════════════════════════════════════════════ */
 
-router.get("/support/rooms/:roomId/chat", requireBotAuth, async (req: Request, res: Response) => {
+router.get("/support/rooms/:roomId/chat", horizonRateLimit, requireBotAuth, async (req: Request, res: Response) => {
   const requestId = (req as any).id ?? "no-req-id";
   const roomId = typeof req.params.roomId === "string" ? req.params.roomId.trim() : "";
 
