@@ -18,6 +18,7 @@ import RoomExitPage from "./pages/RoomExitPage";
 import PostStreamSummary from "./pages/PostStreamSummary";
 import SettingsDestinations from "./pages/SettingsDestinations";
 import SettingsBilling from "./pages/SettingsBilling";
+import MonetizationSetup from "./pages/MonetizationSetup";
 import LearnMore from "./pages/LearnMore";
 import Checkout from "./pages/Checkout";
 import PricingExplainerPage from "./pages/PricingExplainerPage";
@@ -102,6 +103,7 @@ export function creatorRoutes(flags: CreatorRouteFlags) {
       <Route path="/live/:savedEmbedId" element={<Live />} />
       <Route path="/ig/:savedEmbedId" element={<Live />} />
       <Route path="/settings/destinations" element={<SettingsDestinations />} />
+      <Route path="/settings/monetization" element={<MonetizationSetup />} />
       <Route path="/room-exit/:recordingId" element={<RoomExitPage />} />
 
       {/* Legacy redirect */}

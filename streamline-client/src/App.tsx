@@ -7,6 +7,7 @@ import Terms from "./pages/Terms";
 import Support from "./pages/Support";
 import BillingCanceled from "./pages/BillingCanceled";
 import BillingSuccess from "./pages/BillingSuccess";
+import PpvViewer from "./pages/PpvViewer";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { creatorRoutes } from "./creator/routes";
 
@@ -50,7 +51,7 @@ function App() {
         path.startsWith("/privacy") || path.startsWith("/terms") ||
         path.startsWith("/support") || path.startsWith("/learnmore") ||
         path.startsWith("/i/") || path.startsWith("/invite/") ||
-        path.startsWith("/billing/")
+        path.startsWith("/billing/") || path.startsWith("/ppv/")
       ) {
         return;
       }
@@ -152,6 +153,9 @@ function App() {
       <Route path="/support" element={<Support />} />
       <Route path="/billing/canceled" element={<BillingCanceled />} />
       <Route path="/billing/success" element={<BillingSuccess />} />
+
+      {/* PPV viewer (public, no auth required) */}
+      <Route path="/ppv/:eventId" element={<PpvViewer />} />
 
       {/* Creator lane */}
       {creatorRoutes({ canContentLibrary, canMyContentRecordings, canProjects, canEditor, canMyContent, myContentTarget })}
