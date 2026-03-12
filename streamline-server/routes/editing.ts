@@ -26,6 +26,16 @@ import {
   getExportJob,
   cancelJob,
 } from "../lib/exportQueue";
+import {
+  resolveProjectForEditor,
+  listProjectsForEditor,
+  countUserProjects,
+} from "../lib/projectBridge";
+import {
+  getProcessingJob,
+  listProjectProcessingJobs,
+  enqueueStandardJobs,
+} from "../lib/processingQueue";
 
 const router = Router();
 
@@ -596,30 +606,9 @@ router.get("/projects", async (req: Request, res: Response) => {
     // Plan-based gating: projects are part of editing.
     const access = await assertEditingAccess(req, res);
     if (!access) return;
-    
-    const projectsSnap = await db
-      .collection("editing_projects")
-      .where("userId", "==", userId)
-      .get();
 
-    const projects = projectsSnap.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        name: data.name,
-        assetId: data.assetId,
-        createdAt: data.createdAt?.toDate?.()?.toISOString(),
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString(),
-        lastModified:
-          data.updatedAt?.toDate?.()?.toISOString() ||
-          data.createdAt?.toDate?.()?.toISOString() ||
-          new Date().toISOString(),
-        duration: data.duration || 0,
-        status: data.status || 'draft',
-        userId: data.userId,
-        timeline: data.timeline || null,
-      };
-    });
+    // Use the project bridge to merge both collections into one normalized list
+    const projects = await listProjectsForEditor(userId);
 
     res.json(projects);
   } catch (err: any) {
@@ -651,11 +640,8 @@ router.post("/projects", async (req: Request, res: Response) => {
 
     // Enforce max projects (0 means unlimited when access=true)
     if (access.plan.maxProjects > 0) {
-      const existingSnap = await db
-        .collection("editing_projects")
-        .where("userId", "==", userId)
-        .get();
-      if (existingSnap.size >= access.plan.maxProjects) {
+      const totalCount = await countUserProjects(userId);
+      if (totalCount >= access.plan.maxProjects) {
         return res.status(409).json({
           error: LIMIT_ERRORS.LIMIT_EXCEEDED,
           reason: "Max projects limit reached",
@@ -716,29 +702,13 @@ router.get("/projects/:id", async (req: Request, res: Response) => {
     const access = await assertEditingAccess(req, res);
     if (!access) return;
 
-    const snap = await db.collection("editing_projects").doc(id).get();
-    if (!snap.exists) {
+    // Use the bridge to resolve from either collection, auto-creating if needed
+    const project = await resolveProjectForEditor(id, userId);
+    if (!project) {
       return res.status(404).json({ error: "Project not found" });
     }
-    const data = snap.data() as any;
-    if (data?.userId !== userId) {
-      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
-    }
 
-    return res.json({
-      id: snap.id,
-      name: data?.name || "Untitled Project",
-      assetId: data?.assetId,
-      status: data?.status || "draft",
-      lastModified:
-        data?.updatedAt?.toDate?.()?.toISOString?.() ||
-        data?.createdAt?.toDate?.()?.toISOString?.() ||
-        new Date().toISOString(),
-      duration: data?.duration || 0,
-      thumbnail: data?.thumbnail || data?.thumbnailUrl || null,
-      userId: data?.userId,
-      timeline: data?.timeline || null,
-    });
+    return res.json(project);
   } catch (err: any) {
     console.error("Get project error:", err);
     res.status(500).json({ error: "Failed to fetch project" });
@@ -856,11 +826,8 @@ router.post("/projects/:id/duplicate", async (req: Request, res: Response) => {
 
     // Enforce max projects
     if (access.plan.maxProjects > 0) {
-      const existingSnap = await db
-        .collection("editing_projects")
-        .where("userId", "==", userId)
-        .get();
-      if (existingSnap.size >= access.plan.maxProjects) {
+      const totalCount = await countUserProjects(userId);
+      if (totalCount >= access.plan.maxProjects) {
         return res.status(409).json({
           error: LIMIT_ERRORS.LIMIT_EXCEEDED,
           reason: "Max projects limit reached",
@@ -1641,6 +1608,76 @@ router.post("/recordings/stop", async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error("❌ recording stop error:", err);
     res.status(500).json({ error: err.message || "Failed to stop recording" });
+  }
+});
+
+// ============================================================================
+// PLAN INFO ENDPOINT — expose editing plan limits to the client
+// ============================================================================
+
+router.get("/plan-info", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    const plan = await getEditingPlanInfo(userId);
+    const projectCount = await countUserProjects(userId);
+
+    return res.json({
+      planId: plan.planId,
+      access: plan.access,
+      maxProjects: plan.maxProjects,
+      currentProjects: projectCount,
+      maxStorageGB: plan.maxStorageGB,
+      maxTracks: plan.maxTracks ?? null,
+      maxResolution: plan.maxResolution ?? null,
+    });
+  } catch (err: any) {
+    console.error("Plan info error:", err);
+    res.status(500).json({ error: "Failed to fetch plan info" });
+  }
+});
+
+// ============================================================================
+// PROCESSING STATUS ENDPOINTS — background job status
+// ============================================================================
+
+router.get("/processing/:jobId", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    const job = await getProcessingJob(req.params.jobId);
+    if (!job || job.userId !== userId) {
+      return res.status(404).json({ error: "Processing job not found" });
+    }
+
+    return res.json(job);
+  } catch (err: any) {
+    console.error("Processing status error:", err);
+    res.status(500).json({ error: "Failed to fetch processing status" });
+  }
+});
+
+router.get("/projects/:id/processing", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    if (!userId) {
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+    }
+
+    const jobs = await listProjectProcessingJobs(req.params.id);
+    // Filter to only this user's jobs
+    const userJobs = jobs.filter((j) => j.userId === userId);
+
+    return res.json(userJobs);
+  } catch (err: any) {
+    console.error("Project processing status error:", err);
+    res.status(500).json({ error: "Failed to fetch processing status" });
   }
 });
 

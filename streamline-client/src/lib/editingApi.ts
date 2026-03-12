@@ -34,6 +34,9 @@ export type Project = {
   thumbnail?: string;
   userId?: string;
   timeline?: TimelineData;
+  projectId?: string;           // new `projects` collection ID (when bridged)
+  migrated?: boolean;           // true when sourced from the new projects collection
+  sourceCollection?: "projects" | "editing_projects";
 };
 
 export type TimelineClip = {
@@ -103,6 +106,43 @@ export type ExportJob = {
 export const EXPORT_TERMINAL_STATUSES: ExportJob["status"][] = [
   "completed", "failed", "canceled",
 ];
+
+// ============================================================================
+// PLAN INFO TYPES
+// ============================================================================
+
+export type EditingPlanInfo = {
+  planId: string;
+  access: boolean;
+  maxProjects: number;
+  currentProjects: number;
+  maxStorageGB: number;
+  maxTracks: number | null;
+  maxResolution: string | null;
+};
+
+// ============================================================================
+// PROCESSING JOB TYPES
+// ============================================================================
+
+export type ProcessingJobType = "thumbnail" | "waveform" | "transcription";
+export type ProcessingJobStatus = "queued" | "processing" | "completed" | "failed";
+
+export type ProcessingJob = {
+  id: string;
+  userId: string;
+  projectId: string;
+  assetId: string;
+  type: ProcessingJobType;
+  status: ProcessingJobStatus;
+  progressPercent: number;
+  currentStep: string | null;
+  errorMessage: string | null;
+  outputUrl: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
 
 // ============================================================================
 // AUTH HELPERS
@@ -524,6 +564,54 @@ export const exportApi = {
 };
 
 // ============================================================================
+// PLAN INFO API
+// ============================================================================
+
+export const planInfoApi = {
+  async get(): Promise<EditingPlanInfo | null> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/editing/plan-info`, {}, { allowNonOk: true });
+      if (!response.ok) return null;
+      return handleResponse<EditingPlanInfo>(response);
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Plan info API error:', error);
+      return null;
+    }
+  },
+};
+
+// ============================================================================
+// PROCESSING API
+// ============================================================================
+
+export const processingApi = {
+  async getJob(jobId: string): Promise<ProcessingJob | null> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/editing/processing/${jobId}`, {}, { allowNonOk: true });
+      if (!response.ok) return null;
+      return handleResponse<ProcessingJob>(response);
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Processing job API error:', error);
+      return null;
+    }
+  },
+
+  async listForProject(projectId: string): Promise<ProcessingJob[]> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${projectId}/processing`, {}, { allowNonOk: true });
+      if (!response.ok) return [];
+      return handleResponse<ProcessingJob[]>(response);
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Processing list API error:', error);
+      return [];
+    }
+  },
+};
+
+// ============================================================================
 // UNIFIED API EXPORT
 // ============================================================================
 
@@ -556,6 +644,13 @@ export const editingApi = {
   waitForExport: (id: string, onProgress?: (job: ExportJob) => void) =>
     exportApi.waitForComplete(id, onProgress),
   cancelExport: (id: string) => exportApi.cancel(id),
+
+  // Plan Info
+  getPlanInfo: () => planInfoApi.get(),
+
+  // Processing
+  getProcessingJob: (id: string) => processingApi.getJob(id),
+  getProjectProcessing: (projectId: string) => processingApi.listForProject(projectId),
 };
 
 export default editingApi;
