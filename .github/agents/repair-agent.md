@@ -1,6 +1,5 @@
 ---
-# Fill in the fields below to create a basic custom agent for your repository.
-# To make this agent available, merge this file into the default repository branch.
+
 name: repair-agent
 description: >
   A rapid-response agent that detects, diagnoses, and fixes immediate problems 
