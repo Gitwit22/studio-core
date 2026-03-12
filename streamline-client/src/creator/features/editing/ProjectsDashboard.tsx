@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { editingApi, type Project as EditProject, type Asset } from "../../../lib/editingApi";
+import { editingApi, type Project as EditProject, type Asset, type EditingPlanInfo } from "../../../lib/editingApi";
 import { useEffectiveEntitlements } from "../../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../../hooks/useFeatureAccess";
 
@@ -14,6 +14,7 @@ export default function ProjectsDashboard() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [planInfo, setPlanInfo] = useState<EditingPlanInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState("");
@@ -21,12 +22,14 @@ export default function ProjectsDashboard() {
 
   useEffect(() => {
     const loadData = async () => {
-      const [projectsData, assetsData] = await Promise.all([
+      const [projectsData, assetsData, planData] = await Promise.all([
         editingApi.getProjects(),
         editingApi.getAssets(),
+        editingApi.getPlanInfo(),
       ]);
       setProjects(projectsData);
       setAssets(assetsData);
+      setPlanInfo(planData);
       setLoading(false);
     };
     loadData();
@@ -112,7 +115,9 @@ export default function ProjectsDashboard() {
               🎬 Your Projects
             </h1>
             <p style={{ fontSize: '1rem', color: '#9ca3af', marginTop: '0.5rem' }}>
-              {projects.length} / 100 projects used
+              {planInfo
+                ? `${planInfo.currentProjects} / ${planInfo.maxProjects || 'unlimited'} projects used`
+                : `${projects.length} projects`}
             </p>
           </div>
           <button
@@ -144,36 +149,52 @@ export default function ProjectsDashboard() {
         </div>
 
         {/* New Project Button */}
-        <button
-          onClick={() => setShowCreateModal(true)}
-          style={{
-            padding: '0.875rem 1.75rem',
-            background: 'linear-gradient(135deg, #dc2626, #ef4444)',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '0.75rem',
-            fontWeight: '600',
-            cursor: 'pointer',
-            marginBottom: '2rem',
-            transition: 'all 0.3s ease',
-            boxShadow: '0 8px 16px rgba(220, 38, 38, 0.2)',
-            fontSize: '1rem'
-          }}
-          onMouseEnter={(e) => {
-            const target = e.target as HTMLButtonElement;
-            target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
-            target.style.boxShadow = '0 12px 24px rgba(220, 38, 38, 0.3)';
-            target.style.transform = 'translateY(-2px)';
-          }}
-          onMouseLeave={(e) => {
-            const target = e.target as HTMLButtonElement;
-            target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
-            target.style.boxShadow = '0 8px 16px rgba(220, 38, 38, 0.2)';
-            target.style.transform = 'translateY(0)';
-          }}
-        >
-          ➕ New Project
-        </button>
+        {(() => {
+          const atLimit = planInfo && planInfo.maxProjects > 0 && planInfo.currentProjects >= planInfo.maxProjects;
+          return (
+            <div style={{ marginBottom: '2rem' }}>
+              <button
+                onClick={() => !atLimit && setShowCreateModal(true)}
+                disabled={!!atLimit}
+                style={{
+                  padding: '0.875rem 1.75rem',
+                  background: atLimit
+                    ? 'rgba(107, 114, 128, 0.3)'
+                    : 'linear-gradient(135deg, #dc2626, #ef4444)',
+                  color: atLimit ? '#9ca3af' : '#ffffff',
+                  border: 'none',
+                  borderRadius: '0.75rem',
+                  fontWeight: '600',
+                  cursor: atLimit ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: atLimit ? 'none' : '0 8px 16px rgba(220, 38, 38, 0.2)',
+                  fontSize: '1rem'
+                }}
+                onMouseEnter={(e) => {
+                  if (atLimit) return;
+                  const target = e.target as HTMLButtonElement;
+                  target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
+                  target.style.boxShadow = '0 12px 24px rgba(220, 38, 38, 0.3)';
+                  target.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  if (atLimit) return;
+                  const target = e.target as HTMLButtonElement;
+                  target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
+                  target.style.boxShadow = '0 8px 16px rgba(220, 38, 38, 0.2)';
+                  target.style.transform = 'translateY(0)';
+                }}
+              >
+                ➕ New Project
+              </button>
+              {atLimit && (
+                <p style={{ color: '#f87171', fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                  Project limit reached. Upgrade your plan to create more projects.
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Projects Grid */}
         {loading ? (
