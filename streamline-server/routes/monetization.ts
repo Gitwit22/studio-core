@@ -11,6 +11,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import crypto from "crypto";
 import { stripe } from "../lib/stripe";
 import { requireAuth } from "../middleware/requireAuth";
 import {
@@ -39,7 +40,6 @@ const CLIENT_URL =
 function getDeviceId(req: Request, res: Response): string {
   let deviceId = req.cookies?.sl_device_id;
   if (!deviceId || typeof deviceId !== "string") {
-    const crypto = require("crypto") as typeof import("crypto");
     deviceId = crypto.randomUUID();
     res.cookie("sl_device_id", deviceId, {
       httpOnly: true,
@@ -318,18 +318,15 @@ router.post("/redeem", async (req: Request, res: Response) => {
 
     const deviceId = getDeviceId(req, res);
 
-    if (accessCode.status === "claimed") {
-      if (event.singlePersonOnly) {
-        // Allow re-entry from same device
-        if (accessCode.claimedDeviceId === deviceId) {
-          return res.json({ ok: true, message: "already_claimed_same_device" });
-        }
+    // Transaction-based claim to prevent race conditions
+    const result = await claimAccessCode(eventId, accessCode.id, deviceId);
+    if (!result.ok) {
+      if (result.reason === "already_claimed" && event.singlePersonOnly) {
         return res.status(400).json({ error: "code_already_claimed" });
       }
-      // Not single-person: allow re-claim
+      return res.status(400).json({ error: result.reason || "claim_failed" });
     }
 
-    await claimAccessCode(eventId, accessCode.id, deviceId);
     return res.json({ ok: true });
   } catch (err: any) {
     console.error("[monetization] redeem error:", err?.message);

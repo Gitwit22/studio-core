@@ -317,15 +317,34 @@ export default function PpvViewer() {
                 </button>
                 <button
                   style={btnPrimary}
-                  onClick={() => {
+                  onClick={async () => {
+                    // Pre-fill the code and clear success URL params
                     setCodeInput(revealedCode);
-                    setShowCodeEntry(true);
-                    // Clear success params from URL
                     window.history.replaceState({}, "", `/ppv/${event.id}`);
-                    handleRedeem();
+                    // Redeem the code for the current device
+                    setRedeeming(true);
+                    try {
+                      const res = await apiFetch("/api/monetization/redeem", {
+                        method: "POST",
+                        body: JSON.stringify({ eventId: event.id, code: revealedCode }),
+                      }, { allowNonOk: true });
+                      const data = await res.json();
+                      if (data.ok) {
+                        setHasAccess(true);
+                      } else {
+                        setRedeemError(data.error || "Redeem failed");
+                        setShowCodeEntry(true);
+                      }
+                    } catch {
+                      setRedeemError("Redeem failed");
+                      setShowCodeEntry(true);
+                    } finally {
+                      setRedeeming(false);
+                    }
                   }}
+                  disabled={redeeming}
                 >
-                  Enter Stream →
+                  {redeeming ? "Entering…" : "Enter Stream →"}
                 </button>
               </div>
             </>
@@ -394,15 +413,23 @@ export default function PpvViewer() {
             type="number"
             min="1"
             step="0.01"
-            placeholder="Custom amount ($)"
+            placeholder="Custom amount (min $1.00)"
             value={customAmountDollars}
             onChange={(e) => setCustomAmountDollars(e.target.value)}
           />
           <button
-            style={btnSecondary}
+            style={{
+              ...btnSecondary,
+              opacity: customAmountDollars && parseFloat(customAmountDollars) < 1 ? 0.5 : 1,
+            }}
             onClick={() => {
               const cents = Math.round(parseFloat(customAmountDollars || "0") * 100);
-              if (cents >= 100) handleCheckout("donation", cents);
+              if (cents < 100) {
+                setError("Minimum donation is $1.00");
+                return;
+              }
+              setError(null);
+              handleCheckout("donation", cents);
             }}
             disabled={checkingOut}
           >

@@ -20,5 +20,3 @@ out/
 
 # Secrets / credentials (do not commit)
 **/firebaseServiceAccount*.json
-node_modules/
-dist/

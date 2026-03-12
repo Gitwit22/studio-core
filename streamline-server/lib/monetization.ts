@@ -288,11 +288,24 @@ export async function claimAccessCode(
   eventId: string,
   codeId: string,
   deviceId: string
-): Promise<void> {
-  await accessCodesCol(eventId).doc(codeId).update({
-    status: "claimed",
-    claimedAt: FieldValue.serverTimestamp(),
-    claimedDeviceId: deviceId,
+): Promise<{ ok: boolean; reason?: string }> {
+  const ref = accessCodesCol(eventId).doc(codeId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return { ok: false, reason: "not_found" };
+    const data = snap.data() as AccessCode;
+    if (data.status === "claimed") {
+      // Allow re-entry from the same device
+      if (data.claimedDeviceId === deviceId) return { ok: true };
+      return { ok: false, reason: "already_claimed" };
+    }
+    if (data.status === "revoked") return { ok: false, reason: "revoked" };
+    tx.update(ref, {
+      status: "claimed",
+      claimedAt: FieldValue.serverTimestamp(),
+      claimedDeviceId: deviceId,
+    });
+    return { ok: true };
   });
 }
 
