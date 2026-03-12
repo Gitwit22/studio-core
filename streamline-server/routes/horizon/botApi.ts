@@ -47,6 +47,7 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 60;
 const MAX_CHAT_LIMIT = 100;
 const DEFAULT_CHAT_LIMIT = 50;
+const BOT_API_VERSION = "1.0.0";
 
 /* ── Rate Limiter ─────────────────────────────────────────────────────── */
 
@@ -107,9 +108,9 @@ router.post(
     try {
       // ── HMAC signature verification ──────────────────────────────
       const cfg = getHorizonWebhookConfig();
+      const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body));
       if (cfg.webhookSecret) {
         const sigHeader = req.headers["x-horizon-signature"] as string | undefined;
-        const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body));
         if (!verifySignature(cfg.webhookSecret, rawBody, sigHeader)) {
           logger.warn({ requestId }, "horizon inbound event — HMAC verification failed");
           res.status(401).json({ error: "invalid_signature" });
@@ -118,10 +119,9 @@ router.post(
       }
 
       // ── Parse JSON body ──────────────────────────────────────────
-      const rawBody = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body);
       let payload: any;
       try {
-        payload = JSON.parse(rawBody);
+        payload = JSON.parse(rawBody.toString("utf8"));
       } catch {
         res.status(400).json({ error: "invalid_json" });
         return;
@@ -191,7 +191,7 @@ router.get("/support/status", requireBotAuth, (_req: Request, res: Response) => 
   res.json({
     ok: true,
     service: "StreamLine Horizon Integration",
-    version: "1.0.0",
+    version: BOT_API_VERSION,
     timestamp: new Date().toISOString(),
     capabilities: [
       "chat.message",
@@ -225,9 +225,9 @@ router.get("/support/rooms", requireBotAuth, async (req: Request, res: Response)
 
   try {
     const statusFilter = typeof req.query.status === "string" ? req.query.status.trim().toLowerCase() : "";
-    const limitParam = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 50, 1), 100);
+    const effectiveLimit = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 50, 1), 100);
 
-    let query: FirebaseFirestore.Query = firestore.collection("rooms").orderBy("updatedAt", "desc").limit(limitParam);
+    let query: FirebaseFirestore.Query = firestore.collection("rooms").orderBy("updatedAt", "desc").limit(effectiveLimit);
 
     // Optional status filter (e.g. "live", "idle", "ended")
     if (statusFilter) {
