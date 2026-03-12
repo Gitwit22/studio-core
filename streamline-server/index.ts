@@ -33,6 +33,7 @@ import statsRoutes from "./routes/stats";
 import telemetryRoutes from "./routes/telemetry";
 import savedEmbedsRoutes from "./routes/savedEmbeds";
 import editingRoutes from "./routes/editing";
+import projectsRoutes from "./routes/projects";
 import maintenanceRoutes from "./routes/maintenance";
 import onboardingRoutes from "./routes/onboarding";
 import { firestore as db } from "./firebaseAdmin";
@@ -226,6 +227,9 @@ app.use("/api/recordings", recordingsRoutes);
 
 // Editing API (authenticated)
 app.use("/api/editing", editingRoutes);
+
+// Projects API (core media workspace — independent of editing)
+app.use("/api/projects", projectsRoutes);
 
 // Health check
 app.get("/", (_req, res) => res.send("API up"));

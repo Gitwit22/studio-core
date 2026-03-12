@@ -34,6 +34,7 @@ import AssetLibrary from "./features/editing/AssetLibrary";
 import ProjectsDashboard from "./features/editing/ProjectsDashboard";
 import EditorPage from "./features/editing/EditorPage";
 import RenderAndUploadPage from "./features/editing/pages/RenderAndUploadPage";
+import ProjectDetail from "./pages/ProjectDetail";
 
 // ── Legacy redirect helper ───────────────────────────────────────────
 import { useParams } from "react-router-dom";
@@ -127,6 +128,7 @@ export function creatorRoutes(flags: CreatorRouteFlags) {
         path="/projects"
         element={canProjects ? <ProjectsDashboard /> : <Navigate to="/join" replace />}
       />
+      <Route path="/projects/:projectId" element={<ProjectDetail />} />
 
       {/* Legacy editing aliases */}
       <Route

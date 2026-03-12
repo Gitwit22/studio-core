@@ -7,6 +7,7 @@ import { useNavigate, useSearchParams,} from "react-router-dom";
 import { apiFetch, apiFetchAuth, clearAuthStorage } from "../../lib/api";
 import { useFeatureAccess } from "../../hooks/useFeatureAccess";
 import { useEffectiveEntitlements } from "../../hooks/useEffectiveEntitlements";
+import { listProjects, type Project } from "../../lib/projectsApi";
 
 type SavedEmbedSummary = {
   embedId: string;
@@ -150,6 +151,10 @@ export default function Join() {
   const [selectedSavedEmbedId, setSelectedSavedEmbedId] = useState<string>("");
 
   const [joinMode, setJoinMode] = useState<"new" | "saved">("new");
+
+  // Projects
+  const [recentProjects, setRecentProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
 
   // Presence mode: controls how the host joins (normal, invisible)
   const [hostPresenceMode, setHostPresenceMode] = useState<"normal" | "invisible">("normal");
@@ -468,6 +473,22 @@ export default function Join() {
       didCancel = true;
     };
   }, [user]);
+
+  // Load recent projects for the Projects section
+  useEffect(() => {
+    if (!user || isParticipant) return;
+    let cancelled = false;
+    setProjectsLoading(true);
+    listProjects(6)
+      .then((projects) => {
+        if (!cancelled) setRecentProjects(projects);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setProjectsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [user, isParticipant]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1378,6 +1399,141 @@ export default function Join() {
             </button>
           </form>
         </div>
+
+        {/* ── Projects Section ──────────────────────────────────── */}
+        {!isParticipant && user && (
+          <div
+            style={{
+              marginTop: "32px",
+              marginBottom: "24px",
+              width: "100%",
+              maxWidth: "480px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "16px",
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: "16px",
+                  fontWeight: 600,
+                  color: "#fff",
+                }}
+              >
+                📁 Projects
+              </h3>
+              <button
+                onClick={() => nav("/projects")}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#ef4444",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  fontWeight: 500,
+                  textDecoration: "underline",
+                  padding: 0,
+                }}
+              >
+                View All
+              </button>
+            </div>
+
+            {projectsLoading && (
+              <div style={{ color: "#9ca3af", fontSize: "13px", textAlign: "center", padding: "16px 0" }}>
+                Loading projects…
+              </div>
+            )}
+
+            {!projectsLoading && recentProjects.length === 0 && (
+              <div
+                style={{
+                  color: "#6b7280",
+                  fontSize: "13px",
+                  textAlign: "center",
+                  padding: "24px 16px",
+                  background: "rgba(255,255,255,0.03)",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                }}
+              >
+                No projects yet. Recordings will automatically appear here.
+              </div>
+            )}
+
+            {!projectsLoading && recentProjects.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {recentProjects.map((proj) => (
+                  <button
+                    key={proj.id}
+                    onClick={() => nav(`/projects/${proj.id}`)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      width: "100%",
+                      padding: "12px 16px",
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: "10px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      transition: "all 0.2s ease",
+                      color: "#fff",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "rgba(255,255,255,0.08)";
+                      e.currentTarget.style.borderColor = "rgba(239,68,68,0.4)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+                      e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "40px",
+                        height: "40px",
+                        borderRadius: "8px",
+                        background: "linear-gradient(135deg, rgba(220,38,38,0.2), rgba(239,68,68,0.1))",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        fontSize: "18px",
+                      }}
+                    >
+                      🎬
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: "14px",
+                          fontWeight: 500,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {proj.name}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>
+                        {proj.assetCount} asset{proj.assetCount === 1 ? "" : "s"}
+                        {proj.sourceRoomName ? ` · ${proj.sourceRoomName}` : ""}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Streaming setup hint - hosts only */}
         {!isParticipant && (

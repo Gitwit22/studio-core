@@ -19,6 +19,7 @@ import { firestore as db } from "../firebaseAdmin";
 import { stripe } from "../lib/stripe";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { FieldValue } from "firebase-admin/firestore";
+import { attachRecordingToProject } from "../lib/projectManager";
 import {
   S3Client,
   HeadObjectCommand,
@@ -1244,6 +1245,30 @@ router.post("/livekit", express.raw({ type: "*/*" }), async (req, res) => {
         await maybeCountRecordingUsage({ recordingRef, recordingData, now });
       } catch (e: any) {
         console.warn("[livekit-webhook] failed to count recording usage", { recordingId, error: e?.message || e });
+      }
+    }
+
+    // Auto-attach recording to a project when it becomes ready
+    if (finalStatus === "ready" && normalizedObjectKey) {
+      try {
+        const recUserId = typeof recordingData.userId === "string" ? recordingData.userId : "";
+        const recRoomId = typeof recordingData.roomId === "string" ? recordingData.roomId : "";
+        const recRoomName = typeof recordingData.roomName === "string" ? recordingData.roomName : "";
+        const recDuration = typeof recordingData.durationSeconds === "number" ? recordingData.durationSeconds : null;
+        if (recUserId) {
+          const result = await attachRecordingToProject({
+            userId: recUserId,
+            recordingId,
+            roomId: recRoomId,
+            roomName: recRoomName,
+            objectKey: normalizedObjectKey,
+            fileSize,
+            durationSeconds: recDuration,
+          });
+          console.log(`[livekit-webhook] Recording attached to project ${result.projectId}`);
+        }
+      } catch (projErr: any) {
+        console.warn("[livekit-webhook] failed to attach recording to project:", projErr?.message);
       }
     }
 

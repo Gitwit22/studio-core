@@ -2989,7 +2989,7 @@ function RoomPage() {
       if (typeof window !== "undefined" && "Notification" in window) {
         if (window.Notification.permission === "granted") {
           const n = new window.Notification("Recording is ready to download", {
-            body: "Click Download in the room banner (or open Settings → Usage → Latest video).",
+            body: "Your recording is now in Projects. You can download it there.",
           });
           n.onclick = () => {
             try {
@@ -2997,12 +2997,7 @@ function RoomPage() {
             } catch {}
 
             try {
-              nav("/settings/billing", {
-                state: {
-                  openTab: "usage",
-                  usageRoomId: effectiveRoomName || undefined,
-                },
-              });
+              nav("/projects");
             } catch {}
           };
         }
@@ -4916,14 +4911,14 @@ function RoomPage() {
           <div style={{ marginTop: 6, fontSize: 12, color: "#cbd5e1", lineHeight: 1.35 }}>
             {recordingBackgroundNotice.kind === "processing" ? (
               <>
-                Recording is processing in the background. Download it from{" "}
-                <span style={{ color: "#e5e7eb", fontWeight: 600 }}>Settings → Usage → Latest video</span>{" "}
-                when it turns green.
+                Recording is processing in the background. It will appear in your{" "}
+                <span style={{ color: "#e5e7eb", fontWeight: 600 }}>Projects</span>{" "}
+                when ready.
               </>
             ) : (
               <>
-                Recording is ready. Click <span style={{ color: "#e5e7eb", fontWeight: 700 }}>Download</span> (opens a new tab).{" "}
-                <span style={{ color: "#94a3b8" }}>Link lasts 1 hour.</span>
+                Your recording is now in <span style={{ color: "#e5e7eb", fontWeight: 700 }}>Projects</span>.{" "}
+                Download it there, or click <span style={{ color: "#e5e7eb", fontWeight: 700 }}>Download</span> below.
               </>
             )}
           </div>
