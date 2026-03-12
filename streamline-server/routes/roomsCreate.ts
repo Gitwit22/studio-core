@@ -5,7 +5,7 @@ import { ensureRoomDoc } from "../services/rooms";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { normalizeRoomLayout, type RoomLayout } from "../lib/roomLayout";
-import { isValidPresenceMode, type PresenceMode } from "../lib/presenceMode";
+import { isValidPresenceMode, normalizePresenceMode, type PresenceMode } from "../lib/presenceMode";
 
 const router = Router();
 
@@ -22,10 +22,10 @@ router.post("/create", requireAuth as any, async (req: any, res) => {
 
   const roomType = (req.body?.roomType || "rtc") as "rtc" | "hls";
 
-  // Presence mode for the room creator (normal/silent/invisible)
+  // Presence mode for the room creator (normal/invisible; "silent" → "invisible")
   const rawPresenceMode = req.body?.presenceMode;
   const presenceMode: PresenceMode = isValidPresenceMode(rawPresenceMode)
-    ? rawPresenceMode
+    ? normalizePresenceMode(rawPresenceMode)
     : "normal";
 
   // Optional room access policy (secure defaults are applied in ensureRoomDoc).

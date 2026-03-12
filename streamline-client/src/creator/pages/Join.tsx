@@ -151,8 +151,8 @@ export default function Join() {
 
   const [joinMode, setJoinMode] = useState<"new" | "saved">("new");
 
-  // Presence mode: controls how the host joins (normal, silent, invisible)
-  const [hostPresenceMode, setHostPresenceMode] = useState<"normal" | "silent" | "invisible">("normal");
+  // Presence mode: controls how the host joins (normal, invisible)
+  const [hostPresenceMode, setHostPresenceMode] = useState<"normal" | "invisible">("normal");
 
   // Platform-level HLS flag (controls enablement of Saved Room join when HLS is disabled)
   // Default to false so HLS-only UI is disabled until account flags load.
@@ -1259,8 +1259,7 @@ export default function Join() {
                 >
                   {([
                     { value: "normal" as const, label: "Normal Host" },
-                    { value: "silent" as const, label: "Silent Mod" },
-                    { value: "invisible" as const, label: "Invisible Mod" },
+                    { value: "invisible" as const, label: "Invisible" },
                   ]).map((opt) => (
                     <button
                       key={opt.value}
@@ -1281,14 +1280,9 @@ export default function Join() {
                     </button>
                   ))}
                 </div>
-                {hostPresenceMode === "silent" && (
-                  <div style={{ marginTop: "6px", fontSize: "11px", color: "#9ca3af" }}>
-                    In room, visible to admins, no mic/camera/chat.
-                  </div>
-                )}
                 {hostPresenceMode === "invisible" && (
                   <div style={{ marginTop: "6px", fontSize: "11px", color: "#9ca3af" }}>
-                    Hidden from participants, room control access only.
+                    Hidden from participants, no mic/camera/chat. Room control access only.
                   </div>
                 )}
               </div>
