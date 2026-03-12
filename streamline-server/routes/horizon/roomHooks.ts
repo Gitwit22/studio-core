@@ -234,7 +234,7 @@ router.post("/:roomId/chat", async (req: any, res) => {
     const authHeader = trimStr(req.headers?.authorization);
     if (!verifyHorizonSecret(authHeader)) {
       logger.warn({ requestId, roomId }, "agent chat post — invalid/missing webhook secret");
-      return res.status(401).json({ error: "unauthorized" });
+      return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     }
 
     // ── Validate payload ───────────────────────────────────────────

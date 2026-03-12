@@ -1314,7 +1314,7 @@ router.post("/rooms/:roomId/token/invisible", async (req: any, res) => {
     // Check admin status
     const callerIsAdmin = await isAdmin(user.uid);
     if (!callerIsAdmin) {
-      return res.status(403).json({ error: "insufficient_permissions" });
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
     }
 
     // Validate room

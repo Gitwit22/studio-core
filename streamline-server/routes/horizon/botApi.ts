@@ -38,6 +38,7 @@ import { firestore } from "../../firebaseAdmin";
 import { logger } from "../../lib/logger";
 import { verifyHorizonSecret, getHorizonWebhookConfig } from "../../lib/horizon/webhookConfig";
 import { verifySignature } from "../../lib/horizon/hmacVerify";
+import { PERMISSION_ERRORS } from "../../lib/permissionErrors";
 
 const router = Router();
 
@@ -87,7 +88,7 @@ setInterval(() => {
 function requireBotAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
   if (!verifyHorizonSecret(authHeader)) {
-    res.status(401).json({ error: "unauthorized" });
+    res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
     return;
   }
   next();
@@ -276,7 +277,7 @@ router.get("/support/rooms/:roomId", horizonRateLimit, requireBotAuth, async (re
   try {
     const roomSnap = await firestore.collection("rooms").doc(roomId).get();
     if (!roomSnap.exists) {
-      res.status(404).json({ error: "room_not_found" });
+      res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
       return;
     }
 
@@ -329,7 +330,7 @@ router.get("/support/rooms/:roomId/chat", horizonRateLimit, requireBotAuth, asyn
       // Use the active session from the room doc
       const roomSnap = await firestore.collection("rooms").doc(roomId).get();
       if (!roomSnap.exists) {
-        res.status(404).json({ error: "room_not_found" });
+        res.status(404).json({ error: PERMISSION_ERRORS.ROOM_NOT_FOUND });
         return;
       }
       const roomData = (roomSnap.data() as any) || {};
