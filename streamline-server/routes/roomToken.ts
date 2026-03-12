@@ -17,7 +17,7 @@ import jwt from "jsonwebtoken";
 import { getEffectiveEntitlements } from "../lib/effectiveEntitlements";
 import { resolveMaxDestinations } from "../lib/planLimits";
 import { getPlatformTranscodeEnabled } from "../lib/platformFlags";
-import { isValidPresenceMode, buildPresenceMetadata, type PresenceMode } from "../lib/presenceMode";
+import { isValidPresenceMode, normalizePresenceMode, buildPresenceMetadata, type PresenceMode } from "../lib/presenceMode";
 
 // Dynamic import for AccessToken constructor
 async function getAccessTokenCtor() {
@@ -134,7 +134,7 @@ function roleToGrant(role: GrantRole, presenceMode?: PresenceMode) {
 
   const participantPerm = roleToParticipantPermission(permissionRole);
 
-  // Apply presence-mode restrictions when joining as silent/invisible.
+  // Apply presence-mode restrictions when joining as invisible.
   const effectivePerm = presenceMode
     ? applyPresenceModeToGrant(participantPerm, presenceMode)
     : participantPerm;
@@ -483,9 +483,9 @@ router.post("/", requireAuthOrInvite, async (req, res) => {
     const uid = (req as any).user?.uid as string | undefined;
     const invite = (req as any).invite as InviteClaims | undefined;
 
-    // Validate and normalize presence mode (default to "normal")
+    // Validate and normalize presence mode (default to "normal", "silent" → "invisible")
     const presenceMode: PresenceMode = isValidPresenceMode(rawPresenceMode)
-      ? rawPresenceMode
+      ? normalizePresenceMode(rawPresenceMode)
       : "normal";
 
     // Default: RTC token issuance requires authentication.

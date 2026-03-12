@@ -8,8 +8,12 @@ export function normalizeUiRolePresetId(raw: any): UiRolePresetId {
 // Presence Mode helpers (mirrors server-side lib/presenceMode.ts)
 // ---------------------------------------------------------------------------
 
-/** How a participant appears in the room. */
-export type PresenceMode = "normal" | "silent" | "invisible";
+/**
+ * Room-level presence mode.
+ * "silent" has been unified into "invisible" — use normalizePresenceMode()
+ * to map legacy values.
+ */
+export type PresenceMode = "normal" | "invisible";
 
 /** Parsed metadata shape attached to LiveKit participants by the server. */
 export interface PresenceMetadata {
@@ -18,7 +22,18 @@ export interface PresenceMetadata {
   isVisibleInRoster?: boolean;
   canSendChat?: boolean;
   canReadChat?: boolean;
+  canScreenShare?: boolean;
+  canRequestStage?: boolean;
   rolePresetId?: string;
+}
+
+/**
+ * Normalize a raw presence mode value.
+ * Maps the legacy "silent" to "invisible"; unknown values → "normal".
+ */
+export function normalizePresenceMode(v: unknown): PresenceMode {
+  if (v === "invisible" || v === "silent") return "invisible";
+  return "normal";
 }
 
 /**
@@ -60,16 +75,15 @@ export function isNonNormalPresence(
 ): boolean {
   const meta = extractPresenceMetadata(rawParticipant);
   if (!meta) return false;
-  return meta.presenceMode === "silent" || meta.presenceMode === "invisible";
+  return meta.presenceMode === "invisible";
 }
 
 /** User-friendly label for a presence mode. */
-export function presenceModeLabel(mode: PresenceMode): string {
-  switch (mode) {
-    case "silent":
-      return "Silent Moderator";
+export function presenceModeLabel(mode: PresenceMode | string): string {
+  const normalized = normalizePresenceMode(mode);
+  switch (normalized) {
     case "invisible":
-      return "Invisible Moderator";
+      return "Invisible";
     default:
       return "Normal";
   }

@@ -1576,12 +1576,12 @@ function RoomPage() {
   const roomTokenMintInFlightRef = useRef(false);
 
   // Presence mode: passed from Join page via route state or localStorage
-  const [presenceMode, setPresenceMode] = useState<"normal" | "silent" | "invisible">(() => {
+  const [presenceMode, setPresenceMode] = useState<"normal" | "invisible">(() => {
     const fromState = (location.state as any)?.presenceMode;
-    if (fromState === "silent" || fromState === "invisible") return fromState;
+    if (fromState === "silent" || fromState === "invisible") return "invisible";
     try {
       const stored = localStorage.getItem("sl_presence_mode");
-      if (stored === "silent" || stored === "invisible") return stored;
+      if (stored === "silent" || stored === "invisible") return "invisible";
     } catch { /* ignore */ }
     return "normal";
   });

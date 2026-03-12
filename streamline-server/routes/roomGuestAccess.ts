@@ -10,7 +10,7 @@ import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 import { PERMISSION_ERRORS } from "../lib/permissionErrors";
 import { signGuestSession } from "../middleware/guestSession";
 import { roleToParticipantPermission, applyPresenceModeToGrant } from "../lib/livekitPermissions";
-import { isValidPresenceMode, buildPresenceMetadata, type PresenceMode } from "../lib/presenceMode";
+import { isValidPresenceMode, normalizePresenceMode, buildPresenceMetadata, type PresenceMode } from "../lib/presenceMode";
 import { isAdmin } from "../middleware/adminAuth";
 
 export function extractInviteToken(req: any): string | null {
@@ -254,7 +254,7 @@ function roleGrant(role: "guest" | "participant" | "host", presenceMode?: Presen
   const participantPerm = roleToParticipantPermission(role);
   const isHost = role === "host";
 
-  // Apply presence-mode restrictions when joining as silent/invisible.
+  // Apply presence-mode restrictions when joining as invisible.
   const effectivePerm = presenceMode
     ? applyPresenceModeToGrant(participantPerm, presenceMode)
     : participantPerm;
@@ -953,13 +953,13 @@ router.post("/rooms/:roomId/token", async (req: any, res) => {
 
     const displayName = sanitizeDisplayName(String(req.body?.displayName || req.body?.identity || "Guest")).trim() || "Guest";
 
-    // Validate and normalize presence mode (default to "normal")
+    // Validate and normalize presence mode (default to "normal", "silent" → "invisible")
     // Authenticated room owners (and future moderator/cohost roles) may use
     // non-normal presence modes.  Guests cannot.
     const rawPresenceMode = req.body?.presenceMode;
     const presenceMode: PresenceMode =
       user && isOwner && isValidPresenceMode(rawPresenceMode)
-        ? rawPresenceMode
+        ? normalizePresenceMode(rawPresenceMode)
         : "normal";
 
     // Determine LiveKit role based on authentication
@@ -1301,7 +1301,7 @@ router.post("/rooms/:roomId/join-guest", async (req: any, res) => {
  *   - can subscribe (watch/listen)
  *   - cannot publish audio/video/data
  *   - is marked hidden in metadata
- * Ideal for note-taking bots, silent mods, observing admins.
+ * Ideal for note-taking bots, invisible moderators, observing admins.
  */
 router.post("/rooms/:roomId/token/invisible", async (req: any, res) => {
   try {

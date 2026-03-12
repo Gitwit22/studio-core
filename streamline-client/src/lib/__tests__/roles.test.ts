@@ -4,7 +4,25 @@ import {
   isParticipantHidden,
   isNonNormalPresence,
   presenceModeLabel,
+  normalizePresenceMode,
 } from "../roles";
+
+describe("normalizePresenceMode", () => {
+  it("maps 'silent' to 'invisible'", () => {
+    expect(normalizePresenceMode("silent")).toBe("invisible");
+  });
+
+  it("passes through 'normal' and 'invisible'", () => {
+    expect(normalizePresenceMode("normal")).toBe("normal");
+    expect(normalizePresenceMode("invisible")).toBe("invisible");
+  });
+
+  it("defaults unknown values to 'normal'", () => {
+    expect(normalizePresenceMode("")).toBe("normal");
+    expect(normalizePresenceMode(null)).toBe("normal");
+    expect(normalizePresenceMode(undefined)).toBe("normal");
+  });
+});
 
 describe("extractPresenceMetadata", () => {
   it("parses JSON string metadata", () => {
@@ -16,9 +34,9 @@ describe("extractPresenceMetadata", () => {
   });
 
   it("handles object metadata", () => {
-    const p = { metadata: { presenceMode: "silent", isVisibleInRoster: true } as any };
+    const p = { metadata: { presenceMode: "invisible", isVisibleInRoster: false } as any };
     const meta = extractPresenceMetadata(p);
-    expect(meta?.presenceMode).toBe("silent");
+    expect(meta?.presenceMode).toBe("invisible");
   });
 
   it("returns null for missing metadata", () => {
@@ -39,11 +57,6 @@ describe("isParticipantHidden", () => {
     expect(isParticipantHidden(p)).toBe(false);
   });
 
-  it("shows silent participants (visible in roster)", () => {
-    const p = { metadata: JSON.stringify({ presenceMode: "silent", isVisibleInRoster: true }) };
-    expect(isParticipantHidden(p)).toBe(false);
-  });
-
   it("returns false for no metadata", () => {
     expect(isParticipantHidden({})).toBe(false);
     expect(isParticipantHidden(null)).toBe(false);
@@ -51,11 +64,6 @@ describe("isParticipantHidden", () => {
 });
 
 describe("isNonNormalPresence", () => {
-  it("detects silent mode", () => {
-    const p = { metadata: JSON.stringify({ presenceMode: "silent" }) };
-    expect(isNonNormalPresence(p)).toBe(true);
-  });
-
   it("detects invisible mode", () => {
     const p = { metadata: JSON.stringify({ presenceMode: "invisible" }) };
     expect(isNonNormalPresence(p)).toBe(true);
@@ -70,7 +78,10 @@ describe("isNonNormalPresence", () => {
 describe("presenceModeLabel", () => {
   it("returns human-readable labels", () => {
     expect(presenceModeLabel("normal")).toBe("Normal");
-    expect(presenceModeLabel("silent")).toBe("Silent Moderator");
-    expect(presenceModeLabel("invisible")).toBe("Invisible Moderator");
+    expect(presenceModeLabel("invisible")).toBe("Invisible");
+  });
+
+  it("maps legacy 'silent' to Invisible label", () => {
+    expect(presenceModeLabel("silent")).toBe("Invisible");
   });
 });

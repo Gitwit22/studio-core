@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   isValidPresenceMode,
+  normalizePresenceMode,
+  getPresencePolicy,
   getPresenceModeDefaults,
   buildPresenceMetadata,
 } from "./presenceMode";
@@ -10,8 +12,11 @@ import {
 
 test("isValidPresenceMode accepts valid modes", () => {
   assert.ok(isValidPresenceMode("normal"));
-  assert.ok(isValidPresenceMode("silent"));
   assert.ok(isValidPresenceMode("invisible"));
+});
+
+test("isValidPresenceMode accepts legacy 'silent' for backwards compat", () => {
+  assert.ok(isValidPresenceMode("silent"));
 });
 
 test("isValidPresenceMode rejects invalid values", () => {
@@ -22,36 +27,53 @@ test("isValidPresenceMode rejects invalid values", () => {
   assert.equal(isValidPresenceMode(42), false);
 });
 
-// ---------- getPresenceModeDefaults ----------
+// ---------- normalizePresenceMode ----------
 
-test("normal mode allows publish and is visible", () => {
-  const d = getPresenceModeDefaults("normal");
-  assert.equal(d.canPublishAudio, true);
-  assert.equal(d.canPublishVideo, true);
-  assert.equal(d.canSendChat, true);
-  assert.equal(d.canReadChat, true);
-  assert.equal(d.isVisibleInRoster, true);
-  assert.equal(d.canModerate, false);
+test("normalizePresenceMode maps 'silent' to 'invisible'", () => {
+  assert.equal(normalizePresenceMode("silent"), "invisible");
 });
 
-test("silent mode disables publish/chat but is visible", () => {
-  const d = getPresenceModeDefaults("silent");
-  assert.equal(d.canPublishAudio, false);
-  assert.equal(d.canPublishVideo, false);
-  assert.equal(d.canSendChat, false);
-  assert.equal(d.canReadChat, true);
-  assert.equal(d.isVisibleInRoster, true);
-  assert.equal(d.canModerate, true);
+test("normalizePresenceMode passes through valid modes", () => {
+  assert.equal(normalizePresenceMode("normal"), "normal");
+  assert.equal(normalizePresenceMode("invisible"), "invisible");
 });
 
-test("invisible mode disables everything and hides from roster", () => {
-  const d = getPresenceModeDefaults("invisible");
-  assert.equal(d.canPublishAudio, false);
-  assert.equal(d.canPublishVideo, false);
-  assert.equal(d.canSendChat, false);
-  assert.equal(d.canReadChat, true);
-  assert.equal(d.isVisibleInRoster, false);
-  assert.equal(d.canModerate, true);
+test("normalizePresenceMode defaults unknown values to 'normal'", () => {
+  assert.equal(normalizePresenceMode(""), "normal");
+  assert.equal(normalizePresenceMode(null), "normal");
+  assert.equal(normalizePresenceMode(undefined), "normal");
+  assert.equal(normalizePresenceMode(42), "normal");
+});
+
+// ---------- getPresencePolicy ----------
+
+test("normal policy allows publish, chat, screen-share, and is visible", () => {
+  const p = getPresencePolicy("normal");
+  assert.equal(p.canPublishAudio, true);
+  assert.equal(p.canPublishVideo, true);
+  assert.equal(p.canScreenShare, true);
+  assert.equal(p.canSendChat, true);
+  assert.equal(p.canReadChat, true);
+  assert.equal(p.canRequestStage, true);
+  assert.equal(p.isVisibleInRoster, true);
+  assert.equal(p.canModerate, false);
+});
+
+test("invisible policy disables publish, chat, screen-share, stage and hides from roster", () => {
+  const p = getPresencePolicy("invisible");
+  assert.equal(p.canPublishAudio, false);
+  assert.equal(p.canPublishVideo, false);
+  assert.equal(p.canScreenShare, false);
+  assert.equal(p.canSendChat, false);
+  assert.equal(p.canReadChat, true);
+  assert.equal(p.canRequestStage, false);
+  assert.equal(p.isVisibleInRoster, false);
+  assert.equal(p.canModerate, true);
+});
+
+test("getPresenceModeDefaults is a backwards-compat alias for getPresencePolicy", () => {
+  assert.deepStrictEqual(getPresenceModeDefaults("normal"), getPresencePolicy("normal"));
+  assert.deepStrictEqual(getPresenceModeDefaults("invisible"), getPresencePolicy("invisible"));
 });
 
 // ---------- buildPresenceMetadata ----------
@@ -67,6 +89,8 @@ test("buildPresenceMetadata produces correct metadata for invisible mod", () => 
   assert.equal(meta.isVisibleInRoster, false);
   assert.equal(meta.canSendChat, false);
   assert.equal(meta.canReadChat, true);
+  assert.equal(meta.canScreenShare, false);
+  assert.equal(meta.canRequestStage, false);
   assert.equal(meta.rolePresetId, "cohost");
 });
 
@@ -79,5 +103,7 @@ test("buildPresenceMetadata for normal mode", () => {
   assert.equal(meta.presenceMode, "normal");
   assert.equal(meta.isVisibleInRoster, true);
   assert.equal(meta.canSendChat, true);
+  assert.equal(meta.canScreenShare, true);
+  assert.equal(meta.canRequestStage, true);
   assert.equal(meta.rolePresetId, undefined);
 });

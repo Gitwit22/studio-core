@@ -1,11 +1,18 @@
 /**
+ * Room-level presence policy system.
+ *
  * Presence mode controls how a participant appears and behaves in a room.
+ * The old "silent" mode has been unified into "invisible" — legacy callers
+ * that send "silent" are transparently mapped to "invisible".
  *
  * - "normal"    – Visible in roster, standard permissions.
- * - "silent"    – Visible in roster to admins, no mic/video/chat.
- * - "invisible" – Hidden from standard roster and interaction surfaces.
+ * - "invisible" – Hidden from standard roster; cannot publish audio/video,
+ *                 screen-share, send chat, or request stage.  May still
+ *                 receive room media, mute/remove participants, and send
+ *                 invite links.  Admin/moderator views may still list
+ *                 invisible participants in a protected admin-only roster.
  */
-export type PresenceMode = "normal" | "silent" | "invisible";
+export type PresenceMode = "normal" | "invisible";
 
 /** Roles that can meaningfully use non-normal presence modes. */
 export type PresenceCapableRole = "host" | "cohost" | "mod" | "bot";
@@ -26,54 +33,80 @@ export interface PresenceMetadata {
   isVisibleInRoster?: boolean;
   canSendChat?: boolean;
   canReadChat?: boolean;
+  canScreenShare?: boolean;
+  canRequestStage?: boolean;
   rolePresetId?: string;
 }
 
-/** Default capability flags derived from a given presence mode. */
-export interface PresenceModeDefaults {
+/**
+ * Policy object describing what a presence mode allows / disallows.
+ * Structured so that future modes (e.g. "listen_only") can be added
+ * without a major refactor — just add a new entry to PRESENCE_POLICIES.
+ */
+export interface PresencePolicy {
   canPublishAudio: boolean;
   canPublishVideo: boolean;
+  canScreenShare: boolean;
   canSendChat: boolean;
   canReadChat: boolean;
+  canRequestStage: boolean;
   isVisibleInRoster: boolean;
   canModerate: boolean;
 }
 
-const PRESENCE_MODE_DEFAULTS: Record<PresenceMode, PresenceModeDefaults> = {
+/** @deprecated Use {@link PresencePolicy} instead. */
+export type PresenceModeDefaults = PresencePolicy;
+
+const PRESENCE_POLICIES: Record<PresenceMode, PresencePolicy> = {
   normal: {
     canPublishAudio: true,
     canPublishVideo: true,
+    canScreenShare: true,
     canSendChat: true,
     canReadChat: true,
+    canRequestStage: true,
     isVisibleInRoster: true,
     canModerate: false,
-  },
-  silent: {
-    canPublishAudio: false,
-    canPublishVideo: false,
-    canSendChat: false,
-    canReadChat: true,
-    isVisibleInRoster: true,
-    canModerate: true,
   },
   invisible: {
     canPublishAudio: false,
     canPublishVideo: false,
+    canScreenShare: false,
     canSendChat: false,
     canReadChat: true,
+    canRequestStage: false,
     isVisibleInRoster: false,
     canModerate: true,
   },
 };
 
-/** Returns true when the value is a valid PresenceMode literal. */
+/**
+ * Returns true when the value is a recognized presence mode literal.
+ * Accepts the legacy "silent" value for backwards compatibility
+ * (callers should follow up with {@link normalizePresenceMode}).
+ */
 export function isValidPresenceMode(v: unknown): v is PresenceMode {
   return v === "normal" || v === "silent" || v === "invisible";
 }
 
-/** Look up the default capability flags for a presence mode. */
-export function getPresenceModeDefaults(mode: PresenceMode): PresenceModeDefaults {
-  return PRESENCE_MODE_DEFAULTS[mode];
+/**
+ * Normalize a raw presence mode value.
+ * Maps the legacy "silent" value to "invisible"; unknown values
+ * fall back to "normal".
+ */
+export function normalizePresenceMode(v: unknown): PresenceMode {
+  if (v === "invisible" || v === "silent") return "invisible";
+  return "normal";
+}
+
+/** Look up the policy for a presence mode. */
+export function getPresencePolicy(mode: PresenceMode): PresencePolicy {
+  return PRESENCE_POLICIES[mode];
+}
+
+/** @deprecated Use {@link getPresencePolicy} instead. */
+export function getPresenceModeDefaults(mode: PresenceMode): PresencePolicy {
+  return getPresencePolicy(mode);
 }
 
 /**
@@ -85,13 +118,15 @@ export function buildPresenceMetadata(opts: {
   presenceMode: PresenceMode;
   rolePresetId?: string;
 }): PresenceMetadata {
-  const defaults = getPresenceModeDefaults(opts.presenceMode);
+  const policy = getPresencePolicy(opts.presenceMode);
   return {
     role: opts.role,
     presenceMode: opts.presenceMode,
-    isVisibleInRoster: defaults.isVisibleInRoster,
-    canSendChat: defaults.canSendChat,
-    canReadChat: defaults.canReadChat,
+    isVisibleInRoster: policy.isVisibleInRoster,
+    canSendChat: policy.canSendChat,
+    canReadChat: policy.canReadChat,
+    canScreenShare: policy.canScreenShare,
+    canRequestStage: policy.canRequestStage,
     ...(opts.rolePresetId ? { rolePresetId: opts.rolePresetId } : {}),
   };
 }
