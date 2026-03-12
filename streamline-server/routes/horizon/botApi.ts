@@ -93,13 +93,15 @@ function requireBotAuth(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
+// Apply rate limiting to ALL bot API routes
+router.use(horizonRateLimit);
+
 /* ═══════════════════════════════════════════════════════════════════════
  * POST /events — Inbound webhook (Bot → StreamLine)
  * ═══════════════════════════════════════════════════════════════════════ */
 
 router.post(
   "/events",
-  horizonRateLimit,
   express.raw({ type: "application/json", limit: "256kb" }),
   requireBotAuth,
   async (req: Request, res: Response) => {
