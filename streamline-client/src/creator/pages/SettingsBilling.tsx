@@ -172,6 +172,7 @@ const DEFAULT_MEDIA_PREFS = {
 };
 
 type CheckoutPlanVariant = "starter_trial" | "starter_paid" | "basic" | "pro";
+type ActionLoadingState = CheckoutPlanVariant | "portal" | "cancel-plan-change" | null;
 
 function checkoutVariantToPlanId(plan: CheckoutPlanVariant): PlanId {
   if (plan === "starter_paid" || plan === "starter_trial") return "starter";
@@ -344,7 +345,7 @@ export default function SettingsBilling() {
   const latestVideoPollIntervalRef = useRef<number | null>(null);
   const latestVideoPollCountRef = useRef(0);
 
-  const [actionLoading, setActionLoading] = useState<CheckoutPlanVariant | "portal" | null>(null);
+  const [actionLoading, setActionLoading] = useState<ActionLoadingState>(null);
 
   const [checkoutTosAccepted, setCheckoutTosAccepted] = useState(false);
   const [checkoutTosError, setCheckoutTosError] = useState<string | null>(null);

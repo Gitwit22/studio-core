@@ -196,6 +196,9 @@ function normalizeNewProject(docId: string, data: any, userId: string): Normaliz
 /**
  * Create a legacy `editing_projects` doc from a new `projects` record so
  * the editor has a document it can write timelines to.
+ *
+ * Looks up the first recording asset from `project_assets` to pre-populate
+ * the assetId and initial timeline clip.
  */
 async function hydrateEditingProject(
   newProjectId: string,
@@ -203,29 +206,85 @@ async function hydrateEditingProject(
   userId: string,
 ): Promise<NormalizedProject> {
   const now = new Date();
+
+  // Look up the first recording asset for this project to seed the editor
+  let firstAssetId = "";
+  let firstAssetDuration = 0;
+  let firstAssetName = projData.name || "Untitled Project";
+  try {
+    const assetsSnap = await db
+      .collection("project_assets")
+      .where("projectId", "==", newProjectId)
+      .where("type", "==", "recording")
+      .orderBy("createdAt", "desc")
+      .limit(1)
+      .get();
+    if (!assetsSnap.empty) {
+      const assetData = assetsSnap.docs[0].data() as any;
+      firstAssetId = assetData.sourceRecordingId || "";
+      firstAssetDuration = assetData.duration || 0;
+      firstAssetName = assetData.filename || firstAssetName;
+    }
+  } catch (assetErr: any) {
+    // Fallback: try without orderBy in case composite index is missing
+    try {
+      const fallbackSnap = await db
+        .collection("project_assets")
+        .where("projectId", "==", newProjectId)
+        .where("type", "==", "recording")
+        .limit(1)
+        .get();
+      if (!fallbackSnap.empty) {
+        const assetData = fallbackSnap.docs[0].data() as any;
+        firstAssetId = assetData.sourceRecordingId || "";
+        firstAssetDuration = assetData.duration || 0;
+        firstAssetName = assetData.filename || firstAssetName;
+      }
+    } catch {
+      // non-fatal
+    }
+    logger.warn({ newProjectId, error: assetErr?.message }, "project_assets query failed during hydration");
+  }
+
+  const initialClips = firstAssetId
+    ? [
+        {
+          id: `clip_${Date.now()}`,
+          assetId: firstAssetId,
+          trackId: "video_1",
+          startTime: 0,
+          duration: firstAssetDuration || 60,
+          inPoint: 0,
+          outPoint: firstAssetDuration || 60,
+          name: firstAssetName,
+          videoUrl: "",
+        },
+      ]
+    : [];
+
   const newDoc: Record<string, any> = {
     userId,
     projectId: newProjectId, // link back to new collection
     name: projData.name || "Untitled Project",
-    assetId: "",
+    assetId: firstAssetId,
     createdAt: now,
     updatedAt: now,
-    duration: 0,
+    duration: firstAssetDuration,
     status: "draft",
-    timeline: { clips: [], tracks: 2 },
+    timeline: { clips: initialClips, tracks: 2 },
   };
 
   const ref = await db.collection(EDITING_PROJECTS).add(newDoc);
-  logger.info({ editingProjectId: ref.id, newProjectId }, "Auto-created editing_projects backing doc");
+  logger.info({ editingProjectId: ref.id, newProjectId, assetId: firstAssetId }, "Auto-created editing_projects backing doc");
 
   return {
     id: ref.id,
     projectId: newProjectId,
     name: newDoc.name,
-    assetId: "",
+    assetId: firstAssetId,
     status: "draft",
     lastModified: now.toISOString(),
-    duration: 0,
+    duration: firstAssetDuration,
     thumbnail: null,
     userId,
     timeline: newDoc.timeline,

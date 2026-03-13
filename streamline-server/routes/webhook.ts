@@ -1334,7 +1334,7 @@ router.post("/livekit", express.raw({ type: "*/*" }), async (req, res) => {
           console.log(`[livekit-webhook] Recording attached to project ${result.projectId}`);
         }
       } catch (projErr: any) {
-        console.warn("[livekit-webhook] failed to attach recording to project:", projErr?.message);
+        console.error("[livekit-webhook] failed to attach recording to project:", projErr?.message, projErr?.stack?.slice(0, 500));
       }
     }
 

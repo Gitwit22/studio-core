@@ -98,13 +98,30 @@ export async function getProject(projectId: string): Promise<ProjectDoc | null> 
 }
 
 export async function listProjects(ownerId: string, limit = 50): Promise<ProjectDoc[]> {
-  const snap = await projectsColl()
-    .where("ownerId", "==", ownerId)
-    .where("status", "==", "active")
-    .orderBy("updatedAt", "desc")
-    .limit(limit)
-    .get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjectDoc));
+  try {
+    const snap = await projectsColl()
+      .where("ownerId", "==", ownerId)
+      .where("status", "==", "active")
+      .orderBy("updatedAt", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjectDoc));
+  } catch (err: any) {
+    // Fallback if composite index isn't created yet
+    console.warn(`[listProjects] Compound query failed (missing index?): ${err?.message}`);
+    const snap = await projectsColl()
+      .where("ownerId", "==", ownerId)
+      .get();
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as ProjectDoc))
+      .filter((p) => p.status === "active")
+      .sort((a, b) => {
+        const aTime = (a.updatedAt as any)?.toMillis?.() || 0;
+        const bTime = (b.updatedAt as any)?.toMillis?.() || 0;
+        return bTime - aTime;
+      })
+      .slice(0, limit);
+  }
 }
 
 export async function updateProject(
@@ -212,18 +229,43 @@ export async function attachRecordingToProject(opts: {
 }): Promise<{ projectId: string; assetId: string }> {
   const { userId, recordingId, roomId, roomName, objectKey, fileSize, durationSeconds } = opts;
 
+  console.log(`[attachRecordingToProject] Starting: recording=${recordingId}, userId=${userId}, roomId=${roomId}`);
+
   // Re-use existing project for this room if one exists (Option A — per-room project)
   let project: ProjectDoc | null = null;
-  const existingSnap = await projectsColl()
-    .where("ownerId", "==", userId)
-    .where("sourceRoomId", "==", roomId)
-    .where("status", "==", "active")
-    .orderBy("updatedAt", "desc")
-    .limit(1)
-    .get();
+  try {
+    const existingSnap = await projectsColl()
+      .where("ownerId", "==", userId)
+      .where("sourceRoomId", "==", roomId)
+      .where("status", "==", "active")
+      .orderBy("updatedAt", "desc")
+      .limit(1)
+      .get();
 
-  if (!existingSnap.empty) {
-    project = { id: existingSnap.docs[0].id, ...(existingSnap.docs[0].data() as any) } as ProjectDoc;
+    if (!existingSnap.empty) {
+      project = { id: existingSnap.docs[0].id, ...(existingSnap.docs[0].data() as any) } as ProjectDoc;
+    }
+  } catch (queryErr: any) {
+    // Firestore composite index may be missing — fall back to simpler query
+    console.warn(`[attachRecordingToProject] Compound query failed (missing index?): ${queryErr?.message}`);
+    try {
+      const fallbackSnap = await projectsColl()
+        .where("ownerId", "==", userId)
+        .where("sourceRoomId", "==", roomId)
+        .get();
+      const activeProjects = fallbackSnap.docs
+        .filter((d) => (d.data() as any).status === "active")
+        .sort((a, b) => {
+          const aTime = (a.data() as any).updatedAt?.toMillis?.() || 0;
+          const bTime = (b.data() as any).updatedAt?.toMillis?.() || 0;
+          return bTime - aTime;
+        });
+      if (activeProjects.length > 0) {
+        project = { id: activeProjects[0].id, ...(activeProjects[0].data() as any) } as ProjectDoc;
+      }
+    } catch (fallbackErr: any) {
+      console.error(`[attachRecordingToProject] Fallback query also failed:`, fallbackErr);
+    }
   }
 
   // No existing project for this room — create one

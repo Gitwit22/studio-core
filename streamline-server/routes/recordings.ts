@@ -1311,7 +1311,7 @@ router.post(
       console.warn("[recordings/start] failed to update activeRecordings lock", (e as any)?.message);
     }
 
-    console.log(`[recordings/start] Complete in ${Date.now() - startTime}ms`);
+    console.log(`[recordings/start] Complete in ${Date.now() - startTime}ms, maxRecordingMinutesPerClip=${maxRecordingMinutesPerClip}, autoStopAt=${autoStopAt?.toISOString() ?? "none"}`);
 
     const finalSnap = await recordingRef.get();
     const finalData = finalSnap.data();
@@ -1326,6 +1326,8 @@ router.post(
       presetClamped: clamped || clampedToStream,
       presetClampedToStream: clampedToStream,
       streamPresetId: activeStreamPresetId,
+      maxRecordingMinutesPerClip,
+      autoStopAt: autoStopAt?.toISOString() ?? null,
     });
 
   } catch (err: any) {
@@ -1643,7 +1645,7 @@ router.post(
               });
               console.log(`[recordings/stop] Recording attached to project ${result.projectId}`);
             } catch (projErr: any) {
-              console.warn("[recordings/stop] failed to attach recording to project:", projErr?.message);
+              console.error("[recordings/stop] failed to attach recording to project:", projErr?.message, projErr?.stack?.slice(0, 500));
             }
           } else {
             console.warn(`[recordings/stop] head-check found no file yet for ${objectKey}`);

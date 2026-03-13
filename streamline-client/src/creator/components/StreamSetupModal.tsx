@@ -504,7 +504,7 @@ export default function StreamSetupModalV2({
     };
   }, [open, effectiveHlsRoomId, roomUiState.hls, hlsStatus]);
 
-  const mainByPlatform = useMemo(() => {
+  const mainByPlatform = useMemo((): Record<PlatformKey, any> => {
     const map: Partial<Record<PlatformKey, DestinationItem>> = {};
     destinations.forEach((d) => {
       const platform = d.platform as PlatformKey;
@@ -524,7 +524,7 @@ export default function StreamSetupModalV2({
         map[platform] = d;
       }
     });
-    return map;
+    return map as Record<PlatformKey, any>;
   }, [destinations]);
 
   const updatePlatformState = (platform: PlatformKey, partial: Partial<PlatformState>) => {

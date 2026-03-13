@@ -37,6 +37,7 @@ import {
 } from "../../lib/mediaRecovery";
 import { setPlatformFlagsValue } from "../../lib/platformFlagsStore";
 import { fetchDestinations, preflight, type DestinationItem } from "../../services/destinations";
+import { normalizeUiRolePresetId } from "../../lib/roles";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
@@ -152,7 +153,7 @@ function LiveKitDebugLogger() {
     const onConnected = () => {
       console.log('[LiveKit] ✅ Room connected successfully', {
         roomName: room.name,
-        serverUrl: room.engine?.client?.url,
+        serverUrl: (room.engine?.client as any)?.url,
         localIdentity: localParticipant?.identity,
       });
     };
@@ -252,7 +253,7 @@ function LiveKitDebugLogger() {
         localAudioPublished: localTracks.some((t: any) => t.kind === 'audio'),
         remoteParticipants: remoteParts.length,
         remoteParticipantsWithVideo: remoteParts.filter(p => 
-          Array.from(p.videoTracks.values()).some((t: any) => t.isSubscribed)
+          Array.from((p as any).videoTracks?.values?.() ?? (p as any).trackPublications?.values?.() ?? []).some((t: any) => t.isSubscribed)
         ).length,
         videoElementsInDOM: document.querySelectorAll('video').length,
       });
@@ -544,7 +545,7 @@ function MediaPermissionErrorBanner({
             background: '#fff',
             border: 'none',
             borderRadius: 8,
-            color: error.type === 'denied' ? '#dc2626' : '#d97706',
+            color: '#d97706',
             cursor: 'pointer',
             padding: '8px 16px',
             fontSize: 13,
@@ -2475,7 +2476,7 @@ function RoomPage() {
 
         const res = attempt.res;
         console.log("[Room] roomToken status:", res.status, "mode:", attempt.mode);
-        setRoomTokenMode(attempt.mode);
+        setRoomTokenMode(attempt.mode === "invite" ? "guest" : attempt.mode);
 
         // If an authenticated mint succeeds, we can clear the banner without probing /me in the background.
         if (res.ok && attempt.mode === "auth") {
@@ -3285,7 +3286,7 @@ function RoomPage() {
     layout = "grid",
     mode = "cloud",
     presetId,
-  }: { mode: "cloud" | "dual"; presetId?: string }) => {
+  }: { layout?: string; mode: "cloud" | "dual"; presetId?: string }) => {
     if (isViewer) {
       console.warn("startRecording blocked for viewer role");
       return;
