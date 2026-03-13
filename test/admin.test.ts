@@ -126,16 +126,7 @@ async function adminRequest(
   const urlObj = new URL(url);
 
   if (body) {
-    options.body = JSON.stringify({
-      ...body,
-      // Fallback path used by requireAdmin when JWT is missing/invalid.
-      adminUserId: ADMIN_USER_ID,
-    });
-  }
-
-  if (method === 'GET') {
-    // Fallback path used by requireAdmin when JWT is missing/invalid.
-    urlObj.searchParams.set('adminUserId', ADMIN_USER_ID);
+    options.body = JSON.stringify(body);
   }
 
   return fetch(urlObj.toString(), options);
@@ -154,7 +145,6 @@ async function testNonAdminBlocked() {
     }
 
     const url = new URL(`${API_BASE}/api/admin/users`);
-    url.searchParams.set('adminUserId', 'non-admin-user-999');
     const response = await fetch(url.toString(), {
       headers: {
         ...authHeadersFromJwt(attackerJwt),
