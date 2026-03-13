@@ -26,6 +26,8 @@ import StreamSetupModalV2 from "../components/StreamSetupModal";
 import { ErrorBoundary } from "../../components/ErrorBoundary";
 import { RoleChangeToast } from "../components/RoleChangeToast";
 import SafeVideoConference from "../components/SafeVideoConference";
+import AudioMixerModal from "../components/AudioMixerModal";
+import ScreenShareRouter, { type ScreenShareRouteMode } from "../components/ScreenShareRouter";
 import { useEffectiveEntitlements } from "../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../hooks/useFeatureAccess";
 import { useHlsStatus } from "../hooks/useHlsStatus";
@@ -1546,6 +1548,9 @@ function RoomPage() {
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [showStreamSetup, setShowStreamSetup] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [showMixer, setShowMixer] = useState(false);
+  const [showScreenShareRouter, setShowScreenShareRouter] = useState(false);
+  const [screenShareMode, setScreenShareMode] = useState<ScreenShareRouteMode>("main");
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
@@ -4245,6 +4250,50 @@ function RoomPage() {
               Dashboard
             </button>
 
+            <button
+              onClick={() => setShowMixer(v => !v)}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                border: showMixer
+                  ? '1px solid rgba(139, 92, 246, 0.7)'
+                  : '1px solid rgba(139, 92, 246, 0.35)',
+                borderRadius: '0.375rem',
+                background: showMixer
+                  ? 'rgba(139, 92, 246, 0.18)'
+                  : 'rgba(139, 92, 246, 0.06)',
+                color: '#a78bfa',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontWeight: '500'
+              }}
+              title="Open audio mixer"
+            >
+              🎛️ Mixer
+            </button>
+
+            <button
+              onClick={() => setShowScreenShareRouter(v => !v)}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                border: showScreenShareRouter
+                  ? '1px solid rgba(59, 130, 246, 0.7)'
+                  : '1px solid rgba(59, 130, 246, 0.35)',
+                borderRadius: '0.375rem',
+                background: showScreenShareRouter
+                  ? 'rgba(59, 130, 246, 0.18)'
+                  : 'rgba(59, 130, 246, 0.06)',
+                color: '#60a5fa',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontWeight: '500'
+              }}
+              title="Screen share routing"
+            >
+              🖥️ Screen
+            </button>
+
             {canManageStream && (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: '#ffffff' }}>
@@ -4508,6 +4557,18 @@ function RoomPage() {
             }))}
         />
       </ErrorBoundary>
+
+      <AudioMixerModal
+        open={showMixer}
+        onClose={() => setShowMixer(false)}
+      />
+
+      <ScreenShareRouter
+        open={showScreenShareRouter}
+        onClose={() => setShowScreenShareRouter(false)}
+        mode={screenShareMode}
+        onModeChange={setScreenShareMode}
+      />
 
       {showStreamEndedModal && recordingId && (
         <StreamEndedModal
