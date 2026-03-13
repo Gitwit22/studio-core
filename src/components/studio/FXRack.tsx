@@ -14,6 +14,8 @@ const FXRack = () => {
     { id: "comp", name: "Compressor", active: true, params: { amount: 65 } },
     { id: "delay", name: "Delay", active: false, params: { time: 50, mix: 30 } },
     { id: "reverb", name: "Reverb", active: true, params: { size: 45, mix: 40 } },
+    { id: "eq", name: "EQ", active: true, params: { low: 50, mid: 55, high: 50 } },
+    { id: "limiter", name: "Limiter", active: true, params: { ceiling: 75, gain: 50 } },
   ]);
 
   const [delayTime, setDelayTime] = useState<string>("1/4");
