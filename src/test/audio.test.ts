@@ -50,8 +50,7 @@ describe("AudioEngine", () => {
 
   it("should initialize the audio context", async () => {
     const { audioEngine } = await import("../audio/AudioEngine");
-    // Reset state for fresh test
-    audioEngine.contextStarted = false;
+    audioEngine.reset();
 
     const Tone = await import("tone");
     await audioEngine.init();
@@ -62,7 +61,8 @@ describe("AudioEngine", () => {
 
   it("should not re-initialize if already started", async () => {
     const { audioEngine } = await import("../audio/AudioEngine");
-    audioEngine.contextStarted = true;
+    // Ensure engine is started
+    await audioEngine.init();
 
     const Tone = await import("tone");
     vi.mocked(Tone.start).mockClear();
@@ -162,8 +162,8 @@ describe("TransportController", () => {
     const transport = Tone.getTransport();
     vi.mocked(transport.start).mockClear();
 
-    const { record } = await import("../audio/TransportController");
-    record();
+    const { startRecordTransport } = await import("../audio/TransportController");
+    startRecordTransport();
 
     expect(transport.start).toHaveBeenCalledOnce();
   });

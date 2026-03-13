@@ -7,8 +7,11 @@ class AudioEngine {
     if (!this.contextStarted) {
       await Tone.start();
       this.contextStarted = true;
-      console.log("Audio engine ready");
     }
+  }
+
+  reset() {
+    this.contextStarted = false;
   }
 }
 

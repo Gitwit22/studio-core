@@ -8,7 +8,7 @@ export function stop() {
   Tone.getTransport().stop();
 }
 
-export function record() {
+export function startRecordTransport() {
   Tone.getTransport().start();
 }
 
