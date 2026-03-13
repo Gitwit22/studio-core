@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { ZoomIn, ZoomOut } from "lucide-react";
+import { useStudioStore } from "@/studio/engine/studioStore";
 
 interface Clip {
   id: string;
@@ -26,8 +27,9 @@ const totalBeats = 32;
 
 const Timeline = () => {
   const [clips] = useState<Clip[]>(defaultClips);
-  const [playheadPosition, setPlayheadPosition] = useState(8);
-  const [zoom, setZoom] = useState(1);
+  const playheadPosition = useStudioStore((s) => s.playhead);
+  const setPlayhead = useStudioStore((s) => s.setPlayhead);
+  const zoom = useStudioStore((s) => s.zoom);
   const timelineRef = useRef<HTMLDivElement>(null);
 
   const beatWidth = 40 * zoom;
@@ -37,7 +39,7 @@ const Timeline = () => {
     const rect = timelineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const beat = Math.max(0, Math.min(totalBeats, x / beatWidth));
-    setPlayheadPosition(beat);
+    setPlayhead(beat);
   };
 
   // Generate fake waveform path
@@ -64,11 +66,11 @@ const Timeline = () => {
           Timeline
         </span>
         <div className="flex-1" />
-        <button onClick={() => setZoom(z => Math.max(0.5, z - 0.25))} className="p-1 rounded hover:bg-studio-metal">
+        <button onClick={() => useStudioStore.setState((s) => ({ zoom: Math.max(0.5, s.zoom - 0.25) }))} className="p-1 rounded hover:bg-studio-metal">
           <ZoomOut className="w-3 h-3 text-studio-text-dim" />
         </button>
         <span className="studio-readout text-[9px]">{Math.round(zoom * 100)}%</span>
-        <button onClick={() => setZoom(z => Math.min(3, z + 0.25))} className="p-1 rounded hover:bg-studio-metal">
+        <button onClick={() => useStudioStore.setState((s) => ({ zoom: Math.min(3, s.zoom + 0.25) }))} className="p-1 rounded hover:bg-studio-metal">
           <ZoomIn className="w-3 h-3 text-studio-text-dim" />
         </button>
       </div>
