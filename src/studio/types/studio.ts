@@ -12,13 +12,24 @@ export interface StudioTrack {
   color?: string
 }
 
+export interface AudioSource {
+  id: string
+  name: string
+  file?: File
+  url: string
+  duration: number
+  waveform?: number[]
+}
+
 export interface Clip {
   id: string
   trackId: string
-  start: number
-  end: number
+  sourceId: string
+  start: number        // timeline beat position
+  end: number          // timeline beat position
+  offset: number       // offset inside source in beats or seconds depending on engine choice
   name: string
-  sourceUrl?: string
+  color?: string
 }
 
 export interface LoopRegion {
@@ -45,6 +56,7 @@ export interface StudioState {
   loop: LoopRegion
   tracks: StudioTrack[]
   clips: Clip[]
+  sources: AudioSource[]
   selectedTrackId: string | null
   selectedClipId: string | null
   panels: StudioPanels
