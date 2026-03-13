@@ -605,6 +605,72 @@ router.post(
 
         case "checkout.session.completed": {
           const session = event.data.object as Stripe.Checkout.Session;
+
+          // ── Monetization one-time payments ──────────────────────────
+          if (session.metadata?.source === "streamline_monetization") {
+            try {
+              const {
+                createPurchase,
+                generateAccessCode,
+                hashAccessCode,
+                createAccessCode,
+                storeRawCode,
+              } = await import("../lib/monetization.js");
+
+              const mEventId = session.metadata.eventId;
+              const mType = session.metadata.type as "access" | "donation";
+              const amountTotal = session.amount_total ?? 0;
+              const currency = session.currency || "usd";
+              const paymentIntentId =
+                typeof session.payment_intent === "string"
+                  ? session.payment_intent
+                  : null;
+              const payerEmail =
+                typeof session.customer_details?.email === "string"
+                  ? session.customer_details.email
+                  : null;
+
+              const purchase = await createPurchase({
+                eventId: mEventId,
+                type: mType,
+                amountCents: amountTotal,
+                currency,
+                stripeCheckoutSessionId: session.id,
+                stripePaymentIntentId: paymentIntentId,
+                payerEmail,
+              });
+
+              if (mType === "access") {
+                const rawCode = generateAccessCode();
+                const codeHash = hashAccessCode(rawCode);
+                await createAccessCode({
+                  eventId: mEventId,
+                  purchaseId: purchase.id,
+                  codeHash,
+                });
+                storeRawCode(session.id, rawCode);
+                console.log("[stripe-webhook] Monetization access code issued", {
+                  eventId: mEventId,
+                  purchaseId: purchase.id,
+                  sessionId: session.id,
+                });
+              } else {
+                console.log("[stripe-webhook] Monetization donation recorded", {
+                  eventId: mEventId,
+                  purchaseId: purchase.id,
+                  amountCents: amountTotal,
+                });
+              }
+            } catch (mErr: any) {
+              console.error(
+                "[stripe-webhook] Monetization processing error:",
+                mErr?.message
+              );
+            }
+            break;
+          }
+
+          // ── Subscription checkout (existing billing flow) ──────────
           const uid = session.metadata?.userId;
           if (!uid) {
             console.warn("[stripe] checkout.session.completed missing userId");

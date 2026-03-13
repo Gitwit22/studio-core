@@ -16,5 +16,6 @@ export const creatorNavItems: CreatorNavItem[] = [
   { label: "Content Library",    path: "/content" },
   { label: "Projects",           path: "/projects" },
   { label: "Destinations",       path: "/settings/destinations" },
+  { label: "Monetization",       path: "/settings/monetization" },
   { label: "Billing",            path: "/settings/billing" },
 ];

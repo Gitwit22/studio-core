@@ -50,6 +50,7 @@ import jwt from "jsonwebtoken";
 import hlsRoutes from "./routes/hls";
 import publicHlsRoutes from "./routes/publicHls";
 import publicRoomsHlsConfigRoutes from "./routes/publicRoomsHlsConfig";
+import monetizationRoutes from "./routes/monetization";
 import { sanitizeDisplayName } from "./lib/sanitizeDisplayName";
 import { resolveRoomIdentity } from "./lib/roomIdentity";
 import { assertRoomPerm, RoomPermissionError } from "./lib/rolePermissions";
@@ -216,6 +217,9 @@ app.use("/api/hls", hlsRoutes);
 app.use("/api/public/hls", publicHlsRoutes);
 // Public viewer-safe HLS config (no auth)
 app.use("/api/public/rooms", publicRoomsHlsConfigRoutes);
+
+// Monetization v1 (PPV, PWYW, Donations for HLS rooms)
+app.use("/api/monetization", monetizationRoutes);
 
 // Internal maintenance/admin utilities
 app.use("/api/maintenance", maintenanceRoutes);
