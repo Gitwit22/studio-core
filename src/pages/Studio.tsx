@@ -13,7 +13,8 @@ const Studio = () => {
   const [exportOpen, setExportOpen] = useState(false);
 
   useEffect(() => {
-    registerStudioShortcuts();
+    const cleanup = registerStudioShortcuts();
+    return cleanup;
   }, []);
 
   return (

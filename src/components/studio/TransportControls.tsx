@@ -45,8 +45,6 @@ const TransportControls = () => {
         icon={<Repeat className="w-4 h-4" />}
         active={looping}
         onClick={() => {
-          const store = useStudioStore.getState();
-          store.setPlayhead(store.playhead); // keep playhead
           useStudioStore.setState((s) => ({
             loop: { ...s.loop, enabled: !s.loop.enabled },
           }));

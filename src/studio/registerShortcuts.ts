@@ -1,10 +1,10 @@
 import { runCommand } from "./commandBus"
 
 export function registerStudioShortcuts() {
-  window.addEventListener("keydown", (e) => {
+  const handler = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
-    if (e.code === "Space") {
+    if (e.key === " ") {
       e.preventDefault()
       runCommand("transport:play")
     }
@@ -17,5 +17,11 @@ export function registerStudioShortcuts() {
       e.preventDefault()
       runCommand("project:save")
     }
-  })
+  }
+
+  window.addEventListener("keydown", handler)
+
+  return () => {
+    window.removeEventListener("keydown", handler)
+  }
 }
