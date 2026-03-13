@@ -1,12 +1,29 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import ConsoleBar from "@/components/studio/ConsoleBar";
+import ChannelStrips from "@/components/studio/ChannelStrips";
+import Timeline from "@/components/studio/Timeline";
+import TransportControls from "@/components/studio/TransportControls";
+import FXRack from "@/components/studio/FXRack";
 
 const Index = () => {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
+    <div className="h-screen w-screen flex flex-col bg-background overflow-hidden">
+      {/* Top Console Bar */}
+      <ConsoleBar />
+
+      {/* Main workspace */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left: Channel Strips */}
+        <ChannelStrips />
+
+        {/* Center: Timeline */}
+        <Timeline />
+
+        {/* Right: FX Rack */}
+        <FXRack />
       </div>
+
+      {/* Bottom: Transport Controls */}
+      <TransportControls />
     </div>
   );
 };
