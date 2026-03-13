@@ -1,34 +1,35 @@
-import { describe, it, expect, beforeEach } from "vitest"
-import { registerCommand, runCommand, hasCommand } from "@/studio/commandBus"
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { registerCommand, runCommand, resetCommands } from "@/studio/commandBus";
 
 describe("commandBus", () => {
-  it("registers and runs a command", () => {
-    let called = false
-    registerCommand("test:command", () => {
-      called = true
-    })
-    runCommand("test:command")
-    expect(called).toBe(true)
-  })
+  beforeEach(() => {
+    resetCommands();
+  });
 
-  it("hasCommand returns true for registered commands", () => {
-    registerCommand("test:exists", () => {})
-    expect(hasCommand("test:exists")).toBe(true)
-  })
+  it("should register and run a command", () => {
+    const handler = vi.fn();
+    registerCommand("test:run", handler);
+    runCommand("test:run");
+    expect(handler).toHaveBeenCalledOnce();
+  });
 
-  it("hasCommand returns false for unregistered commands", () => {
-    expect(hasCommand("test:nonexistent")).toBe(false)
-  })
+  it("should warn when running an unregistered command", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    runCommand("nonexistent:command");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Command not implemented:",
+      "nonexistent:command"
+    );
+    warnSpy.mockRestore();
+  });
 
-  it("runCommand does not throw for unregistered commands", () => {
-    expect(() => runCommand("test:missing")).not.toThrow()
-  })
-
-  it("can overwrite a command", () => {
-    let value = 0
-    registerCommand("test:overwrite", () => { value = 1 })
-    registerCommand("test:overwrite", () => { value = 2 })
-    runCommand("test:overwrite")
-    expect(value).toBe(2)
-  })
-})
+  it("should overwrite a previously registered command", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    registerCommand("test:overwrite", first);
+    registerCommand("test:overwrite", second);
+    runCommand("test:overwrite");
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledOnce();
+  });
+});
