@@ -173,28 +173,63 @@ export default function EditorPage() {
 
         if (recordingId) {
           console.log('📹 Loading recording:', recordingId);
-          const recording = await editingApi.getRecording(recordingId);
+
+          // Try the typed API first, fall back to raw fetch
+          let recording: any = null;
+          try {
+            recording = await editingApi.getRecording(recordingId);
+          } catch {
+            // editingApi may throw – try direct fetch as backup
+          }
+
+          if (!recording) {
+            try {
+              const res = await apiFetchAuth(`/api/editing/recordings/${recordingId}`, {}, { allowNonOk: true });
+              if (res.ok) recording = await res.json();
+            } catch {
+              // network error – handled below
+            }
+          }
+
           if (cancelled) return;
           console.log('✅ Recording loaded:', recording);
-          
-          if (recording) {
-            setProjectName(`Edit: ${recording.title}`);
-            const videoUrl = recording.videoUrl || SAMPLE_VIDEO_URL;
-            const clipData = {
-              id: `clip_${Date.now()}`,
+
+          if (recording && recording.videoUrl) {
+            const videoUrl = recording.videoUrl;
+            const duration = recording.duration || (recording.durationMinutes ? recording.durationMinutes * 60 : 60);
+
+            setProjectName(`Edit: ${recording.title || 'Recording'}`);
+
+            // Create both video and audio clips so they appear on the timeline
+            const now = Date.now();
+            const videoClip: TimelineClip = {
+              id: `clip_video_${now}`,
               assetId: recordingId,
               trackId: 'video_1',
               startTime: 0,
-              duration: Math.min(recording.duration || 60, 60),
+              duration,
               inPoint: 0,
-              outPoint: Math.min(recording.duration || 60, 60),
-              name: recording.title || 'Recording',
-              videoUrl: videoUrl,
+              outPoint: duration,
+              name: recording.title || 'Video',
+              videoUrl,
             };
-            console.log('🎬 Clip data:', clipData);
-            setClips([clipData]);
-            
-            // Load video directly into ref
+            const audioClip: TimelineClip = {
+              id: `clip_audio_${now}`,
+              assetId: recordingId,
+              trackId: 'audio_1',
+              startTime: 0,
+              duration,
+              inPoint: 0,
+              outPoint: duration,
+              name: recording.title || 'Audio',
+              videoUrl,
+            };
+
+            console.log('🎬 Video clip:', videoClip);
+            console.log('🎙️ Audio clip:', audioClip);
+            setClips([videoClip, audioClip]);
+
+            // Load video into player
             setTimeout(() => {
               if (!cancelled && videoRef.current) {
                 videoRef.current.src = videoUrl;
@@ -203,8 +238,7 @@ export default function EditorPage() {
               }
             }, 100);
           } else {
-            console.error('❌ Recording not found:', recordingId);
-            // Fallback to sample
+            console.error('❌ Recording not found or has no videoUrl:', recordingId);
             setProjectName("New Project");
             setClips([
               {
@@ -224,20 +258,43 @@ export default function EditorPage() {
           const asset = await editingApi.getAsset(assetId);
           if (cancelled) return;
           if (asset) {
+            const videoUrl = asset.videoUrl || SAMPLE_VIDEO_URL;
+            const duration = asset.duration || 60;
+
             setProjectName(`Project: ${asset.name}`);
+
+            const now = Date.now();
             setClips([
               {
-                id: `clip_${Date.now()}`,
+                id: `clip_video_${now}`,
                 assetId,
                 trackId: 'video_1',
                 startTime: 0,
-                duration: Math.min(asset.duration, 60),
+                duration,
                 inPoint: 0,
-                outPoint: Math.min(asset.duration, 60),
+                outPoint: duration,
                 name: asset.name,
-                videoUrl: asset.videoUrl || SAMPLE_VIDEO_URL,
+                videoUrl,
+              },
+              {
+                id: `clip_audio_${now}`,
+                assetId,
+                trackId: 'audio_1',
+                startTime: 0,
+                duration,
+                inPoint: 0,
+                outPoint: duration,
+                name: asset.name,
+                videoUrl,
               },
             ]);
+
+            setTimeout(() => {
+              if (!cancelled && videoRef.current) {
+                videoRef.current.src = videoUrl;
+                videoRef.current.load();
+              }
+            }, 100);
           }
         } else {
           // No asset specified - create empty project with sample
@@ -332,86 +389,6 @@ export default function EditorPage() {
     loadProject();
     return () => { cancelled = true; };
   }, [projectId, searchParams]);
-
-  // ============================================================================
-  // LOAD RECORDING INTO TIMELINE
-  // ============================================================================
-
-  useEffect(() => {
-    const recordingId = searchParams.get('recordingId');
-    
-    if (recordingId && clips.length === 0) {
-      console.log('📹 Loading recording into editor:', recordingId);
-      loadRecordingIntoEditor(recordingId);
-    }
-  }, [searchParams]);
-
-  const loadRecordingIntoEditor = async (recordingId: string) => {
-    try {
-      console.log('🔍 Fetching recording:', recordingId);
-      
-      // Fetch recording details
-      const response = await apiFetchAuth(`/api/editing/recordings/${recordingId}`, {}, { allowNonOk: true });
-      if (!response.ok) {
-        throw new Error('Recording not found');
-      }
-      
-      const recording = await response.json();
-      console.log('✅ Recording data:', recording);
-
-      if (!recording.videoUrl) {
-        throw new Error('Recording has no video URL');
-      }
-
-      // Update project name
-      setProjectName(recording.title || `Recording ${new Date().toLocaleDateString()}`);
-
-      // Calculate duration
-      const duration = recording.duration || (recording.durationMinutes ? recording.durationMinutes * 60 : 60);
-
-      // Create video clip
-      const videoClip: TimelineClip = {
-        id: `clip_video_${Date.now()}`,
-        assetId: recording.id,
-        trackId: 'video_1',
-        startTime: 0,
-        duration: duration,
-        inPoint: 0,
-        outPoint: duration,
-        name: recording.title || 'Video',
-        videoUrl: recording.videoUrl
-      };
-
-      // Create audio clip (linked)
-      const audioClip: TimelineClip = {
-        id: `clip_audio_${Date.now()}`,
-        assetId: recording.id,
-        trackId: 'audio_1',
-        startTime: 0,
-        duration: duration,
-        inPoint: 0,
-        outPoint: duration,
-        name: recording.title || 'Audio',
-        videoUrl: recording.videoUrl
-      };
-
-      // Add to timeline
-      setClips([videoClip, audioClip]);
-      
-      // Load video into player
-      if (videoRef.current) {
-        videoRef.current.src = recording.videoUrl;
-        videoRef.current.load();
-        console.log('📺 Video loaded into player:', recording.videoUrl);
-      }
-
-      console.log('✅ Recording loaded into timeline!');
-
-    } catch (error: any) {
-      console.error('❌ Failed to load recording:', error);
-      alert(`Failed to load recording: ${error.message}`);
-    }
-  };
 
   // ============================================================================
   // VIDEO SYNC
@@ -977,7 +954,7 @@ export default function EditorPage() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <button
-            onClick={() => nav("/editing/projects")}
+            onClick={() => nav("/content")}
             style={{
               fontSize: '14px',
               color: '#9ca3af',
@@ -989,7 +966,7 @@ export default function EditorPage() {
             onMouseEnter={(e) => (e.currentTarget.style.color = '#ffffff')}
             onMouseLeave={(e) => (e.currentTarget.style.color = '#9ca3af')}
           >
-            ← Projects
+            ← My Content
           </button>
           <input
             type="text"
@@ -1352,7 +1329,7 @@ export default function EditorPage() {
         {/* ====== CENTER - PREVIEW + TIMELINE ====== */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Video Preview */}
-          <div className="flex-1 bg-black flex items-center justify-center p-4 min-h-0">
+          <div className="bg-black flex items-center justify-center p-4" style={{ maxHeight: '45vh', minHeight: '120px' }}>
             {clips.length > 0 ? (
               <video
                 key={clips[0]?.id || 'no-clip'}
@@ -1433,7 +1410,7 @@ export default function EditorPage() {
           </div>
 
           {/* ====== TIMELINE ====== */}
-          <div className="flex-1 border-t border-zinc-800 bg-zinc-950 overflow-hidden flex flex-col">
+          <div className="flex-1 border-t border-zinc-800 bg-zinc-950 overflow-hidden flex flex-col" style={{ minHeight: '240px' }}>
             {/* Timeline container with dynamic height based on track count */}
             <div className="flex-1 overflow-auto">
               <div
@@ -1672,7 +1649,7 @@ export default function EditorPage() {
             </div>
 
             <button
-              onClick={() => nav(`/editing/export/${projectId}`)}
+              onClick={handleExport}
               disabled={clips.length === 0}
               className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:from-zinc-700 disabled:to-zinc-700 rounded-lg text-sm font-medium transition"
             >
