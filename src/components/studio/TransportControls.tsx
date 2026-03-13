@@ -1,11 +1,14 @@
-import { useState } from "react";
 import TransportButton from "./TransportButton";
 import { SkipBack, Play, Pause, Square, Circle, Repeat } from "lucide-react";
+import { useStudioStore } from "@/studio/engine/studioStore";
+import { runCommand } from "@/studio/commandBus";
 
 const TransportControls = () => {
-  const [playing, setPlaying] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [looping, setLooping] = useState(false);
+  const playing = useStudioStore((s) => s.isPlaying);
+  const recording = useStudioStore((s) => s.isRecording);
+  const looping = useStudioStore((s) => s.loop.enabled);
+  const bpm = useStudioStore((s) => s.bpm);
+  const playhead = useStudioStore((s) => s.playhead);
 
   return (
     <div className="studio-panel h-16 shrink-0 flex items-center justify-center gap-3 px-6">
@@ -19,36 +22,42 @@ const TransportControls = () => {
       {/* Transport buttons */}
       <TransportButton
         icon={<SkipBack className="w-4 h-4" />}
-        onClick={() => { setPlaying(false); setRecording(false); }}
+        onClick={() => runCommand("transport:stop")}
       />
       <TransportButton
         icon={playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
         active={playing}
         variant="play"
-        onClick={() => setPlaying(!playing)}
+        onClick={() => runCommand("transport:play")}
       />
       <TransportButton
         icon={<Square className="w-3.5 h-3.5" />}
-        onClick={() => { setPlaying(false); setRecording(false); }}
+        onClick={() => runCommand("transport:stop")}
       />
       <TransportButton
         icon={<Circle className="w-4 h-4" />}
         active={recording}
         variant="record"
-        onClick={() => { setRecording(!recording); if (!recording) setPlaying(true); }}
+        onClick={() => runCommand("transport:record")}
         size={54}
       />
       <TransportButton
         icon={<Repeat className="w-4 h-4" />}
         active={looping}
-        onClick={() => setLooping(!looping)}
+        onClick={() => {
+          const store = useStudioStore.getState();
+          store.setPlayhead(store.playhead); // keep playhead
+          useStudioStore.setState((s) => ({
+            loop: { ...s.loop, enabled: !s.loop.enabled },
+          }));
+        }}
       />
 
       {/* Right: BPM and countdown */}
       <div className="studio-panel-raised rounded px-3 py-1.5 flex items-center gap-3 ml-6">
         <div className="flex flex-col items-center">
           <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">BPM</span>
-          <span className="studio-readout text-sm">140</span>
+          <span className="studio-readout text-sm">{bpm}</span>
         </div>
         <div className="w-px h-4 bg-border" />
         <div className="flex flex-col items-center">
