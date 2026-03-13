@@ -358,6 +358,7 @@ export default function AdminDashboard() {
     return groups;
   }, [features]);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [seedingPlans, setSeedingPlans] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -1142,6 +1143,27 @@ export default function AdminDashboard() {
                       Edit and save plan limits, features, and pricing. Changes will update for all users on each plan.
                     </p>
                   </div>
+                  <button
+                    disabled={seedingPlans}
+                    onClick={async () => {
+                      if (!window.confirm("Seed / update ALL plans with canonical features, limits, and editing fields? Existing Stripe config is preserved.")) return;
+                      setSeedingPlans(true);
+                      try {
+                        const res = await apiFetch("/api/admin/plans/seed", { method: "POST" });
+                        if (res.ok) {
+                          const data = await res.json();
+                          showToast(`Plans seeded: ${data.created?.length || 0} created, ${data.updated?.length || 0} updated`);
+                          await loadPlans();
+                        } else {
+                          showToast("Seed failed: " + (await describeNonOkResponse(res)));
+                        }
+                      } catch { showToast("Seed plans failed"); }
+                      finally { setSeedingPlans(false); }
+                    }}
+                    style={{ padding: "8px 16px", background: "#4f46e5", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 13, opacity: seedingPlans ? 0.6 : 1, whiteSpace: "nowrap", alignSelf: "flex-start" }}
+                  >
+                    {seedingPlans ? "⏳ Seeding…" : "🌱 Seed All Plans"}
+                  </button>
                 </div>
 
                 <div style={S.plansGrid}>
@@ -1440,6 +1462,11 @@ export default function AdminDashboard() {
                                   />
                                 </>
                               )}
+                              <ToggleRow
+                                label="Allows Overages"
+                                value={Boolean((plan.features as any)?.allowsOverages)}
+                                onChange={(v) => updatePlanField(plan.id, "features.allowsOverages", v)}
+                              />
                               <ToggleRow
                                 label="Watermark Recordings"
                                 value={plan.features?.watermarkRecordings}

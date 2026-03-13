@@ -158,9 +158,11 @@ router.put("/plans/:planId", async (req, res) => {
     const planRef = firestore.collection("plans").doc(planId);
     const planSnap = await planRef.get();
     if (!planSnap.exists) {
-      return res.status(404).json({ error: "Plan not found" });
+      // Create the plan doc if it doesn't exist yet (e.g. first-time setup)
+      await planRef.set({ id: planId, ...updateData, createdAt: new Date().toISOString() });
+    } else {
+      await planRef.set(updateData, { merge: true });
     }
-    await planRef.update(updateData);
     await logAdminAction(req.adminUser!.uid, "update_plan", { planId, updateData });
     res.json({ success: true, planId, updated: updateData });
   } catch (error: any) {

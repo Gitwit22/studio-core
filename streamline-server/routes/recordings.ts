@@ -849,10 +849,29 @@ router.post(
       });
 
       if (!decision.allowed) {
+        console.warn(`[recordings/start] usage gate blocked uid=${uid} planId=${planId}`, {
+          participantUsed: Number(usage.participantMinutes || 0),
+          participantLimit: Number(entitlements.limits.monthlyMinutes || 0),
+          transcodeUsed: Number(usage.transcodeMinutes || 0),
+          transcodeLimit: Number(entitlements.limits.transcodeMinutes || 0),
+          allowsOverages: !!(entitlements.features as any).allowsOverages,
+          decision,
+        });
         return res.status(403).json({
           success: false,
           error: decision.reason || LIMIT_ERRORS.USAGE_EXHAUSTED,
           reason: "Monthly usage limit reached",
+          _diag: {
+            planId,
+            monthKey,
+            participantUsed: Number(usage.participantMinutes || 0),
+            participantLimit: Number(entitlements.limits.monthlyMinutes || 0),
+            transcodeUsed: Number(usage.transcodeMinutes || 0),
+            transcodeLimit: Number(entitlements.limits.transcodeMinutes || 0),
+            allowsOverages: !!(entitlements.features as any).allowsOverages,
+            isOverParticipant: decision.isOverParticipant,
+            isOverTranscode: decision.isOverTranscode,
+          },
         });
       }
 
