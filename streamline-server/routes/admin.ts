@@ -853,7 +853,6 @@ router.get("/usage/summary", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to fetch usage summary",
-
     });
   }
 });
