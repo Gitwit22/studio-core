@@ -142,6 +142,53 @@ const FXRack = () => {
                 />
               </div>
             )}
+
+            {mod.id === "eq" && (
+              <div className="flex gap-1.5 justify-center">
+                <RotaryKnob
+                  value={mod.params.low}
+                  onChange={(v) => updateParam(mod.id, "low", v)}
+                  size={32}
+                  label="Low"
+                  active={mod.active}
+                  glowColor="blue"
+                />
+                <RotaryKnob
+                  value={mod.params.mid}
+                  onChange={(v) => updateParam(mod.id, "mid", v)}
+                  size={32}
+                  label="Mid"
+                  active={mod.active}
+                />
+                <RotaryKnob
+                  value={mod.params.high}
+                  onChange={(v) => updateParam(mod.id, "high", v)}
+                  size={32}
+                  label="High"
+                  active={mod.active}
+                  glowColor="blue"
+                />
+              </div>
+            )}
+
+            {mod.id === "limiter" && (
+              <div className="flex gap-2 justify-center">
+                <RotaryKnob
+                  value={mod.params.ceiling}
+                  onChange={(v) => updateParam(mod.id, "ceiling", v)}
+                  size={38}
+                  label="Ceil"
+                  active={mod.active}
+                />
+                <RotaryKnob
+                  value={mod.params.gain}
+                  onChange={(v) => updateParam(mod.id, "gain", v)}
+                  size={38}
+                  label="Gain"
+                  active={mod.active}
+                />
+              </div>
+            )
           </div>
         ))}
 
