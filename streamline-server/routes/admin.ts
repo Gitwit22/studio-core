@@ -163,6 +163,140 @@ router.put("/plans/:planId", async (req, res) => {
     res.status(500).json({ error: "Failed to update plan", details: error.message });
   }
 });
+
+// ── Seed / ensure all canonical plan documents exist with full features+limits ──
+router.post("/plans/seed", async (req, res) => {
+  try {
+    const PLANS: Record<string, any> = {
+      free: {
+        name: "Free",
+        description: "Get started – basic in-room experience",
+        priceMonthly: 0,
+        visibility: "public",
+        features: {
+          recording: false, rtmp: false, multistream: false, dualRecording: false,
+          advancedPermissions: false, allowsOverages: false,
+          canHls: false, hls: false, hlsEnabled: false, hlsCustomizationEnabled: false,
+        },
+        limits: {
+          monthlyMinutesIncluded: 180, transcodeMinutes: 0, maxGuests: 2,
+          rtmpDestinationsMax: 0, maxSessionMinutes: 60, maxRecordingMinutesPerClip: 0, maxHoursPerMonth: 3,
+        },
+        caps: { hlsMaxMinutesPerSession: null },
+        editing: { access: false, maxProjects: 0, maxStorageGB: 0, maxStorageBytes: 0 },
+      },
+      basic: {
+        name: "Basic",
+        description: "For hobbyists – recording & basic editing",
+        priceMonthly: 15,
+        visibility: "public",
+        features: {
+          recording: true, rtmp: false, multistream: false, dualRecording: false,
+          advancedPermissions: false, allowsOverages: false,
+          canHls: false, hls: false, hlsEnabled: false, hlsCustomizationEnabled: false,
+        },
+        limits: {
+          monthlyMinutesIncluded: 360, transcodeMinutes: 0, maxGuests: 4,
+          rtmpDestinationsMax: 0, maxSessionMinutes: 120, maxRecordingMinutesPerClip: 30, maxHoursPerMonth: 6,
+        },
+        caps: { hlsMaxMinutesPerSession: null },
+        editing: { access: true, maxProjects: 2, maxStorageGB: 3, maxStorageBytes: 3 * 1024 * 1024 * 1024 },
+      },
+      starter: {
+        name: "Starter",
+        description: "For growing creators – streaming, recording & editing",
+        priceMonthly: 29,
+        visibility: "public",
+        features: {
+          recording: true, rtmp: true, multistream: true, dualRecording: false,
+          advancedPermissions: false, allowsOverages: false,
+          canHls: false, hls: false, hlsEnabled: false, hlsCustomizationEnabled: false,
+        },
+        limits: {
+          monthlyMinutesIncluded: 600, transcodeMinutes: 60, maxGuests: 5,
+          rtmpDestinationsMax: 3, maxSessionMinutes: 240, maxRecordingMinutesPerClip: 15, maxHoursPerMonth: 10,
+        },
+        caps: { hlsMaxMinutesPerSession: null },
+        editing: { access: true, maxProjects: 5, maxStorageGB: 15, maxStorageBytes: 15 * 1024 * 1024 * 1024 },
+      },
+      pro: {
+        name: "Pro",
+        description: "For professionals – full suite with HLS & overages",
+        priceMonthly: 79,
+        visibility: "public",
+        features: {
+          recording: true, rtmp: true, multistream: true, dualRecording: true,
+          advancedPermissions: false, allowsOverages: true,
+          canHls: true, hls: true, hlsEnabled: true, hlsCustomizationEnabled: true,
+        },
+        limits: {
+          monthlyMinutesIncluded: 2400, transcodeMinutes: 300, maxGuests: 10,
+          rtmpDestinationsMax: 3, maxSessionMinutes: 480, maxRecordingMinutesPerClip: 60, maxHoursPerMonth: 40,
+        },
+        caps: { hlsMaxMinutesPerSession: null },
+        editing: { access: true, maxProjects: 10, maxStorageGB: 25, maxStorageBytes: 25 * 1024 * 1024 * 1024 },
+      },
+      enterprise: {
+        name: "Enterprise",
+        description: "Custom enterprise solution – configured per account",
+        priceMonthly: 0,
+        visibility: "admin",
+        features: {
+          recording: true, rtmp: true, multistream: true, dualRecording: true,
+          advancedPermissions: false, allowsOverages: true,
+          canHls: true, hls: true, hlsEnabled: true, hlsCustomizationEnabled: true,
+        },
+        limits: {
+          monthlyMinutesIncluded: 6000, transcodeMinutes: 1000, maxGuests: 50,
+          rtmpDestinationsMax: 10, maxSessionMinutes: 720, maxRecordingMinutesPerClip: 120, maxHoursPerMonth: 100,
+        },
+        caps: { hlsMaxMinutesPerSession: null },
+        editing: { access: true, maxProjects: 0, maxStorageGB: 0, maxStorageBytes: 0 },
+        customizable: true, contactSales: true,
+      },
+      internal_unlimited: {
+        name: "Internal Unlimited",
+        description: "Internal testing – all features unlocked",
+        priceMonthly: 0,
+        visibility: "admin",
+        features: {
+          recording: true, rtmp: true, multistream: true, dualRecording: true,
+          advancedPermissions: false, allowsOverages: true,
+          canHls: true, hls: true, hlsEnabled: true, hlsCustomizationEnabled: true,
+        },
+        limits: {
+          monthlyMinutesIncluded: 99999, transcodeMinutes: 99999, maxGuests: 100,
+          rtmpDestinationsMax: 10, maxSessionMinutes: 1440, maxRecordingMinutesPerClip: 999, maxHoursPerMonth: 9999,
+        },
+        caps: { hlsMaxMinutesPerSession: null },
+        editing: { access: true, maxProjects: 999, maxStorageGB: 100, maxStorageBytes: 100 * 1024 * 1024 * 1024 },
+      },
+    };
+
+    const results: { created: string[]; updated: string[]; errors: Array<{ planId: string; error: string }> } = {
+      created: [], updated: [], errors: [],
+    };
+
+    for (const [planId, planData] of Object.entries(PLANS)) {
+      try {
+        const docRef = firestore.collection("plans").doc(planId);
+        const existingDoc = await docRef.get();
+        const payload: any = { ...planData, id: planId, updatedAt: new Date().toISOString() };
+        if (!existingDoc.exists) payload.createdAt = new Date().toISOString();
+        await docRef.set(payload, { merge: true });
+        (existingDoc.exists ? results.updated : results.created).push(planId);
+      } catch (err: any) {
+        results.errors.push({ planId, error: err?.message || String(err) });
+      }
+    }
+
+    await logAdminAction(req.adminUser!.uid, "seed_plans", { created: results.created, updated: results.updated, errors: results.errors.length });
+    res.json({ success: true, ...results });
+  } catch (error: any) {
+    console.error("Failed to seed plans:", error);
+    res.status(500).json({ error: "Failed to seed plans", details: error.message });
+  }
+});
 /**
  * GET /api/admin/users
  * List all users with usage information

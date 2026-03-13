@@ -128,7 +128,7 @@ export function creatorRoutes(flags: CreatorRouteFlags) {
       />
       <Route
         path="/projects"
-        element={canProjects ? <ProjectsDashboard /> : <Navigate to="/join" replace />}
+        element={<ProjectsDashboard />}
       />
       <Route path="/projects/:projectId" element={<ProjectDetail />} />
 

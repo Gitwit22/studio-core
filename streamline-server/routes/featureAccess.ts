@@ -6,6 +6,7 @@ type AccessResult = {
   allowed: boolean;
   code?: string;
   reason?: string;
+  _diag?: Record<string, any>;
 };
 
 const BAD_BILLING_STATUSES = new Set([
@@ -99,6 +100,7 @@ export async function canAccessFeature(
         allowed: false,
         code: LIMIT_ERRORS.FEATURE_DISABLED,
         reason: "Feature disabled platform-wide",
+        _diag: { uid, planId, feature: featureKey, failedAt: "platform_gate" },
       };
     }
   }
@@ -145,6 +147,7 @@ export async function canAccessFeature(
         allowed: false,
         code: LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
         reason: `Billing issue: ${billingBlockReason}`,
+        _diag: { uid, planId, feature: featureKey, failedAt: "billing_block", billingBlockReason, effectiveBillingEnabled: account.effectiveBillingEnabled, billingStatus: user?.billingStatus, billingActive: user?.billingActive, subscriptionId: !!(user?.stripeSubscriptionId || user?.billing?.subscriptionId) },
       };
     }
   }
@@ -152,7 +155,7 @@ export async function canAccessFeature(
   // 3) Load plan
   const planSnap = await db.collection("plans").doc(planId).get();
   if (!planSnap.exists) {
-    return { allowed: false, code: LIMIT_ERRORS.FEATURE_NOT_ENTITLED, reason: "Plan not found" };
+    return { allowed: false, code: LIMIT_ERRORS.FEATURE_NOT_ENTITLED, reason: "Plan not found", _diag: { uid, planId, feature: featureKey, failedAt: "plan_not_found", rawPlanId: user?.planId, accountPlanId: account.planId } };
   }
 
   const plan = planSnap.data() as any;
@@ -213,6 +216,7 @@ export async function canAccessFeature(
       allowed: false,
       code: LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
       reason: "Feature not available on your plan",
+      _diag: { uid, planId, feature: featureKey, failedAt: "feature_flag", featureValue: plan?.features?.[featureKey] },
     };
   }
 

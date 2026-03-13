@@ -747,10 +747,12 @@ router.post(
     // Feature access gate
     const featureAccess = await canAccessFeature((req as any).account || uid, "recording");
     if (!featureAccess.allowed) {
+      console.warn(`[recordings/start] feature access denied uid=${uid}`, featureAccess);
       return res.status(403).json({
         success: false,
         error: featureAccess.code || LIMIT_ERRORS.FEATURE_NOT_ENTITLED,
         reason: featureAccess.reason || "Recording requires upgrade",
+        _diag: featureAccess._diag,
       });
     }
 
