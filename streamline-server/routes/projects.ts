@@ -12,6 +12,7 @@
  *   PATCH  /api/projects/:id       — Update project name/status
  *   DELETE /api/projects/:id       — Archive project
  *   GET    /api/projects/:id/assets — List project assets
+ *   GET    /api/projects/:id/assets/:assetId/download — Download asset
  *   DELETE /api/projects/:id/assets/:assetId — Remove asset
  */
 
@@ -24,8 +25,12 @@ import {
   updateProject,
   deleteProject,
   listProjectAssets,
+  getProjectAsset,
   deleteProjectAsset,
+  serializeProject,
+  serializeAsset,
 } from "../lib/projectManager";
+import { getSignedDownloadUrl } from "../lib/storageClient";
 
 const router = Router();
 
@@ -41,7 +46,7 @@ router.get("/", requireAuth, async (req: any, res) => {
 
     const limit = Math.min(Number(req.query.limit) || 50, 100);
     const projects = await listProjects(uid, limit);
-    return res.json({ projects });
+    return res.json({ projects: projects.map(serializeProject) });
   } catch (err: any) {
     console.error("[projects] list error:", err?.message || err);
     return res.status(500).json({ error: "Failed to list projects" });
@@ -62,7 +67,7 @@ router.post("/", requireAuth, async (req: any, res) => {
       name,
       createdBy: uid,
     });
-    return res.status(201).json({ project });
+    return res.status(201).json({ project: serializeProject(project) });
   } catch (err: any) {
     console.error("[projects] create error:", err?.message || err);
     return res.status(500).json({ error: "Failed to create project" });
@@ -79,7 +84,7 @@ router.get("/:id", requireAuth, async (req: any, res) => {
     if (!project || project.ownerId !== uid) {
       return res.status(404).json({ error: "Project not found" });
     }
-    return res.json({ project });
+    return res.json({ project: serializeProject(project) });
   } catch (err: any) {
     console.error("[projects] get error:", err?.message || err);
     return res.status(500).json({ error: "Failed to get project" });
@@ -148,7 +153,7 @@ router.get("/:id/assets", requireAuth, async (req: any, res) => {
 
     const limit = Math.min(Number(req.query.limit) || 100, 200);
     const assets = await listProjectAssets(req.params.id, limit);
-    return res.json({ assets });
+    return res.json({ assets: assets.map(serializeAsset) });
   } catch (err: any) {
     console.error("[projects] list assets error:", err?.message || err);
     return res.status(500).json({ error: "Failed to list assets" });
@@ -171,6 +176,43 @@ router.delete("/:id/assets/:assetId", requireAuth, async (req: any, res) => {
   } catch (err: any) {
     console.error("[projects] delete asset error:", err?.message || err);
     return res.status(500).json({ error: "Failed to delete asset" });
+  }
+});
+
+// ── GET /:id/assets/:assetId/download — download asset ──────────────────────
+router.get("/:id/assets/:assetId/download", requireAuth, async (req: any, res) => {
+  try {
+    const uid = getAuthUserId(req);
+    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+
+    const project = await getProject(req.params.id);
+    if (!project || project.ownerId !== uid) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const asset = await getProjectAsset(req.params.assetId);
+    if (!asset || asset.projectId !== req.params.id) {
+      return res.status(404).json({ error: "Asset not found" });
+    }
+
+    if (asset.processingStatus !== "ready") {
+      return res.status(409).json({ error: "Asset is not ready yet", status: asset.processingStatus });
+    }
+
+    if (!asset.storageKey) {
+      return res.status(404).json({ error: "No storage key for this asset" });
+    }
+
+    const downloadUrl = await getSignedDownloadUrl(asset.storageKey, 900);
+    return res.json({
+      downloadUrl,
+      filename: asset.filename || "recording.mp4",
+      storageKey: asset.storageKey,
+      status: asset.processingStatus,
+    });
+  } catch (err: any) {
+    console.error("[projects] download asset error:", err?.message || err);
+    return res.status(500).json({ error: "Failed to get download URL" });
   }
 });
 

@@ -64,6 +64,31 @@ export interface ProjectAssetDoc {
 const projectsColl = () => firestore.collection("projects");
 const assetsColl   = () => firestore.collection("project_assets");
 
+/** Convert Firestore Timestamp fields to ISO strings for JSON responses */
+function tsToIso(ts: any): string | null {
+  if (!ts) return null;
+  if (typeof ts.toDate === "function") return ts.toDate().toISOString();
+  if (ts instanceof Date) return ts.toISOString();
+  if (typeof ts === "string") return ts;
+  return null;
+}
+
+export function serializeProject(p: ProjectDoc): Record<string, any> {
+  return {
+    ...p,
+    createdAt: tsToIso(p.createdAt) || new Date().toISOString(),
+    updatedAt: tsToIso(p.updatedAt) || new Date().toISOString(),
+  };
+}
+
+export function serializeAsset(a: ProjectAssetDoc): Record<string, any> {
+  return {
+    ...a,
+    createdAt: tsToIso(a.createdAt) || new Date().toISOString(),
+    updatedAt: tsToIso(a.updatedAt) || new Date().toISOString(),
+  };
+}
+
 // ── Project CRUD ─────────────────────────────────────────────────────────────
 
 export async function createProject(opts: {
@@ -189,12 +214,28 @@ export async function listProjectAssets(
   projectId: string,
   limit = 100,
 ): Promise<ProjectAssetDoc[]> {
-  const snap = await assetsColl()
-    .where("projectId", "==", projectId)
-    .orderBy("createdAt", "desc")
-    .limit(limit)
-    .get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjectAssetDoc));
+  try {
+    const snap = await assetsColl()
+      .where("projectId", "==", projectId)
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjectAssetDoc));
+  } catch (err: any) {
+    // Fallback if composite index isn't created yet
+    console.warn(`[listProjectAssets] Compound query failed (missing index?): ${err?.message}`);
+    const snap = await assetsColl()
+      .where("projectId", "==", projectId)
+      .get();
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as ProjectAssetDoc))
+      .sort((a, b) => {
+        const aTime = (a.createdAt as any)?.toMillis?.() || 0;
+        const bTime = (b.createdAt as any)?.toMillis?.() || 0;
+        return bTime - aTime;
+      })
+      .slice(0, limit);
+  }
 }
 
 export async function getProjectAsset(assetId: string): Promise<ProjectAssetDoc | null> {

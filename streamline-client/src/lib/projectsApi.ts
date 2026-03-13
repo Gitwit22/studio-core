@@ -48,6 +48,13 @@ export interface ProjectAsset {
   updatedAt: string;
 }
 
+export interface AssetDownloadResult {
+  downloadUrl: string;
+  filename: string;
+  storageKey: string;
+  status: string;
+}
+
 // ── API calls ────────────────────────────────────────────────────────────────
 
 export async function listProjects(limit = 50): Promise<Project[]> {
@@ -98,6 +105,20 @@ export async function listProjectAssets(
   );
   const data = await res.json();
   return data.assets ?? [];
+}
+
+export async function getAssetDownloadUrl(
+  projectId: string,
+  assetId: string,
+): Promise<AssetDownloadResult> {
+  const res = await apiFetchAuth(
+    `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/download`,
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to get download URL" }));
+    throw new Error(err.error || "Failed to get download URL");
+  }
+  return res.json();
 }
 
 export async function deleteProjectAsset(
