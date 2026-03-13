@@ -154,7 +154,7 @@ export class AudioMixer {
   }
 
   // -----------------------------------------------------------------------
-  // Initialisation
+  // Initialization
   // -----------------------------------------------------------------------
 
   /** Call once after a user gesture to create the AudioContext. */

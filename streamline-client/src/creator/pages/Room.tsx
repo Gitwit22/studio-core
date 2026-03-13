@@ -1550,7 +1550,7 @@ function RoomPage() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [showMixer, setShowMixer] = useState(false);
   const [showScreenShareRouter, setShowScreenShareRouter] = useState(false);
-  const [screenShareMode, setScreenShareMode] = useState<ScreenShareRouteMode>("main");
+  const [screenShareMode, setScreenShareMode] = useState<ScreenShareRouteMode>("off");
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
