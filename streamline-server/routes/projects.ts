@@ -17,6 +17,7 @@
  */
 
 import { Router } from "express";
+import multer from "multer";
 import { requireAuth } from "../middleware/requireAuth";
 import {
   createProject,
@@ -27,12 +28,17 @@ import {
   listProjectAssets,
   getProjectAsset,
   deleteProjectAsset,
+  addAssetToProject,
   serializeProject,
   serializeAsset,
 } from "../lib/projectManager";
-import { getSignedDownloadUrl } from "../lib/storageClient";
+import { getSignedDownloadUrl, uploadVideo } from "../lib/storageClient";
 
 const router = Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
+});
 
 function getAuthUserId(req: any): string | null {
   return req.user?.uid || req.authUid || null;
@@ -176,6 +182,53 @@ router.delete("/:id/assets/:assetId", requireAuth, async (req: any, res) => {
   } catch (err: any) {
     console.error("[projects] delete asset error:", err?.message || err);
     return res.status(500).json({ error: "Failed to delete asset" });
+  }
+});
+
+// ── POST /:id/assets/upload — upload video to existing project ──────────────
+router.post("/:id/assets/upload", requireAuth, upload.single("video") as any, async (req: any, res) => {
+  try {
+    const uid = getAuthUserId(req);
+    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+
+    const project = await getProject(req.params.id);
+    if (!project || project.ownerId !== uid) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "No file uploaded" });
+
+    const allowedTypes = ["video/mp4", "video/webm", "video/quicktime", "video/x-msvideo"];
+    if (!allowedTypes.includes(file.mimetype)) {
+      return res.status(400).json({ error: "Invalid file type. MP4, WebM, MOV, and AVI supported." });
+    }
+
+    const title = typeof req.body?.title === "string" && req.body.title.trim()
+      ? req.body.title.trim()
+      : file.originalname.replace(/\.[^/.]+$/, "");
+
+    const timestamp = Date.now();
+    const safeName = title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+    const ext = file.originalname.split(".").pop() || "mp4";
+    const storagePath = `projects/${uid}/${req.params.id}/${timestamp}-${safeName}.${ext}`;
+
+    await uploadVideo(file.buffer, storagePath, file.mimetype);
+
+    const asset = await addAssetToProject({
+      projectId: req.params.id,
+      ownerId: uid,
+      type: "upload",
+      filename: `${title}.${ext}`,
+      storageKey: storagePath,
+      size: file.size,
+      processingStatus: "ready",
+    });
+
+    return res.status(201).json({ asset: serializeAsset(asset) });
+  } catch (err: any) {
+    console.error("[projects] upload asset error:", err?.message || err);
+    return res.status(500).json({ error: "Failed to upload asset" });
   }
 });
 

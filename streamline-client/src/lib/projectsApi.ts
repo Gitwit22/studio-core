@@ -130,3 +130,24 @@ export async function deleteProjectAsset(
     { method: "DELETE" },
   );
 }
+
+export async function uploadAssetToProject(
+  projectId: string,
+  file: File,
+  title?: string,
+): Promise<ProjectAsset> {
+  const formData = new FormData();
+  formData.append("video", file);
+  if (title) formData.append("title", title);
+
+  const res = await apiFetchAuth(
+    `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/assets/upload`,
+    { method: "POST", body: formData },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Upload failed" }));
+    throw new Error(err.error || "Upload failed");
+  }
+  const data = await res.json();
+  return data.asset;
+}

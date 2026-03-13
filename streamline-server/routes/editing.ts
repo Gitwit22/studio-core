@@ -76,24 +76,27 @@ async function getSegmentedPlatformFlags(): Promise<SegmentedPlatformFlags> {
       ? ((myContentRecordingsSnap.data() as any) || {})
       : {};
 
+    // Platform flags act as kill-switches: missing → enabled.
+    // Set { enabled: false } in Firestore to disable.
+    const resolve = (d: any) => d.enabled !== false;
+
     cachedSegmentedFlags = {
-      // New segmented flags default to DISABLED when missing.
-      contentLibraryEnabled: contentLibraryData.enabled === true,
-      projectsEnabled: projectsData.enabled === true,
-      editorEnabled: editorData.enabled === true,
-      myContentEnabled: myContentData.enabled === true,
-      myContentRecordingsEnabled: myContentRecordingsData.enabled === true,
+      contentLibraryEnabled: resolve(contentLibraryData),
+      projectsEnabled: resolve(projectsData),
+      editorEnabled: resolve(editorData),
+      myContentEnabled: resolve(myContentData),
+      myContentRecordingsEnabled: resolve(myContentRecordingsData),
     };
     cachedSegmentedFlagsAt = now;
     return cachedSegmentedFlags;
   } catch (err) {
     console.error("[editing] failed to load segmented platform flags", err);
     cachedSegmentedFlags = {
-      contentLibraryEnabled: false,
-      projectsEnabled: false,
-      editorEnabled: false,
-      myContentEnabled: false,
-      myContentRecordingsEnabled: false,
+      contentLibraryEnabled: true,
+      projectsEnabled: true,
+      editorEnabled: true,
+      myContentEnabled: true,
+      myContentRecordingsEnabled: true,
     };
     cachedSegmentedFlagsAt = now;
     return cachedSegmentedFlags;

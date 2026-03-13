@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { 
   Play, 
@@ -16,11 +16,18 @@ import {
   Unlock,
   Link2,
   Undo2,
-  Redo2
+  Redo2,
+  Upload,
 } from "lucide-react";
 import { editingApi } from "../../../lib/editingApi";
 import { apiFetchAuth } from "../../../lib/api";
 import { useEditingFeatures } from "./useEditingFeatures";
+import {
+  listProjectAssets,
+  getAssetDownloadUrl,
+  uploadAssetToProject,
+} from "../../../lib/projectsApi";
+import type { ProjectAsset } from "../../../lib/projectsApi";
 
 // ============================================================================
 // TYPES
@@ -97,6 +104,8 @@ export default function EditorPage() {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [exportResolution, setExportResolution] = useState("720p");
   const [exportFormat, setExportFormat] = useState("mp4");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef2 = useRef<HTMLInputElement>(null);
 
   // Undo/redo state
   const undoStack = useRef<HistorySnapshot[]>([]);
@@ -159,6 +168,13 @@ export default function EditorPage() {
   const timelineWidth = Math.max(800, totalDuration * PIXELS_PER_SECOND * zoom);
   const selectedClip = clips.find((c) => c.id === selectedClipId);
 
+  // Video tracks first, then audio tracks for timeline layout
+  const sortedTracks = useMemo(() => {
+    const video = tracks.filter(t => t.type === 'video');
+    const audio = tracks.filter(t => t.type === 'audio');
+    return [...video, ...audio];
+  }, [tracks]);
+
   // ============================================================================
   // LOAD PROJECT DATA
   // ============================================================================
@@ -180,45 +196,47 @@ export default function EditorPage() {
           if (recording) {
             setProjectName(`Edit: ${recording.title}`);
             const videoUrl = recording.videoUrl || SAMPLE_VIDEO_URL;
-            const clipData = {
-              id: `clip_${Date.now()}`,
-              assetId: recordingId,
-              trackId: 'video_1',
-              startTime: 0,
-              duration: Math.min(recording.duration || 60, 60),
-              inPoint: 0,
-              outPoint: Math.min(recording.duration || 60, 60),
-              name: recording.title || 'Recording',
-              videoUrl: videoUrl,
-            };
-            console.log('🎬 Clip data:', clipData);
-            setClips([clipData]);
+            const duration = Math.min(recording.duration || 60, 600);
+
+            // Create linked video + audio clips
+            setTracks([
+              { id: 'video_1', name: 'Video 1', type: 'video', muted: false, locked: false, solo: false, linkedTrackId: 'audio_1' },
+              { id: 'audio_1', name: 'Audio 1', type: 'audio', muted: false, locked: false, solo: false, linkedTrackId: 'video_1' },
+            ]);
+            setClips([
+              {
+                id: `clip_v_${Date.now()}`,
+                assetId: recordingId,
+                trackId: 'video_1',
+                startTime: 0,
+                duration,
+                inPoint: 0,
+                outPoint: duration,
+                name: recording.title || 'Video',
+                videoUrl,
+              },
+              {
+                id: `clip_a_${Date.now()}`,
+                assetId: recordingId,
+                trackId: 'audio_1',
+                startTime: 0,
+                duration,
+                inPoint: 0,
+                outPoint: duration,
+                name: recording.title || 'Audio',
+                videoUrl,
+              },
+            ]);
             
-            // Load video directly into ref
             setTimeout(() => {
               if (!cancelled && videoRef.current) {
                 videoRef.current.src = videoUrl;
                 videoRef.current.load();
-                console.log('📺 Video loaded into player:', videoUrl);
               }
             }, 100);
           } else {
             console.error('❌ Recording not found:', recordingId);
-            // Fallback to sample
             setProjectName("New Project");
-            setClips([
-              {
-                id: `clip_${Date.now()}`,
-                assetId: "sample",
-                trackId: 'video_1',
-                startTime: 0,
-                duration: 30,
-                inPoint: 0,
-                outPoint: 30,
-                name: "Sample Clip",
-                videoUrl: SAMPLE_VIDEO_URL,
-              },
-            ]);
           }
         } else if (assetId) {
           const asset = await editingApi.getAsset(assetId);
@@ -263,33 +281,63 @@ export default function EditorPage() {
         if (proj) {
           setProjectName(proj.name);
 
-          // Restore saved track state if available
-          const savedTracks = (proj as any)?.timeline?.tracks;
-          if (Array.isArray(savedTracks) && savedTracks.length > 0) {
-            const restoredTracks: Track[] = savedTracks.map((t: any, idx: number) => ({
-              id: String(t?.id || `track_${idx}`),
-              name: String(t?.name || 'Track'),
-              type: t?.type === 'audio' ? 'audio' as const : 'video' as const,
-              muted: !!t?.muted,
-              locked: !!t?.locked,
-              solo: !!t?.solo,
-              linkedTrackId: typeof t?.linkedTrackId === 'string' ? t.linkedTrackId : null,
-            }));
-            setTracks(restoredTracks);
+          // Fetch real project assets for fresh signed download URLs
+          let projectAssets: ProjectAsset[] = [];
+          try {
+            projectAssets = await listProjectAssets(projectId!);
+          } catch (e) {
+            console.warn("[editor] Failed to load project assets:", e);
           }
+          if (cancelled) return;
 
-          const timelineClips = (proj as any)?.timeline?.clips;
-          if (Array.isArray(timelineClips) && timelineClips.length > 0) {
-            const normalized = timelineClips.map((c: any) => ({
+          const readyAssets = projectAssets.filter(
+            a => a.processingStatus === 'ready' && (a.type === 'recording' || a.type === 'upload')
+          );
+
+          // Build download URL map (projectAssetId → url, sourceRecordingId → url)
+          const urlMap = new Map<string, string>();
+          await Promise.all(readyAssets.map(async (asset) => {
+            try {
+              const result = await getAssetDownloadUrl(projectId!, asset.id);
+              urlMap.set(asset.id, result.downloadUrl);
+              if (asset.sourceRecordingId) {
+                urlMap.set(asset.sourceRecordingId, result.downloadUrl);
+              }
+            } catch (e) {
+              console.warn(`[editor] Failed to get download URL for asset ${asset.id}:`, e);
+            }
+          }));
+          if (cancelled) return;
+
+          // Check for saved timeline state
+          const savedTracks = (proj as any)?.timeline?.tracks;
+          const savedClips = (proj as any)?.timeline?.clips;
+
+          if (Array.isArray(savedClips) && savedClips.length > 0) {
+            // Restore saved track layout
+            if (Array.isArray(savedTracks) && savedTracks.length > 0) {
+              setTracks(savedTracks.map((t: any, idx: number) => ({
+                id: String(t?.id || `track_${idx}`),
+                name: String(t?.name || 'Track'),
+                type: t?.type === 'audio' ? 'audio' as const : 'video' as const,
+                muted: !!t?.muted,
+                locked: !!t?.locked,
+                solo: !!t?.solo,
+                linkedTrackId: typeof t?.linkedTrackId === 'string' ? t.linkedTrackId : null,
+              })));
+            }
+
+            // Restore clips with refreshed download URLs
+            const normalized = savedClips.map((c: any) => ({
               id: String(c?.id || `clip_${Date.now()}`),
-              assetId: String(c?.assetId || proj.assetId),
+              assetId: String(c?.assetId || ''),
               trackId: typeof c?.trackId === 'string' ? c.trackId : 'video_1',
               startTime: Number(c?.startTime || 0),
               duration: Number(c?.duration || 0),
               inPoint: Number(c?.inPoint || 0),
               outPoint: Number(c?.outPoint || 0),
               name: String(c?.name || proj.name),
-              videoUrl: String(c?.videoUrl || SAMPLE_VIDEO_URL),
+              videoUrl: urlMap.get(String(c?.assetId || '')) || String(c?.videoUrl || SAMPLE_VIDEO_URL),
             }));
             setClips(normalized);
 
@@ -300,31 +348,55 @@ export default function EditorPage() {
                 videoRef.current.load();
               }
             }, 50);
-          } else {
-            const asset = await editingApi.getAsset(proj.assetId);
-            if (cancelled) return;
-            const videoUrl = asset?.videoUrl || SAMPLE_VIDEO_URL;
-            setClips([
-              {
-                id: "clip_1",
-                assetId: proj.assetId,
-                trackId: 'video_1',
-                startTime: 0,
-                duration: Math.min(asset?.duration || 60, 60),
-                inPoint: 0,
-                outPoint: Math.min(asset?.duration || 60, 60),
-                name: asset?.name || proj.name,
-                videoUrl,
-              },
+          } else if (readyAssets.length > 0) {
+            // No saved timeline — auto-populate from project assets
+            // All video clips on video_1, all audio clips on audio_1, linked
+            setTracks([
+              { id: 'video_1', name: 'Video 1', type: 'video', muted: false, locked: false, solo: false, linkedTrackId: 'audio_1' },
+              { id: 'audio_1', name: 'Audio 1', type: 'audio', muted: false, locked: false, solo: false, linkedTrackId: 'video_1' },
             ]);
 
+            let currentTime = 0;
+            const newClips: TimelineClip[] = [];
+            for (const asset of readyAssets) {
+              const duration = asset.duration || 60;
+              const downloadUrl = urlMap.get(asset.id) || '';
+
+              newClips.push({
+                id: `clip_v_${asset.id}`,
+                assetId: asset.id,
+                trackId: 'video_1',
+                startTime: currentTime,
+                duration,
+                inPoint: 0,
+                outPoint: duration,
+                name: asset.filename || 'Video',
+                videoUrl: downloadUrl,
+              });
+              newClips.push({
+                id: `clip_a_${asset.id}`,
+                assetId: asset.id,
+                trackId: 'audio_1',
+                startTime: currentTime,
+                duration,
+                inPoint: 0,
+                outPoint: duration,
+                name: asset.filename || 'Audio',
+                videoUrl: downloadUrl,
+              });
+              currentTime += duration;
+            }
+            setClips(newClips);
+
             setTimeout(() => {
-              if (!cancelled && videoRef.current) {
-                videoRef.current.src = videoUrl;
+              const firstUrl = newClips[0]?.videoUrl;
+              if (!cancelled && videoRef.current && firstUrl) {
+                videoRef.current.src = firstUrl;
                 videoRef.current.load();
               }
             }, 50);
           }
+          // If no ready assets and no saved timeline, leave empty
         }
       }
     };
@@ -856,6 +928,77 @@ export default function EditorPage() {
   };
 
   // ============================================================================
+  // UPLOAD TO PROJECT
+  // ============================================================================
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (!projectId || projectId === "new") {
+      alert("Save the project first before uploading additional media.");
+      return;
+    }
+    const allowed = ["video/mp4", "video/webm", "video/quicktime", "video/x-msvideo"];
+    if (!allowed.includes(file.type)) {
+      alert("Only MP4, WebM, MOV, and AVI files are supported.");
+      return;
+    }
+    if (file.size > 500 * 1024 * 1024) {
+      alert("File too large. Maximum size is 500 MB.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const title = file.name.replace(/\.[^/.]+$/, "");
+      const asset = await uploadAssetToProject(projectId, file, title);
+
+      // Get download URL for the new asset
+      let downloadUrl = "";
+      try {
+        const result = await getAssetDownloadUrl(projectId, asset.id);
+        downloadUrl = result.downloadUrl;
+      } catch { /* non-fatal */ }
+
+      // Find the end of existing clips
+      const endTime = clips.reduce((max, c) => Math.max(max, c.startTime + c.duration), 0);
+      const duration = asset.duration || 60;
+
+      pushUndoSnapshot();
+
+      // Add video + audio clip pair
+      setClips(prev => [
+        ...prev,
+        {
+          id: `clip_v_${asset.id}`,
+          assetId: asset.id,
+          trackId: 'video_1',
+          startTime: endTime,
+          duration,
+          inPoint: 0,
+          outPoint: duration,
+          name: asset.filename || title,
+          videoUrl: downloadUrl,
+        },
+        {
+          id: `clip_a_${asset.id}`,
+          assetId: asset.id,
+          trackId: 'audio_1',
+          startTime: endTime,
+          duration,
+          inPoint: 0,
+          outPoint: duration,
+          name: asset.filename || title,
+          videoUrl: downloadUrl,
+        },
+      ]);
+    } catch (err: any) {
+      console.error("Upload failed:", err);
+      alert(err?.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }, [projectId, clips, pushUndoSnapshot]);
+
+  // ============================================================================
   // DRAG HANDLERS (TRIM + MOVE)
   // ============================================================================
 
@@ -1331,6 +1474,30 @@ export default function EditorPage() {
                     + Add Audio Track
                   </button>
                 )}
+
+                {projectId && projectId !== "new" && (
+                  <>
+                    <input
+                      type="file"
+                      ref={fileInputRef2}
+                      accept="video/mp4,video/webm,video/quicktime,video/x-msvideo"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileUpload(file);
+                        e.target.value = "";
+                      }}
+                    />
+                    <button
+                      onClick={() => fileInputRef2.current?.click()}
+                      disabled={uploading}
+                      className="w-full px-3 py-2 text-sm font-medium rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition flex items-center justify-center gap-2"
+                    >
+                      <Upload size={14} />
+                      {uploading ? "Uploading..." : "Upload Video"}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1445,7 +1612,7 @@ export default function EditorPage() {
                 {(() => {
                   const RULER_HEIGHT = 32;
                   const TRACK_HEIGHT = 100;
-                  const timelineHeight = RULER_HEIGHT + (tracks.length * TRACK_HEIGHT);
+                  const timelineHeight = RULER_HEIGHT + (sortedTracks.length * TRACK_HEIGHT);
                   
                   return (
                     <div
@@ -1509,7 +1676,7 @@ export default function EditorPage() {
                       </div>
 
                       {/* TRACKS - Video then Audio */}
-                      {tracks.map((track, trackIndex) => {
+                      {sortedTracks.map((track, trackIndex) => {
                         const trackY = RULER_HEIGHT + (trackIndex * TRACK_HEIGHT);
                         const trackClips = clips.filter(c => c.trackId === track.id);
                         const linkedTrack = tracks.find(t => t.id === track.linkedTrackId);
