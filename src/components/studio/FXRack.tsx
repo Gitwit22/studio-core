@@ -188,7 +188,7 @@ const FXRack = () => {
                   active={mod.active}
                 />
               </div>
-            )
+            )}
           </div>
         ))}
 
