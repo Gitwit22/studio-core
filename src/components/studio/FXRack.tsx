@@ -42,16 +42,13 @@ const FXRack = () => {
       </div>
 
       {/* Signal chain indicator */}
-      <div className="px-3 py-1.5 border-b border-border flex items-center gap-1">
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Mic</span>
-        <span className="text-[8px] text-studio-teal">→</span>
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Comp</span>
-        <span className="text-[8px] text-studio-teal">→</span>
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Dly</span>
-        <span className="text-[8px] text-studio-teal">→</span>
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Rev</span>
-        <span className="text-[8px] text-studio-teal">→</span>
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Out</span>
+      <div className="px-3 py-1.5 border-b border-border flex items-center gap-1 flex-wrap">
+        {["Mic", "Comp", "Dly", "Rev", "EQ", "Lim", "Out"].map((s, i, arr) => (
+          <span key={s} className="flex items-center gap-1">
+            <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">{s}</span>
+            {i < arr.length - 1 && <span className="text-[8px] text-studio-teal">→</span>}
+          </span>
+        ))}
       </div>
 
       {/* FX Modules */}
