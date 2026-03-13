@@ -14,6 +14,8 @@ const FXRack = () => {
     { id: "comp", name: "Compressor", active: true, params: { amount: 65 } },
     { id: "delay", name: "Delay", active: false, params: { time: 50, mix: 30 } },
     { id: "reverb", name: "Reverb", active: true, params: { size: 45, mix: 40 } },
+    { id: "eq", name: "EQ", active: true, params: { low: 50, mid: 55, high: 50 } },
+    { id: "limiter", name: "Limiter", active: true, params: { ceiling: 75, gain: 50 } },
   ]);
 
   const [delayTime, setDelayTime] = useState<string>("1/4");
@@ -42,16 +44,13 @@ const FXRack = () => {
       </div>
 
       {/* Signal chain indicator */}
-      <div className="px-3 py-1.5 border-b border-border flex items-center gap-1">
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Mic</span>
-        <span className="text-[8px] text-studio-teal">→</span>
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Comp</span>
-        <span className="text-[8px] text-studio-teal">→</span>
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Dly</span>
-        <span className="text-[8px] text-studio-teal">→</span>
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Rev</span>
-        <span className="text-[8px] text-studio-teal">→</span>
-        <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Out</span>
+      <div className="px-3 py-1.5 border-b border-border flex items-center gap-1 flex-wrap">
+        {["Mic", "Comp", "Dly", "Rev", "EQ", "Lim", "Out"].map((s, i, arr) => (
+          <span key={s} className="flex items-center gap-1">
+            <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">{s}</span>
+            {i < arr.length - 1 && <span className="text-[8px] text-studio-teal">→</span>}
+          </span>
+        ))}
       </div>
 
       {/* FX Modules */}
@@ -140,6 +139,53 @@ const FXRack = () => {
                   label="Mix"
                   active={mod.active}
                   glowColor="blue"
+                />
+              </div>
+            )}
+
+            {mod.id === "eq" && (
+              <div className="flex gap-1.5 justify-center">
+                <RotaryKnob
+                  value={mod.params.low}
+                  onChange={(v) => updateParam(mod.id, "low", v)}
+                  size={32}
+                  label="Low"
+                  active={mod.active}
+                  glowColor="blue"
+                />
+                <RotaryKnob
+                  value={mod.params.mid}
+                  onChange={(v) => updateParam(mod.id, "mid", v)}
+                  size={32}
+                  label="Mid"
+                  active={mod.active}
+                />
+                <RotaryKnob
+                  value={mod.params.high}
+                  onChange={(v) => updateParam(mod.id, "high", v)}
+                  size={32}
+                  label="High"
+                  active={mod.active}
+                  glowColor="blue"
+                />
+              </div>
+            )}
+
+            {mod.id === "limiter" && (
+              <div className="flex gap-2 justify-center">
+                <RotaryKnob
+                  value={mod.params.ceiling}
+                  onChange={(v) => updateParam(mod.id, "ceiling", v)}
+                  size={38}
+                  label="Ceil"
+                  active={mod.active}
+                />
+                <RotaryKnob
+                  value={mod.params.gain}
+                  onChange={(v) => updateParam(mod.id, "gain", v)}
+                  size={38}
+                  label="Gain"
+                  active={mod.active}
                 />
               </div>
             )}
