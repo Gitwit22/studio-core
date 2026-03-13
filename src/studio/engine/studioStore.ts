@@ -1,20 +1,8 @@
 import { create } from "zustand"
 import { StudioState, AudioSource, Clip, StudioTrack, TrackType } from "../types/studio"
 
-let nextTrackId = 1
-let nextClipId = 1
-let nextSourceId = 1
-
-function generateTrackId(): string {
-  return `track-${nextTrackId++}`
-}
-
-function generateClipId(): string {
-  return `clip-${nextClipId++}`
-}
-
-function generateSourceId(): string {
-  return `source-${nextSourceId++}`
+function generateId(): string {
+  return crypto.randomUUID()
 }
 
 interface StudioActions {
@@ -88,10 +76,11 @@ export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
   // Tracks
   addTrack: (type, name) =>
     set((state) => {
-      const id = generateTrackId()
+      const id = generateId()
+      const count = state.tracks.filter((t) => t.type === type).length + 1
       const track: StudioTrack = {
         id,
-        name: name ?? `${type.charAt(0).toUpperCase() + type.slice(1)} ${state.tracks.length + 1}`,
+        name: name ?? `${type.charAt(0).toUpperCase() + type.slice(1)} ${count}`,
         type,
         volume: 0.75,
         pan: 0,
@@ -119,7 +108,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
   // Clips
   addClip: (clip) =>
     set((state) => {
-      const id = generateClipId()
+      const id = generateId()
       return { clips: [...state.clips, { ...clip, id }] }
     }),
 
@@ -138,7 +127,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
 
   // Sources
   addSource: (source) => {
-    const id = generateSourceId()
+    const id = generateId()
     set((state) => ({
       sources: [...state.sources, { ...source, id }],
     }))
@@ -170,9 +159,6 @@ export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
 
   // Reset
   reset: () => {
-    nextTrackId = 1
-    nextClipId = 1
-    nextSourceId = 1
     set(initialState)
   },
 }))
