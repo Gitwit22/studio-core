@@ -11,3 +11,10 @@ export function runCommand(name: string) {
     console.warn("Command not implemented:", name);
   }
 }
+
+/** Clear all registered commands. Intended for use in tests. */
+export function resetCommands() {
+  for (const key of Object.keys(commands)) {
+    delete commands[key];
+  }
+}

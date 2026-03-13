@@ -44,6 +44,7 @@ export default function MenuBar() {
         const tag = (e.target as HTMLElement).tagName;
         if (tag !== "INPUT" && tag !== "TEXTAREA") {
           runCommand("transport:record");
+          e.preventDefault();
         }
       }
 

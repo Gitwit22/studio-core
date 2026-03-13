@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { registerCommand, runCommand } from "@/studio/commandBus";
+import { registerCommand, runCommand, resetCommands } from "@/studio/commandBus";
 
 describe("commandBus", () => {
+  beforeEach(() => {
+    resetCommands();
+  });
+
   it("should register and run a command", () => {
     const handler = vi.fn();
     registerCommand("test:run", handler);
