@@ -612,6 +612,61 @@ export const processingApi = {
 };
 
 // ============================================================================
+// CONTENT ITEMS API
+// ============================================================================
+
+export type ContentItem = {
+  id: string;
+  userId: string;
+  sourceType: "recording";
+  sourceId: string;
+  title: string;
+  kind: "video";
+  playbackUrl: string;
+  thumbnailUrl: string;
+  durationMs: number;
+  roomName: string;
+  status: string;
+  createdAt: string;
+};
+
+export const contentItemsApi = {
+  async list(): Promise<ContentItem[]> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/editing/content-items`, {}, { allowNonOk: true });
+      if (!response.ok) return [];
+      const data = await handleResponse<{ items: ContentItem[] }>(response);
+      return data.items;
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Content items API error:', error);
+      return [];
+    }
+  },
+
+  async addFromRecording(recordingId: string): Promise<ContentItem> {
+    const response = await apiFetchAuth(`${API_BASE}/editing/content-items`, {
+      method: 'POST',
+      body: JSON.stringify({ recordingId }),
+    }, { allowNonOk: true });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || `Failed to add content item: HTTP ${response.status}`);
+    }
+    return handleResponse<ContentItem>(response);
+  },
+
+  async remove(id: string): Promise<void> {
+    const response = await apiFetchAuth(`${API_BASE}/editing/content-items/${id}`, {
+      method: 'DELETE',
+    }, { allowNonOk: true });
+    if (!response.ok) {
+      throw new Error('Failed to remove content item');
+    }
+  },
+};
+
+// ============================================================================
 // UNIFIED API EXPORT
 // ============================================================================
 
@@ -651,6 +706,11 @@ export const editingApi = {
   // Processing
   getProcessingJob: (id: string) => processingApi.getJob(id),
   getProjectProcessing: (projectId: string) => processingApi.listForProject(projectId),
+
+  // Content Items
+  getContentItems: () => contentItemsApi.list(),
+  addContentItem: (recordingId: string) => contentItemsApi.addFromRecording(recordingId),
+  removeContentItem: (id: string) => contentItemsApi.remove(id),
 };
 
 export default editingApi;

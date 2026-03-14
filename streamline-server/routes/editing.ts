@@ -1692,4 +1692,133 @@ router.get("/projects/:id/processing", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// CONTENT ITEMS — lightweight references to recordings in the user's library
+// ============================================================================
+
+// GET /api/editing/content-items — list user's content items
+router.get("/content-items", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    if (!userId) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) return;
+
+    const snap = await db.collection("content_items")
+      .where("userId", "==", userId)
+      .get();
+
+    const items = snap.docs
+      .map((doc) => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          ...d,
+          createdAt: d.createdAt?.toDate?.()?.toISOString?.() ?? d.createdAt,
+        };
+      })
+      .sort((a: any, b: any) => {
+        const aTime = new Date(a.createdAt || 0).getTime();
+        const bTime = new Date(b.createdAt || 0).getTime();
+        return bTime - aTime;
+      });
+
+    return res.json({ items });
+  } catch (err: any) {
+    console.error("[content-items] list error:", err);
+    res.status(500).json({ error: "Failed to list content items" });
+  }
+});
+
+// POST /api/editing/content-items — add a recording to the user's content library
+router.post("/content-items", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    if (!userId) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+
+    if (!(await assertSegmentEnabled(res, "contentLibraryEnabled"))) return;
+
+    const { recordingId } = req.body;
+    if (!recordingId || typeof recordingId !== "string") {
+      return res.status(400).json({ error: "recordingId is required" });
+    }
+
+    // Verify the recording exists and belongs to this user
+    const recSnap = await db.collection("recordings").doc(recordingId).get();
+    if (!recSnap.exists) {
+      return res.status(404).json({ error: "Recording not found" });
+    }
+    const recData = recSnap.data() as any;
+    if (recData.userId !== userId) {
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
+    }
+
+    // Idempotency: don't duplicate
+    const dupCheck = await db.collection("content_items")
+      .where("userId", "==", userId)
+      .where("sourceId", "==", recordingId)
+      .where("sourceType", "==", "recording")
+      .limit(1)
+      .get();
+
+    if (!dupCheck.empty) {
+      const existing = dupCheck.docs[0];
+      return res.json({
+        item: {
+          id: existing.id,
+          ...existing.data(),
+          createdAt: existing.data().createdAt?.toDate?.()?.toISOString?.() ?? existing.data().createdAt,
+        },
+        duplicate: true,
+      });
+    }
+
+    const now = new Date();
+    const item = {
+      userId,
+      sourceType: "recording" as const,
+      sourceId: recordingId,
+      title: recData.title || recData.roomName || "Untitled Recording",
+      kind: "video" as const,
+      playbackUrl: recData.videoUrl || "",
+      thumbnailUrl: recData.thumbnailUrl || null,
+      durationMs: recData.duration ? Math.round(recData.duration * 1000) : null,
+      roomName: recData.roomName || null,
+      status: recData.status || "ready",
+      createdAt: now,
+    };
+
+    const ref = await db.collection("content_items").add(item);
+
+    return res.status(201).json({
+      item: { id: ref.id, ...item, createdAt: now.toISOString() },
+      duplicate: false,
+    });
+  } catch (err: any) {
+    console.error("[content-items] create error:", err);
+    res.status(500).json({ error: "Failed to add content item" });
+  }
+});
+
+// DELETE /api/editing/content-items/:id — remove a content item (reference only, not the recording)
+router.delete("/content-items/:id", async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthedUid(req);
+    if (!userId) return res.status(401).json({ error: PERMISSION_ERRORS.UNAUTHORIZED });
+
+    const docRef = db.collection("content_items").doc(req.params.id);
+    const snap = await docRef.get();
+    if (!snap.exists) return res.status(404).json({ error: "Content item not found" });
+    if ((snap.data() as any).userId !== userId) {
+      return res.status(403).json({ error: PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS });
+    }
+
+    await docRef.delete();
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("[content-items] delete error:", err);
+    res.status(500).json({ error: "Failed to delete content item" });
+  }
+});
+
 export default router;

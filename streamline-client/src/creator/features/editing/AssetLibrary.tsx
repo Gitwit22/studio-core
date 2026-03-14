@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { editingApi, type Recording } from "../../../lib/editingApi";
 import VideoUploadModal from "../../components/VideoUploadModal";
+import AddVideoModal from "./AddVideoModal";
 import { useEffectiveEntitlements } from "../../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../../hooks/useFeatureAccess";
 
@@ -19,6 +20,7 @@ export default function AssetLibrary() {
   const [filter, setFilter] = useState<'all' | 'stream' | 'upload' | 'recordings'>('all');
   const [search, setSearch] = useState("");
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showAddVideoModal, setShowAddVideoModal] = useState(false);
 
   const loadData = async () => {
     const [assetsData, recordingsData] = await Promise.all([
@@ -74,6 +76,11 @@ export default function AssetLibrary() {
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onUploadComplete={handleUploadComplete}
+      />
+      <AddVideoModal
+        isOpen={showAddVideoModal}
+        onClose={() => setShowAddVideoModal(false)}
+        onAdded={() => loadData()}
       />
 
       <div style={{
@@ -198,6 +205,35 @@ export default function AssetLibrary() {
               }}
             >
               ⬆️ Upload Video
+            </button>
+          )}
+          {canMyContentRecordings && (
+            <button
+              onClick={() => setShowAddVideoModal(true)}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: 'rgba(239, 68, 68, 0.1)',
+                color: '#ef4444',
+                border: '1px solid rgba(220, 38, 38, 0.4)',
+                borderRadius: '0.75rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(239, 68, 68, 0.2)';
+                target.style.borderColor = 'rgba(239, 68, 68, 0.8)';
+                target.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(239, 68, 68, 0.1)';
+                target.style.borderColor = 'rgba(220, 38, 38, 0.4)';
+                target.style.transform = 'translateY(0)';
+              }}
+            >
+              🎬 Add Video
             </button>
           )}
         </div>
