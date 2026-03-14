@@ -34,6 +34,7 @@ import telemetryRoutes from "./routes/telemetry";
 import savedEmbedsRoutes from "./routes/savedEmbeds";
 import editingRoutes from "./routes/editing";
 import projectsRoutes from "./routes/projects";
+import myContentRoutes from "./routes/myContent";
 import maintenanceRoutes from "./routes/maintenance";
 import onboardingRoutes from "./routes/onboarding";
 import { firestore as db } from "./firebaseAdmin";
@@ -234,6 +235,9 @@ app.use("/api/editing", editingRoutes);
 
 // Projects API (core media workspace — independent of editing)
 app.use("/api/projects", projectsRoutes);
+
+// My Content API (SavedVideo library — Layer 1)
+app.use("/api/my-content", myContentRoutes);
 
 // Health check
 app.get("/", (_req, res) => res.send("API up"));

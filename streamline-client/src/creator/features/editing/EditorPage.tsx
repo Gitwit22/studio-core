@@ -19,8 +19,9 @@ import {
   Redo2,
   Upload,
 } from "lucide-react";
-import { editingApi, type Recording } from "../../../lib/editingApi";
+import { editingApi, type Recording, type TimelineClipRecord, type ProjectAssetRecord, type SavedVideo } from "../../../lib/editingApi";
 import { apiFetchAuth } from "../../../lib/api";
+import { API_BASE } from "../../../lib/apiBase";
 import { useEditingFeatures } from "./useEditingFeatures";
 import {
   listProjectAssets,
@@ -320,6 +321,93 @@ export default function EditorPage() {
 
         if (proj) {
           setProjectName(proj.name);
+
+          // ────────────────────────────────────────────────────────────────────
+          // NEW 3-LAYER ARCHITECTURE: Try to load timeline clips from the
+          // /api/projects/:id endpoint that returns { project, projectAssets,
+          // timelineClips, savedVideos }
+          // ────────────────────────────────────────────────────────────────────
+          let layeredData: {
+            projectAssets?: ProjectAssetRecord[];
+            timelineClips?: TimelineClipRecord[];
+            savedVideos?: Record<string, Partial<SavedVideo>>;
+          } | null = null;
+
+          try {
+            const layeredRes = await apiFetchAuth(
+              `${API_BASE}/projects/${projectId}`,
+              {},
+              { allowNonOk: true },
+            );
+            if (layeredRes.ok) {
+              layeredData = await layeredRes.json();
+            }
+          } catch (e) {
+            console.warn('[editor] 3-layer project fetch failed (non-fatal):', e);
+          }
+          if (cancelled) return;
+
+          const layeredClips = layeredData?.timelineClips ?? [];
+          const layeredAssets = layeredData?.projectAssets ?? [];
+          const savedVideos = layeredData?.savedVideos ?? {};
+
+          if (layeredClips.length > 0) {
+            console.log('[editor] 3-layer timeline clips found:', layeredClips.length);
+
+            // Build a URL map: projectAssetId → playbackUrl
+            const assetUrlMap = new Map<string, string>();
+            const assetTitleMap = new Map<string, string>();
+            for (const pa of layeredAssets) {
+              const sv = savedVideos[pa.savedVideoId];
+              if (sv?.playbackUrl) {
+                assetUrlMap.set(pa.id, sv.playbackUrl);
+                assetTitleMap.set(pa.id, sv.title || 'Clip');
+              }
+            }
+
+            // Convert TimelineClipRecords to local TimelineClip format
+            const restoredClips: TimelineClip[] = layeredClips.map((tc) => ({
+              id: tc.id,
+              assetId: tc.projectAssetId,
+              trackId: tc.trackId,
+              startTime: tc.startMs / 1000,
+              duration: (tc.endMs - tc.startMs) / 1000,
+              inPoint: tc.trimInMs / 1000,
+              outPoint: tc.trimOutMs / 1000,
+              name: assetTitleMap.get(tc.projectAssetId) || (tc.kind === 'audio' ? 'Audio' : 'Video'),
+              videoUrl: assetUrlMap.get(tc.projectAssetId) || SAMPLE_VIDEO_URL,
+            }));
+
+            // Ensure we have tracks for all referenced trackIds
+            const usedTrackIds = new Set(restoredClips.map((c) => c.trackId));
+            const newTracks: Track[] = [];
+            if (usedTrackIds.has('video_1') || restoredClips.some((c) => c.trackId.startsWith('video'))) {
+              newTracks.push({ id: 'video_1', name: 'Video 1', type: 'video', muted: false, locked: false, solo: false, linkedTrackId: 'audio_1' });
+            }
+            if (usedTrackIds.has('audio_1') || restoredClips.some((c) => c.trackId.startsWith('audio'))) {
+              newTracks.push({ id: 'audio_1', name: 'Audio 1', type: 'audio', muted: false, locked: false, solo: false, linkedTrackId: 'video_1' });
+            }
+            if (newTracks.length > 0) {
+              setTracks(newTracks);
+            }
+
+            setClips(restoredClips);
+
+            // Set video player source
+            setTimeout(() => {
+              const firstVideoUrl = restoredClips.find((c) => c.trackId.startsWith('video'))?.videoUrl;
+              if (!cancelled && videoRef.current && firstVideoUrl) {
+                videoRef.current.src = firstVideoUrl;
+                videoRef.current.load();
+              }
+            }, 50);
+
+            return; // Done — skip legacy loading paths
+          }
+
+          // ────────────────────────────────────────────────────────────────────
+          // LEGACY PATH: Fallback to existing project asset + timeline loading
+          // ────────────────────────────────────────────────────────────────────
 
           // Fetch real project assets for fresh signed download URLs
           let projectAssets: ProjectAsset[] = [];
