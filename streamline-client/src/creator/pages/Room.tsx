@@ -42,6 +42,7 @@ import { setPlatformFlagsValue } from "../../lib/platformFlagsStore";
 import { fetchDestinations, preflight, type DestinationItem } from "../../services/destinations";
 import { normalizeUiRolePresetId } from "../../lib/roles";
 import { recordingEvents } from "../../lib/recordingEvents";
+import { detectInAppBrowser } from "../../lib/detectInAppBrowser";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
@@ -953,14 +954,6 @@ function LiveKitShell({
     type: 'denied' | 'notFound' | 'notReadable' | 'notSupported' | 'inAppBrowser' | null;
     message: string;
   } | null>(null);
-
-  // Detect in-app browsers that may block camera/mic access
-  const detectInAppBrowser = (): boolean => {
-    const ua = navigator.userAgent || "";
-    // Facebook, Instagram, TikTok, Twitter, LinkedIn in-app browsers
-    const patterns = /FBAN|FBAV|Instagram|TikTok|Twitter|LinkedInApp/i;
-    return patterns.test(ua);
-  };
 
   // Handle media device errors and show appropriate messaging
   const handleMediaDeviceError = (error: any) => {
@@ -2326,6 +2319,41 @@ function RoomPage() {
           }
 
           if (res.status === 401) {
+            // Guest session retry: if we have a guest session token and this was
+            // a cookie-only attempt, retry once with the explicit header.
+            const gst = getGuestSessionToken(roomId);
+            if (gst && !payload.guestSessionToken) {
+              console.log('[Room] 401 on token fetch — retrying with explicit guest session header');
+              const retryRes = await apiFetch(
+                endpoint,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "x-guest-session": gst,
+                    ...(inviteTokenForJoin ? { "x-invite-token": inviteTokenForJoin } : {}),
+                  },
+                  body: JSON.stringify({ ...payload, guestSessionToken: gst }),
+                },
+                { allowNonOk: true },
+              );
+              if (retryRes.ok) {
+                const retryData = await retryRes.json().catch(() => null);
+                if (retryData?.token && retryData?.serverUrl) {
+                  console.log('[Room] Guest session retry succeeded');
+                  setToken(retryData.token);
+                  setServerUrl(retryData.serverUrl);
+                  if (retryData.identity) setParticipantIdentity(retryData.identity);
+                  if (retryData.roomAccessToken) setRoomAccessToken(retryData.roomAccessToken);
+                  if (retryData.roomName) setRoomName(retryData.roomName);
+                  if (retryData.roomId) setFirestoreRoomId(retryData.roomId);
+                  if (retryData.isViewer) setIsViewer(true);
+                  setNeedsReauth(false);
+                  return;
+                }
+              }
+            }
+
             setNeedsReauth(true);
             setAuthStatus("guest");
             setReauthBannerText(
@@ -2334,8 +2362,8 @@ function RoomPage() {
                   ? "Invite invalid or expired."
                   : "This room requires an account to join. Please sign in.")
             );
-            // Only force login redirect when we truly have no invite to attempt guest join.
-            if (!inviteToken) {
+            // Only force login redirect when we truly have no invite or guest session to attempt guest join.
+            if (!inviteToken && !gst) {
               try {
                 const next = `${location.pathname}${location.search}`;
                 nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });

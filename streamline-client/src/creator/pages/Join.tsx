@@ -194,12 +194,12 @@ export default function Join() {
     let cancelled = false;
 
     const run = async () => {
-      // Preferred: inviteToken resolves room+role server-side
+      // Preferred: inviteToken resolves to an inviteId, then redirect to landing page
       if (inviteTokenParam) {
         try {
-          console.log('[Join] Consolidated invite flow started');
+          console.log('[Join] Resolving invite token → landing page');
           
-          // Step 1: Resolve legacy token to inviteId
+          // Resolve legacy token to Firestore inviteId
           const resolveRes = await fetch(`${API_BASE}/api/invites/legacy/resolve`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -219,77 +219,12 @@ export default function Join() {
             if (!cancelled) setInviteError(INVITE_INVALID_MSG);
             return;
           }
-          
-          console.log('[Join] Got inviteId, calling join-now:', inviteId);
 
-          // Step 2: Call consolidated join-now endpoint (redeem + token mint in one call)
-          const joinNowRes = await apiFetch(`/api/invites/${encodeURIComponent(inviteId)}/join-now`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
-          });
-
-          if (!joinNowRes.ok) {
-            // If join-now fails, fall back to old flow
-            console.warn('[Join] Join-now failed, falling back to /invite page');
-            nav(`/invite/${encodeURIComponent(inviteId)}`, { replace: true });
-            return;
-          }
-
-          const joinData = await joinNowRes.json().catch(() => null as any);
-          if (cancelled) return;
-
-          const roomId = String(joinData?.roomId || "").trim();
-          const guestSessionToken = String(joinData?.guestSessionToken || "").trim();
-          const serverUrl = String(joinData?.serverUrl || "").trim();
-          const roomToken = String(joinData?.roomToken || "").trim();
-          const identity = String(joinData?.identity || "").trim();
-          const displayName = String(joinData?.displayName || "").trim();
-
-          if (!roomId || !serverUrl || !roomToken) {
-            // Fall back to old flow if missing critical data
-            console.warn('[Join] Missing critical data, falling back to /invite page');
-            nav(`/invite/${encodeURIComponent(inviteId)}`, { replace: true });
-            return;
-          }
-
-          console.log('[Join] Consolidated flow complete, going to room with pre-fetched token:', roomId);
-
-          // Store guest session token in multiple places (redundant storage for reliability)
-          if (guestSessionToken) {
-            try {
-              sessionStorage.setItem(`sl_guest_session:${roomId}`, guestSessionToken);
-              localStorage.setItem("sl_guestSessionToken", guestSessionToken);
-              localStorage.setItem("sl_guestSessionRoomId", roomId);
-            } catch {
-              // ignore storage errors
-            }
-          }
-
-          // Store pre-fetched LiveKit credentials (eliminates token fetch in Room.tsx)
-          if (serverUrl && roomToken && identity) {
-            try {
-              const tokenData = {
-                serverUrl,
-                token: roomToken,
-                identity,
-                displayName,
-                fetchedAt: Date.now(),
-              };
-              sessionStorage.setItem(`sl_lk_token:${roomId}`, JSON.stringify(tokenData));
-              console.log('[Join] Stored pre-fetched LiveKit token for room:', roomId);
-            } catch {
-              // ignore storage errors
-            }
-          }
-
-          // Step 3: Go directly to room with guest session token
-          // Room.tsx will use pre-fetched token data, eliminating token fetch delay
-          const urlToken = guestSessionToken ? `?gst=${encodeURIComponent(guestSessionToken)}` : "";
-          nav(`/room/${encodeURIComponent(roomId)}${urlToken}`, { replace: true });
+          // Redirect to the invite landing page (shows room info + name input)
+          nav(`/invite/${encodeURIComponent(inviteId)}`, { replace: true });
           return;
         } catch (err) {
-          console.error('[Join] Consolidated flow error:', err);
+          console.error('[Join] Invite resolve error:', err);
           if (!cancelled) setInviteError(INVITE_INVALID_MSG);
           return;
         }

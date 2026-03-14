@@ -12,6 +12,7 @@ import { signGuestSession } from "../middleware/guestSession";
 import { roleToParticipantPermission, applyPresenceModeToGrant } from "../lib/livekitPermissions";
 import { isValidPresenceMode, normalizePresenceMode, buildPresenceMetadata, type PresenceMode } from "../lib/presenceMode";
 import { isAdmin } from "../middleware/adminAuth";
+import { resolveHostName } from "../lib/resolveHostName";
 
 export function extractInviteToken(req: any): string | null {
   const hdr = (req?.headers as any) || {};
@@ -1132,6 +1133,7 @@ router.get("/rooms/:roomId/info", async (req: any, res) => {
     const status = room.status === "live" ? "live" : "idle";
     const allowGuests = typeof room.allowGuests === "boolean" ? room.allowGuests : true;
     const roomName = String(room.roomName || room.name || roomId);
+    const hostName = await resolveHostName(room.ownerId);
 
     // Only return safe, public info — never expose owner IDs, secrets, or internal fields
     return res.json({
@@ -1139,9 +1141,62 @@ router.get("/rooms/:roomId/info", async (req: any, res) => {
       roomName,
       status,
       allowGuests,
+      hostName,
     });
   } catch (err) {
     console.error("/api/rooms/:roomId/info error", err);
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
+/**
+ * GET /api/invites/:inviteId/info
+ * Auth: NONE — fully public, read-only
+ * Returns invite + room metadata so the landing page can render context
+ * before the user clicks "Join". Does NOT increment useCount.
+ */
+router.get("/invites/:inviteId/info", async (req: any, res) => {
+  try {
+    const inviteId = String(req.params.inviteId || "").trim();
+    if (!inviteId) return res.status(400).json({ error: "inviteId_required" });
+
+    const inviteSnap = await firestore.collection("roomInvites").doc(inviteId).get();
+    if (!inviteSnap.exists) return res.status(404).json({ error: "invite_not_found" });
+
+    const invite = (inviteSnap.data() as any) || {};
+
+    // Check validity: not revoked and not expired
+    const now = Date.now();
+    const revoked = !!invite.revokedAt;
+    const expired = invite.expiresAt ? invite.expiresAt.toMillis?.() < now || invite.expiresAt < now : false;
+    const maxUsesReached = typeof invite.maxUses === "number" && invite.maxUses > 0
+      ? (invite.useCount || 0) >= invite.maxUses
+      : false;
+    const inviteValid = !revoked && !expired && !maxUsesReached;
+
+    // Resolve room info
+    const roomId = String(invite.roomId || "");
+    const roomSnap = roomId ? await firestore.collection("rooms").doc(roomId).get() : null;
+    const room = roomSnap?.exists ? (roomSnap.data() as any) || {} : {};
+    const roomName = String(room.roomName || room.name || roomId || "Room");
+    const allowGuests = typeof room.allowGuests === "boolean" ? room.allowGuests : true;
+    const status = room.status === "live" ? "live" : "idle";
+
+    // Resolve host name from room owner
+    const hostName = await resolveHostName(room.ownerId);
+
+    return res.json({
+      inviteId,
+      roomId,
+      roomName,
+      hostName,
+      role: invite.role || "guest",
+      status,
+      allowGuests,
+      inviteValid,
+    });
+  } catch (err) {
+    console.error("/api/invites/:inviteId/info error", err);
     return res.status(500).json({ error: "internal_error" });
   }
 });

@@ -37,6 +37,7 @@ import {
 } from "../lib/mediaRecovery";
 import { setPlatformFlagsValue } from "../lib/platformFlagsStore";
 import { fetchDestinations, preflight, type DestinationItem } from "../services/destinations";
+import { detectInAppBrowser, getInAppBrowserName } from "../lib/detectInAppBrowser";
 
 const DEV_CONTROLS = import.meta.env.VITE_DEV_CONTROLS === "1";
 
@@ -1192,14 +1193,6 @@ function LiveKitShell({
     message: string;
   } | null>(null);
 
-  // Detect in-app browsers that may block camera/mic access
-  const detectInAppBrowser = (): boolean => {
-    const ua = navigator.userAgent || "";
-    // Facebook, Instagram, TikTok, Twitter, LinkedIn in-app browsers
-    const patterns = /FBAN|FBAV|Instagram|TikTok|Twitter|LinkedInApp/i;
-    return patterns.test(ua);
-  };
-
   // Handle media device errors and show appropriate messaging
   const handleMediaDeviceError = (error: any) => {
     console.error('[Room] MediaDevicesError:', error);
@@ -1578,7 +1571,7 @@ function RoomPage() {
   const [guestJoinMode, setGuestJoinMode] = useState<"select" | "name-input">("select");
   const [guestJoinLoading, setGuestJoinLoading] = useState(false);
   const [guestJoinError, setGuestJoinError] = useState<string | null>(null);
-  const [publicRoomInfo, setPublicRoomInfo] = useState<{ roomName: string; status: string; allowGuests: boolean } | null>(null);
+  const [publicRoomInfo, setPublicRoomInfo] = useState<{ roomName: string; status: string; allowGuests: boolean; hostName?: string } | null>(null);
 
   // Presence mode: passed from Join page via route state or localStorage
   const [presenceMode, setPresenceMode] = useState<"normal" | "invisible">(() => {
@@ -2538,6 +2531,41 @@ function RoomPage() {
           }
 
           if (res.status === 401) {
+            // Guest session retry: if we have a guest session token and this was
+            // a cookie-only attempt, retry once with the explicit header.
+            const gst = getGuestSessionToken(roomId);
+            if (gst && !payload.guestSessionToken) {
+              console.log('[Room] 401 on token fetch — retrying with explicit guest session header');
+              const retryRes = await apiFetch(
+                endpoint,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "x-guest-session": gst,
+                    ...(inviteTokenForJoin ? { "x-invite-token": inviteTokenForJoin } : {}),
+                  },
+                  body: JSON.stringify({ ...payload, guestSessionToken: gst }),
+                },
+                { allowNonOk: true },
+              );
+              if (retryRes.ok) {
+                const retryData = await retryRes.json().catch(() => null);
+                if (retryData?.token && retryData?.serverUrl) {
+                  console.log('[Room] Guest session retry succeeded');
+                  setToken(retryData.token);
+                  setServerUrl(retryData.serverUrl);
+                  if (retryData.identity) setParticipantIdentity(retryData.identity);
+                  if (retryData.roomAccessToken) setRoomAccessToken(retryData.roomAccessToken);
+                  if (retryData.roomName) setRoomName(retryData.roomName);
+                  if (retryData.roomId) setFirestoreRoomId(retryData.roomId);
+                  if (retryData.isViewer) setIsViewer(true);
+                  setNeedsReauth(false);
+                  return;
+                }
+              }
+            }
+
             setNeedsReauth(true);
             setAuthStatus("guest");
             setReauthBannerText(
@@ -2546,8 +2574,8 @@ function RoomPage() {
                   ? "Invite invalid or expired."
                   : "This room requires an account to join. Please sign in.")
             );
-            // Only force login redirect when we truly have no invite to attempt guest join.
-            if (!inviteToken) {
+            // Only force login redirect when we truly have no invite or guest session to attempt guest join.
+            if (!inviteToken && !gst) {
               try {
                 const next = `${location.pathname}${location.search}`;
                 nav(`/login?next=${encodeURIComponent(next)}`, { replace: true });
@@ -3948,7 +3976,33 @@ function RoomPage() {
               ● LIVE
             </span>
           )}
+          {publicRoomInfo?.hostName && (
+            <p style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.55)', marginTop: '0.25rem' }}>
+              Hosted by {publicRoomInfo.hostName}
+            </p>
+          )}
         </div>
+
+        {/* In-app browser warning */}
+        {detectInAppBrowser() && (
+          <div style={{
+            maxWidth: '400px',
+            width: '100%',
+            padding: '10px 14px',
+            borderRadius: '0.75rem',
+            background: 'rgba(250,204,21,0.1)',
+            border: '1px solid rgba(250,204,21,0.25)',
+            fontSize: '0.85rem',
+            lineHeight: 1.45,
+            color: 'rgba(255,255,255,0.85)',
+            marginBottom: '1rem',
+            position: 'relative',
+            zIndex: 1,
+          }}>
+            <strong>Heads up:</strong> You're in {getInAppBrowserName() ? `the ${getInAppBrowserName()} browser` : 'an in-app browser'} which may block camera &amp; mic access.
+            Tap <strong>⋯</strong> → <strong>Open in browser</strong> for the best experience.
+          </div>
+        )}
 
         {/* === Authenticated or invite-based user: simple name entry === */}
         {!isDirectGuest && (

@@ -1,26 +1,12 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { API_BASE } from "../../lib/apiBase";
 
-type ResolveResponse = {
-  roomId?: string;
-  roomName: string;
-  role: string;
-  requiresAuth: boolean;
-};
-
-type AcceptResponse = {
-  roomId?: string;
-  roomName: string;
-  role: string;
-  requiresAuth: boolean;
-};
-
-async function postJson<T>(url: string, body: any, withCreds: boolean): Promise<T> {
+async function postJson<T>(url: string, body: any): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: withCreds ? "include" : "omit",
+    credentials: "omit",
     body: JSON.stringify(body),
   });
   const ct = res.headers.get("content-type") || "";
@@ -48,16 +34,13 @@ export default function InviteLanding() {
       }
 
       try {
-        // Canonicalize legacy JWT invites into the Firestore-backed invite flow.
-        // This makes guest joins resilient to link rewriting and removes query-token reliance.
-        const legacy = await postJson<{ inviteId: string; url?: string; role?: string }>(
+        const legacy = await postJson<{ inviteId: string }>(
           `${API_BASE}/api/invites/legacy/resolve`,
           { inviteToken },
-          false,
         );
         if (cancelled) return;
 
-        const inviteId = String((legacy as any)?.inviteId || "").trim();
+        const inviteId = String(legacy?.inviteId || "").trim();
         if (!inviteId) throw new Error("invalid_invite");
 
         nav(`/invite/${encodeURIComponent(inviteId)}`, { replace: true });
@@ -69,28 +52,47 @@ export default function InviteLanding() {
     };
 
     run();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [inviteToken, nav]);
+
+  const wrap: React.CSSProperties = {
+    minHeight: "100vh", background: "#0a0a0f", color: "#fff",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 24, fontFamily: "'Inter', system-ui, sans-serif",
+  };
+
+  const card: React.CSSProperties = {
+    maxWidth: 440, width: "100%", padding: 32, borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+    textAlign: "center",
+  };
 
   if (status === "error") {
     return (
-      <div style={{ minHeight: "100vh", background: "#000", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <div style={{ maxWidth: 520, width: "100%", textAlign: "center" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>Invite Link Error</h1>
-          <p style={{ color: "#9ca3af", marginBottom: 16 }}>{errorMsg}</p>
-          <Link to="/join" style={{ color: "#ef4444", textDecoration: "none", fontWeight: 600 }}>Go to Join</Link>
+      <div style={wrap}>
+        <div style={card}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Invite Link Error</div>
+          <div style={{ fontSize: 14, opacity: 0.7, marginBottom: 20 }}>{errorMsg}</div>
+          <button
+            onClick={() => nav("/join")}
+            style={{
+              padding: "10px 20px", borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)",
+              color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            Go to Join
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#000", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ maxWidth: 520, width: "100%", textAlign: "center" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>Opening invite…</h1>
-        <p style={{ color: "#9ca3af" }}>Just a moment while we connect you.</p>
+    <div style={wrap}>
+      <div style={card}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Opening invite…</div>
+        <div style={{ fontSize: 14, opacity: 0.6 }}>Just a moment while we connect you.</div>
       </div>
     </div>
   );
