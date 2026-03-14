@@ -667,6 +667,269 @@ export const contentItemsApi = {
 };
 
 // ============================================================================
+// 3-LAYER DATA ARCHITECTURE TYPES
+// ============================================================================
+
+/** Layer 1 — SavedVideo (My Content) */
+export type SavedVideo = {
+  id: string;
+  userId: string;
+  title: string;
+  sourceType: "recording" | "upload";
+  sourceId?: string;
+  playbackUrl: string;
+  downloadUrl?: string;
+  thumbnailUrl?: string;
+  durationMs: number;
+  sizeBytes: number;
+  hasEmbeddedAudio: boolean;
+  status: "processing" | "ready" | "failed";
+  createdAt: string;
+};
+
+/** Layer 2 — ProjectAsset (link record connecting SavedVideo to Project) */
+export type ProjectAssetRecord = {
+  id: string;
+  projectId: string;
+  savedVideoId: string;
+  sourceInMs: number;
+  sourceOutMs: number;
+  mode: "full" | "subclip";
+  createdAt: string;
+  savedVideo?: Partial<SavedVideo> | null;
+};
+
+/** Layer 3 — TimelineClipRecord (placed instance on the timeline) */
+export type TimelineClipRecord = {
+  id: string;
+  projectId: string;
+  projectAssetId: string;
+  trackId: string;
+  kind: "video" | "audio";
+  startMs: number;
+  endMs: number;
+  trimInMs: number;
+  trimOutMs: number;
+  linkGroupId: string | null;
+  lane: number;
+  createdAt: string;
+};
+
+/** Recording from the library endpoint */
+export type LibraryRecording = {
+  id: string;
+  title: string;
+  roomName: string | null;
+  status: string;
+  thumbnailUrl: string | null;
+  videoUrl: string | null;
+  duration: number;
+  fileSize: number | null;
+  createdAt: string | null;
+};
+
+// ============================================================================
+// MY CONTENT API (Layer 1 — SavedVideo)
+// ============================================================================
+
+export const myContentApi = {
+  /** List user's saved videos */
+  async list(): Promise<SavedVideo[]> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/my-content`, {}, { allowNonOk: true });
+      if (!response.ok) return [];
+      return handleResponse<SavedVideo[]>(response);
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('My Content list error:', error);
+      return [];
+    }
+  },
+
+  /** Delete a saved video */
+  async remove(id: string): Promise<void> {
+    const response = await apiFetchAuth(`${API_BASE}/my-content/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }, { allowNonOk: true });
+    if (!response.ok) throw new Error('Failed to delete saved video');
+  },
+
+  /** Batch create SavedVideos from recording IDs */
+  async fromRecordings(recordingIds: string[]): Promise<{ created: SavedVideo[]; errors: any[] }> {
+    const response = await apiFetchAuth(`${API_BASE}/my-content/from-recordings`, {
+      method: 'POST',
+      body: JSON.stringify({ recordingIds }),
+    }, { allowNonOk: true });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || `Failed to import recordings: HTTP ${response.status}`);
+    }
+    return handleResponse<{ created: SavedVideo[]; errors: any[] }>(response);
+  },
+
+  /** Upload a video file from device */
+  async upload(file: File, onProgress?: (percent: number) => void): Promise<SavedVideo> {
+    const token = await getFirebaseIdToken();
+    const formData = new FormData();
+    formData.append('video', file);
+    formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/my-content/upload`);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText));
+        } else {
+          reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Upload failed: network error'));
+      xhr.send(formData);
+    });
+  },
+};
+
+// ============================================================================
+// RECORDINGS LIBRARY API
+// ============================================================================
+
+export const recordingsLibraryApi = {
+  /** List ready platform recordings for import into My Content */
+  async list(): Promise<LibraryRecording[]> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/recordings/library`, {}, { allowNonOk: true });
+      if (!response.ok) return [];
+      return handleResponse<LibraryRecording[]>(response);
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Recordings library error:', error);
+      return [];
+    }
+  },
+};
+
+// ============================================================================
+// PROJECT ASSETS API (Layer 2 — ProjectAsset)
+// ============================================================================
+
+export const projectAssetsApi = {
+  /** Create a project asset linking a saved video to a project */
+  async create(projectId: string, data: {
+    savedVideoId: string;
+    mode?: "full" | "subclip";
+    sourceInMs?: number;
+    sourceOutMs?: number;
+  }): Promise<ProjectAssetRecord> {
+    const response = await apiFetchAuth(`${API_BASE}/projects/${encodeURIComponent(projectId)}/assets`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, { allowNonOk: true });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || `Failed to create project asset: HTTP ${response.status}`);
+    }
+    return handleResponse<ProjectAssetRecord>(response);
+  },
+
+  /** List all project assets for a project */
+  async list(projectId: string): Promise<ProjectAssetRecord[]> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/projects/${encodeURIComponent(projectId)}/assets`, {}, { allowNonOk: true });
+      if (!response.ok) return [];
+      const data = await handleResponse<{ assets: ProjectAssetRecord[] }>(response);
+      return data.assets;
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Project assets list error:', error);
+      return [];
+    }
+  },
+
+  /** Detach an asset from a project */
+  async remove(projectId: string, assetId: string): Promise<void> {
+    const response = await apiFetchAuth(
+      `${API_BASE}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+      { method: 'DELETE' },
+      { allowNonOk: true },
+    );
+    if (!response.ok) throw new Error('Failed to remove project asset');
+  },
+};
+
+// ============================================================================
+// TIMELINE CLIPS API (Layer 3 — TimelineClip)
+// ============================================================================
+
+export const timelineClipsApi = {
+  /** Create a linked video+audio clip pair on the timeline */
+  async create(projectId: string, data: {
+    projectAssetId: string;
+    startMs?: number;
+  }): Promise<{ videoClip: TimelineClipRecord; audioClip: TimelineClipRecord; linkGroupId: string }> {
+    const response = await apiFetchAuth(`${API_BASE}/projects/${encodeURIComponent(projectId)}/timeline/clips`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, { allowNonOk: true });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || `Failed to create timeline clips: HTTP ${response.status}`);
+    }
+    return handleResponse<{ videoClip: TimelineClipRecord; audioClip: TimelineClipRecord; linkGroupId: string }>(response);
+  },
+
+  /** List all timeline clips for a project */
+  async list(projectId: string): Promise<TimelineClipRecord[]> {
+    try {
+      const response = await apiFetchAuth(`${API_BASE}/projects/${encodeURIComponent(projectId)}/timeline/clips`, {}, { allowNonOk: true });
+      if (!response.ok) return [];
+      const data = await handleResponse<{ clips: TimelineClipRecord[] }>(response);
+      return data.clips;
+    } catch (error) {
+      if (isUnauthorizedError(error)) throw error;
+      console.error('Timeline clips list error:', error);
+      return [];
+    }
+  },
+
+  /** Update a timeline clip (trim, move, unlink) */
+  async update(projectId: string, clipId: string, data: {
+    startMs?: number;
+    endMs?: number;
+    trimInMs?: number;
+    trimOutMs?: number;
+    trackId?: string;
+    lane?: number;
+    unlink?: boolean;
+  }): Promise<void> {
+    const response = await apiFetchAuth(
+      `${API_BASE}/projects/${encodeURIComponent(projectId)}/timeline/clips/${encodeURIComponent(clipId)}`,
+      { method: 'PATCH', body: JSON.stringify(data) },
+      { allowNonOk: true },
+    );
+    if (!response.ok) throw new Error('Failed to update timeline clip');
+  },
+
+  /** Delete a timeline clip (and linked partner if linked) */
+  async remove(projectId: string, clipId: string): Promise<void> {
+    const response = await apiFetchAuth(
+      `${API_BASE}/projects/${encodeURIComponent(projectId)}/timeline/clips/${encodeURIComponent(clipId)}`,
+      { method: 'DELETE' },
+      { allowNonOk: true },
+    );
+    if (!response.ok) throw new Error('Failed to delete timeline clip');
+  },
+};
+
+// ============================================================================
 // UNIFIED API EXPORT
 // ============================================================================
 
@@ -711,6 +974,29 @@ export const editingApi = {
   getContentItems: () => contentItemsApi.list(),
   addContentItem: (recordingId: string) => contentItemsApi.addFromRecording(recordingId),
   removeContentItem: (id: string) => contentItemsApi.remove(id),
+
+  // My Content (Layer 1 — SavedVideo)
+  getMyContent: () => myContentApi.list(),
+  deleteMyContent: (id: string) => myContentApi.remove(id),
+  importRecordings: (ids: string[]) => myContentApi.fromRecordings(ids),
+  uploadToMyContent: (file: File, onProgress?: (p: number) => void) => myContentApi.upload(file, onProgress),
+
+  // Recordings Library
+  getRecordingsLibrary: () => recordingsLibraryApi.list(),
+
+  // Project Assets (Layer 2 — ProjectAsset)
+  createProjectAsset: (projectId: string, data: { savedVideoId: string; mode?: "full" | "subclip"; sourceInMs?: number; sourceOutMs?: number }) =>
+    projectAssetsApi.create(projectId, data),
+  listProjectAssets: (projectId: string) => projectAssetsApi.list(projectId),
+  removeProjectAsset: (projectId: string, assetId: string) => projectAssetsApi.remove(projectId, assetId),
+
+  // Timeline Clips (Layer 3 — TimelineClip)
+  createTimelineClips: (projectId: string, data: { projectAssetId: string; startMs?: number }) =>
+    timelineClipsApi.create(projectId, data),
+  listTimelineClips: (projectId: string) => timelineClipsApi.list(projectId),
+  updateTimelineClip: (projectId: string, clipId: string, data: any) =>
+    timelineClipsApi.update(projectId, clipId, data),
+  removeTimelineClip: (projectId: string, clipId: string) => timelineClipsApi.remove(projectId, clipId),
 };
 
 export default editingApi;
