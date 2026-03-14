@@ -27,6 +27,7 @@ import { ErrorBoundary } from "../../components/ErrorBoundary";
 import { RoleChangeToast } from "../components/RoleChangeToast";
 import SafeVideoConference from "../components/SafeVideoConference";
 import AudioMixerModal from "../components/AudioMixerModal";
+import MixerBridge from "../components/MixerBridge";
 import ScreenShareRouter, { type ScreenShareRouteMode } from "../components/ScreenShareRouter";
 import { useEffectiveEntitlements } from "../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../hooks/useFeatureAccess";
@@ -1124,6 +1125,7 @@ function LiveKitShell({
           onDismiss={() => setMediaPermissionError(null)}
         />
         <ReconnectCommandListener />
+        <MixerBridge />
         {isHost && !isViewer && (
           <div
             style={{
@@ -1308,7 +1310,7 @@ function RoomPage() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [showMixer, setShowMixer] = useState(false);
   const [showScreenShareRouter, setShowScreenShareRouter] = useState(false);
-  const [screenShareMode, setScreenShareMode] = useState<ScreenShareRouteMode>("off");
+  const [screenShareMode, setScreenShareModeRaw] = useState<ScreenShareRouteMode>("off");
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
@@ -1552,6 +1554,51 @@ function RoomPage() {
     const [effectivePermissionsMode, setEffectivePermissionsMode] = useState<"simple" | "advanced">("simple");
   const roomId = firestoreRoomId ?? routeRoomId ?? null;
 
+  // ---------------------------------------------------------------------------
+  // Screen share route mode: persist per-room in localStorage + room controls
+  // ---------------------------------------------------------------------------
+  const SCREEN_SHARE_MODE_KEY = "sl_screen_share_mode";
+
+  // Load saved screenShareMode from localStorage when roomId becomes available
+  useEffect(() => {
+    if (!roomId) return;
+    try {
+      const stored = localStorage.getItem(`${SCREEN_SHARE_MODE_KEY}:${roomId}`);
+      if (stored === "off" || stored === "main" || stored === "popout") {
+        setScreenShareModeRaw(stored);
+      }
+    } catch {
+      // ignore
+    }
+  }, [roomId]);
+
+  // Wrapper that persists to localStorage and broadcasts via room controls
+  const setScreenShareMode = (mode: ScreenShareRouteMode) => {
+    setScreenShareModeRaw(mode);
+    // Persist locally
+    if (roomId) {
+      try {
+        localStorage.setItem(`${SCREEN_SHARE_MODE_KEY}:${roomId}`, mode);
+      } catch {
+        // ignore
+      }
+    }
+    // Broadcast via room controls PATCH
+    if (roomId && roomAccessToken) {
+      apiFetch(
+        `/api/rooms/${encodeURIComponent(roomId)}/controls`,
+        {
+          method: "PATCH",
+          headers: { "x-room-access-token": roomAccessToken },
+          body: JSON.stringify({ screenShareLayout: mode }),
+        },
+        { allowNonOk: true },
+      ).catch((err: unknown) => {
+        console.warn("[Room] screenShareLayout broadcast failed", err);
+      });
+    }
+  };
+
   const { data: hlsStatusData } = useHlsStatus({
     apiBase: API_BASE,
     roomId: roomId || "",
@@ -1707,6 +1754,12 @@ function RoomPage() {
           canStartStopRecording: typeof data?.canStartStopRecording === "boolean" ? data.canStartStopRecording : false,
           rolePresetId: normalizedRolePresetId,
         });
+
+        // Sync screen-share layout from room controls broadcast
+        const ssLayout = data?.screenShareLayout;
+        if (ssLayout === "off" || ssLayout === "main" || ssLayout === "popout") {
+          setScreenShareModeRaw(ssLayout);
+        }
       } catch {
         // ignore
       }
