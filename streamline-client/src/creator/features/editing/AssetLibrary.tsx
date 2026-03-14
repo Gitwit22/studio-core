@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { editingApi, type Recording } from "../../../lib/editingApi";
 import VideoUploadModal from "../../components/VideoUploadModal";
 import AddVideoModal from "./AddVideoModal";
+import OpenProjectModal from "./OpenProjectModal";
 import { useEffectiveEntitlements } from "../../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../../hooks/useFeatureAccess";
 
@@ -21,6 +22,22 @@ export default function AssetLibrary() {
   const [search, setSearch] = useState("");
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAddVideoModal, setShowAddVideoModal] = useState(false);
+  const [showOpenProjectModal, setShowOpenProjectModal] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+
+  const handleStartNewProject = async () => {
+    if (creatingProject) return;
+    setCreatingProject(true);
+    try {
+      const proj = await editingApi.createProject({ name: "Untitled Project" });
+      nav(`/editing/editor/${proj.id}`);
+    } catch (err: any) {
+      console.error("Failed to create project:", err);
+      alert(err?.message || "Could not create project.");
+    } finally {
+      setCreatingProject(false);
+    }
+  };
 
   const loadData = async () => {
     const [assetsData, recordingsData] = await Promise.all([
@@ -81,6 +98,11 @@ export default function AssetLibrary() {
         isOpen={showAddVideoModal}
         onClose={() => setShowAddVideoModal(false)}
         onAdded={() => loadData()}
+      />
+      <OpenProjectModal
+        isOpen={showOpenProjectModal}
+        onClose={() => setShowOpenProjectModal(false)}
+        onOpen={(id) => { setShowOpenProjectModal(false); nav(`/editing/editor/${id}`); }}
       />
 
       <div style={{
@@ -234,6 +256,67 @@ export default function AssetLibrary() {
               }}
             >
               🎬 Add Video
+            </button>
+          )}
+          {canEditor && (
+            <button
+              onClick={handleStartNewProject}
+              disabled={creatingProject}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '0.75rem',
+                fontWeight: '600',
+                cursor: creatingProject ? 'not-allowed' : 'pointer',
+                transition: 'all 0.3s ease',
+                boxShadow: '0 8px 16px rgba(79, 70, 229, 0.2)',
+                opacity: creatingProject ? 0.6 : 1,
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #4338ca, #4f46e5)';
+                target.style.boxShadow = '0 12px 24px rgba(79, 70, 229, 0.3)';
+                target.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'linear-gradient(135deg, #4f46e5, #6366f1)';
+                target.style.boxShadow = '0 8px 16px rgba(79, 70, 229, 0.2)';
+                target.style.transform = 'translateY(0)';
+              }}
+            >
+              {creatingProject ? '⏳ Creating…' : '✨ Start New Project'}
+            </button>
+          )}
+          {canEditor && (
+            <button
+              onClick={() => setShowOpenProjectModal(true)}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: 'rgba(99, 102, 241, 0.1)',
+                color: '#818cf8',
+                border: '1px solid rgba(99, 102, 241, 0.4)',
+                borderRadius: '0.75rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+              }}
+              onMouseEnter={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(99, 102, 241, 0.2)';
+                target.style.borderColor = 'rgba(99, 102, 241, 0.8)';
+                target.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.target as HTMLButtonElement;
+                target.style.background = 'rgba(99, 102, 241, 0.1)';
+                target.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                target.style.transform = 'translateY(0)';
+              }}
+            >
+              📂 Edit Project
             </button>
           )}
         </div>

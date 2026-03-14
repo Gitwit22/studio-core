@@ -400,7 +400,7 @@ export const projectsApi = {
     }
   },
 
-  async create(data: { name: string; assetId: string }): Promise<Project> {
+  async create(data: { name: string; assetId?: string }): Promise<Project> {
     try {
       const response = await apiFetchAuth(`${API_BASE}/editing/projects`, {
         method: 'POST',
@@ -687,7 +687,7 @@ export const editingApi = {
   // Projects
   getProjects: () => projectsApi.getAll(),
   getProject: (id: string) => projectsApi.getById(id),
-  createProject: (data: { name: string; assetId: string }) => projectsApi.create(data),
+  createProject: (data: { name: string; assetId?: string }) => projectsApi.create(data),
   updateProject: (id: string, data: Partial<Project>) => projectsApi.update(id, data),
   saveTimeline: (id: string, clips: TimelineClip[], tracks?: TimelineTrack[]) => projectsApi.saveTimeline(id, clips, tracks),
   deleteProject: (id: string) => projectsApi.delete(id),

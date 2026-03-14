@@ -19,7 +19,7 @@ import {
   Redo2,
   Upload,
 } from "lucide-react";
-import { editingApi } from "../../../lib/editingApi";
+import { editingApi, type Recording } from "../../../lib/editingApi";
 import { apiFetchAuth } from "../../../lib/api";
 import { useEditingFeatures } from "./useEditingFeatures";
 import {
@@ -105,6 +105,10 @@ export default function EditorPage() {
   const [exportResolution, setExportResolution] = useState("720p");
   const [exportFormat, setExportFormat] = useState("mp4");
   const [uploading, setUploading] = useState(false);
+  const [showAddAssetMenu, setShowAddAssetMenu] = useState(false);
+  const [showSavedVideosPicker, setShowSavedVideosPicker] = useState(false);
+  const [savedRecordings, setSavedRecordings] = useState<Recording[]>([]);
+  const [loadingSaved, setLoadingSaved] = useState(false);
   const fileInputRef2 = useRef<HTMLInputElement>(null);
 
   // Undo/redo state
@@ -298,21 +302,9 @@ export default function EditorPage() {
             }, 100);
           }
         } else {
-          // No asset specified - create empty project with sample
-          setProjectName("New Project");
-          setClips([
-            {
-              id: `clip_${Date.now()}`,
-              assetId: "sample",
-              trackId: 'video_1',
-              startTime: 0,
-              duration: 30,
-              inPoint: 0,
-              outPoint: 30,
-              name: "Sample Clip",
-              videoUrl: SAMPLE_VIDEO_URL,
-            },
-          ]);
+          // No asset specified — start with empty timeline
+          setProjectName("Untitled Project");
+          setClips([]);
         }
       } else {
         // Load existing project
@@ -893,12 +885,9 @@ export default function EditorPage() {
       let actualProjectId = projectId;
       if (actualProjectId === "new") {
         const firstClip = clips[0];
-        if (!firstClip?.assetId) {
-          throw new Error("Missing asset to create project");
-        }
         const created = await editingApi.createProject({
           name: projectName || "Untitled Project",
-          assetId: firstClip.assetId,
+          ...(firstClip?.assetId ? { assetId: firstClip.assetId } : {}),
         });
         actualProjectId = created.id;
         nav(`/editing/editor/${created.id}`, { replace: true });
@@ -925,12 +914,9 @@ export default function EditorPage() {
       let actualProjectId = projectId;
       if (actualProjectId === "new") {
         const firstClip = clips[0];
-        if (!firstClip?.assetId) {
-          throw new Error("Missing asset to create project");
-        }
         const created = await editingApi.createProject({
           name: projectName || "Untitled Project",
-          assetId: firstClip.assetId,
+          ...(firstClip?.assetId ? { assetId: firstClip.assetId } : {}),
         });
         actualProjectId = created.id;
         await editingApi.saveTimeline(actualProjectId!, clips, tracks);
@@ -1019,6 +1005,58 @@ export default function EditorPage() {
       setUploading(false);
     }
   }, [projectId, clips, pushUndoSnapshot]);
+
+  // ============================================================================
+  // ADD SAVED VIDEO TO TIMELINE
+  // ============================================================================
+
+  const openSavedVideosPicker = useCallback(async () => {
+    setShowSavedVideosPicker(true);
+    setLoadingSaved(true);
+    try {
+      const all = await editingApi.getRecordings();
+      setSavedRecordings(all.filter(r => r.status === 'ready'));
+    } catch {
+      setSavedRecordings([]);
+    } finally {
+      setLoadingSaved(false);
+    }
+  }, []);
+
+  const addSavedVideoToTimeline = useCallback((recording: Recording) => {
+    pushUndoSnapshot();
+    const endTime = clips.reduce((max, c) => Math.max(max, c.startTime + c.duration), 0);
+    const duration = Math.min(recording.duration || 60, 600);
+    const videoUrl = recording.videoUrl || '';
+    const now = Date.now();
+
+    setClips(prev => [
+      ...prev,
+      {
+        id: `clip_v_${now}`,
+        assetId: recording.id,
+        trackId: 'video_1',
+        startTime: endTime,
+        duration,
+        inPoint: 0,
+        outPoint: duration,
+        name: recording.title || 'Video',
+        videoUrl,
+      },
+      {
+        id: `clip_a_${now}`,
+        assetId: recording.id,
+        trackId: 'audio_1',
+        startTime: endTime,
+        duration,
+        inPoint: 0,
+        outPoint: duration,
+        name: recording.title || 'Audio',
+        videoUrl,
+      },
+    ]);
+    setShowSavedVideosPicker(false);
+  }, [clips, pushUndoSnapshot]);
 
   // ============================================================================
   // DRAG HANDLERS (TRIM + MOVE)
@@ -1510,16 +1548,43 @@ export default function EditorPage() {
                         e.target.value = "";
                       }}
                     />
-                    <button
-                      onClick={() => fileInputRef2.current?.click()}
-                      disabled={uploading}
-                      className="w-full px-3 py-2 text-sm font-medium rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition flex items-center justify-center gap-2"
-                    >
-                      <Upload size={14} />
-                      {uploading ? "Uploading..." : "Upload Video"}
-                    </button>
                   </>
                 )}
+
+                {/* Add Asset dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowAddAssetMenu(!showAddAssetMenu)}
+                    className="w-full px-3 py-2 text-sm font-medium rounded-lg bg-green-600 hover:bg-green-500 text-white transition flex items-center justify-center gap-2"
+                  >
+                    <Upload size={14} />
+                    Add Asset ▾
+                  </button>
+                  {showAddAssetMenu && (
+                    <div className="absolute left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                      <button
+                        onClick={() => { setShowAddAssetMenu(false); openSavedVideosPicker(); }}
+                        className="w-full px-3 py-2 text-sm text-left text-zinc-200 hover:bg-zinc-700 transition flex items-center gap-2"
+                      >
+                        🎬 Saved Videos
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowAddAssetMenu(false);
+                          if (projectId && projectId !== "new") {
+                            fileInputRef2.current?.click();
+                          } else {
+                            alert("Save the project first before uploading media.");
+                          }
+                        }}
+                        disabled={uploading}
+                        className="w-full px-3 py-2 text-sm text-left text-zinc-200 hover:bg-zinc-700 disabled:opacity-50 transition flex items-center gap-2 border-t border-zinc-700"
+                      >
+                        ⬆️ {uploading ? "Uploading..." : "Upload From Device"}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1883,6 +1948,90 @@ export default function EditorPage() {
           </div>
         </div>
       </div>
+
+      {/* Saved Videos Picker Overlay */}
+      {showSavedVideosPicker && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.7)",
+            backdropFilter: "blur(4px)",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowSavedVideosPicker(false); }}
+        >
+          <div
+            style={{
+              width: "min(620px, 90vw)",
+              maxHeight: "70vh",
+              background: "#1a1a2e",
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: "0.75rem",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+            }}
+          >
+            <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid rgba(255,255,255,0.1)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ color: "#fff", fontWeight: 700, fontSize: "1rem", margin: 0 }}>🎬 Saved Videos</h3>
+              <button onClick={() => setShowSavedVideosPicker(false)} style={{ background: "none", border: "none", color: "#9ca3af", fontSize: "1.25rem", cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem 1.25rem" }}>
+              {loadingSaved ? (
+                <p style={{ color: "#9ca3af", textAlign: "center", padding: "2rem" }}>Loading…</p>
+              ) : savedRecordings.length === 0 ? (
+                <p style={{ color: "#6b7280", textAlign: "center", padding: "2rem" }}>No saved videos found.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {savedRecordings.map((r) => (
+                    <div
+                      key={r.id}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "0.75rem",
+                        padding: "0.6rem 0.75rem", borderRadius: "0.5rem",
+                        border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                      onClick={() => addSavedVideoToTimeline(r)}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.06)"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+                    >
+                      <div style={{ width: 72, height: 40, borderRadius: "0.375rem", overflow: "hidden", background: "#111", flexShrink: 0 }}>
+                        {r.thumbnailUrl ? (
+                          <img src={r.thumbnailUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : (
+                          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#555", fontSize: "0.75rem" }}>🎬</div>
+                        )}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
+                        <div style={{ fontSize: "0.7rem", color: "#9ca3af" }}>
+                          {Math.floor(r.duration / 60)}:{String(r.duration % 60).padStart(2, "0")}
+                          {r.roomName ? ` • ${r.roomName}` : ""}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: "0.75rem", color: "#22c55e", fontWeight: 600 }}>+ Add</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ padding: "0.75rem 1.25rem", borderTop: "1px solid rgba(255,255,255,0.1)", display: "flex", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setShowSavedVideosPicker(false)}
+                style={{ padding: "0.5rem 1rem", borderRadius: "0.375rem", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)", color: "#ccc", cursor: "pointer", fontSize: "0.8rem" }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

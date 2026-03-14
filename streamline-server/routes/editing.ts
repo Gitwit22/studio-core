@@ -664,14 +664,11 @@ router.post("/projects", async (req: Request, res: Response) => {
     if (!name || typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ error: "name is required" });
     }
-    if (!assetId || typeof assetId !== "string" || !assetId.trim()) {
-      return res.status(400).json({ error: "assetId is required" });
-    }
 
-    const newProject = {
+    const newProject: Record<string, any> = {
       userId,
       name: String(name).trim(),
-      assetId: String(assetId).trim(),
+      ...(assetId && typeof assetId === "string" && assetId.trim() ? { assetId: assetId.trim() } : {}),
       createdAt: new Date(),
       updatedAt: new Date(),
       duration: 0,
