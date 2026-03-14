@@ -240,21 +240,21 @@ async function getSegmentedUiFlags() {
     firestore.collection("featureFlags").doc("myContentRecordingsEnabled").get(),
   ]);
 
-  const contentLibraryData = contentLibrarySnap.exists ? ((contentLibrarySnap.data() as any) || {}) : {};
-  const projectsData = projectsSnap.exists ? ((projectsSnap.data() as any) || {}) : {};
-  const editorData = editorSnap.exists ? ((editorSnap.data() as any) || {}) : {};
-  const myContentData = myContentSnap.exists ? ((myContentSnap.data() as any) || {}) : {};
-  const myContentRecordingsData = myContentRecordingsSnap.exists
-    ? ((myContentRecordingsSnap.data() as any) || {})
-    : {};
+  // Default to ENABLED when the Firestore document doesn't exist.
+  // Plans already gate feature access; platform flags act only as
+  // kill-switches. Set `{ enabled: false }` in Firestore to disable.
+  const resolve = (snap: FirebaseFirestore.DocumentSnapshot) => {
+    if (!snap.exists) return true;               // missing → enabled
+    const d = (snap.data() as any) || {};
+    return d.enabled !== false;                   // explicit false → disabled
+  };
 
-  // New flags default to DISABLED when missing.
   return {
-    contentLibraryEnabled: contentLibraryData.enabled === true,
-    projectsEnabled: projectsData.enabled === true,
-    editorEnabled: editorData.enabled === true,
-    myContentEnabled: myContentData.enabled === true,
-    myContentRecordingsEnabled: myContentRecordingsData.enabled === true,
+    contentLibraryEnabled: resolve(contentLibrarySnap),
+    projectsEnabled: resolve(projectsSnap),
+    editorEnabled: resolve(editorSnap),
+    myContentEnabled: resolve(myContentSnap),
+    myContentRecordingsEnabled: resolve(myContentRecordingsSnap),
   };
 }
 // Advanced permissions have been fully removed in favor of a single,

@@ -4,11 +4,10 @@ import {
   getProject,
   listProjectAssets,
   deleteProjectAsset,
+  getAssetDownloadUrl,
   type Project,
   type ProjectAsset,
 } from "../../lib/projectsApi";
-import { API_BASE } from "../../lib/apiBase";
-import { apiFetchAuth } from "../../lib/api";
 
 /**
  * ProjectDetail — Displays a single project with its recordings and assets.
@@ -49,6 +48,8 @@ export default function ProjectDetail() {
     };
   }, [projectId]);
 
+  const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
+
   const handleDeleteAsset = async (assetId: string) => {
     if (!projectId) return;
     if (!window.confirm("Remove this recording from the project?")) return;
@@ -64,15 +65,28 @@ export default function ProjectDetail() {
   };
 
   const handleDownload = async (asset: ProjectAsset) => {
-    if (!asset.sourceRecordingId) return;
+    if (!projectId) return;
     try {
-      const res = await apiFetchAuth(
-        `${API_BASE}/api/recordings/${encodeURIComponent(asset.sourceRecordingId)}/download-link`,
-      );
-      const data = await res.json();
-      if (data.downloadUrl) {
-        window.open(data.downloadUrl, "_blank");
+      const result = await getAssetDownloadUrl(projectId, asset.id);
+      if (result.downloadUrl) {
+        try {
+          window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
+        } catch {
+          window.open(result.downloadUrl, "_blank");
+        }
       }
+    } catch {
+      // silent
+    }
+  };
+
+  const handleCopyCid = async (asset: ProjectAsset) => {
+    const key = asset.storageKey;
+    if (!key) return;
+    try {
+      await navigator.clipboard.writeText(key);
+      setCopiedAssetId(asset.id);
+      setTimeout(() => setCopiedAssetId(null), 2000);
     } catch {
       // silent
     }
@@ -229,13 +243,25 @@ export default function ProjectDetail() {
                         ✂️
                       </button>
                     )}
-                    {rec.sourceRecordingId && rec.processingStatus === "ready" && (
+                    {rec.processingStatus === "ready" && (
                       <button
                         onClick={() => handleDownload(rec)}
                         style={actionBtnStyle}
                         title="Download"
                       >
                         ⬇
+                      </button>
+                    )}
+                    {rec.storageKey && (
+                      <button
+                        onClick={() => handleCopyCid(rec)}
+                        style={{
+                          ...actionBtnStyle,
+                          color: copiedAssetId === rec.id ? "#10b981" : "#d1d5db",
+                        }}
+                        title={copiedAssetId === rec.id ? "Copied!" : "Copy CID"}
+                      >
+                        {copiedAssetId === rec.id ? "✓" : "📋"}
                       </button>
                     )}
                     <button
@@ -281,9 +307,21 @@ export default function ProjectDetail() {
                       {formatDuration(asset.duration)} · {formatSize(asset.size)}
                     </div>
                   </div>
-                  {asset.sourceRecordingId && asset.processingStatus === "ready" && (
+                  {asset.processingStatus === "ready" && (
                     <button onClick={() => handleDownload(asset)} style={actionBtnStyle} title="Download">
                       ⬇
+                    </button>
+                  )}
+                  {asset.storageKey && (
+                    <button
+                      onClick={() => handleCopyCid(asset)}
+                      style={{
+                        ...actionBtnStyle,
+                        color: copiedAssetId === asset.id ? "#10b981" : "#d1d5db",
+                      }}
+                      title={copiedAssetId === asset.id ? "Copied!" : "Copy CID"}
+                    >
+                      {copiedAssetId === asset.id ? "✓" : "📋"}
                     </button>
                   )}
                   <button

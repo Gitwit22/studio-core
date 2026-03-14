@@ -13,8 +13,9 @@ export type PlatformFlagsLike = {
   transcodeEnabled?: unknown;
   recordingEnabled?: unknown;
 
-  // Segmented, safety-first platform switches:
-  // - Missing/undefined => disabled (must be explicitly enabled)
+  // Segmented platform switches (kill-switches):
+  // - Server defaults to enabled when the Firestore doc is missing.
+  // - Set { enabled: false } in Firestore to disable.
   contentLibraryEnabled?: unknown;
   libraryEnabled?: unknown;
   projectsEnabled?: unknown;
