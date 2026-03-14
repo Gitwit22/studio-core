@@ -1593,7 +1593,9 @@ function RoomPage() {
           body: JSON.stringify({ screenShareLayout: mode }),
         },
         { allowNonOk: true },
-      ).catch(() => { /* best-effort */ });
+      ).catch((err: unknown) => {
+        console.warn("[Room] screenShareLayout broadcast failed", err);
+      });
     }
   };
 

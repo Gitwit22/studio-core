@@ -266,9 +266,11 @@ router.patch("/:roomId/controls", requireAuth as any, requireRoomAccessToken as 
 
   // Only accept known keys.
   const cleaned: RoomControls = {};
+  const STRING_CONTROL_KEYS = new Set<keyof RoomControls>(["screenShareLayout"]);
   (Object.keys(patch) as Array<keyof RoomControls>).forEach((k) => {
     const val = patch[k];
-    if (typeof val === "boolean" || typeof val === "string") (cleaned as any)[k] = val;
+    if (typeof val === "boolean") (cleaned as any)[k] = val;
+    else if (typeof val === "string" && STRING_CONTROL_KEYS.has(k)) (cleaned as any)[k] = val;
   });
 
   if (Object.keys(cleaned).length === 0) {
@@ -436,9 +438,11 @@ router.patch("/:roomId/controls/:identity", requireAuth as any, requireRoomAcces
   };
 
   const cleaned: RoomControls = {};
+  const STRING_CTRL_KEYS = new Set<keyof RoomControls>(["screenShareLayout"]);
   (Object.keys(patch) as Array<keyof RoomControls>).forEach((k) => {
     const val = patch[k];
-    if (typeof val === "boolean" || typeof val === "string") (cleaned as any)[k] = val;
+    if (typeof val === "boolean") (cleaned as any)[k] = val;
+    else if (typeof val === "string" && STRING_CTRL_KEYS.has(k)) (cleaned as any)[k] = val;
   });
 
   if (Object.keys(cleaned).length === 0) {
