@@ -303,4 +303,56 @@ router.post(
   },
 );
 
+// ── Auto-create saved_video when recording becomes ready ─────────────────────
+
+/**
+ * Called when a recording export completes (status → "ready").
+ * Creates a saved_videos entry so the recording appears in My Content.
+ * Idempotent: skips if a saved_video already exists for this recording.
+ */
+export async function createSavedVideoFromRecording(opts: {
+  userId: string;
+  recordingId: string;
+  title?: string;
+  playbackUrl?: string;
+  thumbnailUrl?: string | null;
+  durationMs?: number;
+  fileSize?: number;
+}): Promise<{ id: string; duplicate: boolean }> {
+  const { userId, recordingId } = opts;
+
+  // Idempotency: check for existing saved_video for this recording
+  const dupSnap = await db
+    .collection("saved_videos")
+    .where("userId", "==", userId)
+    .where("sourceType", "==", "recording")
+    .where("sourceId", "==", recordingId)
+    .limit(1)
+    .get();
+
+  if (!dupSnap.empty) {
+    return { id: dupSnap.docs[0].id, duplicate: true };
+  }
+
+  const now = new Date();
+  const savedVideo = {
+    userId,
+    title: opts.title || "Untitled Recording",
+    sourceType: "recording" as const,
+    sourceId: recordingId,
+    playbackUrl: opts.playbackUrl || "",
+    downloadUrl: opts.playbackUrl || null,
+    thumbnailUrl: opts.thumbnailUrl || null,
+    durationMs: typeof opts.durationMs === "number" ? opts.durationMs : 0,
+    sizeBytes: typeof opts.fileSize === "number" ? opts.fileSize : 0,
+    hasEmbeddedAudio: true,
+    status: "ready" as const,
+    createdAt: now,
+  };
+
+  const ref = await db.collection("saved_videos").add(savedVideo);
+  console.log(`[my-content] Auto-created saved_video ${ref.id} for recording ${recordingId}`);
+  return { id: ref.id, duplicate: false };
+}
+
 export default router;

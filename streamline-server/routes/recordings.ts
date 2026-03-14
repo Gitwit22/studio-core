@@ -42,6 +42,7 @@ import { deleteFiles, deletePrefix } from "../lib/storageClient";
 import { resolveCompositeLayoutFromRoom } from "../lib/roomLayout";
 import { deleteRecordingStorage } from "../lib/recordingDeletion";
 import { attachRecordingToProject } from "../lib/projectManager";
+import { createSavedVideoFromRecording } from "./myContent";
 
 const router = Router();
 
@@ -1646,6 +1647,25 @@ router.post(
               console.log(`[recordings/stop] Recording attached to project ${result.projectId}`);
             } catch (projErr: any) {
               console.error("[recordings/stop] failed to attach recording to project:", projErr?.message, projErr?.stack?.slice(0, 500));
+            }
+
+            // Auto-create saved_video so recording appears in My Content
+            try {
+              const roomName = typeof data.roomName === "string" ? data.roomName : "";
+              const videoUrl = typeof data.videoUrl === "string" ? data.videoUrl : "";
+              const thumbUrl = typeof data.thumbnailUrl === "string" ? data.thumbnailUrl : null;
+              const durationSec = typeof data.durationSeconds === "number" ? data.durationSeconds : null;
+              await createSavedVideoFromRecording({
+                userId: uid,
+                recordingId,
+                title: roomName || data.title || "Untitled Recording",
+                playbackUrl: videoUrl,
+                thumbnailUrl: thumbUrl,
+                durationMs: durationSec ? Math.round(durationSec * 1000) : 0,
+                fileSize: size,
+              });
+            } catch (savedErr: any) {
+              console.warn("[recordings/stop] failed to auto-create saved_video:", savedErr?.message);
             }
           } else {
             console.warn(`[recordings/stop] head-check found no file yet for ${objectKey}`);

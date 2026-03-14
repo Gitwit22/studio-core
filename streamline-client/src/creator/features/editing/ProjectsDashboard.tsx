@@ -122,7 +122,7 @@ export default function ProjectsDashboard() {
               background: 'linear-gradient(to right, #ffffff, #fecaca)',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
             }}>
-              🎬 Your Projects
+              🎬 Saved Projects
             </h1>
             <p style={{ fontSize: '1rem', color: '#9ca3af', marginTop: '0.5rem' }}>
               {projects.length} project{projects.length !== 1 ? 's' : ''} · Recordings auto-attach from your rooms
@@ -141,8 +141,8 @@ export default function ProjectsDashboard() {
           </button>
         </div>
 
-        {/* New Project Button */}
-        <div style={{ marginBottom: '2rem' }}>
+        {/* Action Buttons */}
+        <div style={{ marginBottom: '2rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
           <button
             onClick={() => setShowCreateModal(true)}
             style={{
@@ -154,6 +154,20 @@ export default function ProjectsDashboard() {
             }}
           >
             ➕ New Project
+          </button>
+          <button
+            onClick={() => nav('/content')}
+            style={{
+              padding: '0.875rem 1.75rem',
+              background: 'rgba(99, 102, 241, 0.1)',
+              color: '#818cf8',
+              border: '1px solid rgba(99, 102, 241, 0.4)',
+              borderRadius: '0.75rem',
+              fontWeight: '600', cursor: 'pointer', transition: 'all 0.3s ease',
+              fontSize: '1rem'
+            }}
+          >
+            📚 My Content
           </button>
         </div>
 
