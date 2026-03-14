@@ -152,9 +152,17 @@ async function getEditingPlanInfo(uid: string): Promise<EditingPlanInfo> {
   const planData = planSnap.exists ? ((planSnap.data() as any) || {}) : {};
 
   const editing = (planData.editing || {}) as any;
-  const access = editing.access === true;
-  const maxProjects = Number(editing.maxProjects ?? 0);
+
+  // If the plan doc is missing from Firestore, fall back based on planId.
+  // Internal/enterprise/pro plans get full access even without a plan doc.
+  const FULL_ACCESS_PLAN_IDS = ["internal_unlimited", "enterprise", "pro"];
+  const planDocMissing = !planSnap.exists;
+  const access = planDocMissing
+    ? FULL_ACCESS_PLAN_IDS.includes(planId)
+    : editing.access === true;
+  const maxProjects = planDocMissing && access ? 999 : Number(editing.maxProjects ?? 0);
   const maxStorageGB = (() => {
+    if (planDocMissing && access) return 100;
     const gb = editing.maxStorageGB;
     const bytes = editing.maxStorageBytes;
     if (gb !== undefined && gb !== null) {

@@ -966,32 +966,6 @@ export default function Join() {
                 ⚙️ Settings & Billing
               </button>
 
-              <button
-                onClick={() => nav("/projects")}
-                style={{
-                  fontSize: "13px",
-                  padding: "8px 16px",
-                  background: "rgba(255,255,255,0.05)",
-                  border: "1px solid rgba(255,255,255,0.2)",
-                  color: "#fff",
-                  borderRadius: "8px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  transition: "all 0.3s ease",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(255,255,255,0.1)";
-                  e.currentTarget.style.borderColor = "rgba(239,68,68,0.6)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "rgba(255,255,255,0.05)";
-                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)";
-                }}
-              >
-                📁 My Projects
-              </button>
-
               {showMyContentButton && (
                 <button
                   onClick={() => nav(myContentTarget)}
