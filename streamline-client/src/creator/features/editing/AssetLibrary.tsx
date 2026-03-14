@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { editingApi, type Recording } from "../../../lib/editingApi";
 import VideoUploadModal from "../../components/VideoUploadModal";
 import AddVideoModal from "./AddVideoModal";
-import OpenProjectModal from "./OpenProjectModal";
 import { useEffectiveEntitlements } from "../../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../../hooks/useFeatureAccess";
 
@@ -22,7 +21,6 @@ export default function AssetLibrary() {
   const [search, setSearch] = useState("");
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAddVideoModal, setShowAddVideoModal] = useState(false);
-  const [showOpenProjectModal, setShowOpenProjectModal] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
 
   const handleStartNewProject = async () => {
@@ -99,11 +97,6 @@ export default function AssetLibrary() {
         onClose={() => setShowAddVideoModal(false)}
         onAdded={() => loadData()}
       />
-      <OpenProjectModal
-        isOpen={showOpenProjectModal}
-        onClose={() => setShowOpenProjectModal(false)}
-        onOpen={(id) => { setShowOpenProjectModal(false); nav(`/editing/editor/${id}`); }}
-      />
 
       <div style={{
         minHeight: '100vh',
@@ -158,7 +151,7 @@ export default function AssetLibrary() {
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent'
             }}>
-              📚 Asset Library
+              📚 My Content
             </h1>
             <p style={{ fontSize: '1rem', color: '#9ca3af', marginTop: '0.5rem' }}>
               {filteredRecordings.length} recordings • {filtered.length} assets
@@ -292,7 +285,7 @@ export default function AssetLibrary() {
           )}
           {canEditor && (
             <button
-              onClick={() => setShowOpenProjectModal(true)}
+              onClick={() => nav('/projects')}
               style={{
                 padding: '0.75rem 1.5rem',
                 background: 'rgba(99, 102, 241, 0.1)',
@@ -316,7 +309,7 @@ export default function AssetLibrary() {
                 target.style.transform = 'translateY(0)';
               }}
             >
-              📂 Edit Project
+              📂 Saved Projects
             </button>
           )}
         </div>
