@@ -260,7 +260,7 @@ router.post(
         : file.originalname.replace(/\.[^/.]+$/, "");
 
       const timestamp = Date.now();
-      const safeName = title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+      const safeName = title.replace(/[^a-z0-9]/gi, "-").toLowerCase().replace(/-+/g, "-").replace(/^-+|-+$/g, "");
       const ext = file.originalname.split(".").pop() || "mp4";
       const storagePath = `my-content/${userId}/${timestamp}-${safeName}.${ext}`;
 

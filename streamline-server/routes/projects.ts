@@ -607,7 +607,7 @@ router.patch("/:projectId/timeline/clips/:clipId", requireAuth, async (req: any,
 
     patch.updatedAt = new Date();
 
-    // If linked and not unlinking, apply same changes to linked clip
+    // If linked and not unlinking, apply movement/trim changes to linked partner(s)
     if (clipData.linkGroupId && !req.body.unlink) {
       const linkedSnap = await db
         .collection("timeline_clips")
@@ -616,13 +616,19 @@ router.patch("/:projectId/timeline/clips/:clipId", requireAuth, async (req: any,
 
       const batch = db.batch();
       for (const linkedDoc of linkedSnap.docs) {
-        // Apply movement and trim changes to all linked clips
-        const linkedPatch: Record<string, any> = { updatedAt: patch.updatedAt };
-        if (patch.startMs !== undefined) linkedPatch.startMs = patch.startMs;
-        if (patch.endMs !== undefined) linkedPatch.endMs = patch.endMs;
-        if (patch.trimInMs !== undefined) linkedPatch.trimInMs = patch.trimInMs;
-        if (patch.trimOutMs !== undefined) linkedPatch.trimOutMs = patch.trimOutMs;
-        batch.update(linkedDoc.ref, linkedPatch);
+        if (linkedDoc.id === req.params.clipId) {
+          // Current clip: apply all changes (movement, trim, track, lane, unlink)
+          batch.update(linkedDoc.ref, patch);
+        } else {
+          // Linked partner: only sync movement and trim changes
+          // (trackId and lane are intentionally excluded — each clip stays on its own track)
+          const linkedPatch: Record<string, any> = { updatedAt: patch.updatedAt };
+          if (patch.startMs !== undefined) linkedPatch.startMs = patch.startMs;
+          if (patch.endMs !== undefined) linkedPatch.endMs = patch.endMs;
+          if (patch.trimInMs !== undefined) linkedPatch.trimInMs = patch.trimInMs;
+          if (patch.trimOutMs !== undefined) linkedPatch.trimOutMs = patch.trimOutMs;
+          batch.update(linkedDoc.ref, linkedPatch);
+        }
       }
       await batch.commit();
     } else {

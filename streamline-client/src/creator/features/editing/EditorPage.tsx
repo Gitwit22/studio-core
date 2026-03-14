@@ -381,10 +381,10 @@ export default function EditorPage() {
             // Ensure we have tracks for all referenced trackIds
             const usedTrackIds = new Set(restoredClips.map((c) => c.trackId));
             const newTracks: Track[] = [];
-            if (usedTrackIds.has('video_1') || restoredClips.some((c) => c.trackId.startsWith('video'))) {
+            if (usedTrackIds.has('video_1')) {
               newTracks.push({ id: 'video_1', name: 'Video 1', type: 'video', muted: false, locked: false, solo: false, linkedTrackId: 'audio_1' });
             }
-            if (usedTrackIds.has('audio_1') || restoredClips.some((c) => c.trackId.startsWith('audio'))) {
+            if (usedTrackIds.has('audio_1')) {
               newTracks.push({ id: 'audio_1', name: 'Audio 1', type: 'audio', muted: false, locked: false, solo: false, linkedTrackId: 'video_1' });
             }
             if (newTracks.length > 0) {
