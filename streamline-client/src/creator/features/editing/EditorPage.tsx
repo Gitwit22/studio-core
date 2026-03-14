@@ -316,8 +316,16 @@ export default function EditorPage() {
         }
       } else {
         // Load existing project
-        const proj = await editingApi.getProject(projectId!);
+        console.log('[editor] Loading existing project:', projectId);
+        let proj: any = null;
+        try {
+          proj = await editingApi.getProject(projectId!);
+        } catch (e) {
+          console.error('[editor] editingApi.getProject failed:', e);
+        }
         if (cancelled) return;
+        console.log('[editor] Project loaded:', proj ? { id: proj.id, name: proj.name, timeline: proj.timeline } : null);
+
         if (proj) {
           setProjectName(proj.name);
 
@@ -329,10 +337,12 @@ export default function EditorPage() {
             console.warn("[editor] Failed to load project assets:", e);
           }
           if (cancelled) return;
+          console.log('[editor] Project assets:', projectAssets.length, projectAssets.map(a => ({ id: a.id, type: a.type, status: a.processingStatus, storageKey: a.storageKey, sourceRecordingId: a.sourceRecordingId })));
 
           const readyAssets = projectAssets.filter(
             a => a.processingStatus === 'ready' && (a.type === 'recording' || a.type === 'upload')
           );
+          console.log('[editor] Ready assets:', readyAssets.length);
 
           // Build download URL map (projectAssetId → url, sourceRecordingId → url)
           const urlMap = new Map<string, string>();
@@ -348,10 +358,12 @@ export default function EditorPage() {
             }
           }));
           if (cancelled) return;
+          console.log('[editor] URL map keys:', Array.from(urlMap.keys()));
 
           // Check for saved timeline state
           const savedTracks = (proj as any)?.timeline?.tracks;
           const savedClips = (proj as any)?.timeline?.clips;
+          console.log('[editor] Saved timeline — tracks:', savedTracks, 'clips:', savedClips);
 
           if (Array.isArray(savedClips) && savedClips.length > 0) {
             // Restore saved track layout
@@ -379,16 +391,26 @@ export default function EditorPage() {
               name: String(c?.name || proj.name),
               videoUrl: urlMap.get(String(c?.assetId || '')) || String(c?.videoUrl || SAMPLE_VIDEO_URL),
             }));
-            setClips(normalized);
+            console.log('[editor] Restored clips:', normalized.length, normalized.map(c => ({ id: c.id, videoUrl: c.videoUrl?.slice(0, 80) })));
 
-            setTimeout(() => {
-              const firstUrl = normalized[0]?.videoUrl;
-              if (!cancelled && videoRef.current && firstUrl) {
-                videoRef.current.src = firstUrl;
-                videoRef.current.load();
-              }
-            }, 50);
-          } else if (readyAssets.length > 0) {
+            // If all clips have empty/missing videoUrls (bridge stubs), auto-populate from assets instead
+            const hasRealUrls = normalized.some(c => c.videoUrl && c.videoUrl !== SAMPLE_VIDEO_URL && c.videoUrl !== '');
+            if (!hasRealUrls && readyAssets.length > 0) {
+              console.log('[editor] Saved clips have no real URLs — falling through to auto-populate');
+            } else {
+              setClips(normalized);
+              setTimeout(() => {
+                const firstUrl = normalized[0]?.videoUrl;
+                if (!cancelled && videoRef.current && firstUrl) {
+                  videoRef.current.src = firstUrl;
+                  videoRef.current.load();
+                }
+              }, 50);
+              return; // done — skip auto-populate
+            }
+          }
+
+          if (readyAssets.length > 0) {
             // No saved timeline — auto-populate from project assets
             // All video clips on video_1, all audio clips on audio_1, linked
             setTracks([
@@ -436,7 +458,47 @@ export default function EditorPage() {
               }
             }, 50);
           }
-          // If no ready assets and no saved timeline, leave empty
+
+          // Last-resort fallback: if no assets/clips were loaded but the project bridge has an assetId (recording ID),
+          // try to load the recording directly
+          if (readyAssets.length === 0) {
+            const bridgeAssetId = (proj as any)?.assetId;
+            console.log('[editor] No ready assets found. Bridge assetId:', bridgeAssetId);
+            if (bridgeAssetId) {
+              let recording: any = null;
+              try {
+                recording = await editingApi.getRecording(bridgeAssetId);
+              } catch { /* non-fatal */ }
+              if (!recording) {
+                try {
+                  const res = await apiFetchAuth(`/api/editing/recordings/${bridgeAssetId}`, {}, { allowNonOk: true });
+                  if (res.ok) recording = await res.json();
+                } catch { /* non-fatal */ }
+              }
+              if (cancelled) return;
+              console.log('[editor] Fallback recording:', recording ? { title: recording.title, videoUrl: recording.videoUrl?.slice(0, 80) } : null);
+              if (recording?.videoUrl) {
+                const videoUrl = recording.videoUrl;
+                const duration = Math.min(recording.duration || 60, 600);
+                setTracks([
+                  { id: 'video_1', name: 'Video 1', type: 'video', muted: false, locked: false, solo: false, linkedTrackId: 'audio_1' },
+                  { id: 'audio_1', name: 'Audio 1', type: 'audio', muted: false, locked: false, solo: false, linkedTrackId: 'video_1' },
+                ]);
+                setClips([
+                  { id: `clip_v_${Date.now()}`, assetId: bridgeAssetId, trackId: 'video_1', startTime: 0, duration, inPoint: 0, outPoint: duration, name: recording.title || 'Video', videoUrl },
+                  { id: `clip_a_${Date.now()}`, assetId: bridgeAssetId, trackId: 'audio_1', startTime: 0, duration, inPoint: 0, outPoint: duration, name: recording.title || 'Audio', videoUrl },
+                ]);
+                setTimeout(() => {
+                  if (!cancelled && videoRef.current) {
+                    videoRef.current.src = videoUrl;
+                    videoRef.current.load();
+                  }
+                }, 100);
+              }
+            }
+          }
+        } else {
+          console.error('[editor] Project not found for id:', projectId);
         }
       }
     };
