@@ -4244,16 +4244,6 @@ function RoomPage() {
         onModeChange={setScreenShareMode}
       />
 
-      {showStreamEndedModal && recordingId && (
-        <StreamEndedModal
-          recordingId={recordingId}
-          processing={postStopProcessing}
-          ready={postStopReady}
-          onExitRoom={() => nav('/join', { replace: true })}
-          onStayInRoom={handleStayInRoom}
-        />
-      )}
-
       {/* Recording cap toast (Free plan) */}
       {recordingToast && (
         <div

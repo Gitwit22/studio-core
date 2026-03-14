@@ -210,43 +210,6 @@ export default function EditorPage() {
           if (cancelled) return;
           console.log('✅ Recording loaded:', recording);
 
-          if (recording && recording.videoUrl) {
-            const videoUrl = recording.videoUrl;
-            const duration = recording.duration || (recording.durationMinutes ? recording.durationMinutes * 60 : 60);
-
-            setProjectName(`Edit: ${recording.title || 'Recording'}`);
-
-            // Create both video and audio clips so they appear on the timeline
-            const now = Date.now();
-            const videoClip: TimelineClip = {
-              id: `clip_video_${now}`,
-              assetId: recordingId,
-              trackId: 'video_1',
-              startTime: 0,
-              duration,
-              inPoint: 0,
-              outPoint: duration,
-              name: recording.title || 'Video',
-              videoUrl,
-            };
-            const audioClip: TimelineClip = {
-              id: `clip_audio_${now}`,
-              assetId: recordingId,
-              trackId: 'audio_1',
-              startTime: 0,
-              duration,
-              inPoint: 0,
-              outPoint: duration,
-              name: recording.title || 'Audio',
-              videoUrl,
-            };
-
-            console.log('🎬 Video clip:', videoClip);
-            console.log('🎙️ Audio clip:', audioClip);
-            setClips([videoClip, audioClip]);
-
-            // Load video into player
-          
           if (recording) {
             setProjectName(`Edit: ${recording.title}`);
             const videoUrl = recording.videoUrl || SAMPLE_VIDEO_URL;
