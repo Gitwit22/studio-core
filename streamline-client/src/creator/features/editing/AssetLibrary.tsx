@@ -12,7 +12,6 @@ export default function AssetLibrary() {
   const { access } = useFeatureAccess(effectiveEntitlements);
   const canAssets = access.contentLibrary.allowed;
   const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
-  const canProjects = access.projects.allowed;
   const canEditor = access.editor.allowed;
   const [assets, setAssets] = useState<Awaited<ReturnType<typeof editingApi.getAssets>>>([]);
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -201,38 +200,6 @@ export default function AssetLibrary() {
               ⬆️ Upload Video
             </button>
           )}
-          <button
-            onClick={() => {
-              if (!canProjects) return;
-              nav('/projects');
-            }}
-            disabled={!canProjects}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              borderRadius: '0.75rem',
-              color: canProjects ? '#ffffff' : '#9ca3af',
-              fontWeight: '600',
-              cursor: canProjects ? 'pointer' : 'not-allowed',
-              transition: 'all 0.3s ease',
-              backdropFilter: 'blur(10px)'
-            }}
-            onMouseEnter={(e) => {
-              if (!canProjects) return;
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'rgba(255, 255, 255, 0.1)';
-              target.style.borderColor = 'rgba(220, 38, 38, 0.5)';
-            }}
-            onMouseLeave={(e) => {
-              if (!canProjects) return;
-              const target = e.target as HTMLButtonElement;
-              target.style.background = 'rgba(255, 255, 255, 0.05)';
-              target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-            }}
-          >
-            📁 View Projects
-          </button>
         </div>
 
         {/* Filter tabs */}
