@@ -4,7 +4,6 @@ import { StudioState, AudioSource, Clip, StudioTrack, TrackType } from "../types
 function generateId(): string {
   return crypto.randomUUID()
 }
-import { StudioState } from "../types/studio"
 
 interface StudioActions {
   setPlaying: (playing: boolean) => void
@@ -42,12 +41,6 @@ interface StudioActions {
 }
 
 const initialState: StudioState = {
-  addTrack: (type: "audio" | "midi" | "bus") => void
-  selectTrack: (trackId: string | null) => void
-  togglePanel: (panel: keyof StudioState["panels"]) => void
-}
-
-export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
   projectId: null,
   projectName: "Untitled Project",
   isPlaying: false,
@@ -62,14 +55,19 @@ export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
   },
   tracks: [],
   clips: [],
+  sources: [],
   selectedTrackId: null,
   selectedClipId: null,
   panels: {
-    mixer: false,
+    mixer: true,
     pianoRoll: false,
-    browser: true,
+    browser: false,
     export: false,
   },
+}
+
+export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
+  ...initialState,
 
   setPlaying: (playing) => set({ isPlaying: playing }),
   setRecording: (recording) => set({ isRecording: recording }),
