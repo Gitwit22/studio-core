@@ -1,6 +1,4 @@
 import { useState, useEffect } from "react";
-import TopMenu from "@/components/studio/TopMenu";
-import { useState } from "react";
 import MenuBar from "@/components/studio/MenuBar";
 import ConsoleBar from "@/components/studio/ConsoleBar";
 import ChannelStrips from "@/components/studio/ChannelStrips";
