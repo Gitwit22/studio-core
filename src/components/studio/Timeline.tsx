@@ -1,8 +1,13 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import { useStudioStore } from "@/studio/engine/studioStore";
+import WaveformCanvas from "@/components/studio/WaveformCanvas";
+import { selectResolution } from "@/audio/waveformPeaks";
+import type { WaveformPeaks, WaveformStatus, PeakResolution } from "@/studio/types/waveform";
+import { getCachedPeaks, setCachedPeaks } from "@/audio/waveformCache";
+import { generatePeaksFromFile, generatePeaksFromUrl } from "@/audio/waveformPeaks";
 
-interface Clip {
+interface TimelineClip {
   id: string;
   trackIndex: number;
   startBeat: number;
@@ -10,9 +15,11 @@ interface Clip {
   label: string;
   take: number;
   color: string;
+  /** Optional source ID linking to an AudioSource with real audio data. */
+  sourceId?: string;
 }
 
-const defaultClips: Clip[] = [
+const defaultClips: TimelineClip[] = [
   { id: "1", trackIndex: 0, startBeat: 0, durationBeats: 32, label: "Beat", take: 1, color: "hsl(217 100% 71%)" },
   { id: "2", trackIndex: 1, startBeat: 4, durationBeats: 12, label: "Lead", take: 1, color: "hsl(172 72% 55%)" },
   { id: "3", trackIndex: 1, startBeat: 18, durationBeats: 10, label: "Lead", take: 2, color: "hsl(172 72% 55%)" },
@@ -25,12 +32,102 @@ const defaultClips: Clip[] = [
 const trackNames = ["Beat", "Lead", "Double", "Ad-Lib"];
 const totalBeats = 32;
 
+/** Height of clip content area in pixels (track height minus top/bottom margins). */
+const CLIP_HEIGHT = 68; // h-20 (80px) minus 1.5*4=6px top + 6px bottom
+
+/**
+ * Generate deterministic waveform peaks for demo/placeholder clips
+ * that have no real audio source. Uses a seeded pattern based on clip ID
+ * so the waveform is stable across renders and reloads.
+ */
+function generateDemoPeaks(clipId: string, numPeaks: number): PeakResolution {
+  // Simple deterministic hash from clip ID
+  let seed = 0;
+  for (let i = 0; i < clipId.length; i++) {
+    seed = ((seed << 5) - seed + clipId.charCodeAt(i)) | 0;
+  }
+
+  const min: number[] = new Array(numPeaks);
+  const max: number[] = new Array(numPeaks);
+
+  for (let i = 0; i < numPeaks; i++) {
+    // Deterministic pseudo-random using seed
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const r1 = (seed % 1000) / 1000;
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const r2 = (seed % 1000) / 1000;
+
+    // Create a waveform-like pattern: envelope × (sine + noise)
+    const envelope = Math.sin((i / numPeaks) * Math.PI) * 0.6 + 0.2;
+    const wave = Math.sin(i * 0.4) * 0.3;
+
+    max[i] = Math.min(1, (wave + r1 * 0.4) * envelope + 0.05);
+    min[i] = Math.max(-1, -(wave + r2 * 0.4) * envelope - 0.05);
+  }
+
+  return { samplesPerPeak: 1024, channels: [{ min, max }] };
+}
+
+/**
+ * Custom hook to manage waveform peaks for audio sources.
+ * Handles loading from cache, generating from audio files/URLs,
+ * and tracking loading status.
+ */
+function useWaveformPeaks() {
+  const sources = useStudioStore((s) => s.sources);
+  const [peaksMap, setPeaksMap] = useState<Record<string, WaveformPeaks>>({});
+  const [statusMap, setStatusMap] = useState<Record<string, WaveformStatus>>({});
+
+  const loadPeaks = useCallback(async (sourceId: string, file?: File, url?: string) => {
+    // Check cache first
+    setStatusMap((prev) => ({ ...prev, [sourceId]: "analyzing" }));
+    try {
+      const cached = await getCachedPeaks(sourceId);
+      if (cached) {
+        setPeaksMap((prev) => ({ ...prev, [sourceId]: cached }));
+        setStatusMap((prev) => ({ ...prev, [sourceId]: "ready" }));
+        return;
+      }
+
+      // Generate from file or URL
+      let peaks: WaveformPeaks | null = null;
+      if (file) {
+        peaks = await generatePeaksFromFile(sourceId, file);
+      } else if (url) {
+        peaks = await generatePeaksFromUrl(sourceId, url);
+      }
+
+      if (peaks) {
+        await setCachedPeaks(peaks);
+        setPeaksMap((prev) => ({ ...prev, [sourceId]: peaks }));
+        setStatusMap((prev) => ({ ...prev, [sourceId]: "ready" }));
+      } else {
+        setStatusMap((prev) => ({ ...prev, [sourceId]: "error" }));
+      }
+    } catch {
+      setStatusMap((prev) => ({ ...prev, [sourceId]: "error" }));
+    }
+  }, []);
+
+  // Process new sources that don't have peaks yet
+  useEffect(() => {
+    for (const source of sources) {
+      if (!peaksMap[source.id] && statusMap[source.id] !== "analyzing") {
+        loadPeaks(source.id, source.file, source.url);
+      }
+    }
+  }, [sources, peaksMap, statusMap, loadPeaks]);
+
+  return { peaksMap, statusMap };
+}
+
 const Timeline = () => {
-  const [clips] = useState<Clip[]>(defaultClips);
+  const [clips] = useState<TimelineClip[]>(defaultClips);
   const playheadPosition = useStudioStore((s) => s.playhead);
   const setPlayhead = useStudioStore((s) => s.setPlayhead);
   const zoom = useStudioStore((s) => s.zoom);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const { peaksMap, statusMap } = useWaveformPeaks();
 
   const beatWidth = 40 * zoom;
 
@@ -42,21 +139,30 @@ const Timeline = () => {
     setPlayhead(beat);
   };
 
-  // Generate fake waveform path
-  const generateWaveform = (width: number) => {
-    const points: string[] = [];
-    const steps = Math.floor(width / 3);
-    for (let i = 0; i <= steps; i++) {
-      const x = (i / steps) * width;
-      const y = 10 + Math.sin(i * 0.8) * 6 + Math.random() * 4;
-      points.push(`${x},${y}`);
-    }
-    const mirroredPoints = points.map(p => {
-      const [x, y] = p.split(",").map(Number);
-      return `${x},${20 - (y - 10) + 10}`;
-    }).reverse();
-    return `M${points.join(" L")} L${mirroredPoints.join(" L")}Z`;
-  };
+  /** Memoized demo peaks cache keyed by clipId + numPeaks for stability. */
+  const demoPeaksCache = useRef<Record<string, PeakResolution>>({});
+
+  const getClipPeaks = useCallback(
+    (clip: TimelineClip, clipWidth: number): { peaks: PeakResolution | null; status: WaveformStatus } => {
+      // Real audio source — use waveform pipeline
+      if (clip.sourceId && peaksMap[clip.sourceId]) {
+        const waveform = peaksMap[clip.sourceId];
+        return { peaks: selectResolution(waveform, zoom), status: "ready" };
+      }
+      if (clip.sourceId) {
+        return { peaks: null, status: statusMap[clip.sourceId] ?? "pending" };
+      }
+
+      // Demo clip — generate deterministic peaks
+      const numPeaks = Math.max(10, Math.round(clipWidth / 3));
+      const cacheKey = `${clip.id}_${numPeaks}`;
+      if (!demoPeaksCache.current[cacheKey]) {
+        demoPeaksCache.current[cacheKey] = generateDemoPeaks(clip.id, numPeaks);
+      }
+      return { peaks: demoPeaksCache.current[cacheKey], status: "ready" };
+    },
+    [peaksMap, statusMap, zoom],
+  );
 
   return (
     <div className="studio-panel h-full flex flex-col overflow-hidden">
@@ -128,6 +234,7 @@ const Timeline = () => {
                   .filter(c => c.trackIndex === trackIndex)
                   .map(clip => {
                     const width = clip.durationBeats * beatWidth;
+                    const { peaks, status } = getClipPeaks(clip, width);
                     return (
                       <div
                         key={clip.id}
@@ -140,18 +247,31 @@ const Timeline = () => {
                           boxShadow: `inset 0 1px 0 ${clip.color}15, 0 0 8px ${clip.color}10`,
                         }}
                       >
-                        {/* Waveform */}
-                        <svg
-                          className="absolute inset-0 w-full h-full opacity-40"
-                          viewBox={`0 0 ${width} 20`}
-                          preserveAspectRatio="none"
-                        >
-                          <path
-                            d={generateWaveform(width)}
-                            fill={clip.color}
-                            opacity="0.5"
+                        {/* Waveform — Canvas-based from peak data */}
+                        {status === "ready" && peaks ? (
+                          <WaveformCanvas
+                            peaks={peaks}
+                            width={width}
+                            height={CLIP_HEIGHT}
+                            color={clip.color}
+                            opacity={0.4}
                           />
-                        </svg>
+                        ) : status === "analyzing" ? (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <span
+                              className="text-[8px] animate-pulse"
+                              style={{ color: clip.color }}
+                            >
+                              Analyzing…
+                            </span>
+                          </div>
+                        ) : null}
+
+                        {/* Center line */}
+                        <div
+                          className="absolute left-0 right-0 h-px top-1/2 -translate-y-px pointer-events-none"
+                          style={{ background: `${clip.color}20` }}
+                        />
 
                         {/* Label */}
                         <div className="absolute top-1 left-2 flex items-center gap-1">
