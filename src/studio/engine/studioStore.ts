@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { StudioState, AudioSource, Clip, StudioTrack, TrackType } from "../types/studio"
+import { StudioState, AudioSource, Clip, StudioTrack, TrackType, ModalId } from "../types/studio"
 
 function generateId(): string {
   return crypto.randomUUID()
@@ -36,6 +36,9 @@ interface StudioActions {
   // Panel actions
   togglePanel: (panel: keyof StudioState["panels"]) => void
 
+  // Modal actions
+  setActiveModal: (modal: ModalId) => void
+
   // Reset
   reset: () => void
 }
@@ -64,6 +67,7 @@ const initialState: StudioState = {
     browser: false,
     export: false,
   },
+  activeModal: null,
 }
 
 export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
@@ -159,6 +163,9 @@ export const useStudioStore = create<StudioState & StudioActions>()((set) => ({
     set((state) => ({
       panels: { ...state.panels, [panel]: !state.panels[panel] },
     })),
+
+  // Modals
+  setActiveModal: (modal) => set({ activeModal: modal }),
 
   // Reset
   reset: () => {

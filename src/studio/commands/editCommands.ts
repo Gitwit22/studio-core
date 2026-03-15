@@ -19,3 +19,15 @@ registerCommand("edit:copy", () => {
 registerCommand("edit:paste", () => {
   console.log("Paste");
 });
+
+registerCommand("edit:duplicateClip", () => {
+  console.log("Duplicate clip");
+});
+
+registerCommand("edit:delete", () => {
+  console.log("Delete");
+});
+
+registerCommand("edit:selectAll", () => {
+  console.log("Select all");
+});
