@@ -18,7 +18,10 @@ export interface AudioSource {
   file?: File
   url: string
   duration: number
+  /** @deprecated Use WaveformPeaks from waveform pipeline instead. */
   waveform?: number[]
+  /** Status of waveform peak generation for this source. */
+  waveformStatus?: import("./waveform").WaveformStatus
 }
 
 export interface Clip {
