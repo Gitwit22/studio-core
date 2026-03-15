@@ -99,7 +99,10 @@ export interface AudioSource {
   /** Relative path inside project storage (e.g. "audio/recording-1.wav") */
   relativePath?: string
   duration: number
+  /** @deprecated Use WaveformPeaks from waveform pipeline instead. */
   waveform?: number[]
+  /** Status of waveform peak generation for this source. */
+  waveformStatus?: import("./waveform").WaveformStatus
 }
 
 export interface Clip {
