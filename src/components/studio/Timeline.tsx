@@ -448,8 +448,7 @@ const Timeline = () => {
   }, [beatWidth, addMarker]);
 
   return (
-  return (
-    <div className="studio-panel flex-1 flex flex-col overflow-hidden">
+    <div className="studio-panel h-full flex flex-col overflow-hidden">
       {/* ── Toolbar ── */}
       <div className="flex items-center border-b border-border px-2 py-1 gap-2 shrink-0">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-studio-text-dim">

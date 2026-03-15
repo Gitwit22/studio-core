@@ -1,4 +1,4 @@
-import { Save, Settings, Download, Mic } from "lucide-react";
+import { Save, Download, Mic } from "lucide-react";
 import VUMeter from "./VUMeter";
 import { useStudioStore } from "@/studio/engine/studioStore";
 import { runCommand } from "@/studio/commandBus";
@@ -47,9 +47,7 @@ const ConsoleBar = () => {
           <button onClick={() => runCommand("project:export")} className="p-1.5 rounded hover:bg-studio-metal transition-colors" title="Export">
             <Download className="w-3.5 h-3.5 text-studio-text-dim" />
           </button>
-          <button className="p-1.5 rounded hover:bg-studio-metal transition-colors" title="Settings">
-            <Settings className="w-3.5 h-3.5 text-studio-text-dim" />
-          </button>
+
         </div>
       </div>
     </div>

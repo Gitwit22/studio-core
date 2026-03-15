@@ -96,6 +96,8 @@ export interface AudioSource {
   name: string
   file?: File
   url: string
+  /** Relative path inside project storage (e.g. "audio/recording-1.wav") */
+  relativePath?: string
   duration: number
   waveform?: number[]
 }
@@ -178,6 +180,22 @@ export interface UndoSnapshot {
   mixerChannels: MixerChannel[]
 }
 
+export type ModalId =
+  | "newSession"
+  | "openSession"
+  | "saveSessionAs"
+  | "sessionInfo"
+  | "exportMix"
+  | "settings"
+  | "keyboardShortcuts"
+  | "quickStart"
+  | "troubleshooting"
+  | "reportProblem"
+  | "about"
+  | "confirmDelete"
+  | "unsavedChanges"
+  | null
+
 export interface StudioState {
   projectId: string | null
   projectName: string
@@ -204,6 +222,7 @@ export interface StudioState {
   redoStack: UndoSnapshot[]
   clipboard: Clip | null
   isDirty: boolean
+  activeModal: ModalId
 }
 
 // ── Master FX state ──

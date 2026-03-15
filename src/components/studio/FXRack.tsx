@@ -27,7 +27,7 @@ const FXRack = () => {
     fxChain.find((f) => f.type === type);
 
   return (
-    <div className="studio-panel w-[160px] shrink-0 flex flex-col overflow-hidden">
+    <div className="studio-panel h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-studio-text-dim">

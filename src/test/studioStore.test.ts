@@ -28,6 +28,7 @@ describe("studioStore", () => {
         browser: false,
         export: false,
       })
+      expect(state.activeModal).toBeNull()
     })
   })
 
@@ -268,6 +269,27 @@ describe("studioStore", () => {
       expect(useStudioStore.getState().panels.pianoRoll).toBe(false)
       useStudioStore.getState().togglePanel("pianoRoll")
       expect(useStudioStore.getState().panels.pianoRoll).toBe(true)
+    })
+  })
+
+  describe("modal actions", () => {
+    it("setActiveModal opens a modal", () => {
+      expect(useStudioStore.getState().activeModal).toBeNull()
+      useStudioStore.getState().setActiveModal("settings")
+      expect(useStudioStore.getState().activeModal).toBe("settings")
+    })
+
+    it("setActiveModal to null closes modal", () => {
+      useStudioStore.getState().setActiveModal("about")
+      expect(useStudioStore.getState().activeModal).toBe("about")
+      useStudioStore.getState().setActiveModal(null)
+      expect(useStudioStore.getState().activeModal).toBeNull()
+    })
+
+    it("reset clears activeModal", () => {
+      useStudioStore.getState().setActiveModal("settings")
+      useStudioStore.getState().reset()
+      expect(useStudioStore.getState().activeModal).toBeNull()
     })
   })
 

@@ -24,3 +24,15 @@ registerCommand("edit:paste", () => {
 registerCommand("edit:toggle-grid-snap", () => {
   useStudioStore.getState().toggleSnapToGrid()
 })
+
+registerCommand("edit:duplicateClip", () => {
+  console.log("Duplicate clip");
+});
+
+registerCommand("edit:delete", () => {
+  console.log("Delete");
+});
+
+registerCommand("edit:selectAll", () => {
+  console.log("Select all");
+});

@@ -17,6 +17,7 @@ import {
   defaultEffects,
   defaultTrackPresets,
   MAX_SESSION_SOURCES,
+  ModalId,
 } from "../types/studio"
 
 function generateId(): string {
@@ -92,6 +93,10 @@ interface StudioActions {
 
   // Session
   newSession: () => void
+
+  // Modal actions
+  setActiveModal: (modal: ModalId) => void
+
   reset: () => void
 
   // Dirty tracking
@@ -134,6 +139,7 @@ const initialState: StudioState = {
   effects: { ...defaultEffects },
   snapToGrid: true,
   isDirty: false,
+  activeModal: null,
 }
 
 function snapshot(s: StudioState): UndoSnapshot {
@@ -492,6 +498,9 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     // New session starts clean
     set({ isDirty: false })
   },
+
+  // Modals
+  setActiveModal: (modal) => set({ activeModal: modal }),
 
   // Reset
   reset: () => {

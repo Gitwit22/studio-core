@@ -178,12 +178,15 @@ export async function stopRecording() {
   // Save recording to project folder (or fall back to blob URL)
   const recordingName = `recording-${Date.now()}.wav`
   let url: string
+  let savedRelativePath: string | undefined
   try {
-    const relativePath = await persistenceService.saveAudio(recordingName, blob)
-    // If saved to disk, load back as blob URL for playback
-    url = relativePath.startsWith("audio/")
-      ? await persistenceService.loadAudio(relativePath)
-      : relativePath
+    const savedPath = await persistenceService.saveAudio(recordingName, blob)
+    if (savedPath.startsWith("audio/")) {
+      savedRelativePath = savedPath
+      url = await persistenceService.loadAudio(savedPath)
+    } else {
+      url = savedPath
+    }
   } catch {
     url = URL.createObjectURL(blob)
   }
@@ -207,6 +210,7 @@ export async function stopRecording() {
   const sourceId = useStudioStore.getState().addSource({
     name: `Recording ${state.sources.length + 1}`,
     url,
+    relativePath: savedRelativePath,
     duration: durationSeconds,
   })
 

@@ -73,3 +73,42 @@ registerCommand("project:export", async () => {
   const wav = bufferToWav(buffer)
   downloadBlob(wav, `${state.projectName}.wav`)
 })
+
+// Session commands (open modals)
+registerCommand("session:new", () => {
+  useStudioStore.getState().setActiveModal("newSession");
+});
+
+registerCommand("session:open", () => {
+  useStudioStore.getState().setActiveModal("openSession");
+});
+
+registerCommand("session:saveAs", () => {
+  useStudioStore.getState().setActiveModal("saveSessionAs");
+});
+
+registerCommand("session:info", () => {
+  useStudioStore.getState().setActiveModal("sessionInfo");
+});
+
+registerCommand("session:close", () => {
+  stopTransport()
+  mixerEngine.dispose()
+  audioEffectsManager.dispose()
+  persistenceService.stopAutosave()
+  useStudioStore.getState().reset()
+  window.location.href = "/"
+});
+
+registerCommand("session:recent", () => {
+  console.log("Recent sessions");
+});
+
+// File commands
+registerCommand("file:importAudio", () => {
+  window.dispatchEvent(new CustomEvent("studio:import-audio"));
+});
+
+registerCommand("file:exportMix", () => {
+  useStudioStore.getState().setActiveModal("exportMix");
+});

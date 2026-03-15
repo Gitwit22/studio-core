@@ -84,12 +84,16 @@ const ChannelStrips = () => {
 
     // Save imported file to project folder
     let url: string;
+    let savedRelativePath: string | undefined;
     try {
       const blob = new Blob([await file.arrayBuffer()], { type: file.type });
-      const relativePath = await persistenceService.saveAudio(file.name, blob);
-      url = relativePath.startsWith("audio/")
-        ? await persistenceService.loadAudio(relativePath)
-        : relativePath;
+      const savedPath = await persistenceService.saveAudio(file.name, blob);
+      if (savedPath.startsWith("audio/")) {
+        savedRelativePath = savedPath;
+        url = await persistenceService.loadAudio(savedPath);
+      } else {
+        url = savedPath;
+      }
     } catch {
       url = URL.createObjectURL(file);
     }
@@ -105,7 +109,7 @@ const ChannelStrips = () => {
       duration = 30;
     }
 
-    const sourceId = addSource({ name: file.name, file, url, duration });
+    const sourceId = addSource({ name: file.name, file, url, relativePath: savedRelativePath, duration });
 
     let targetTrackId = trackId;
     const hasTrack = targetTrackId
@@ -163,7 +167,7 @@ const ChannelStrips = () => {
   const busTracks = tracks.filter((t) => t.type === "bus");
 
   return (
-    <div className="studio-panel flex flex-col gap-0 w-[260px] shrink-0 overflow-hidden">
+    <div className="studio-panel flex flex-col gap-0 h-full overflow-hidden">
       {/* Header */}
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-studio-text-dim">

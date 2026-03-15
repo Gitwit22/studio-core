@@ -69,47 +69,87 @@ export default function MenuBar() {
         borderBottom: "1px solid #333",
       }}
     >
-      {studioMenu.map((menu) => (
-        <div key={menu.title} className="relative">
-          <button
-            className="px-3 py-1 text-gray-300 hover:text-white transition-colors"
-            style={{ fontSize: 12 }}
-            onMouseDown={() =>
-              setOpenMenu(openMenu === menu.title ? null : menu.title)
-            }
-            onMouseEnter={() => openMenu && setOpenMenu(menu.title)}
-          >
-            {menu.title}
-          </button>
+      {studioMenu.map((menu) => {
+        const isSettingsMenu = menu.title === "Settings";
 
-          {openMenu === menu.title && (
-            <div
-              className="absolute top-full left-0 mt-0 min-w-[180px] py-1 rounded shadow-lg z-50"
-              style={{ background: "#252525", border: "1px solid #333" }}
+        return (
+          <div key={menu.title} className="relative">
+            <button
+              className="px-3 py-1 text-gray-300 hover:text-white transition-colors"
+              style={{ fontSize: 12 }}
+              onMouseDown={() => {
+                if (isSettingsMenu) {
+                  runCommand("modal:settings");
+                  setOpenMenu(null);
+                } else {
+                  setOpenMenu(openMenu === menu.title ? null : menu.title);
+                }
+              }}
+              onMouseEnter={() => {
+                if (openMenu && !isSettingsMenu) setOpenMenu(menu.title);
+              }}
             >
-              {menu.items.map((item) => (
-                <button
-                  key={item.action}
-                  className="w-full text-left px-3 py-1.5 text-gray-300 transition-colors"
-                  style={{ fontSize: 12 }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "#3a3a3a")
+              {menu.title}
+            </button>
+
+            {openMenu === menu.title && !isSettingsMenu && (
+              <div
+                className="absolute top-full left-0 mt-0 min-w-[220px] py-1 rounded shadow-lg z-50"
+                style={{ background: "#252525", border: "1px solid #333" }}
+              >
+                {menu.items.map((item, idx) => {
+                  if (item.separator) {
+                    return (
+                      <div
+                        key={`sep-${idx}`}
+                        className="my-1 mx-2"
+                        style={{ height: 1, background: "#3a3a3a" }}
+                      />
+                    );
                   }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "transparent")
-                  }
-                  onClick={() => {
-                    runCommand(item.action);
-                    setOpenMenu(null);
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+
+                  return (
+                    <button
+                      key={item.action}
+                      className="w-full text-left px-3 py-1.5 flex items-center justify-between transition-colors"
+                      style={{
+                        fontSize: 12,
+                        color: item.disabled ? "#666" : undefined,
+                        cursor: item.disabled ? "default" : "pointer",
+                      }}
+                      disabled={item.disabled}
+                      onMouseEnter={(e) => {
+                        if (!item.disabled) e.currentTarget.style.background = "#3a3a3a";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "transparent";
+                      }}
+                      onClick={() => {
+                        if (!item.disabled) {
+                          runCommand(item.action);
+                          setOpenMenu(null);
+                        }
+                      }}
+                    >
+                      <span className={item.disabled ? "text-gray-600" : "text-gray-300"}>
+                        {item.label}
+                      </span>
+                      {item.shortcut && (
+                        <span
+                          className="ml-6 text-gray-500"
+                          style={{ fontSize: 10 }}
+                        >
+                          {item.shortcut}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

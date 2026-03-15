@@ -105,16 +105,17 @@ class PersistenceService {
     for (const src of snapshot.sources ?? []) {
       if (src.url && !src.url.startsWith("blob:")) {
         // url contains relative path like "audio/recording-1.wav"
+        const relPath = src.url
         try {
-          const blobUrl = await adapter.loadAudioFile(handle, src.url)
-          // Update the source with a real blob: URL
+          const blobUrl = await adapter.loadAudioFile(handle, relPath)
+          // Update the source with a real blob: URL and preserve relativePath
           useStudioStore.setState((state) => ({
             sources: state.sources.map((s) =>
-              s.id === src.id ? { ...s, url: blobUrl } : s,
+              s.id === src.id ? { ...s, url: blobUrl, relativePath: relPath } : s,
             ),
           }))
         } catch {
-          console.warn(`Could not load audio file: ${src.url}`)
+          console.warn(`Could not load audio file: ${relPath}`)
         }
       }
     }
@@ -211,7 +212,12 @@ class PersistenceService {
       tracks: state.tracks,
       clips: state.clips,
       mixerChannels: state.mixerChannels,
-      sources: state.sources.map((s) => ({ ...s, file: undefined })),
+      sources: state.sources.map((s) => ({
+        ...s,
+        file: undefined,
+        // Persist the relative path as the url so it survives reload
+        url: s.relativePath || s.url,
+      })),
       effects: state.effects,
       markers: state.markers,
       snapToGrid: state.snapToGrid,
