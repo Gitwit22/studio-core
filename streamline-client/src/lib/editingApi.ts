@@ -194,7 +194,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
 export const assetsApi = {
   async getAll(): Promise<Asset[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/assets`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/assets`, {}, { allowNonOk: true });
       if (!response.ok) {
         return [];
       }
@@ -208,7 +208,7 @@ export const assetsApi = {
 
   async getById(id: string): Promise<Asset | null> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/assets/${id}`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/assets/${id}`, {}, { allowNonOk: true });
       if (!response.ok) {
         return null;
       }
@@ -276,7 +276,7 @@ export const assetsApi = {
 
         xhr.addEventListener('error', () => reject(new Error('Upload failed')));
 
-        xhr.open('POST', `${API_BASE}/editing/assets/upload`);
+        xhr.open('POST', `${API_BASE}/api/editing/assets/upload`);
         xhr.setRequestHeader('Authorization', `Bearer ${bearer.token}`);
         xhr.send(formData);
       };
@@ -287,7 +287,7 @@ export const assetsApi = {
 
   async delete(id: string): Promise<void> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/assets/${id}`, {
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/assets/${id}`, {
         method: 'DELETE',
       }, { allowNonOk: true });
       if (!response.ok) {
@@ -308,7 +308,7 @@ export const assetsApi = {
 export const recordingsApi = {
   async getAll(): Promise<Recording[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/list`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/list`, {}, { allowNonOk: true });
       if (!response.ok) {
         return [];
       }
@@ -327,7 +327,7 @@ export const recordingsApi = {
 
   async getById(id: string): Promise<Recording | null> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/recordings/${id}`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/recordings/${id}`, {}, { allowNonOk: true });
       if (!response.ok) {
         return null;
       }
@@ -341,7 +341,7 @@ export const recordingsApi = {
 
   async convertToAsset(recordingId: string): Promise<Asset> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/assets/from-recording`, {
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/assets/from-recording`, {
         method: 'POST',
         body: JSON.stringify({ recordingId }),
       }, { allowNonOk: true });
@@ -355,7 +355,7 @@ export const recordingsApi = {
 
   async delete(id: string): Promise<void> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/assets/${id}`, { method: 'DELETE' }, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/assets/${id}`, { method: 'DELETE' }, { allowNonOk: true });
       if (!response.ok) {
         throw new Error('Failed to delete recording');
       }
@@ -374,7 +374,7 @@ export const recordingsApi = {
 export const projectsApi = {
   async getAll(): Promise<Project[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/projects`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/projects`, {}, { allowNonOk: true });
       if (!response.ok) {
         return [];
       }
@@ -388,7 +388,7 @@ export const projectsApi = {
 
   async getById(id: string): Promise<Project | null> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${id}`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/projects/${id}`, {}, { allowNonOk: true });
       if (!response.ok) {
         return null;
       }
@@ -402,7 +402,7 @@ export const projectsApi = {
 
   async create(data: { name: string; assetId?: string }): Promise<Project> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/projects`, {
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/projects`, {
         method: 'POST',
         body: JSON.stringify(data),
       }, { allowNonOk: true });
@@ -419,7 +419,7 @@ export const projectsApi = {
 
   async update(id: string, data: Partial<Project>): Promise<Project> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${id}`, {
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/projects/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(data),
       }, { allowNonOk: true });
@@ -437,7 +437,7 @@ export const projectsApi = {
       if (tracks) {
         body.tracks = tracks;
       }
-      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${id}/timeline`, {
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/projects/${id}/timeline`, {
         method: 'PUT',
         body: JSON.stringify(body),
       }, { allowNonOk: true });
@@ -454,7 +454,7 @@ export const projectsApi = {
 
   async delete(id: string): Promise<void> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${id}`, { method: 'DELETE' }, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/projects/${id}`, { method: 'DELETE' }, { allowNonOk: true });
       if (!response.ok) {
         throw new Error('Failed to delete project');
       }
@@ -467,7 +467,7 @@ export const projectsApi = {
 
   async duplicate(id: string): Promise<Project> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${id}/duplicate`, {
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/projects/${id}/duplicate`, {
         method: 'POST',
       }, { allowNonOk: true });
       if (!response.ok) {
@@ -489,7 +489,7 @@ export const projectsApi = {
 export const exportApi = {
   async start(projectId: string, settings: ExportSettings): Promise<ExportJob> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/export`, {
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/export`, {
         method: 'POST',
         body: JSON.stringify({ projectId, settings }),
       }, { allowNonOk: true });
@@ -506,7 +506,7 @@ export const exportApi = {
 
   async getStatus(exportId: string): Promise<ExportJob> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/exports/${exportId}`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/exports/${exportId}`, {}, { allowNonOk: true });
       return handleResponse<ExportJob>(response);
     } catch (error) {
       if (isUnauthorizedError(error)) throw error;
@@ -549,7 +549,7 @@ export const exportApi = {
 
   async cancel(exportId: string): Promise<void> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/exports/${exportId}/cancel`, {
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/exports/${exportId}/cancel`, {
         method: 'POST',
       }, { allowNonOk: true });
       if (!response.ok) {
@@ -570,7 +570,7 @@ export const exportApi = {
 export const planInfoApi = {
   async get(): Promise<EditingPlanInfo | null> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/plan-info`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/plan-info`, {}, { allowNonOk: true });
       if (!response.ok) return null;
       return handleResponse<EditingPlanInfo>(response);
     } catch (error) {
@@ -588,7 +588,7 @@ export const planInfoApi = {
 export const processingApi = {
   async getJob(jobId: string): Promise<ProcessingJob | null> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/processing/${jobId}`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/processing/${jobId}`, {}, { allowNonOk: true });
       if (!response.ok) return null;
       return handleResponse<ProcessingJob>(response);
     } catch (error) {
@@ -600,7 +600,7 @@ export const processingApi = {
 
   async listForProject(projectId: string): Promise<ProcessingJob[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/projects/${projectId}/processing`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/projects/${projectId}/processing`, {}, { allowNonOk: true });
       if (!response.ok) return [];
       return handleResponse<ProcessingJob[]>(response);
     } catch (error) {
@@ -633,7 +633,7 @@ export type ContentItem = {
 export const contentItemsApi = {
   async list(): Promise<ContentItem[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/editing/content-items`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/editing/content-items`, {}, { allowNonOk: true });
       if (!response.ok) return [];
       const data = await handleResponse<{ items: ContentItem[] }>(response);
       return data.items;
@@ -645,7 +645,7 @@ export const contentItemsApi = {
   },
 
   async addFromRecording(recordingId: string): Promise<ContentItem> {
-    const response = await apiFetchAuth(`${API_BASE}/editing/content-items`, {
+    const response = await apiFetchAuth(`${API_BASE}/api/editing/content-items`, {
       method: 'POST',
       body: JSON.stringify({ recordingId }),
     }, { allowNonOk: true });
@@ -657,7 +657,7 @@ export const contentItemsApi = {
   },
 
   async remove(id: string): Promise<void> {
-    const response = await apiFetchAuth(`${API_BASE}/editing/content-items/${id}`, {
+    const response = await apiFetchAuth(`${API_BASE}/api/editing/content-items/${id}`, {
       method: 'DELETE',
     }, { allowNonOk: true });
     if (!response.ok) {
@@ -736,7 +736,7 @@ export const myContentApi = {
   /** List user's saved videos */
   async list(): Promise<SavedVideo[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/my-content`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/my-content`, {}, { allowNonOk: true });
       if (!response.ok) return [];
       return handleResponse<SavedVideo[]>(response);
     } catch (error) {
@@ -748,7 +748,7 @@ export const myContentApi = {
 
   /** Delete a saved video */
   async remove(id: string): Promise<void> {
-    const response = await apiFetchAuth(`${API_BASE}/my-content/${encodeURIComponent(id)}`, {
+    const response = await apiFetchAuth(`${API_BASE}/api/my-content/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }, { allowNonOk: true });
     if (!response.ok) throw new Error('Failed to delete saved video');
@@ -756,7 +756,7 @@ export const myContentApi = {
 
   /** Batch create SavedVideos from recording IDs */
   async fromRecordings(recordingIds: string[]): Promise<{ created: SavedVideo[]; errors: any[] }> {
-    const response = await apiFetchAuth(`${API_BASE}/my-content/from-recordings`, {
+    const response = await apiFetchAuth(`${API_BASE}/api/my-content/from-recordings`, {
       method: 'POST',
       body: JSON.stringify({ recordingIds }),
     }, { allowNonOk: true });
@@ -776,7 +776,7 @@ export const myContentApi = {
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API_BASE}/my-content/upload`);
+      xhr.open('POST', `${API_BASE}/api/my-content/upload`);
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
       if (onProgress) {
@@ -806,7 +806,7 @@ export const recordingsLibraryApi = {
   /** List ready platform recordings for import into My Content */
   async list(): Promise<LibraryRecording[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/recordings/library`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/recordings/library`, {}, { allowNonOk: true });
       if (!response.ok) return [];
       return handleResponse<LibraryRecording[]>(response);
     } catch (error) {
@@ -829,7 +829,7 @@ export const projectAssetsApi = {
     sourceInMs?: number;
     sourceOutMs?: number;
   }): Promise<ProjectAssetRecord> {
-    const response = await apiFetchAuth(`${API_BASE}/projects/${encodeURIComponent(projectId)}/assets`, {
+    const response = await apiFetchAuth(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/assets`, {
       method: 'POST',
       body: JSON.stringify(data),
     }, { allowNonOk: true });
@@ -843,7 +843,7 @@ export const projectAssetsApi = {
   /** List all project assets for a project */
   async list(projectId: string): Promise<ProjectAssetRecord[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/projects/${encodeURIComponent(projectId)}/assets`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/assets`, {}, { allowNonOk: true });
       if (!response.ok) return [];
       const data = await handleResponse<{ assets: ProjectAssetRecord[] }>(response);
       return data.assets;
@@ -857,7 +857,7 @@ export const projectAssetsApi = {
   /** Detach an asset from a project */
   async remove(projectId: string, assetId: string): Promise<void> {
     const response = await apiFetchAuth(
-      `${API_BASE}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+      `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
       { method: 'DELETE' },
       { allowNonOk: true },
     );
@@ -875,7 +875,7 @@ export const timelineClipsApi = {
     projectAssetId: string;
     startMs?: number;
   }): Promise<{ videoClip: TimelineClipRecord; audioClip: TimelineClipRecord; linkGroupId: string }> {
-    const response = await apiFetchAuth(`${API_BASE}/projects/${encodeURIComponent(projectId)}/timeline/clips`, {
+    const response = await apiFetchAuth(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/timeline/clips`, {
       method: 'POST',
       body: JSON.stringify(data),
     }, { allowNonOk: true });
@@ -889,7 +889,7 @@ export const timelineClipsApi = {
   /** List all timeline clips for a project */
   async list(projectId: string): Promise<TimelineClipRecord[]> {
     try {
-      const response = await apiFetchAuth(`${API_BASE}/projects/${encodeURIComponent(projectId)}/timeline/clips`, {}, { allowNonOk: true });
+      const response = await apiFetchAuth(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/timeline/clips`, {}, { allowNonOk: true });
       if (!response.ok) return [];
       const data = await handleResponse<{ clips: TimelineClipRecord[] }>(response);
       return data.clips;
@@ -911,7 +911,7 @@ export const timelineClipsApi = {
     unlink?: boolean;
   }): Promise<void> {
     const response = await apiFetchAuth(
-      `${API_BASE}/projects/${encodeURIComponent(projectId)}/timeline/clips/${encodeURIComponent(clipId)}`,
+      `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/timeline/clips/${encodeURIComponent(clipId)}`,
       { method: 'PATCH', body: JSON.stringify(data) },
       { allowNonOk: true },
     );
@@ -921,7 +921,7 @@ export const timelineClipsApi = {
   /** Delete a timeline clip (and linked partner if linked) */
   async remove(projectId: string, clipId: string): Promise<void> {
     const response = await apiFetchAuth(
-      `${API_BASE}/projects/${encodeURIComponent(projectId)}/timeline/clips/${encodeURIComponent(clipId)}`,
+      `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/timeline/clips/${encodeURIComponent(clipId)}`,
       { method: 'DELETE' },
       { allowNonOk: true },
     );

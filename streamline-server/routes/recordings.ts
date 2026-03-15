@@ -41,7 +41,6 @@ import { upsertUsageMonthlyOverageTotals } from "../lib/usageOveragesWriter";
 import { deleteFiles, deletePrefix } from "../lib/storageClient";
 import { resolveCompositeLayoutFromRoom } from "../lib/roomLayout";
 import { deleteRecordingStorage } from "../lib/recordingDeletion";
-import { attachRecordingToProject } from "../lib/projectManager";
 import { createSavedVideoFromRecording } from "./myContent";
 
 const router = Router();
@@ -1630,24 +1629,6 @@ router.post(
               updatedAt: new Date(),
             });
             console.log(`[recordings/stop] ✅ File confirmed via head-check: ${objectKey} (${size} bytes)`);
-
-            // Auto-attach recording to a project
-            try {
-              const roomName = typeof data.roomName === "string" ? data.roomName : "";
-              const durationSec = typeof data.durationSeconds === "number" ? data.durationSeconds : null;
-              const result = await attachRecordingToProject({
-                userId: uid,
-                recordingId,
-                roomId: roomId || "",
-                roomName,
-                objectKey,
-                fileSize: size,
-                durationSeconds: durationSec,
-              });
-              console.log(`[recordings/stop] Recording attached to project ${result.projectId}`);
-            } catch (projErr: any) {
-              console.error("[recordings/stop] failed to attach recording to project:", projErr?.message, projErr?.stack?.slice(0, 500));
-            }
 
             // Auto-create saved_video so recording appears in My Content
             try {

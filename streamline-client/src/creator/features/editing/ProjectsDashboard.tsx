@@ -56,6 +56,7 @@ export default function ProjectsDashboard() {
       nav(`/projects/${newProj.id}`);
     } catch (err) {
       console.error("Failed to create project:", err);
+      alert("Failed to create project. Please try again.");
     }
   };
 
@@ -129,7 +130,7 @@ export default function ProjectsDashboard() {
             </p>
           </div>
           <button
-            onClick={() => nav('/join')}
+            onClick={() => nav('/content')}
             style={{
               fontSize: '0.875rem', padding: '0.75rem 1.5rem',
               background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(220,38,38,0.4)',
@@ -137,7 +138,7 @@ export default function ProjectsDashboard() {
               transition: 'all 0.3s ease', fontWeight: '500'
             }}
           >
-            ← Back
+            ← My Content
           </button>
         </div>
 
@@ -154,20 +155,6 @@ export default function ProjectsDashboard() {
             }}
           >
             ➕ New Project
-          </button>
-          <button
-            onClick={() => nav('/content')}
-            style={{
-              padding: '0.875rem 1.75rem',
-              background: 'rgba(99, 102, 241, 0.1)',
-              color: '#818cf8',
-              border: '1px solid rgba(99, 102, 241, 0.4)',
-              borderRadius: '0.75rem',
-              fontWeight: '600', cursor: 'pointer', transition: 'all 0.3s ease',
-              fontSize: '1rem'
-            }}
-          >
-            📚 My Content
           </button>
         </div>
 

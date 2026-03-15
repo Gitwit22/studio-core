@@ -36,7 +36,7 @@ export function useEditingFeatures() {
         if (cancelled) return;
         setPlanId(pid);
 
-        const resp = await apiFetchAuth(`${API_BASE}/plans/${encodeURIComponent(pid)}`, {}, { allowNonOk: true });
+        const resp = await apiFetchAuth(`${API_BASE}/api/plans/${encodeURIComponent(pid)}`, {}, { allowNonOk: true });
         if (!resp.ok) {
           if (!cancelled) setFeatures(FALLBACK_FEATURES);
           return;

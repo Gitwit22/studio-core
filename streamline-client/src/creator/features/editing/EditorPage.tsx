@@ -335,7 +335,7 @@ export default function EditorPage() {
 
           try {
             const layeredRes = await apiFetchAuth(
-              `${API_BASE}/projects/${projectId}`,
+              `${API_BASE}/api/projects/${projectId}`,
               {},
               { allowNonOk: true },
             );

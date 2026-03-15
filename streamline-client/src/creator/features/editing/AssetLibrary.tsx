@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { editingApi, type Recording } from "../../../lib/editingApi";
 import VideoUploadModal from "../../components/VideoUploadModal";
-import AddVideoModal from "./AddVideoModal";
 import { useEffectiveEntitlements } from "../../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../../hooks/useFeatureAccess";
 
@@ -20,22 +19,6 @@ export default function AssetLibrary() {
   const [filter, setFilter] = useState<'all' | 'stream' | 'upload' | 'recordings'>('all');
   const [search, setSearch] = useState("");
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showAddVideoModal, setShowAddVideoModal] = useState(false);
-  const [creatingProject, setCreatingProject] = useState(false);
-
-  const handleStartNewProject = async () => {
-    if (creatingProject) return;
-    setCreatingProject(true);
-    try {
-      const proj = await editingApi.createProject({ name: "Untitled Project" });
-      nav(`/editing/editor/${proj.id}`);
-    } catch (err: any) {
-      console.error("Failed to create project:", err);
-      alert(err?.message || "Could not create project.");
-    } finally {
-      setCreatingProject(false);
-    }
-  };
 
   const loadData = async () => {
     const [assetsData, recordingsData] = await Promise.all([
@@ -91,11 +74,6 @@ export default function AssetLibrary() {
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onUploadComplete={handleUploadComplete}
-      />
-      <AddVideoModal
-        isOpen={showAddVideoModal}
-        onClose={() => setShowAddVideoModal(false)}
-        onAdded={() => loadData()}
       />
 
       <div style={{
@@ -220,67 +198,6 @@ export default function AssetLibrary() {
               }}
             >
               ⬆️ Upload Video
-            </button>
-          )}
-          {canMyContentRecordings && (
-            <button
-              onClick={() => setShowAddVideoModal(true)}
-              style={{
-                padding: '0.75rem 1.5rem',
-                background: 'rgba(239, 68, 68, 0.1)',
-                color: '#ef4444',
-                border: '1px solid rgba(220, 38, 38, 0.4)',
-                borderRadius: '0.75rem',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(239, 68, 68, 0.2)';
-                target.style.borderColor = 'rgba(239, 68, 68, 0.8)';
-                target.style.transform = 'translateY(-2px)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'rgba(239, 68, 68, 0.1)';
-                target.style.borderColor = 'rgba(220, 38, 38, 0.4)';
-                target.style.transform = 'translateY(0)';
-              }}
-            >
-              🎬 Add Video
-            </button>
-          )}
-          {canEditor && (
-            <button
-              onClick={handleStartNewProject}
-              disabled={creatingProject}
-              style={{
-                padding: '0.75rem 1.5rem',
-                background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '0.75rem',
-                fontWeight: '600',
-                cursor: creatingProject ? 'not-allowed' : 'pointer',
-                transition: 'all 0.3s ease',
-                boxShadow: '0 8px 16px rgba(79, 70, 229, 0.2)',
-                opacity: creatingProject ? 0.6 : 1,
-              }}
-              onMouseEnter={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, #4338ca, #4f46e5)';
-                target.style.boxShadow = '0 12px 24px rgba(79, 70, 229, 0.3)';
-                target.style.transform = 'translateY(-2px)';
-              }}
-              onMouseLeave={(e) => {
-                const target = e.target as HTMLButtonElement;
-                target.style.background = 'linear-gradient(135deg, #4f46e5, #6366f1)';
-                target.style.boxShadow = '0 8px 16px rgba(79, 70, 229, 0.2)';
-                target.style.transform = 'translateY(0)';
-              }}
-            >
-              {creatingProject ? '⏳ Creating…' : '✨ Start New Project'}
             </button>
           )}
           {canEditor && (
@@ -433,13 +350,6 @@ export default function AssetLibrary() {
                   key={recording.id}
                   recording={recording}
                   id={`recording-${recording.id}`}
-                  onCreateProject={() => {
-                    if (!canEditor) {
-                      alert("Editor is currently disabled.");
-                      return;
-                    }
-                    nav(`/editing/editor/new?recordingId=${recording.id}`);
-                  }}
                 />
               ))}
             </div>
@@ -503,13 +413,6 @@ export default function AssetLibrary() {
                   <AssetCard
                     key={asset.id}
                     asset={asset}
-                    onCreateProject={() => {
-                      if (!canEditor) {
-                        alert("Editor is currently disabled.");
-                        return;
-                      }
-                      nav(`/editing/editor/new?assetId=${asset.id}`);
-                    }}
                   />
                 ))}
               </div>
@@ -525,11 +428,9 @@ export default function AssetLibrary() {
 function RecordingCard({
   recording,
   id,
-  onCreateProject,
 }: {
   recording: Recording;
   id: string;
-  onCreateProject: () => void;
 }) {
   const mins = Math.floor(recording.duration / 60);
   const secs = recording.duration % 60;
@@ -625,35 +526,19 @@ function RecordingCard({
             {mins}:{String(secs).padStart(2, '0')}
           </span>
         </div>
-        <button
-          onClick={onCreateProject}
-          style={{
-            marginTop: 'auto',
-            padding: '0.75rem',
-            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '0.5rem',
-            fontSize: '0.75rem',
-            fontWeight: '700',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease'
-          }}
-          onMouseEnter={(e) => {
-            const target = e.target as HTMLButtonElement;
-            target.style.background = 'linear-gradient(135deg, #16a34a, #15803d)';
-            target.style.boxShadow = '0 8px 16px rgba(34, 197, 94, 0.3)';
-            target.style.transform = 'translateY(-2px)';
-          }}
-          onMouseLeave={(e) => {
-            const target = e.target as HTMLButtonElement;
-            target.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
-            target.style.boxShadow = 'none';
-            target.style.transform = 'translateY(0)';
-          }}
-        >
-          ✂️ Edit This
-        </button>
+        <div style={{
+          marginTop: 'auto',
+          padding: '0.5rem 0.75rem',
+          background: 'rgba(34, 197, 94, 0.1)',
+          border: '1px solid rgba(34, 197, 94, 0.3)',
+          borderRadius: '0.5rem',
+          fontSize: '0.75rem',
+          fontWeight: '600',
+          color: '#22c55e',
+          textAlign: 'center'
+        }}>
+          ✓ Ready to use in projects
+        </div>
       </div>
       <style>{`
         @keyframes pulse {
@@ -665,7 +550,7 @@ function RecordingCard({
   );
 }
 
-function AssetCard({ asset, onCreateProject }: any) {
+function AssetCard({ asset }: { asset: any }) {
   const mins = Math.floor(asset.duration / 60);
   const secs = asset.duration % 60;
 
@@ -749,35 +634,20 @@ function AssetCard({ asset, onCreateProject }: any) {
             {mins}:{String(secs).padStart(2, '0')}
           </span>
         </div>
-        <button
-          onClick={onCreateProject}
-          style={{
-            marginTop: 'auto',
-            padding: '0.75rem',
-            background: 'linear-gradient(135deg, #dc2626, #ef4444)',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '0.5rem',
-            fontSize: '0.75rem',
-            fontWeight: '700',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease'
-          }}
-          onMouseEnter={(e) => {
-            const target = e.target as HTMLButtonElement;
-            target.style.background = 'linear-gradient(135deg, #b91c1c, #dc2626)';
-            target.style.boxShadow = '0 8px 16px rgba(220, 38, 38, 0.3)';
-            target.style.transform = 'translateY(-2px)';
-          }}
-          onMouseLeave={(e) => {
-            const target = e.target as HTMLButtonElement;
-            target.style.background = 'linear-gradient(135deg, #dc2626, #ef4444)';
-            target.style.boxShadow = 'none';
-            target.style.transform = 'translateY(0)';
-          }}
-        >
-          📦 Create Project
-        </button>
+        <div style={{
+          marginTop: 'auto',
+          padding: '0.5rem 0.75rem',
+          background: 'rgba(255, 255, 255, 0.05)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: '0.5rem',
+          fontSize: '0.75rem',
+          fontWeight: '600',
+          color: '#9ca3af',
+          textAlign: 'center',
+          textTransform: 'capitalize'
+        }}>
+          {asset.source === 'stream' ? '📡 From stream' : '⬆️ Uploaded'}
+        </div>
       </div>
     </div>
   );

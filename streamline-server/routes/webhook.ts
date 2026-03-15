@@ -19,7 +19,6 @@ import { firestore as db } from "../firebaseAdmin";
 import { stripe } from "../lib/stripe";
 import { getCurrentMonthKey } from "../lib/usageTracker";
 import { FieldValue } from "firebase-admin/firestore";
-import { attachRecordingToProject } from "../lib/projectManager";
 import { createSavedVideoFromRecording } from "./myContent";
 import {
   S3Client,
@@ -1315,45 +1314,29 @@ router.post("/livekit", express.raw({ type: "*/*" }), async (req, res) => {
       }
     }
 
-    // Auto-attach recording to a project when it becomes ready
+    // Auto-create saved_video so recording appears in My Content
     if (finalStatus === "ready" && normalizedObjectKey) {
       try {
         const recUserId = typeof recordingData.userId === "string" ? recordingData.userId : "";
-        const recRoomId = typeof recordingData.roomId === "string" ? recordingData.roomId : "";
         const recRoomName = typeof recordingData.roomName === "string" ? recordingData.roomName : "";
         const recDuration = typeof recordingData.durationSeconds === "number" ? recordingData.durationSeconds : null;
         if (recUserId) {
-          const result = await attachRecordingToProject({
+          const videoUrl = typeof recordingData.videoUrl === "string" ? recordingData.videoUrl : "";
+          const thumbUrl = typeof recordingData.thumbnailUrl === "string" ? recordingData.thumbnailUrl : null;
+          const durationMs = recDuration ? Math.round(recDuration * 1000) : 0;
+          await createSavedVideoFromRecording({
             userId: recUserId,
             recordingId,
-            roomId: recRoomId,
-            roomName: recRoomName,
-            objectKey: normalizedObjectKey,
-            fileSize,
-            durationSeconds: recDuration,
+            title: recRoomName || recordingData.title || "Untitled Recording",
+            playbackUrl: videoUrl,
+            thumbnailUrl: thumbUrl,
+            durationMs,
+            fileSize: typeof fileSize === "number" ? fileSize : undefined,
           });
-          console.log(`[livekit-webhook] Recording attached to project ${result.projectId}`);
-
-          // Auto-create saved_video so recording appears in My Content
-          try {
-            const videoUrl = typeof recordingData.videoUrl === "string" ? recordingData.videoUrl : "";
-            const thumbUrl = typeof recordingData.thumbnailUrl === "string" ? recordingData.thumbnailUrl : null;
-            const durationMs = recDuration ? Math.round(recDuration * 1000) : 0;
-            await createSavedVideoFromRecording({
-              userId: recUserId,
-              recordingId,
-              title: recRoomName || recordingData.title || "Untitled Recording",
-              playbackUrl: videoUrl,
-              thumbnailUrl: thumbUrl,
-              durationMs,
-              fileSize: typeof fileSize === "number" ? fileSize : undefined,
-            });
-          } catch (savedErr: any) {
-            console.warn("[livekit-webhook] failed to auto-create saved_video:", savedErr?.message);
-          }
+          console.log(`[livekit-webhook] Saved video created for recording ${recordingId}`);
         }
-      } catch (projErr: any) {
-        console.error("[livekit-webhook] failed to attach recording to project:", projErr?.message, projErr?.stack?.slice(0, 500));
+      } catch (savedErr: any) {
+        console.warn("[livekit-webhook] failed to auto-create saved_video:", savedErr?.message);
       }
     }
 
