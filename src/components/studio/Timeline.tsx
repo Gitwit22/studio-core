@@ -79,15 +79,17 @@ function useWaveformPeaks() {
   const [statusMap, setStatusMap] = useState<Record<string, WaveformStatus>>({});
 
   const loadPeaks = useCallback(async (sourceId: string, file?: File, url?: string) => {
-    // Check cache first
-    setStatusMap((prev) => ({ ...prev, [sourceId]: "analyzing" }));
     try {
+      // Check cache before setting status to avoid redundant state change
       const cached = await getCachedPeaks(sourceId);
       if (cached) {
         setPeaksMap((prev) => ({ ...prev, [sourceId]: cached }));
         setStatusMap((prev) => ({ ...prev, [sourceId]: "ready" }));
         return;
       }
+
+      // Cache miss — show analyzing state while generating
+      setStatusMap((prev) => ({ ...prev, [sourceId]: "analyzing" }));
 
       // Generate from file or URL
       let peaks: WaveformPeaks | null = null;
@@ -109,10 +111,12 @@ function useWaveformPeaks() {
     }
   }, []);
 
-  // Process new sources that don't have peaks yet
+  // Process new sources that don't have peaks yet.
+  // Sources in "error" state are skipped to prevent infinite retry loops;
+  // they will be retried when the source list changes (e.g. re-import).
   useEffect(() => {
     for (const source of sources) {
-      if (!peaksMap[source.id] && statusMap[source.id] !== "analyzing") {
+      if (!peaksMap[source.id] && statusMap[source.id] !== "analyzing" && statusMap[source.id] !== "error") {
         loadPeaks(source.id, source.file, source.url);
       }
     }
