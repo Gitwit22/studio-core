@@ -30,6 +30,7 @@ interface StudioActions {
   setPlayhead: (position: number) => void
   setBpm: (bpm: number) => void
   setZoom: (zoom: number) => void
+  setTrackLaneHeight: (h: number) => void
   setProjectName: (name: string) => void
 
   // Track actions
@@ -126,6 +127,7 @@ const initialState: StudioState = {
     browser: false,
     export: false,
   },
+  trackLaneHeight: 80,
   undoStack: [],
   redoStack: [],
   clipboard: null,
@@ -147,6 +149,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
   setPlayhead: (position) => set({ playhead: position }),
   setBpm: (bpm) => set({ bpm, isDirty: true }),
   setZoom: (zoom) => set({ zoom }),
+  setTrackLaneHeight: (h: number) => set({ trackLaneHeight: h }),
   setProjectName: (name) => set({ projectName: name, isDirty: true }),
 
   // Tracks – returns the new track id, also creates linked mixer channel

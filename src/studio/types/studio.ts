@@ -199,6 +199,7 @@ export interface StudioState {
   effects: EffectsState
   markers: TimelineMarker[]
   snapToGrid: boolean
+  trackLaneHeight: number   // pixels per track lane (40 = compact, 80 = standard, 120 = large)
   undoStack: UndoSnapshot[]
   redoStack: UndoSnapshot[]
   clipboard: Clip | null
