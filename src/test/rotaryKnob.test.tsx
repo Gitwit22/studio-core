@@ -21,7 +21,7 @@ describe("RotaryKnob", () => {
     // Simulate mousedown
     fireEvent.mouseDown(knob, { clientY: 200 });
 
-    // Simulate mousemove - move 3px up (delta = 3 * 0.5 = 1.5 → rounds to 52)
+    // Simulate mousemove - move 3px up, delta = 1.5, value = Math.round(50 + 1.5) = 52
     fireEvent.mouseMove(window, { clientY: 197 });
 
     expect(onChange).toHaveBeenCalled();
@@ -36,7 +36,7 @@ describe("RotaryKnob", () => {
 
     // Start drag at value=1, move down enough to go below 0
     fireEvent.mouseDown(knob, { clientY: 100 });
-    fireEvent.mouseMove(window, { clientY: 110 }); // delta = (100 - 110) * 0.5 = -5, newValue = Math.round(max(0, 1 + (-5))) = 0
+    fireEvent.mouseMove(window, { clientY: 110 }); // delta = -5, clamped to 0
 
     expect(onChange).toHaveBeenCalledWith(0);
   });
@@ -48,7 +48,7 @@ describe("RotaryKnob", () => {
 
     // Start drag at value=99, move up enough to exceed 100
     fireEvent.mouseDown(knob, { clientY: 200 });
-    fireEvent.mouseMove(window, { clientY: 190 }); // delta = (200 - 190) * 0.5 = 5, newValue = Math.round(min(100, 99 + 5)) = 100
+    fireEvent.mouseMove(window, { clientY: 190 }); // delta = 5, clamped to 100
 
     expect(onChange).toHaveBeenCalledWith(100);
   });
