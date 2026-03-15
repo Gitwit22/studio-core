@@ -20,6 +20,7 @@ import {
   ConfirmDeleteModal,
   UnsavedChangesModal,
 } from "@/components/studio/StudioModals";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import "@/studio/commands/transportCommands";
 import { registerStudioShortcuts } from "@/studio/registerShortcuts";
 import { useStudioStore } from "@/studio/engine/studioStore";
@@ -42,11 +43,19 @@ const Studio = () => {
       <ConsoleBar />
 
       {/* Main workspace */}
-      <div className="flex flex-1 overflow-hidden">
-        <ChannelStrips />
-        <Timeline />
-        <FXRack />
-      </div>
+      <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
+        <ResizablePanel defaultSize={18} minSize={10} maxSize={35}>
+          <ChannelStrips />
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={62} minSize={30}>
+          <Timeline />
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={20} minSize={10} maxSize={35}>
+          <FXRack />
+        </ResizablePanel>
+      </ResizablePanelGroup>
 
       {/* Bottom: Transport Controls */}
       <TransportControls />
