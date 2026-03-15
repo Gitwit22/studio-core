@@ -85,11 +85,9 @@ export default function Join() {
   const canMyContent = !!access?.myContent?.allowed;
   const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
 
-  const myContentTarget = canProjects
-    ? "/projects"
-    : (canContentLibrary || canMyContentRecordings)
-      ? "/content"
-      : null;
+  const myContentTarget = (canContentLibrary || canMyContentRecordings)
+    ? "/content"
+    : null;
   const showMyContentButton = !!myContentTarget && canMyContent;
 
   const [displayName, setDisplayName] = useState(() => {

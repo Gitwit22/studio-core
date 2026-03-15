@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { editingApi, type Recording } from "../../../lib/editingApi";
-import VideoUploadModal from "../../components/VideoUploadModal";
+import { createProject } from "../../../lib/projectsApi";
 import { useEffectiveEntitlements } from "../../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../../hooks/useFeatureAccess";
 
@@ -18,7 +18,8 @@ export default function AssetLibrary() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'stream' | 'upload' | 'recordings'>('all');
   const [search, setSearch] = useState("");
-  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [projectName, setProjectName] = useState("");
 
   const loadData = async () => {
     const [assetsData, recordingsData] = await Promise.all([
@@ -30,11 +31,17 @@ export default function AssetLibrary() {
     setLoading(false);
   };
 
-  const handleUploadComplete = (assetId: string) => {
-    console.log('✅ Upload complete:', assetId);
-    // Reload assets to show the new upload
-    loadData();
-    setFilter('upload'); // Switch to uploads tab
+  const handleCreateProject = async () => {
+    if (!projectName.trim()) return;
+    try {
+      const newProj = await createProject(projectName.trim());
+      setShowCreateModal(false);
+      setProjectName("");
+      nav(`/editing/editor/${newProj.id}`);
+    } catch (err) {
+      console.error("Failed to create project:", err);
+      alert("Failed to create project. Please try again.");
+    }
   };
 
   useEffect(() => {
@@ -70,11 +77,64 @@ export default function AssetLibrary() {
 
   return (
     <>
-      <VideoUploadModal
-        isOpen={showUploadModal}
-        onClose={() => setShowUploadModal(false)}
-        onUploadComplete={handleUploadComplete}
-      />
+      {/* Create Project Modal */}
+      {showCreateModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'linear-gradient(135deg, #1f2937, #111827)',
+              border: '1px solid rgba(220, 38, 38, 0.4)',
+              borderRadius: '1rem', padding: '2rem', width: '100%', maxWidth: 420,
+              boxShadow: '0 24px 48px rgba(0,0,0,0.5)'
+            }}
+          >
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1.5rem', color: '#fff' }}>
+              🎬 New Project
+            </h2>
+            <input
+              autoFocus
+              placeholder="Project name"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+              style={{
+                width: '100%', padding: '0.75rem 1rem',
+                background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '0.5rem', color: '#fff', fontSize: '1rem', outline: 'none',
+                marginBottom: '1.5rem'
+              }}
+            />
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setShowCreateModal(false); setProjectName(""); }}
+                style={{
+                  padding: '0.625rem 1.25rem', borderRadius: '0.5rem',
+                  background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#9ca3af', cursor: 'pointer', fontWeight: 500
+                }}
+              >Cancel</button>
+              <button
+                onClick={handleCreateProject}
+                disabled={!projectName.trim()}
+                style={{
+                  padding: '0.625rem 1.25rem', borderRadius: '0.5rem',
+                  background: projectName.trim() ? 'linear-gradient(135deg, #dc2626, #ef4444)' : 'rgba(255,255,255,0.1)',
+                  border: 'none', color: '#fff', cursor: projectName.trim() ? 'pointer' : 'not-allowed',
+                  fontWeight: 600
+                }}
+              >Create &amp; Open Timeline</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{
         minHeight: '100vh',
@@ -170,9 +230,9 @@ export default function AssetLibrary() {
           marginBottom: '2rem',
           flexWrap: 'wrap'
         }}>
-          {canAssets && (
+          {canEditor && (
             <button
-              onClick={() => setShowUploadModal(true)}
+              onClick={() => setShowCreateModal(true)}
               style={{
                 padding: '0.75rem 1.5rem',
                 background: 'linear-gradient(135deg, #dc2626, #ef4444)',
@@ -197,7 +257,7 @@ export default function AssetLibrary() {
                 target.style.transform = 'translateY(0)';
               }}
             >
-              ⬆️ Upload Video
+              ➕ New Project
             </button>
           )}
           {canEditor && (
@@ -350,6 +410,16 @@ export default function AssetLibrary() {
                   key={recording.id}
                   recording={recording}
                   id={`recording-${recording.id}`}
+                  onDelete={async () => {
+                    if (!window.confirm(`Delete "${recording.title}"? This will permanently remove the video.`)) return;
+                    try {
+                      await editingApi.deleteRecording(recording.id);
+                      setRecordings((prev) => prev.filter((r) => r.id !== recording.id));
+                    } catch (err) {
+                      console.error('Failed to delete recording:', err);
+                      alert('Failed to delete recording. Please try again.');
+                    }
+                  }}
                 />
               ))}
             </div>
@@ -413,6 +483,16 @@ export default function AssetLibrary() {
                   <AssetCard
                     key={asset.id}
                     asset={asset}
+                    onDelete={async () => {
+                      if (!window.confirm(`Delete "${asset.name}"? This will permanently remove the video.`)) return;
+                      try {
+                        await editingApi.deleteAsset(asset.id);
+                        setAssets((prev) => prev.filter((a) => a.id !== asset.id));
+                      } catch (err) {
+                        console.error('Failed to delete asset:', err);
+                        alert('Failed to delete asset. Please try again.');
+                      }
+                    }}
                   />
                 ))}
               </div>
@@ -428,9 +508,11 @@ export default function AssetLibrary() {
 function RecordingCard({
   recording,
   id,
+  onDelete,
 }: {
   recording: Recording;
   id: string;
+  onDelete: () => void;
 }) {
   const mins = Math.floor(recording.duration / 60);
   const secs = recording.duration % 60;
@@ -526,18 +608,45 @@ function RecordingCard({
             {mins}:{String(secs).padStart(2, '0')}
           </span>
         </div>
-        <div style={{
-          marginTop: 'auto',
-          padding: '0.5rem 0.75rem',
-          background: 'rgba(34, 197, 94, 0.1)',
-          border: '1px solid rgba(34, 197, 94, 0.3)',
-          borderRadius: '0.5rem',
-          fontSize: '0.75rem',
-          fontWeight: '600',
-          color: '#22c55e',
-          textAlign: 'center'
-        }}>
-          ✓ Ready to use in projects
+        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem' }}>
+          <div style={{
+            flex: 1,
+            padding: '0.5rem 0.75rem',
+            background: 'rgba(34, 197, 94, 0.1)',
+            border: '1px solid rgba(34, 197, 94, 0.3)',
+            borderRadius: '0.5rem',
+            fontSize: '0.75rem',
+            fontWeight: '600',
+            color: '#22c55e',
+            textAlign: 'center'
+          }}>
+            ✓ Ready
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            title="Delete recording"
+            style={{
+              padding: '0.5rem 0.75rem',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '0.5rem',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              color: '#ef4444',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+            }}
+          >
+            🗑
+          </button>
         </div>
       </div>
       <style>{`
@@ -550,7 +659,7 @@ function RecordingCard({
   );
 }
 
-function AssetCard({ asset }: { asset: any }) {
+function AssetCard({ asset, onDelete }: { asset: any; onDelete: () => void }) {
   const mins = Math.floor(asset.duration / 60);
   const secs = asset.duration % 60;
 
@@ -634,19 +743,46 @@ function AssetCard({ asset }: { asset: any }) {
             {mins}:{String(secs).padStart(2, '0')}
           </span>
         </div>
-        <div style={{
-          marginTop: 'auto',
-          padding: '0.5rem 0.75rem',
-          background: 'rgba(255, 255, 255, 0.05)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          borderRadius: '0.5rem',
-          fontSize: '0.75rem',
-          fontWeight: '600',
-          color: '#9ca3af',
-          textAlign: 'center',
-          textTransform: 'capitalize'
-        }}>
-          {asset.source === 'stream' ? '📡 From stream' : '⬆️ Uploaded'}
+        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem' }}>
+          <div style={{
+            flex: 1,
+            padding: '0.5rem 0.75rem',
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '0.5rem',
+            fontSize: '0.75rem',
+            fontWeight: '600',
+            color: '#9ca3af',
+            textAlign: 'center',
+            textTransform: 'capitalize'
+          }}>
+            {asset.source === 'stream' ? '📡 From stream' : '⬆️ Uploaded'}
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            title="Delete asset"
+            style={{
+              padding: '0.5rem 0.75rem',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '0.5rem',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              color: '#ef4444',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+            }}
+          >
+            🗑
+          </button>
         </div>
       </div>
     </div>

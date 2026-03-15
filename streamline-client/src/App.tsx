@@ -31,11 +31,9 @@ function App() {
   const canMyContentRecordings = !!access?.myContentRecordings?.allowed;
   const canMyContent = !!access?.myContent?.allowed;
 
-  const myContentTarget = canProjects
-    ? "/projects"
-    : (canContentLibrary || canMyContentRecordings)
-      ? "/content"
-      : null;
+  const myContentTarget = (canContentLibrary || canMyContentRecordings)
+    ? "/content"
+    : null;
 
   useEffect(() => {
     const onUnauthorized = () => {
