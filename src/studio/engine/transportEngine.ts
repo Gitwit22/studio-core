@@ -3,6 +3,7 @@ import { useStudioStore } from "./studioStore"
 import { audioEngine } from "@/audio/AudioEngine"
 import { mixerEngine } from "@/audio/MixerEngine"
 import { Recorder } from "@/audio/Recorder"
+import { persistenceService } from "../persistence"
 
 // ── Internal state ──
 let animationFrame: number | null = null
@@ -140,13 +141,21 @@ export async function recordTransport() {
   }
 
   // Get microphone (dry path — no FX on capture)
-  if (!micStream) {
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    } catch {
-      console.warn("Microphone access denied")
-      return
-    }
+  // Use the armed track's selected input device if available
+  const audioConstraints: MediaTrackConstraints = armedTrack.inputDeviceId
+    ? { deviceId: { exact: armedTrack.inputDeviceId } }
+    : true
+
+  // Always request a fresh stream so device selection takes effect
+  if (micStream) {
+    micStream.getTracks().forEach((t) => t.stop())
+    micStream = null
+  }
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+  } catch {
+    console.warn("Microphone access denied")
+    return
   }
 
   recorder.start(micStream)
@@ -166,7 +175,18 @@ export async function stopRecording() {
   const blob = await recorder.stop()
   if (blob.size === 0) return
 
-  const url = URL.createObjectURL(blob)
+  // Save recording to project folder (or fall back to blob URL)
+  const recordingName = `recording-${Date.now()}.wav`
+  let url: string
+  try {
+    const relativePath = await persistenceService.saveAudio(recordingName, blob)
+    // If saved to disk, load back as blob URL for playback
+    url = relativePath.startsWith("audio/")
+      ? await persistenceService.loadAudio(relativePath)
+      : relativePath
+  } catch {
+    url = URL.createObjectURL(blob)
+  }
 
   // Calculate duration in beats
   const audio = new Audio()
@@ -201,6 +221,10 @@ export async function stopRecording() {
     name: armedTrack.name,
     color: armedTrack.color,
   })
+
+  // Trigger immediate save after recording
+  persistenceService.markDirty()
+  persistenceService.immediateSaveIfDirty()
 }
 
 // ── BPM ──

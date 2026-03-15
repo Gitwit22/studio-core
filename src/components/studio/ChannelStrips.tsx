@@ -1,10 +1,12 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Upload, GripVertical } from "lucide-react";
+import { Upload, GripVertical, Mic } from "lucide-react";
 import RotaryKnob from "./RotaryKnob";
 import VUMeter from "./VUMeter";
 import { useStudioStore } from "@/studio/engine/studioStore";
 import { mixerEngine } from "@/audio/MixerEngine";
-import { trackTypeConfig, trackColorPalette } from "@/studio/types/studio";
+import { trackTypeConfig } from "@/studio/types/studio";
+import { useAudioInputDevices } from "@/hooks/use-audio-inputs";
+import { persistenceService } from "@/studio/persistence";
 
 const ChannelStrips = () => {
   const tracks = useStudioStore((s) => s.tracks);
@@ -23,6 +25,9 @@ const ChannelStrips = () => {
   const importTargetTrackRef = useRef<string | null>(null);
 
   const audioActive = isPlaying || isRecording;
+
+  // Enumerate available mic inputs (for vocal track selector)
+  const { devices: micDevices } = useAudioInputDevices();
 
   // Drag state for reorder
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -77,7 +82,17 @@ const ChannelStrips = () => {
   const importAudio = useCallback(async (file: File, trackId?: string) => {
     if (!file.type.startsWith("audio/")) return;
 
-    const url = URL.createObjectURL(file);
+    // Save imported file to project folder
+    let url: string;
+    try {
+      const blob = new Blob([await file.arrayBuffer()], { type: file.type });
+      const relativePath = await persistenceService.saveAudio(file.name, blob);
+      url = relativePath.startsWith("audio/")
+        ? await persistenceService.loadAudio(relativePath)
+        : relativePath;
+    } catch {
+      url = URL.createObjectURL(file);
+    }
 
     let duration = 0;
     try {
@@ -113,6 +128,10 @@ const ChannelStrips = () => {
       offset: 0,
       name: file.name,
     });
+
+    // Trigger immediate save after import
+    persistenceService.markDirty();
+    persistenceService.immediateSaveIfDirty();
   }, [addSource, addTrack, addClip]);
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -255,6 +274,30 @@ const ChannelStrips = () => {
                 />
                 <span className="text-[7px] text-studio-text-dim uppercase">Rec</span>
               </button>
+
+              {/* Mic input selector — vocal tracks only */}
+              {track.type === "vocal" && (
+                <div className="flex flex-col items-center gap-0.5 w-[50px]">
+                  <Mic className="w-2.5 h-2.5 text-studio-text-dim" />
+                  <select
+                    value={track.inputDeviceId ?? ""}
+                    onChange={(e) => updateTrack(track.id, { inputDeviceId: e.target.value || undefined })}
+                    className="w-full text-[6px] bg-studio-metal text-studio-text-dim border border-border rounded px-0.5 py-0.5 truncate cursor-pointer hover:border-studio-teal/50 transition-colors"
+                    title={
+                      track.inputDeviceId
+                        ? micDevices.find((d) => d.deviceId === track.inputDeviceId)?.label ?? "Selected mic"
+                        : "Default mic"
+                    }
+                  >
+                    <option value="">Default Mic</option>
+                    {micDevices.map((dev) => (
+                      <option key={dev.deviceId} value={dev.deviceId}>
+                        {dev.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Mute / Solo — reads from mixer channel */}
               <div className="flex gap-1">

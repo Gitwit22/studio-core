@@ -73,7 +73,7 @@ describe("studioStore", () => {
       expect(tracks[0].name).toBe("Audio 1")
       expect(tracks[0].channelId).toBeDefined()
       expect(tracks[0].armed).toBe(false)
-      expect(tracks[0].fxChain).toHaveLength(5)
+      expect(tracks[0].fxChain).toHaveLength(6)
       // Mixer channel should also be created
       const ch = state.mixerChannels.find((c) => c.id === tracks[0].channelId)
       expect(ch).toBeDefined()

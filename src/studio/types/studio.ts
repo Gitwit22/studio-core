@@ -45,6 +45,7 @@ export interface StudioTrack {
   color?: string
   frozen?: boolean
   busId?: string       // if routed to a bus track
+  inputDeviceId?: string // mic device id (vocal tracks only)
   order: number        // display order for drag-reorder
   fxChain: TrackFXSlot[]
 }
@@ -201,6 +202,7 @@ export interface StudioState {
   undoStack: UndoSnapshot[]
   redoStack: UndoSnapshot[]
   clipboard: Clip | null
+  isDirty: boolean
 }
 
 // ── Master FX state ──

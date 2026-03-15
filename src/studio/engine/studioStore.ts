@@ -92,6 +92,10 @@ interface StudioActions {
   // Session
   newSession: () => void
   reset: () => void
+
+  // Dirty tracking
+  markDirty: () => void
+  clearDirty: () => void
 }
 
 const initialState: StudioState = {
@@ -127,6 +131,7 @@ const initialState: StudioState = {
   clipboard: null,
   effects: { ...defaultEffects },
   snapToGrid: true,
+  isDirty: false,
 }
 
 function snapshot(s: StudioState): UndoSnapshot {
@@ -140,9 +145,9 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
   setRecording: (recording) => set({ isRecording: recording }),
   setPaused: (paused) => set({ isPaused: paused }),
   setPlayhead: (position) => set({ playhead: position }),
-  setBpm: (bpm) => set({ bpm }),
+  setBpm: (bpm) => set({ bpm, isDirty: true }),
   setZoom: (zoom) => set({ zoom }),
-  setProjectName: (name) => set({ projectName: name }),
+  setProjectName: (name) => set({ projectName: name, isDirty: true }),
 
   // Tracks – returns the new track id, also creates linked mixer channel
   addTrack: (type, name, color) => {
@@ -175,6 +180,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
       return {
         tracks: [...state.tracks, track],
         mixerChannels: [...state.mixerChannels, channel],
+        isDirty: true,
       }
     })
     return trackId
@@ -190,12 +196,14 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
           ? state.mixerChannels.filter((ch) => ch.id !== track.channelId)
           : state.mixerChannels,
         selectedTrackId: state.selectedTrackId === trackId ? null : state.selectedTrackId,
+        isDirty: true,
       }
     }),
 
   updateTrack: (trackId, updates) =>
     set((state) => ({
       tracks: state.tracks.map((t) => (t.id === trackId ? { ...t, ...updates } : t)),
+      isDirty: true,
     })),
 
   setSelectedTrackId: (trackId) => set({ selectedTrackId: trackId }),
@@ -210,7 +218,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
       const [moved] = tracks.splice(oldIndex, 1)
       tracks.splice(newIndex, 0, moved)
       // Update order field to match array position
-      return { tracks: tracks.map((t, i) => ({ ...t, order: i })) }
+      return { tracks: tracks.map((t, i) => ({ ...t, order: i })), isDirty: true }
     })
   },
 
@@ -219,6 +227,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     get().pushUndo()
     set((state) => ({
       tracks: state.tracks.map((t) => (t.id === trackId ? { ...t, busId } : t)),
+      isDirty: true,
     }))
   },
 
@@ -228,18 +237,20 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
   addClip: (clip) =>
     set((state) => {
       const id = generateId()
-      return { clips: [...state.clips, { ...clip, id }] }
+      return { clips: [...state.clips, { ...clip, id }], isDirty: true }
     }),
 
   removeClip: (clipId) =>
     set((state) => ({
       clips: state.clips.filter((c) => c.id !== clipId),
       selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
+      isDirty: true,
     })),
 
   updateClip: (clipId, updates) =>
     set((state) => ({
       clips: state.clips.map((c) => (c.id === clipId ? { ...c, ...updates } : c)),
+      isDirty: true,
     })),
 
   setSelectedClipId: (clipId) => set({ selectedClipId: clipId }),
@@ -253,6 +264,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     const id = generateId()
     set((s) => ({
       sources: [...s.sources, { ...source, id }],
+      isDirty: true,
     }))
     return id
   },
@@ -261,6 +273,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     set((state) => ({
       sources: state.sources.filter((s) => s.id !== sourceId),
       clips: state.clips.filter((c) => c.sourceId !== sourceId),
+      isDirty: true,
     })),
 
   // Loop
@@ -278,7 +291,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     const id = generateId()
     set((state) => {
       const markerColor = color ?? defaultMarkerColors[state.markers.length % defaultMarkerColors.length]
-      return { markers: [...state.markers, { id, position, name, color: markerColor }] }
+      return { markers: [...state.markers, { id, position, name, color: markerColor }], isDirty: true }
     })
     return id
   },
@@ -286,11 +299,13 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
   removeMarker: (markerId) =>
     set((state) => ({
       markers: state.markers.filter((m) => m.id !== markerId),
+      isDirty: true,
     })),
 
   updateMarker: (markerId, updates) =>
     set((state) => ({
       markers: state.markers.map((m) => (m.id === markerId ? { ...m, ...updates } : m)),
+      isDirty: true,
     })),
 
   // Panels
@@ -305,6 +320,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
       mixerChannels: state.mixerChannels.map((ch) =>
         ch.id === channelId ? { ...ch, ...updates } : ch,
       ),
+      isDirty: true,
     })),
 
   // ── Per-track FX ──
@@ -320,6 +336,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
             }
           : t,
       ),
+      isDirty: true,
     })),
 
   setTrackFXParam: (trackId, fxType, param, value) =>
@@ -334,6 +351,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
             }
           : t,
       ),
+      isDirty: true,
     })),
 
   // Master bus
@@ -341,6 +359,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     set((state) => ({
       masterBus: { ...state.masterBus, volume: value },
       effects: { ...state.effects, masterVolume: value },
+      isDirty: true,
     })),
 
   // ── Master FX actions ──
@@ -350,19 +369,21 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
         ...state.effects,
         [id]: { ...state.effects[id], active },
       },
+      isDirty: true,
     })),
 
   setEffectParam: (id, param, value) =>
     set((state) => {
       const mod = state.effects[id] as FXModuleState & { time?: string }
       if (param === "time") {
-        return { effects: { ...state.effects, [id]: { ...mod, time: value as string } } }
+        return { effects: { ...state.effects, [id]: { ...mod, time: value as string } }, isDirty: true }
       }
       return {
         effects: {
           ...state.effects,
           [id]: { ...mod, params: { ...mod.params, [param]: value as number } },
         },
+        isDirty: true,
       }
     }),
 
@@ -439,12 +460,12 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     }))
   },
 
-  toggleSnapToGrid: () => set((state) => ({ snapToGrid: !state.snapToGrid })),
+  toggleSnapToGrid: () => set((state) => ({ snapToGrid: !state.snapToGrid, isDirty: true })),
 
   // ── Session ──
   newSession: () => {
     // Full reset first
-    set({ ...initialState, masterBus: { ...defaultMasterBus } })
+    set({ ...initialState, masterBus: { ...defaultMasterBus }, isDirty: false })
 
     const store = get()
 
@@ -465,10 +486,16 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     // Select the first armed track
     const armed = get().tracks.find((t) => t.armed)
     if (armed) set({ selectedTrackId: armed.id })
+    // New session starts clean
+    set({ isDirty: false })
   },
 
   // Reset
   reset: () => {
-    set({ ...initialState, masterBus: { ...defaultMasterBus } })
+    set({ ...initialState, masterBus: { ...defaultMasterBus }, isDirty: false })
   },
+
+  // ── Dirty tracking ──
+  markDirty: () => set({ isDirty: true }),
+  clearDirty: () => set({ isDirty: false }),
 }))

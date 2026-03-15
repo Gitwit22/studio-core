@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import MenuBar from "@/components/studio/MenuBar";
 import ConsoleBar from "@/components/studio/ConsoleBar";
 import ChannelStrips from "@/components/studio/ChannelStrips";
@@ -6,6 +6,7 @@ import Timeline from "@/components/studio/Timeline";
 import TransportControls from "@/components/studio/TransportControls";
 import FXRack from "@/components/studio/FXRack";
 import ExportModal from "@/components/studio/ExportModal";
+import NewSessionDialog from "@/components/studio/NewSessionDialog";
 import "@/studio/commands/transportCommands";
 import "@/studio/commands/trackCommands";
 import "@/studio/commands/editCommands";
@@ -17,19 +18,20 @@ import { mixerEngine } from "@/audio/MixerEngine";
 
 const Studio = () => {
   const [exportOpen, setExportOpen] = useState(false);
+  const [showNewSession, setShowNewSession] = useState(true);
+  const [sessionReady, setSessionReady] = useState(false);
 
-  useEffect(() => {
-    // Initialize session if empty (clean start)
-    const { tracks, newSession } = useStudioStore.getState();
-    if (tracks.length === 0) {
-      newSession();
-    }
+  const handleSessionReady = useCallback(() => {
+    setSessionReady(true);
     // Boot effects chain, then mixer (mixer routes into effects)
     audioEffectsManager.init();
     mixerEngine.init();
-    const cleanup = registerStudioShortcuts();
     // Start autosave
     startAutosave();
+  }, []);
+
+  useEffect(() => {
+    const cleanup = registerStudioShortcuts();
     return () => {
       cleanup();
       stopAutosave();
@@ -40,6 +42,13 @@ const Studio = () => {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-background overflow-hidden">
+      {/* New Session Dialog — shown on launch */}
+      <NewSessionDialog
+        open={showNewSession && !sessionReady}
+        onClose={() => setShowNewSession(false)}
+        onSessionReady={handleSessionReady}
+      />
+
       {/* DAW Menu Bar */}
       <MenuBar />
 
