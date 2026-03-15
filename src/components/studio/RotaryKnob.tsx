@@ -29,7 +29,7 @@ const RotaryKnob = ({ value, onChange, size = 56, label, glowColor = "teal", act
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging.current || !onChange) return;
       const delta = (startY.current - e.clientY) * 0.5;
-      const newValue = Math.min(100, Math.max(0, startValue.current + delta));
+      const newValue = Math.round(Math.min(100, Math.max(0, startValue.current + delta)));
       onChange(newValue);
     };
 
