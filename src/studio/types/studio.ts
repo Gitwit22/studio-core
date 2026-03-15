@@ -45,6 +45,22 @@ export interface StudioPanels {
   export: boolean
 }
 
+export type ModalId =
+  | "newSession"
+  | "openSession"
+  | "saveSessionAs"
+  | "sessionInfo"
+  | "exportMix"
+  | "settings"
+  | "keyboardShortcuts"
+  | "quickStart"
+  | "troubleshooting"
+  | "reportProblem"
+  | "about"
+  | "confirmDelete"
+  | "unsavedChanges"
+  | null
+
 export interface StudioState {
   projectId: string | null
   projectName: string
@@ -60,4 +76,5 @@ export interface StudioState {
   selectedTrackId: string | null
   selectedClipId: string | null
   panels: StudioPanels
+  activeModal: ModalId
 }

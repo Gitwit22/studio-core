@@ -1,4 +1,4 @@
-import { Save, Settings, Download, Mic } from "lucide-react";
+import { Save, Download, Mic } from "lucide-react";
 import VUMeter from "./VUMeter";
 
 const ConsoleBar = () => {
@@ -40,9 +40,6 @@ const ConsoleBar = () => {
           </button>
           <button className="p-1.5 rounded hover:bg-studio-metal transition-colors">
             <Download className="w-3.5 h-3.5 text-studio-text-dim" />
-          </button>
-          <button className="p-1.5 rounded hover:bg-studio-metal transition-colors">
-            <Settings className="w-3.5 h-3.5 text-studio-text-dim" />
           </button>
         </div>
       </div>
