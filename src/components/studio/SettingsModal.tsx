@@ -200,7 +200,7 @@ const SettingsModal = ({ open, onClose }: SettingsModalProps) => {
 
           {activeTab === "timeline" && (
             <div className="space-y-2">
-              <SectionLabel>Grid &amp; Snap</SectionLabel>
+              <SectionLabel>Grid & Snap</SectionLabel>
               <ToggleRow label="Snap to grid by default" checked={snapDefault} onChange={setSnapDefault} />
               <SelectRow
                 label="Grid division"

@@ -6,7 +6,9 @@ registerCommand("instrument:sampler", () => {
 });
 
 registerCommand("track:addVocal", () => {
-  useStudioStore.getState().addTrack("audio", "Vocal " + (useStudioStore.getState().tracks.filter(t => t.name.startsWith("Vocal")).length + 1));
+  const state = useStudioStore.getState();
+  const vocalCount = state.tracks.filter(t => t.name.startsWith("Vocal")).length + 1;
+  state.addTrack("audio", `Vocal ${vocalCount}`);
 });
 
 registerCommand("track:duplicate", () => {
