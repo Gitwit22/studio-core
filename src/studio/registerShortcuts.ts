@@ -13,6 +13,11 @@ export function registerStudioShortcuts() {
       runCommand("transport:record")
     }
 
+    if (e.key.toLowerCase() === "g" && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      runCommand("edit:toggle-grid-snap")
+    }
+
     // Home key = rewind
     if (e.key === "Home") {
       e.preventDefault()

@@ -1,8 +1,11 @@
-import { registerCommand } from "../commandBus"
+import { registerCommand, runCommand } from "../commandBus"
 import { useStudioStore } from "../engine/studioStore"
 import { stopTransport } from "../engine/transportEngine"
 import { audioEffectsManager } from "@/audio/AudioEffectsManager"
+import { mixerEngine } from "@/audio/MixerEngine"
 import { exportMix, bufferToWav, downloadBlob } from "@/audio/ExportEngine"
+import { AUTOSAVE_INTERVAL_MS } from "../types/studio"
+import type { SessionSnapshot } from "../types/studio"
 import * as Tone from "tone"
 
 // ── Serialisation helpers (JSON + IndexedDB for blobs) ──
@@ -43,27 +46,35 @@ async function getBlob(key: string): Promise<Blob | undefined> {
 
 registerCommand("project:new", () => {
   stopTransport()
+  mixerEngine.dispose()
   audioEffectsManager.dispose()
   useStudioStore.getState().newSession()
+  audioEffectsManager.init()
+  mixerEngine.init()
 })
 
 registerCommand("project:open", async () => {
   const raw = localStorage.getItem("studio-core:session")
   if (!raw) { console.warn("No saved session found"); return }
 
-  const saved = JSON.parse(raw)
+  const saved: SessionSnapshot = JSON.parse(raw)
   const store = useStudioStore.getState()
   store.newSession()
 
-  // Restore metadata
+  // Restore full session state
   useStudioStore.setState({
+    projectId: saved.projectId ?? null,
     projectName: saved.projectName,
     bpm: saved.bpm,
     zoom: saved.zoom,
     loop: saved.loop,
-    effects: saved.effects,
+    masterBus: saved.masterBus,
     tracks: saved.tracks,
     clips: saved.clips,
+    mixerChannels: saved.mixerChannels ?? [],
+    effects: saved.effects ?? useStudioStore.getState().effects,
+    markers: saved.markers ?? [],
+    snapToGrid: saved.snapToGrid ?? true,
   })
 
   // Restore audio blobs as object URLs
@@ -72,6 +83,7 @@ registerCommand("project:open", async () => {
     const url = blob ? URL.createObjectURL(blob) : src.url
     useStudioStore.getState().addSource({ ...src, url })
   }
+  console.log("Session loaded:", saved.projectName)
 })
 
 registerCommand("project:save", async () => {
@@ -86,33 +98,58 @@ registerCommand("project:save", async () => {
     }
   }
 
-  // Save JSON metadata to localStorage
-  const session = {
+  // Save full session snapshot to localStorage
+  const session: SessionSnapshot = {
+    projectId: state.projectId,
     projectName: state.projectName,
     bpm: state.bpm,
     zoom: state.zoom,
     loop: state.loop,
-    effects: state.effects,
+    masterBus: state.masterBus,
     tracks: state.tracks,
     clips: state.clips,
+    mixerChannels: state.mixerChannels,
     sources: state.sources.map((s) => ({ ...s, file: undefined })),
+    effects: state.effects,
+    markers: state.markers,
+    snapToGrid: state.snapToGrid,
+    savedAt: Date.now(),
   }
   localStorage.setItem("studio-core:session", JSON.stringify(session))
-  console.log("Session saved")
+  console.log("Session saved:", state.projectName)
 })
 
 registerCommand("project:saveAs", () => {
   const name = prompt("Session name:", useStudioStore.getState().projectName)
   if (name) {
     useStudioStore.getState().setProjectName(name)
-    runSave()
+    runCommand("project:save")
   }
 })
 
-function runSave() {
-  // Reuse the save command
-  const commands = (globalThis as any).__studioBusSaveHook
-  if (commands) commands()
+// ── Autosave ──
+
+let autosaveTimer: ReturnType<typeof setInterval> | null = null
+
+/** Start the autosave interval. Safe to call multiple times. */
+export function startAutosave() {
+  if (autosaveTimer) return
+  autosaveTimer = setInterval(() => {
+    const state = useStudioStore.getState()
+    // Only autosave if there is at least one track (i.e. a real session)
+    if (state.tracks.length > 0) {
+      runCommand("project:save")
+      console.log("Autosaved at", new Date().toLocaleTimeString())
+    }
+  }, AUTOSAVE_INTERVAL_MS)
+}
+
+/** Stop the autosave interval. */
+export function stopAutosave() {
+  if (autosaveTimer) {
+    clearInterval(autosaveTimer)
+    autosaveTimer = null
+  }
 }
 
 registerCommand("project:export", async () => {

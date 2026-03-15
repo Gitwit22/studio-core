@@ -1,15 +1,93 @@
-export type TrackType = "audio" | "midi" | "bus" | "master"
+export type TrackType = "audio" | "vocal" | "instrument" | "beat" | "bus" | "midi" | "master"
+
+// ── Per-track FX types ──
+
+export type FXType = "compressor" | "delay" | "reverb" | "eq" | "pitchShifter" | "limiter"
+
+export interface TrackFXSlot {
+  type: FXType
+  enabled: boolean
+  params: Record<string, number | string>
+}
+
+export const defaultTrackFX: TrackFXSlot[] = [
+  { type: "compressor", enabled: true, params: { amount: 65 } },
+  { type: "delay", enabled: false, params: { time: "1/4", mix: 30 } },
+  { type: "reverb", enabled: true, params: { size: 45, mix: 40 } },
+  { type: "eq", enabled: true, params: { low: 50, mid: 55, high: 50 } },
+  { type: "pitchShifter", enabled: false, params: { semitones: 50 } },
+  { type: "limiter", enabled: true, params: { ceiling: 75, gain: 50 } },
+]
+
+// ── Mixer channel ──
+
+export interface MixerChannel {
+  id: string
+  trackId: string
+  volume: number     // 0-1 linear
+  pan: number        // -1 to 1
+  mute: boolean
+  solo: boolean
+}
+
+// ── Track ──
 
 export interface StudioTrack {
   id: string
+  channelId: string   // links to MixerChannel
   name: string
   type: TrackType
-  volume: number
-  pan: number
+  volume: number      // 0-1 linear
+  pan: number          // -1 to 1
   mute: boolean
   solo: boolean
   armed: boolean
   color?: string
+  frozen?: boolean
+  busId?: string       // if routed to a bus track
+  order: number        // display order for drag-reorder
+  fxChain: TrackFXSlot[]
+}
+
+// ── Timeline markers ──
+
+export interface TimelineMarker {
+  id: string
+  position: number   // beat position
+  name: string
+  color: string
+}
+
+export const defaultMarkerColors = [
+  "hsl(172 72% 55%)",  // teal
+  "hsl(45 100% 60%)",  // yellow
+  "hsl(280 70% 60%)",  // purple
+  "hsl(217 100% 71%)", // blue
+  "hsl(0 100% 62%)",   // red
+]
+
+// ── Track type display config ──
+
+export const trackTypeConfig: Record<TrackType, { label: string; defaultColor: string; icon: string }> = {
+  audio: { label: "Audio", defaultColor: "hsl(217 100% 71%)", icon: "♪" },
+  vocal: { label: "Vocal", defaultColor: "hsl(142 60% 50%)", icon: "🎤" },
+  instrument: { label: "Instrument", defaultColor: "hsl(45 100% 60%)", icon: "🎹" },
+  beat: { label: "Beat", defaultColor: "hsl(217 100% 71%)", icon: "🥁" },
+  bus: { label: "Bus", defaultColor: "hsl(340 80% 55%)", icon: "⊞" },
+  midi: { label: "MIDI", defaultColor: "hsl(120 60% 50%)", icon: "⌨" },
+  master: { label: "Master", defaultColor: "hsl(0 0% 70%)", icon: "M" },
+}
+
+/** Predefined palette for track color coding */
+export const trackColorPalette: Record<string, string> = {
+  blue: "hsl(217 100% 71%)",
+  green: "hsl(142 60% 50%)",
+  purple: "hsl(280 70% 60%)",
+  yellow: "hsl(45 100% 60%)",
+  teal: "hsl(172 72% 55%)",
+  red: "hsl(0 100% 62%)",
+  pink: "hsl(340 80% 55%)",
+  orange: "hsl(25 100% 60%)",
 }
 
 export interface AudioSource {
@@ -45,29 +123,14 @@ export interface StudioPanels {
   export: boolean
 }
 
-// ── FX state types ──
+// ── Master bus state ──
 
-export interface FXModuleState {
-  active: boolean
-  params: Record<string, number>
+export interface MasterBusState {
+  volume: number       // 0-100
 }
 
-export interface EffectsState {
-  compressor: FXModuleState
-  delay: FXModuleState & { time: string }
-  reverb: FXModuleState
-  eq: FXModuleState
-  limiter: FXModuleState
-  masterVolume: number
-}
-
-export const defaultEffects: EffectsState = {
-  compressor: { active: true, params: { amount: 65 } },
-  delay: { active: false, time: "1/4", params: { mix: 30 } },
-  reverb: { active: true, params: { size: 45, mix: 40 } },
-  eq: { active: true, params: { low: 50, mid: 55, high: 50 } },
-  limiter: { active: true, params: { ceiling: 75, gain: 50 } },
-  masterVolume: 80,
+export const defaultMasterBus: MasterBusState = {
+  volume: 80,
 }
 
 // ── Session guardrails ──
@@ -75,13 +138,34 @@ export const defaultEffects: EffectsState = {
 /** Approximate max sources before a memory warning is shown */
 export const MAX_SESSION_SOURCES = 50
 
+/** Autosave interval in milliseconds (30 seconds) */
+export const AUTOSAVE_INTERVAL_MS = 30_000
+
+/** Shape of a serialised session stored in localStorage / IndexedDB */
+export interface SessionSnapshot {
+  projectId: string | null
+  projectName: string
+  bpm: number
+  zoom: number
+  loop: LoopRegion
+  masterBus: MasterBusState
+  tracks: StudioTrack[]
+  clips: Clip[]
+  mixerChannels: MixerChannel[]
+  sources: Omit<AudioSource, "file">[]
+  effects: EffectsState
+  markers: TimelineMarker[]
+  snapToGrid: boolean
+  savedAt: number // Date.now()
+}
+
 // ── Default track presets for new sessions ──
 
-export const defaultTrackPresets: { name: string; color: string; armed: boolean }[] = [
-  { name: "Beat", color: "hsl(217 100% 71%)", armed: false },
-  { name: "Lead Vocal", color: "hsl(172 72% 55%)", armed: true },
-  { name: "Double", color: "hsl(45 100% 60%)", armed: false },
-  { name: "Ad-Lib", color: "hsl(280 70% 60%)", armed: false },
+export const defaultTrackPresets: { name: string; type: TrackType; color: string; armed: boolean; busId?: string }[] = [
+  { name: "Beat", type: "beat", color: "hsl(217 100% 71%)", armed: false },
+  { name: "Lead Vocal", type: "vocal", color: "hsl(142 60% 50%)", armed: true, busId: "__vocal_bus__" },
+  { name: "Double", type: "vocal", color: "hsl(45 100% 60%)", armed: false, busId: "__vocal_bus__" },
+  { name: "Ad-Lib", type: "vocal", color: "hsl(280 70% 60%)", armed: false, busId: "__vocal_bus__" },
 ]
 
 // ── Undo / Redo snapshot ──
@@ -90,6 +174,7 @@ export interface UndoSnapshot {
   tracks: StudioTrack[]
   clips: Clip[]
   sources: AudioSource[]
+  mixerChannels: MixerChannel[]
 }
 
 export interface StudioState {
@@ -105,11 +190,42 @@ export interface StudioState {
   tracks: StudioTrack[]
   clips: Clip[]
   sources: AudioSource[]
+  mixerChannels: MixerChannel[]
+  masterBus: MasterBusState
   selectedTrackId: string | null
   selectedClipId: string | null
   panels: StudioPanels
   effects: EffectsState
+  markers: TimelineMarker[]
+  snapToGrid: boolean
   undoStack: UndoSnapshot[]
   redoStack: UndoSnapshot[]
   clipboard: Clip | null
+}
+
+// ── Master FX state ──
+
+export interface FXModuleState {
+  active: boolean
+  params: Record<string, number>
+}
+
+export interface EffectsState {
+  compressor: FXModuleState
+  delay: FXModuleState & { time: string }
+  reverb: FXModuleState
+  eq: FXModuleState
+  pitchShifter: FXModuleState
+  limiter: FXModuleState
+  masterVolume: number
+}
+
+export const defaultEffects: EffectsState = {
+  compressor: { active: true, params: { amount: 65 } },
+  delay: { active: false, time: "1/4", params: { mix: 30 } },
+  reverb: { active: true, params: { size: 45, mix: 40 } },
+  eq: { active: true, params: { low: 50, mid: 55, high: 50 } },
+  pitchShifter: { active: false, params: { semitones: 50 } },
+  limiter: { active: true, params: { ceiling: 75, gain: 50 } },
+  masterVolume: 80,
 }

@@ -20,7 +20,7 @@ describe("studioMenu", () => {
   it("File menu should contain expected items", () => {
     const file = studioMenu.find((m) => m.title === "File")!;
     const labels = file.items.map((i) => i.label);
-    expect(labels).toContain("New Project");
+    expect(labels).toContain("New Session");
     expect(labels).toContain("Save");
     expect(labels).toContain("Export");
   });

@@ -20,3 +20,7 @@ registerCommand("edit:copy", () => {
 registerCommand("edit:paste", () => {
   useStudioStore.getState().pasteClip()
 })
+
+registerCommand("edit:toggle-grid-snap", () => {
+  useStudioStore.getState().toggleSnapToGrid()
+})

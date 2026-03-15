@@ -35,14 +35,6 @@ registerCommand("transport:record", () => {
   recordTransport()
 })
 
-registerCommand("track:addAudio", () => {
-  useStudioStore.getState().addTrack("audio")
-})
-
-registerCommand("track:addMidi", () => {
-  useStudioStore.getState().addTrack("midi")
-})
-
 registerCommand("view:toggleMixer", () => {
   useStudioStore.getState().togglePanel("mixer")
 })

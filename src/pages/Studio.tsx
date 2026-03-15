@@ -7,9 +7,13 @@ import TransportControls from "@/components/studio/TransportControls";
 import FXRack from "@/components/studio/FXRack";
 import ExportModal from "@/components/studio/ExportModal";
 import "@/studio/commands/transportCommands";
+import "@/studio/commands/trackCommands";
+import "@/studio/commands/editCommands";
+import { startAutosave, stopAutosave } from "@/studio/commands/projectCommands";
 import { registerStudioShortcuts } from "@/studio/registerShortcuts";
 import { useStudioStore } from "@/studio/engine/studioStore";
 import { audioEffectsManager } from "@/audio/AudioEffectsManager";
+import { mixerEngine } from "@/audio/MixerEngine";
 
 const Studio = () => {
   const [exportOpen, setExportOpen] = useState(false);
@@ -20,11 +24,16 @@ const Studio = () => {
     if (tracks.length === 0) {
       newSession();
     }
-    // Boot effects chain
+    // Boot effects chain, then mixer (mixer routes into effects)
     audioEffectsManager.init();
+    mixerEngine.init();
     const cleanup = registerStudioShortcuts();
+    // Start autosave
+    startAutosave();
     return () => {
       cleanup();
+      stopAutosave();
+      mixerEngine.dispose();
       audioEffectsManager.dispose();
     };
   }, []);

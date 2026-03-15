@@ -22,14 +22,10 @@ const VUMeter = ({ bars = 8, active = true, vertical = true, height = 80, level 
     const animate = () => {
       setLevels(prev =>
         prev.map((prevLevel, i) => {
-          if (level !== undefined) {
-            // Driven by external source — each bar staggers slightly for visual spread
-            const barTarget = Math.max(0, level - i * 0.02);
-            return prevLevel + (barTarget - prevLevel) * 0.4;
-          }
-          // Fallback: gentle random animation for decorative use
-          const target = Math.random() * 0.8 + 0.1;
-          return prevLevel + (target - prevLevel) * 0.3;
+          // Driven by external level source (real audio data)
+          const externalLevel = level ?? 0;
+          const barTarget = Math.max(0, externalLevel - i * 0.02);
+          return prevLevel + (barTarget - prevLevel) * 0.4;
         })
       );
       animRef.current = requestAnimationFrame(animate);

@@ -1,6 +1,7 @@
 import * as Tone from "tone"
 import { useStudioStore } from "./studioStore"
 import { audioEngine } from "@/audio/AudioEngine"
+import { mixerEngine } from "@/audio/MixerEngine"
 import { Recorder } from "@/audio/Recorder"
 
 // ── Internal state ──
@@ -24,16 +25,46 @@ export async function playTransport() {
   // Build players for clips that have audio sources
   disposeActivePlayers()
   const { clips, sources, tracks } = store
+
+  const loadPromises: Promise<void>[] = []
+
   for (const clip of clips) {
     const src = sources.find((s) => s.id === clip.sourceId)
     if (!src?.url) continue
     const track = tracks.find((t) => t.id === clip.trackId)
-    if (track?.mute) continue
+    if (!track) continue
 
-    const player = new Tone.Player(src.url).toDestination()
-    const startSec = (clip.start / (store.bpm / 60))
+    // Route each player through the track's mixer channel
+    const channel = mixerEngine.getInput(track.id)
+
+    const player = new Tone.Player(src.url)
+    if (channel) {
+      player.connect(channel)
+    } else {
+      player.toDestination()
+    }
+
+    const startSec = clip.start / (store.bpm / 60)
     player.sync().start(startSec)
     activePlayers.push(player)
+
+    // Collect load promises so we wait for all buffers
+    loadPromises.push(
+      new Promise<void>((resolve) => {
+        if (player.loaded) {
+          resolve()
+        } else {
+          player.buffer.onload = () => resolve()
+          // Fallback timeout so we don't hang
+          setTimeout(resolve, 5000)
+        }
+      })
+    )
+  }
+
+  // Wait for all players to load their audio buffers
+  if (loadPromises.length > 0) {
+    await Promise.all(loadPromises)
   }
 
   Tone.getTransport().start(undefined, `${store.playhead / (store.bpm / 60)}`)
@@ -77,7 +108,7 @@ export function pauseTransport() {
 }
 
 export function stopTransport() {
-  Tone.getTransport().stop()
+  try { Tone.getTransport().stop() } catch { /* Tone not started yet */ }
   useStudioStore.getState().setPlaying(false)
   useStudioStore.getState().setPaused(false)
   useStudioStore.getState().setPlayhead(0)
@@ -89,8 +120,10 @@ export function stopTransport() {
 export function rewindTransport() {
   useStudioStore.getState().setPlayhead(0)
   if (useStudioStore.getState().isPlaying) {
-    Tone.getTransport().stop()
-    Tone.getTransport().start()
+    try {
+      Tone.getTransport().stop()
+      Tone.getTransport().start()
+    } catch { /* Tone not started */ }
   }
 }
 

@@ -5,9 +5,15 @@ import {
   Clip,
   StudioTrack,
   TrackType,
+  TimelineMarker,
+  defaultMarkerColors,
+  MixerChannel,
+  FXType,
+  UndoSnapshot,
   EffectsState,
   FXModuleState,
-  UndoSnapshot,
+  defaultTrackFX,
+  defaultMasterBus,
   defaultEffects,
   defaultTrackPresets,
   MAX_SESSION_SOURCES,
@@ -29,8 +35,10 @@ interface StudioActions {
   // Track actions
   addTrack: (type: Exclude<TrackType, "master">, name?: string, color?: string) => string
   removeTrack: (trackId: string) => void
-  updateTrack: (trackId: string, updates: Partial<Omit<StudioTrack, "id" | "type">>) => void
+  updateTrack: (trackId: string, updates: Partial<Omit<StudioTrack, "id" | "type" | "channelId">>) => void
   setSelectedTrackId: (trackId: string | null) => void
+  reorderTrack: (trackId: string, newIndex: number) => void
+  moveTrackToBus: (trackId: string, busId: string | undefined) => void
 
   // Clip actions
   addClip: (clip: Omit<Clip, "id">) => void
@@ -46,13 +54,27 @@ interface StudioActions {
   setLoop: (start: number, end: number) => void
   toggleLoop: () => void
 
+  // Marker actions
+  addMarker: (position: number, name: string, color?: string) => string
+  removeMarker: (markerId: string) => void
+  updateMarker: (markerId: string, updates: Partial<Omit<TimelineMarker, "id">>) => void
+
   // Panel actions
   togglePanel: (panel: keyof StudioState["panels"]) => void
 
-  // FX actions
+  // Mixer channel actions (single source of truth for vol/pan/mute/solo)
+  updateMixerChannel: (channelId: string, updates: Partial<Omit<MixerChannel, "id" | "trackId">>) => void
+
+  // Per-track FX actions
+  setTrackFXEnabled: (trackId: string, fxType: FXType, enabled: boolean) => void
+  setTrackFXParam: (trackId: string, fxType: FXType, param: string, value: number | string) => void
+
+  // Master bus
+  setMasterVolume: (value: number) => void
+
+  // FX actions (master bus effects)
   setEffectActive: (id: keyof Omit<EffectsState, "masterVolume">, active: boolean) => void
   setEffectParam: (id: keyof Omit<EffectsState, "masterVolume">, param: string, value: number | string) => void
-  setMasterVolume: (value: number) => void
 
   // Undo / Redo
   pushUndo: () => void
@@ -63,6 +85,9 @@ interface StudioActions {
   cutClip: () => void
   copyClip: () => void
   pasteClip: () => void
+
+  // Snap
+  toggleSnapToGrid: () => void
 
   // Session
   newSession: () => void
@@ -86,6 +111,9 @@ const initialState: StudioState = {
   tracks: [],
   clips: [],
   sources: [],
+  mixerChannels: [],
+  markers: [],
+  masterBus: { ...defaultMasterBus },
   selectedTrackId: null,
   selectedClipId: null,
   panels: {
@@ -94,10 +122,15 @@ const initialState: StudioState = {
     browser: false,
     export: false,
   },
-  effects: { ...defaultEffects },
   undoStack: [],
   redoStack: [],
   clipboard: null,
+  effects: { ...defaultEffects },
+  snapToGrid: true,
+}
+
+function snapshot(s: StudioState): UndoSnapshot {
+  return { tracks: s.tracks, clips: s.clips, sources: s.sources, mixerChannels: s.mixerChannels }
 }
 
 export const useStudioStore = create<StudioState & StudioActions>()((set, get) => ({
@@ -111,13 +144,15 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
   setZoom: (zoom) => set({ zoom }),
   setProjectName: (name) => set({ projectName: name }),
 
-  // Tracks – returns the new track id
+  // Tracks – returns the new track id, also creates linked mixer channel
   addTrack: (type, name, color) => {
-    const id = generateId()
+    const trackId = generateId()
+    const channelId = generateId()
     set((state) => {
       const count = state.tracks.filter((t) => t.type === type).length + 1
       const track: StudioTrack = {
-        id,
+        id: trackId,
+        channelId,
         name: name ?? `${type.charAt(0).toUpperCase() + type.slice(1)} ${count}`,
         type,
         volume: 0.75,
@@ -126,18 +161,37 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
         solo: false,
         armed: false,
         color,
+        order: state.tracks.length,
+        fxChain: defaultTrackFX.map((fx) => ({ ...fx, params: { ...fx.params } })),
       }
-      return { tracks: [...state.tracks, track] }
+      const channel: MixerChannel = {
+        id: channelId,
+        trackId,
+        volume: 0.75,
+        pan: 0,
+        mute: false,
+        solo: false,
+      }
+      return {
+        tracks: [...state.tracks, track],
+        mixerChannels: [...state.mixerChannels, channel],
+      }
     })
-    return id
+    return trackId
   },
 
   removeTrack: (trackId) =>
-    set((state) => ({
-      tracks: state.tracks.filter((t) => t.id !== trackId),
-      clips: state.clips.filter((c) => c.trackId !== trackId),
-      selectedTrackId: state.selectedTrackId === trackId ? null : state.selectedTrackId,
-    })),
+    set((state) => {
+      const track = state.tracks.find((t) => t.id === trackId)
+      return {
+        tracks: state.tracks.filter((t) => t.id !== trackId),
+        clips: state.clips.filter((c) => c.trackId !== trackId),
+        mixerChannels: track
+          ? state.mixerChannels.filter((ch) => ch.id !== track.channelId)
+          : state.mixerChannels,
+        selectedTrackId: state.selectedTrackId === trackId ? null : state.selectedTrackId,
+      }
+    }),
 
   updateTrack: (trackId, updates) =>
     set((state) => ({
@@ -145,6 +199,30 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     })),
 
   setSelectedTrackId: (trackId) => set({ selectedTrackId: trackId }),
+
+  // Reorder tracks via drag
+  reorderTrack: (trackId, newIndex) => {
+    get().pushUndo()
+    set((state) => {
+      const tracks = [...state.tracks]
+      const oldIndex = tracks.findIndex((t) => t.id === trackId)
+      if (oldIndex === -1 || newIndex < 0 || newIndex >= tracks.length) return state
+      const [moved] = tracks.splice(oldIndex, 1)
+      tracks.splice(newIndex, 0, moved)
+      // Update order field to match array position
+      return { tracks: tracks.map((t, i) => ({ ...t, order: i })) }
+    })
+  },
+
+  // Route a track to a bus
+  moveTrackToBus: (trackId, busId) => {
+    get().pushUndo()
+    set((state) => ({
+      tracks: state.tracks.map((t) => (t.id === trackId ? { ...t, busId } : t)),
+    }))
+  },
+
+  // SelectedTrackId: (trackId) => set({ selectedTrackId: trackId }),
 
   // Clips
   addClip: (clip) =>
@@ -196,13 +274,76 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
       loop: { ...state.loop, enabled: !state.loop.enabled },
     })),
 
+  addMarker: (position, name, color) => {
+    const id = generateId()
+    set((state) => {
+      const markerColor = color ?? defaultMarkerColors[state.markers.length % defaultMarkerColors.length]
+      return { markers: [...state.markers, { id, position, name, color: markerColor }] }
+    })
+    return id
+  },
+
+  removeMarker: (markerId) =>
+    set((state) => ({
+      markers: state.markers.filter((m) => m.id !== markerId),
+    })),
+
+  updateMarker: (markerId, updates) =>
+    set((state) => ({
+      markers: state.markers.map((m) => (m.id === markerId ? { ...m, ...updates } : m)),
+    })),
+
   // Panels
   togglePanel: (panel) =>
     set((state) => ({
       panels: { ...state.panels, [panel]: !state.panels[panel] },
     })),
 
-  // ── FX actions ──
+  // ── Mixer channel (authoritative for vol / pan / mute / solo) ──
+  updateMixerChannel: (channelId, updates) =>
+    set((state) => ({
+      mixerChannels: state.mixerChannels.map((ch) =>
+        ch.id === channelId ? { ...ch, ...updates } : ch,
+      ),
+    })),
+
+  // ── Per-track FX ──
+  setTrackFXEnabled: (trackId, fxType, enabled) =>
+    set((state) => ({
+      tracks: state.tracks.map((t) =>
+        t.id === trackId
+          ? {
+              ...t,
+              fxChain: t.fxChain.map((fx) =>
+                fx.type === fxType ? { ...fx, enabled } : fx,
+              ),
+            }
+          : t,
+      ),
+    })),
+
+  setTrackFXParam: (trackId, fxType, param, value) =>
+    set((state) => ({
+      tracks: state.tracks.map((t) =>
+        t.id === trackId
+          ? {
+              ...t,
+              fxChain: t.fxChain.map((fx) =>
+                fx.type === fxType ? { ...fx, params: { ...fx.params, [param]: value } } : fx,
+              ),
+            }
+          : t,
+      ),
+    })),
+
+  // Master bus
+  setMasterVolume: (value) =>
+    set((state) => ({
+      masterBus: { ...state.masterBus, volume: value },
+      effects: { ...state.effects, masterVolume: value },
+    })),
+
+  // ── Master FX actions ──
   setEffectActive: (id, active) =>
     set((state) => ({
       effects: {
@@ -214,7 +355,6 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
   setEffectParam: (id, param, value) =>
     set((state) => {
       const mod = state.effects[id] as FXModuleState & { time?: string }
-      // "time" lives at top‑level on delay, everything else is in params
       if (param === "time") {
         return { effects: { ...state.effects, [id]: { ...mod, time: value as string } } }
       }
@@ -226,18 +366,10 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
       }
     }),
 
-  setMasterVolume: (value) =>
-    set((state) => ({
-      effects: { ...state.effects, masterVolume: value },
-    })),
-
   // ── Undo / Redo ──
   pushUndo: () =>
     set((state) => ({
-      undoStack: [
-        ...state.undoStack.slice(-29), // keep last 30
-        { tracks: state.tracks, clips: state.clips, sources: state.sources },
-      ],
+      undoStack: [...state.undoStack.slice(-29), snapshot(state)],
       redoStack: [],
     })),
 
@@ -248,13 +380,11 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     if (!snap) return
     set({
       undoStack: stack,
-      redoStack: [
-        ...state.redoStack,
-        { tracks: state.tracks, clips: state.clips, sources: state.sources },
-      ],
+      redoStack: [...state.redoStack, snapshot(state)],
       tracks: snap.tracks,
       clips: snap.clips,
       sources: snap.sources,
+      mixerChannels: snap.mixerChannels,
     })
   },
 
@@ -265,13 +395,11 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     if (!snap) return
     set({
       redoStack: stack,
-      undoStack: [
-        ...state.undoStack,
-        { tracks: state.tracks, clips: state.clips, sources: state.sources },
-      ],
+      undoStack: [...state.undoStack, snapshot(state)],
       tracks: snap.tracks,
       clips: snap.clips,
       sources: snap.sources,
+      mixerChannels: snap.mixerChannels,
     })
   },
 
@@ -311,17 +439,27 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     }))
   },
 
+  toggleSnapToGrid: () => set((state) => ({ snapToGrid: !state.snapToGrid })),
+
   // ── Session ──
   newSession: () => {
     // Full reset first
-    set({ ...initialState, effects: { ...defaultEffects } })
+    set({ ...initialState, masterBus: { ...defaultMasterBus } })
 
-    // Create the 4 default tracks
     const store = get()
+
+    // Create a Vocal Bus first so presets can route to it
+    const vocalBusId = store.addTrack("bus", "Vocal Bus", "hsl(340 80% 55%)")
+
+    // Create the 4 default tracks (addTrack also creates mixer channels)
     for (const preset of defaultTrackPresets) {
-      const trackId = store.addTrack("audio", preset.name, preset.color)
+      const trackId = store.addTrack(preset.type, preset.name, preset.color)
       if (preset.armed) {
         store.updateTrack(trackId, { armed: true })
+      }
+      // Route tracks marked for vocal bus
+      if (preset.busId === "__vocal_bus__") {
+        store.moveTrackToBus(trackId, vocalBusId)
       }
     }
     // Select the first armed track
@@ -331,6 +469,6 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
 
   // Reset
   reset: () => {
-    set({ ...initialState, effects: { ...defaultEffects } })
+    set({ ...initialState, masterBus: { ...defaultMasterBus } })
   },
 }))

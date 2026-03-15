@@ -66,15 +66,21 @@ describe("studioStore", () => {
   describe("track actions", () => {
     it("addTrack with default name", () => {
       useStudioStore.getState().addTrack("audio")
-      const tracks = useStudioStore.getState().tracks
+      const state = useStudioStore.getState()
+      const tracks = state.tracks
       expect(tracks).toHaveLength(1)
       expect(tracks[0].type).toBe("audio")
       expect(tracks[0].name).toBe("Audio 1")
-      expect(tracks[0].volume).toBe(0.75)
-      expect(tracks[0].pan).toBe(0)
-      expect(tracks[0].mute).toBe(false)
-      expect(tracks[0].solo).toBe(false)
+      expect(tracks[0].channelId).toBeDefined()
       expect(tracks[0].armed).toBe(false)
+      expect(tracks[0].fxChain).toHaveLength(5)
+      // Mixer channel should also be created
+      const ch = state.mixerChannels.find((c) => c.id === tracks[0].channelId)
+      expect(ch).toBeDefined()
+      expect(ch!.volume).toBe(0.75)
+      expect(ch!.pan).toBe(0)
+      expect(ch!.mute).toBe(false)
+      expect(ch!.solo).toBe(false)
     })
 
     it("addTrack with custom name", () => {
@@ -85,6 +91,7 @@ describe("studioStore", () => {
     it("removeTrack removes track and its clips", () => {
       useStudioStore.getState().addTrack("audio")
       const trackId = useStudioStore.getState().tracks[0].id
+      const channelId = useStudioStore.getState().tracks[0].channelId
       useStudioStore.getState().addClip({
         trackId,
         sourceId: "src-1",
@@ -94,10 +101,12 @@ describe("studioStore", () => {
         name: "Clip 1",
       })
       expect(useStudioStore.getState().clips).toHaveLength(1)
+      expect(useStudioStore.getState().mixerChannels).toHaveLength(1)
 
       useStudioStore.getState().removeTrack(trackId)
       expect(useStudioStore.getState().tracks).toHaveLength(0)
       expect(useStudioStore.getState().clips).toHaveLength(0)
+      expect(useStudioStore.getState().mixerChannels).toHaveLength(0)
     })
 
     it("removeTrack clears selectedTrackId if it was the removed track", () => {
@@ -111,11 +120,11 @@ describe("studioStore", () => {
     it("updateTrack updates specific fields", () => {
       useStudioStore.getState().addTrack("audio")
       const trackId = useStudioStore.getState().tracks[0].id
-      useStudioStore.getState().updateTrack(trackId, { volume: 0.5, mute: true })
+      useStudioStore.getState().updateTrack(trackId, { name: "Renamed", armed: true })
       const track = useStudioStore.getState().tracks[0]
-      expect(track.volume).toBe(0.5)
-      expect(track.mute).toBe(true)
-      expect(track.name).toBe("Audio 1") // unchanged
+      expect(track.name).toBe("Renamed")
+      expect(track.armed).toBe(true)
+      expect(track.type).toBe("audio") // unchanged
     })
 
     it("setSelectedTrackId", () => {

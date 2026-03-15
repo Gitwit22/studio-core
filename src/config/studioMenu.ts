@@ -2,10 +2,11 @@ export const studioMenu = [
   {
     title: "File",
     items: [
-      { label: "New Project", action: "project:new" },
-      { label: "Open Project", action: "project:open" },
+      { label: "New Session", action: "project:new" },
+      { label: "Open Session", action: "project:open" },
       { label: "Save", action: "project:save" },
       { label: "Save As", action: "project:saveAs" },
+      { label: "Import Audio", action: "track:import" },
       { label: "Export", action: "project:export" },
     ],
   },
@@ -23,6 +24,10 @@ export const studioMenu = [
     title: "Insert",
     items: [
       { label: "Audio Track", action: "track:addAudio" },
+      { label: "Vocal Track", action: "track:addVocal" },
+      { label: "Instrument Track", action: "track:addInstrument" },
+      { label: "Beat Track", action: "track:addBeat" },
+      { label: "Bus Track", action: "track:addBus" },
       { label: "MIDI Track", action: "track:addMidi" },
       { label: "Sampler", action: "instrument:sampler" },
     ],
