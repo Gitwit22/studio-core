@@ -5,9 +5,11 @@ interface VUMeterProps {
   active?: boolean;
   vertical?: boolean;
   height?: number;
+  /** External level (0-1). When provided, drives the meter instead of random animation. */
+  level?: number;
 }
 
-const VUMeter = ({ bars = 8, active = true, vertical = true, height = 80 }: VUMeterProps) => {
+const VUMeter = ({ bars = 8, active = true, vertical = true, height = 80, level }: VUMeterProps) => {
   const [levels, setLevels] = useState<number[]>(new Array(bars).fill(0));
   const animRef = useRef<number>();
 
@@ -19,9 +21,15 @@ const VUMeter = ({ bars = 8, active = true, vertical = true, height = 80 }: VUMe
 
     const animate = () => {
       setLevels(prev =>
-        prev.map((level) => {
+        prev.map((prevLevel, i) => {
+          if (level !== undefined) {
+            // Driven by external source — each bar staggers slightly for visual spread
+            const barTarget = Math.max(0, level - i * 0.02);
+            return prevLevel + (barTarget - prevLevel) * 0.4;
+          }
+          // Fallback: gentle random animation for decorative use
           const target = Math.random() * 0.8 + 0.1;
-          return level + (target - level) * 0.3;
+          return prevLevel + (target - prevLevel) * 0.3;
         })
       );
       animRef.current = requestAnimationFrame(animate);
@@ -31,7 +39,7 @@ const VUMeter = ({ bars = 8, active = true, vertical = true, height = 80 }: VUMe
     return () => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
     };
-  }, [active, bars]);
+  }, [active, bars, level]);
 
   const getBarColor = (index: number, level: number) => {
     const ratio = index / bars;

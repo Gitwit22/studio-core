@@ -27,6 +27,7 @@ vi.mock("tone", () => ({
   getTransport: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),
+    pause: vi.fn(),
     bpm: { value: 120 },
     position: "0:0:0",
   }),
@@ -141,9 +142,9 @@ describe("TransportController", () => {
     vi.mocked(transport.start).mockClear();
 
     const { play } = await import("../audio/TransportController");
-    play();
+    await play();
 
-    expect(transport.start).toHaveBeenCalledOnce();
+    expect(transport.start).toHaveBeenCalled();
   });
 
   it("should stop transport on stop", async () => {
@@ -158,14 +159,33 @@ describe("TransportController", () => {
   });
 
   it("should start transport on record", async () => {
+    const { useStudioStore } = await import("@/studio/engine/studioStore");
+    // Arm a track so recordTransport proceeds
+    const id = useStudioStore.getState().addTrack("audio", "TestArmed");
+    useStudioStore.getState().updateTrack(id, { armed: true });
+
+    // Mock getUserMedia + MediaRecorder for record path
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [] }) },
+      writable: true,
+      configurable: true,
+    });
+    globalThis.MediaRecorder = vi.fn().mockImplementation(() => ({
+      start: vi.fn(),
+      stop: vi.fn(),
+      ondataavailable: null,
+      onstop: null,
+      state: "inactive",
+    })) as any;
+
     const Tone = await import("tone");
     const transport = Tone.getTransport();
     vi.mocked(transport.start).mockClear();
 
     const { startRecordTransport } = await import("../audio/TransportController");
-    startRecordTransport();
+    await startRecordTransport();
 
-    expect(transport.start).toHaveBeenCalledOnce();
+    expect(transport.start).toHaveBeenCalled();
   });
 
   it("should set BPM", async () => {

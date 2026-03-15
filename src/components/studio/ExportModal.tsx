@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Download, FileAudio, Check } from "lucide-react";
+import { runCommand } from "@/studio/commandBus";
+import { useStudioStore } from "@/studio/engine/studioStore";
 
 interface ExportModalProps {
   open: boolean;
@@ -11,7 +13,8 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
   const [bitDepth, setBitDepth] = useState("24");
   const [sampleRate, setSampleRate] = useState("48000");
   const [exportType, setExportType] = useState("master");
-  const [fileName, setFileName] = useState("Vocal_Session_01");
+  const projectName = useStudioStore((s) => s.projectName);
+  const [fileName, setFileName] = useState(projectName || "Untitled Session");
   const [normalize, setNormalize] = useState(true);
   const [includeEffects, setIncludeEffects] = useState(true);
   const [includeAutomation, setIncludeAutomation] = useState(true);
@@ -222,7 +225,7 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
           {/* Actions */}
           <div className="flex gap-3 pt-2">
             <button
-              onClick={() => setRendering(true)}
+              onClick={() => { setRendering(true); runCommand("project:export"); }}
               disabled={rendering}
               className="flex-1 py-2.5 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_hsl(172_72%_55%/0.1)]"
             >

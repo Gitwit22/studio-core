@@ -1,21 +1,10 @@
-import * as Tone from "tone";
+// Transport controller logic has been merged into src/studio/engine/transportEngine.ts
+// This file is kept for backward compatibility — re-export from the single source of truth.
 
-export function play() {
-  Tone.getTransport().start();
-}
-
-export function stop() {
-  Tone.getTransport().stop();
-}
-
-export function startRecordTransport() {
-  Tone.getTransport().start();
-}
-
-export function setBPM(bpm: number) {
-  Tone.getTransport().bpm.value = bpm;
-}
-
-export function getPosition(): string {
-  return Tone.getTransport().position as string;
-}
+export {
+  playTransport as play,
+  stopTransport as stop,
+  recordTransport as startRecordTransport,
+  setBPM,
+  getPosition,
+} from "@/studio/engine/transportEngine"

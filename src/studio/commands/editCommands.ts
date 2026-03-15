@@ -1,21 +1,22 @@
-import { registerCommand } from "../commandBus";
+import { registerCommand } from "../commandBus"
+import { useStudioStore } from "../engine/studioStore"
 
 registerCommand("edit:undo", () => {
-  console.log("Undo");
-});
+  useStudioStore.getState().undo()
+})
 
 registerCommand("edit:redo", () => {
-  console.log("Redo");
-});
+  useStudioStore.getState().redo()
+})
 
 registerCommand("edit:cut", () => {
-  console.log("Cut");
-});
+  useStudioStore.getState().cutClip()
+})
 
 registerCommand("edit:copy", () => {
-  console.log("Copy");
-});
+  useStudioStore.getState().copyClip()
+})
 
 registerCommand("edit:paste", () => {
-  console.log("Paste");
-});
+  useStudioStore.getState().pasteClip()
+})

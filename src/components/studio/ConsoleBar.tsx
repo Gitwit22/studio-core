@@ -1,7 +1,12 @@
 import { Save, Settings, Download, Mic } from "lucide-react";
 import VUMeter from "./VUMeter";
+import { useStudioStore } from "@/studio/engine/studioStore";
+import { runCommand } from "@/studio/commandBus";
 
 const ConsoleBar = () => {
+  const projectName = useStudioStore((s) => s.projectName);
+  const isRecording = useStudioStore((s) => s.isRecording);
+
   return (
     <div className="studio-panel h-12 flex items-center justify-between px-4 shrink-0">
       {/* Left: Logo */}
@@ -20,10 +25,12 @@ const ConsoleBar = () => {
       {/* Center: Session info */}
       <div className="flex items-center gap-4">
         <span className="text-xs text-studio-text-dim">Session:</span>
-        <span className="studio-readout text-xs">Vocal_Session_01</span>
+        <span className="studio-readout text-xs">{projectName}</span>
         <div className="flex items-center gap-1.5">
-          <div className="studio-led active" />
-          <span className="text-[9px] text-studio-text-dim uppercase tracking-wider">Saved</span>
+          <div className={`studio-led ${isRecording ? "" : "active"}`} />
+          <span className="text-[9px] text-studio-text-dim uppercase tracking-wider">
+            {isRecording ? "Recording" : "Ready"}
+          </span>
         </div>
       </div>
 
@@ -31,17 +38,16 @@ const ConsoleBar = () => {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 studio-panel-raised px-3 py-1 rounded">
           <Mic className="w-3 h-3 text-studio-teal" />
-          <VUMeter bars={12} active height={20} vertical={false} />
-          <span className="studio-readout text-[9px]">-12dB</span>
+          <VUMeter bars={12} active={isRecording} height={20} vertical={false} />
         </div>
         <div className="flex items-center gap-1">
-          <button className="p-1.5 rounded hover:bg-studio-metal transition-colors">
+          <button onClick={() => runCommand("project:save")} className="p-1.5 rounded hover:bg-studio-metal transition-colors" title="Save">
             <Save className="w-3.5 h-3.5 text-studio-text-dim" />
           </button>
-          <button className="p-1.5 rounded hover:bg-studio-metal transition-colors">
+          <button onClick={() => runCommand("project:export")} className="p-1.5 rounded hover:bg-studio-metal transition-colors" title="Export">
             <Download className="w-3.5 h-3.5 text-studio-text-dim" />
           </button>
-          <button className="p-1.5 rounded hover:bg-studio-metal transition-colors">
+          <button className="p-1.5 rounded hover:bg-studio-metal transition-colors" title="Settings">
             <Settings className="w-3.5 h-3.5 text-studio-text-dim" />
           </button>
         </div>

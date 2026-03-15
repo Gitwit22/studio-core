@@ -10,7 +10,7 @@ describe("studioStore", () => {
     it("has correct defaults", () => {
       const state = useStudioStore.getState()
       expect(state.projectId).toBeNull()
-      expect(state.projectName).toBe("Untitled Project")
+      expect(state.projectName).toBe("Untitled Session")
       expect(state.isPlaying).toBe(false)
       expect(state.isRecording).toBe(false)
       expect(state.bpm).toBe(120)

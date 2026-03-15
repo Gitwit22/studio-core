@@ -8,13 +8,25 @@ import FXRack from "@/components/studio/FXRack";
 import ExportModal from "@/components/studio/ExportModal";
 import "@/studio/commands/transportCommands";
 import { registerStudioShortcuts } from "@/studio/registerShortcuts";
+import { useStudioStore } from "@/studio/engine/studioStore";
+import { audioEffectsManager } from "@/audio/AudioEffectsManager";
 
 const Studio = () => {
   const [exportOpen, setExportOpen] = useState(false);
 
   useEffect(() => {
+    // Initialize session if empty (clean start)
+    const { tracks, newSession } = useStudioStore.getState();
+    if (tracks.length === 0) {
+      newSession();
+    }
+    // Boot effects chain
+    audioEffectsManager.init();
     const cleanup = registerStudioShortcuts();
-    return cleanup;
+    return () => {
+      cleanup();
+      audioEffectsManager.dispose();
+    };
   }, []);
 
   return (

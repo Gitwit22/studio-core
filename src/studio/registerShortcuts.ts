@@ -9,13 +9,55 @@ export function registerStudioShortcuts() {
       runCommand("transport:play")
     }
 
-    if (e.key.toLowerCase() === "r") {
+    if (e.key.toLowerCase() === "r" && !e.ctrlKey && !e.metaKey) {
       runCommand("transport:record")
     }
 
-    if (e.ctrlKey && e.key.toLowerCase() === "s") {
+    // Home key = rewind
+    if (e.key === "Home") {
+      e.preventDefault()
+      runCommand("transport:rewind")
+    }
+
+    // Ctrl+Z = undo, Ctrl+Shift+Z = redo
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault()
+      if (e.shiftKey) {
+        runCommand("edit:redo")
+      } else {
+        runCommand("edit:undo")
+      }
+    }
+
+    // Ctrl+X / Ctrl+C / Ctrl+V
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
+      e.preventDefault()
+      runCommand("edit:cut")
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+      e.preventDefault()
+      runCommand("edit:copy")
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+      e.preventDefault()
+      runCommand("edit:paste")
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
       e.preventDefault()
       runCommand("project:save")
+    }
+
+    // Ctrl+N = new session
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+      e.preventDefault()
+      runCommand("project:new")
+    }
+
+    // Ctrl+E = export
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") {
+      e.preventDefault()
+      runCommand("project:export")
     }
   }
 
