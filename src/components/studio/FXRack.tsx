@@ -19,6 +19,7 @@ const FXRack = () => {
   ]);
 
   const [delayTime, setDelayTime] = useState<string>("1/4");
+  const [masterVolume, setMasterVolume] = useState(80);
 
   const toggleModule = (id: string) => {
     setModules(prev => prev.map(m => m.id === id ? { ...m, active: !m.active } : m));
@@ -31,7 +32,7 @@ const FXRack = () => {
   };
 
   return (
-    <div className="studio-panel w-[160px] shrink-0 flex flex-col overflow-hidden">
+    <div className="studio-panel h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-studio-text-dim">
@@ -201,7 +202,7 @@ const FXRack = () => {
             </span>
           </div>
           <div className="flex justify-center">
-            <RotaryKnob value={80} size={44} label="Master" />
+            <RotaryKnob value={masterVolume} onChange={(v) => setMasterVolume(v)} size={44} label="Master" />
           </div>
         </div>
       </div>
