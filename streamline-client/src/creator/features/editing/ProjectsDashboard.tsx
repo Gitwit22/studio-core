@@ -53,7 +53,7 @@ export default function ProjectsDashboard() {
       setProjectAssets((prev) => ({ ...prev, [newProj.id]: [] }));
       setShowCreateModal(false);
       setProjectName("");
-      nav(`/projects/${newProj.id}`);
+      nav(`/editing/editor/${newProj.id}`);
     } catch (err) {
       console.error("Failed to create project:", err);
       alert("Failed to create project. Please try again.");
@@ -191,7 +191,7 @@ export default function ProjectsDashboard() {
                   totalDuration={totalDuration}
                   formatDuration={formatDuration}
                   formatSize={formatSize}
-                  onOpen={() => nav(`/projects/${proj.id}`)}
+                  onOpen={() => nav(`/editing/editor/${proj.id}`)}
                   onEdit={() => nav(`/editing/editor/${proj.id}`)}
                   onDelete={() => handleDelete(proj.id)}
                 />

@@ -25,6 +25,7 @@ import { useEditorStore } from './store/editorStore';
 import type { TimelineClip, Track, SourceAsset } from './types';
 import { generateId } from './types';
 import EditorLayout from './components/EditorLayout';
+import RawVideoViewer from './components/RawVideoViewer';
 
 // ============================================================================
 // HELPERS — Convert legacy formats to new model
@@ -483,7 +484,10 @@ export default function EditorPage() {
     );
   }
 
-  return <EditorLayout />;
+  // Determine view mode: raw viewer for assets from My Content, timeline for saved projects
+  const isRawView = searchParams.get('view') === 'raw';
+
+  return isRawView ? <RawVideoViewer /> : <EditorLayout />;
 }
 
 // ============================================================================

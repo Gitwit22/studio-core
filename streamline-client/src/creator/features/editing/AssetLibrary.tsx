@@ -460,7 +460,7 @@ export default function AssetLibrary() {
                   recording={recording}
                   id={`recording-${recording.id}`}
                   onPlay={() => {
-                    if (recording.videoUrl) setPlayingVideo({ url: recording.videoUrl, title: recording.title });
+                    nav(`/editing/editor/new?recordingId=${encodeURIComponent(recording.id)}&view=raw`);
                   }}
                   onDelete={async () => {
                     if (!window.confirm(`Delete "${recording.title}"? This will permanently remove the video.`)) return;
@@ -536,7 +536,7 @@ export default function AssetLibrary() {
                     key={asset.id}
                     asset={asset}
                     onPlay={() => {
-                      if (asset.videoUrl) setPlayingVideo({ url: asset.videoUrl, title: asset.name });
+                      nav(`/editing/editor/new?assetId=${encodeURIComponent(asset.id)}&view=raw`);
                     }}
                     onDelete={async () => {
                       if (!window.confirm(`Delete "${asset.name}"? This will permanently remove the video.`)) return;
