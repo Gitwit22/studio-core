@@ -128,9 +128,12 @@ export function creatorRoutes(flags: CreatorRouteFlags) {
       />
       <Route
         path="/projects"
-        element={<ProjectsDashboard />}
+        element={canEditor ? <ProjectsDashboard /> : <Navigate to="/content" replace />}
       />
-      <Route path="/projects/:projectId" element={<ProjectDetail />} />
+      <Route
+        path="/projects/:projectId"
+        element={canEditor ? <ProjectDetail /> : <Navigate to="/content" replace />}
+      />
 
       {/* Legacy editing aliases */}
       <Route

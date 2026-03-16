@@ -716,6 +716,30 @@ function RecordingCard({
           >
             ▶ Play
           </button>
+          {recording.videoUrl && (
+            <a
+              href={recording.videoUrl}
+              download
+              title="Download recording"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                padding: '0.5rem 0.75rem',
+                background: 'rgba(34, 197, 94, 0.1)',
+                border: '1px solid rgba(34, 197, 94, 0.3)',
+                borderRadius: '0.5rem',
+                fontSize: '0.75rem',
+                fontWeight: '600',
+                color: '#22c55e',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+            >
+              ⬇
+            </a>
+          )}
           <button
             onClick={onDelete}
             title="Delete recording"
@@ -892,6 +916,30 @@ function AssetCard({ asset, onPlay, onDelete }: { asset: any; onPlay: () => void
           >
             ▶ Play
           </button>
+          {asset.videoUrl && (
+            <a
+              href={asset.videoUrl}
+              download
+              title="Download video"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                padding: '0.5rem 0.75rem',
+                background: 'rgba(34, 197, 94, 0.1)',
+                border: '1px solid rgba(34, 197, 94, 0.3)',
+                borderRadius: '0.5rem',
+                fontSize: '0.75rem',
+                fontWeight: '600',
+                color: '#22c55e',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+            >
+              ⬇
+            </a>
+          )}
           <button
             onClick={onDelete}
             title="Delete asset"
