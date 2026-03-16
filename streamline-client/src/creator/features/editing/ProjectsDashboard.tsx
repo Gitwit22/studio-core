@@ -142,22 +142,6 @@ export default function ProjectsDashboard() {
           </button>
         </div>
 
-        {/* Action Buttons */}
-        <div style={{ marginBottom: '2rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            style={{
-              padding: '0.875rem 1.75rem',
-              background: 'linear-gradient(135deg, #dc2626, #ef4444)',
-              color: '#ffffff', border: 'none', borderRadius: '0.75rem',
-              fontWeight: '600', cursor: 'pointer', transition: 'all 0.3s ease',
-              boxShadow: '0 8px 16px rgba(220,38,38,0.2)', fontSize: '1rem'
-            }}
-          >
-            ➕ New Project
-          </button>
-        </div>
-
         {/* Projects Grid */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
@@ -335,7 +319,7 @@ function ProjectCard({
 
   return (
     <div
-      onClick={onOpen}
+      onClick={onEdit}
       style={{
         background: 'linear-gradient(135deg, rgba(31,41,55,0.6) 0%, rgba(15,23,42,0.6) 100%)',
         borderRadius: '1rem', overflow: 'hidden',

@@ -20,6 +20,7 @@ export default function AssetLibrary() {
   const [search, setSearch] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [playingVideo, setPlayingVideo] = useState<{ url: string; title: string } | null>(null);
 
   const loadData = async () => {
     const [assetsData, recordingsData] = await Promise.all([
@@ -77,6 +78,54 @@ export default function AssetLibrary() {
 
   return (
     <>
+      {/* Video Player Modal */}
+      {playingVideo && (
+        <div
+          onClick={() => setPlayingVideo(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1100,
+            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '90%', maxWidth: 960, borderRadius: '1rem', overflow: 'hidden',
+              background: '#000', border: '1px solid rgba(220,38,38,0.4)',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.6)'
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '0.75rem 1rem', background: 'rgba(31,41,55,0.8)',
+              borderBottom: '1px solid rgba(255,255,255,0.1)'
+            }}>
+              <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.9rem',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%' }}>
+                {playingVideo.title}
+              </span>
+              <button
+                onClick={() => setPlayingVideo(null)}
+                style={{
+                  background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)',
+                  borderRadius: '0.5rem', color: '#ef4444', cursor: 'pointer',
+                  padding: '0.35rem 0.75rem', fontWeight: 600, fontSize: '0.8rem'
+                }}
+              >
+                ✕ Close
+              </button>
+            </div>
+            <video
+              src={playingVideo.url}
+              controls
+              autoPlay
+              style={{ width: '100%', display: 'block', maxHeight: '70vh' }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Create Project Modal */}
       {showCreateModal && (
         <div
@@ -410,6 +459,9 @@ export default function AssetLibrary() {
                   key={recording.id}
                   recording={recording}
                   id={`recording-${recording.id}`}
+                  onPlay={() => {
+                    if (recording.videoUrl) setPlayingVideo({ url: recording.videoUrl, title: recording.title });
+                  }}
                   onDelete={async () => {
                     if (!window.confirm(`Delete "${recording.title}"? This will permanently remove the video.`)) return;
                     try {
@@ -483,6 +535,9 @@ export default function AssetLibrary() {
                   <AssetCard
                     key={asset.id}
                     asset={asset}
+                    onPlay={() => {
+                      if (asset.videoUrl) setPlayingVideo({ url: asset.videoUrl, title: asset.name });
+                    }}
                     onDelete={async () => {
                       if (!window.confirm(`Delete "${asset.name}"? This will permanently remove the video.`)) return;
                       try {
@@ -508,18 +563,24 @@ export default function AssetLibrary() {
 function RecordingCard({
   recording,
   id,
+  onPlay,
   onDelete,
 }: {
   recording: Recording;
   id: string;
+  onPlay: () => void;
   onDelete: () => void;
 }) {
   const mins = Math.floor(recording.duration / 60);
   const secs = recording.duration % 60;
+  const dateStr = recording.createdAt
+    ? new Date(recording.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : '';
 
   return (
     <div
       id={id}
+      onClick={onPlay}
       style={{
         background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.6) 0%, rgba(15, 23, 42, 0.6) 100%)',
         borderRadius: '1rem',
@@ -538,14 +599,16 @@ function RecordingCard({
         target.style.borderColor = 'rgba(220, 38, 38, 0.8)';
         target.style.boxShadow = '0 12px 48px rgba(220, 38, 38, 0.25)';
         target.style.transform = 'translateY(-4px)';
-        target.querySelector('img')!.style.opacity = '0.7';
+        const img = target.querySelector('img');
+        if (img) img.style.opacity = '0.7';
       }}
       onMouseLeave={(e) => {
         const target = e.currentTarget as HTMLDivElement;
         target.style.borderColor = 'rgba(220, 38, 38, 0.3)';
         target.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.3)';
         target.style.transform = 'translateY(0)';
-        target.querySelector('img')!.style.opacity = '1';
+        const img = target.querySelector('img');
+        if (img) img.style.opacity = '1';
       }}
     >
       <div style={{ position: 'relative', overflow: 'hidden', aspectRatio: '16 / 9' }}>
@@ -559,6 +622,21 @@ function RecordingCard({
             transition: 'opacity 0.3s ease'
           }}
         />
+        {/* Play overlay */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.25)', opacity: 0, transition: 'opacity 0.3s',
+          pointerEvents: 'none'
+        }} className="play-overlay">
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%',
+            background: 'rgba(220,38,38,0.9)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center'
+          }}>
+            <span style={{ color: '#fff', fontSize: '1.25rem', marginLeft: 3 }}>▶</span>
+          </div>
+        </div>
         <div style={{
           position: 'absolute',
           top: '0.75rem',
@@ -583,6 +661,15 @@ function RecordingCard({
           }} />
           Ready
         </div>
+        {/* Duration badge */}
+        <div style={{
+          position: 'absolute', bottom: '0.5rem', right: '0.5rem',
+          background: 'rgba(0,0,0,0.75)', color: '#fff',
+          padding: '0.15rem 0.4rem', borderRadius: '0.25rem',
+          fontSize: '0.7rem', fontWeight: 600
+        }}>
+          {mins}:{String(secs).padStart(2, '0')}
+        </div>
       </div>
       <div style={{ padding: '1rem', flex: 1, display: 'flex', flexDirection: 'column' }}>
         <h3 style={{
@@ -592,38 +679,45 @@ function RecordingCard({
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
           color: '#22c55e',
-          marginBottom: '0.5rem'
+          marginBottom: '0.35rem'
         }}>
           ✓ {recording.title}
         </h3>
+        {/* Metadata row: room name + date */}
         <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '0.75rem',
-          color: '#9ca3af',
-          marginBottom: '1rem'
+          display: 'flex', alignItems: 'center', gap: '0.5rem',
+          fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.5rem', flexWrap: 'wrap'
         }}>
-          <span>
-            {mins}:{String(secs).padStart(2, '0')}
-          </span>
+          {recording.roomName && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+              📡 {recording.roomName}
+            </span>
+          )}
+          {recording.roomName && dateStr && <span style={{ opacity: 0.4 }}>·</span>}
+          {dateStr && <span>📅 {dateStr}</span>}
         </div>
-        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem' }}>
-          <div style={{
-            flex: 1,
-            padding: '0.5rem 0.75rem',
-            background: 'rgba(34, 197, 94, 0.1)',
-            border: '1px solid rgba(34, 197, 94, 0.3)',
-            borderRadius: '0.5rem',
-            fontSize: '0.75rem',
-            fontWeight: '600',
-            color: '#22c55e',
-            textAlign: 'center'
-          }}>
-            ✓ Ready
-          </div>
+        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem' }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            onClick={onPlay}
+            style={{
+              flex: 1,
+              padding: '0.5rem 0.75rem',
+              background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+              border: 'none',
+              borderRadius: '0.5rem',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              color: '#fff',
+              cursor: 'pointer',
+              textAlign: 'center'
+            }}
+          >
+            ▶ Play
+          </button>
+          <button
+            onClick={onDelete}
             title="Delete recording"
             style={{
               padding: '0.5rem 0.75rem',
@@ -654,17 +748,22 @@ function RecordingCard({
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
         }
+        div:hover > div > .play-overlay { opacity: 1 !important; }
       `}</style>
     </div>
   );
 }
 
-function AssetCard({ asset, onDelete }: { asset: any; onDelete: () => void }) {
+function AssetCard({ asset, onPlay, onDelete }: { asset: any; onPlay: () => void; onDelete: () => void }) {
   const mins = Math.floor(asset.duration / 60);
   const secs = asset.duration % 60;
+  const dateStr = asset.createdAt
+    ? new Date(asset.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : '';
 
   return (
     <div
+      onClick={onPlay}
       style={{
         background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.6) 0%, rgba(15, 23, 42, 0.6) 100%)',
         borderRadius: '1rem',
@@ -683,14 +782,20 @@ function AssetCard({ asset, onDelete }: { asset: any; onDelete: () => void }) {
         target.style.borderColor = 'rgba(220, 38, 38, 0.6)';
         target.style.boxShadow = '0 12px 48px rgba(220, 38, 38, 0.2)';
         target.style.transform = 'translateY(-4px)';
-        target.querySelector('img')!.style.opacity = '0.7';
+        const img = target.querySelector('img');
+        if (img) img.style.opacity = '0.7';
+        const overlay = target.querySelector('.play-overlay-asset') as HTMLElement;
+        if (overlay) overlay.style.opacity = '1';
       }}
       onMouseLeave={(e) => {
         const target = e.currentTarget as HTMLDivElement;
         target.style.borderColor = 'rgba(255, 255, 255, 0.1)';
         target.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.3)';
         target.style.transform = 'translateY(0)';
-        target.querySelector('img')!.style.opacity = '1';
+        const img = target.querySelector('img');
+        if (img) img.style.opacity = '1';
+        const overlay = target.querySelector('.play-overlay-asset') as HTMLElement;
+        if (overlay) overlay.style.opacity = '0';
       }}
     >
       <div style={{ position: 'relative', overflow: 'hidden', aspectRatio: '16 / 9' }}>
@@ -704,6 +809,24 @@ function AssetCard({ asset, onDelete }: { asset: any; onDelete: () => void }) {
             transition: 'opacity 0.3s ease'
           }}
         />
+        {/* Play overlay */}
+        <div
+          className="play-overlay-asset"
+          style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.25)', opacity: 0, transition: 'opacity 0.3s',
+            pointerEvents: 'none'
+          }}
+        >
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%',
+            background: 'rgba(220,38,38,0.9)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center'
+          }}>
+            <span style={{ color: '#fff', fontSize: '1.25rem', marginLeft: 3 }}>▶</span>
+          </div>
+        </div>
         <div style={{
           position: 'absolute',
           top: '0.75rem',
@@ -718,6 +841,15 @@ function AssetCard({ asset, onDelete }: { asset: any; onDelete: () => void }) {
         }}>
           {asset.source === "stream" ? "📡 Stream" : "⬆️ Upload"}
         </div>
+        {/* Duration badge */}
+        <div style={{
+          position: 'absolute', bottom: '0.5rem', right: '0.5rem',
+          background: 'rgba(0,0,0,0.75)', color: '#fff',
+          padding: '0.15rem 0.4rem', borderRadius: '0.25rem',
+          fontSize: '0.7rem', fontWeight: 600
+        }}>
+          {mins}:{String(secs).padStart(2, '0')}
+        </div>
       </div>
       <div style={{ padding: '1rem', flex: 1, display: 'flex', flexDirection: 'column' }}>
         <h3 style={{
@@ -727,39 +859,41 @@ function AssetCard({ asset, onDelete }: { asset: any; onDelete: () => void }) {
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
           color: '#ffffff',
-          marginBottom: '0.75rem'
+          marginBottom: '0.35rem'
         }}>
           {asset.name}
         </h3>
+        {/* Metadata row: date */}
         <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '0.75rem',
-          color: '#9ca3af',
-          marginBottom: '1rem'
+          display: 'flex', alignItems: 'center', gap: '0.5rem',
+          fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.5rem'
         }}>
-          <span>
-            {mins}:{String(secs).padStart(2, '0')}
-          </span>
+          {dateStr && <span>📅 {dateStr}</span>}
+          {asset.source === 'stream' && dateStr && <span style={{ opacity: 0.4 }}>·</span>}
+          {asset.source === 'stream' && <span>📡 From stream</span>}
         </div>
-        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem' }}>
-          <div style={{
-            flex: 1,
-            padding: '0.5rem 0.75rem',
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '0.5rem',
-            fontSize: '0.75rem',
-            fontWeight: '600',
-            color: '#9ca3af',
-            textAlign: 'center',
-            textTransform: 'capitalize'
-          }}>
-            {asset.source === 'stream' ? '📡 From stream' : '⬆️ Uploaded'}
-          </div>
+        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem' }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            onClick={onPlay}
+            style={{
+              flex: 1,
+              padding: '0.5rem 0.75rem',
+              background: 'linear-gradient(135deg, #dc2626, #ef4444)',
+              border: 'none',
+              borderRadius: '0.5rem',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              color: '#fff',
+              cursor: 'pointer',
+              textAlign: 'center'
+            }}
+          >
+            ▶ Play
+          </button>
+          <button
+            onClick={onDelete}
             title="Delete asset"
             style={{
               padding: '0.5rem 0.75rem',
