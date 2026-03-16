@@ -30,6 +30,8 @@ interface ScreenShareRouterProps {
   onClose: () => void;
   mode: ScreenShareRouteMode;
   onModeChange: (mode: ScreenShareRouteMode) => void;
+  /** Name of the participant currently screen sharing, if any */
+  activeSharerName?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +43,7 @@ export default function ScreenShareRouter({
   onClose,
   mode,
   onModeChange,
+  activeSharerName,
 }: ScreenShareRouterProps) {
   const [selectedMode, setSelectedMode] = useState<ScreenShareRouteMode>(mode);
 
@@ -242,6 +245,40 @@ export default function ScreenShareRouter({
             />
             <span style={{ fontSize: "0.6rem", color: "#9ca3af" }}>
               Current: <strong style={{ color: "#d1d5db" }}>{SCREEN_SHARE_ROUTE_LABELS[selectedMode]}</strong>
+            </span>
+          </div>
+
+          {/* Active screen share indicator */}
+          <div
+            style={{
+              padding: "0.5rem 0.7rem",
+              background: activeSharerName
+                ? "rgba(16,185,129,0.08)"
+                : "rgba(15,23,42,0.7)",
+              borderRadius: "0.4rem",
+              border: activeSharerName
+                ? "1px solid rgba(16,185,129,0.3)"
+                : "1px solid rgba(55,65,81,0.5)",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.4rem",
+            }}
+          >
+            <div
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: activeSharerName ? "#10b981" : "#4b5563",
+                animation: activeSharerName ? "pulse 1.5s ease-in-out infinite" : "none",
+              }}
+            />
+            <span style={{ fontSize: "0.6rem", color: "#9ca3af" }}>
+              {activeSharerName ? (
+                <>Sharing: <strong style={{ color: "#6ee7b7" }}>{activeSharerName}</strong></>
+              ) : (
+                "No active screen share"
+              )}
             </span>
           </div>
         </div>

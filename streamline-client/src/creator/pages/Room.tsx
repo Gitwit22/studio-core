@@ -29,6 +29,7 @@ import SafeVideoConference from "../components/SafeVideoConference";
 import AudioMixerModal from "../components/AudioMixerModal";
 import MixerBridge from "../components/MixerBridge";
 import ScreenShareRouter, { type ScreenShareRouteMode } from "../components/ScreenShareRouter";
+import ScreenSharePopout from "../components/ScreenSharePopout";
 import { useEffectiveEntitlements } from "../../hooks/useEffectiveEntitlements";
 import { useFeatureAccess } from "../../hooks/useFeatureAccess";
 import { useHlsStatus } from "../hooks/useHlsStatus";
@@ -904,6 +905,7 @@ type LiveKitShellProps = {
   controlsAllowPublishAudio: boolean;
   controlsTileVisible: boolean;
   controlsAllowScreenShare: boolean;
+  screenShareMode: ScreenShareRouteMode;
   watermarkEnabled: boolean;
   dashboardOpen: boolean;
   onCloseDashboard: () => void;
@@ -918,6 +920,9 @@ type LiveKitShellProps = {
   dashboardRole: "host" | "moderator" | "participant";
   onLeaveRequested?: () => void;
   onDisconnected: () => void;
+  onActiveSharerChange?: (name: string | null) => void;
+  audioMixerEnabled: boolean;
+  advancedScreenShareEnabled: boolean;
 };
 
 function LiveKitShell({
@@ -930,6 +935,7 @@ function LiveKitShell({
   controlsAllowPublishAudio,
   controlsTileVisible,
    controlsAllowScreenShare,
+  screenShareMode,
   watermarkEnabled,
   dashboardOpen,
   onCloseDashboard,
@@ -944,6 +950,9 @@ function LiveKitShell({
   dashboardRole,
   onLeaveRequested,
   onDisconnected,
+  onActiveSharerChange,
+  audioMixerEnabled,
+  advancedScreenShareEnabled,
 }: LiveKitShellProps) {
   const [guestStatus, setGuestStatus] = useState<GuestStatus>(null);
   const statusRef = useRef<GuestStatus>(null);
@@ -1075,7 +1084,7 @@ function LiveKitShell({
         subjectToControls && !controlsAllowPublishAudio ? " sl-controls-no-audio" : ""
       }${subjectToControls && !controlsTileVisible ? " sl-controls-hide-self" : ""}${
         subjectToControls && !controlsAllowScreenShare ? " sl-controls-no-screen" : ""
-      }`}
+      } sl-screen-${screenShareMode}`}
       token={token}
       serverUrl={serverUrl}
       connect={true}
@@ -1118,7 +1127,8 @@ function LiveKitShell({
           onDismiss={() => setMediaPermissionError(null)}
         />
         <ReconnectCommandListener />
-        <MixerBridge />
+        {audioMixerEnabled && <MixerBridge />}
+        {advancedScreenShareEnabled && <ScreenSharePopout mode={screenShareMode} onActiveSharerChange={onActiveSharerChange} />}
         {isHost && !isViewer && (
           <div
             style={{
@@ -1304,6 +1314,7 @@ function RoomPage() {
   const [showMixer, setShowMixer] = useState(false);
   const [showScreenShareRouter, setShowScreenShareRouter] = useState(false);
   const [screenShareMode, setScreenShareModeRaw] = useState<ScreenShareRouteMode>("off");
+  const [activeSharerName, setActiveSharerName] = useState<string | null>(null);
   const [egressId, setEgressId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [showGoodbye, setShowGoodbye] = useState(false);
@@ -4005,6 +4016,7 @@ function RoomPage() {
               Dashboard
             </button>
 
+            {featureAccess.audioMixer.allowed && (
             <button
               onClick={() => setShowMixer(v => !v)}
               style={{
@@ -4026,28 +4038,31 @@ function RoomPage() {
             >
               🎛️ Mixer
             </button>
+            )}
 
-            <button
-              onClick={() => setShowScreenShareRouter(v => !v)}
-              style={{
-                fontSize: '0.75rem',
-                padding: '0.5rem 0.75rem',
-                border: showScreenShareRouter
-                  ? '1px solid rgba(59, 130, 246, 0.7)'
-                  : '1px solid rgba(59, 130, 246, 0.35)',
-                borderRadius: '0.375rem',
-                background: showScreenShareRouter
-                  ? 'rgba(59, 130, 246, 0.18)'
-                  : 'rgba(59, 130, 246, 0.06)',
-                color: '#60a5fa',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                fontWeight: '500'
-              }}
-              title="Screen share routing"
-            >
-              🖥️ Screen
-            </button>
+            {isHost && featureAccess.advancedScreenShare.allowed && (
+              <button
+                onClick={() => setShowScreenShareRouter(v => !v)}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.5rem 0.75rem',
+                  border: showScreenShareRouter
+                    ? '1px solid rgba(59, 130, 246, 0.7)'
+                    : '1px solid rgba(59, 130, 246, 0.35)',
+                  borderRadius: '0.375rem',
+                  background: showScreenShareRouter
+                    ? 'rgba(59, 130, 246, 0.18)'
+                    : 'rgba(59, 130, 246, 0.06)',
+                  color: '#60a5fa',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontWeight: '500'
+                }}
+                title="Screen share routing"
+              >
+                🖥️ Screen
+              </button>
+            )}
 
             {canManageStream && (
               <>
@@ -4116,6 +4131,7 @@ function RoomPage() {
           controlsAllowPublishAudio={controlsAllowPublishAudio}
           controlsTileVisible={controlsTileVisible}
           controlsAllowScreenShare={controlsAllowScreenShare}
+          screenShareMode={screenShareMode}
           watermarkEnabled={watermarkEnabled}
           dashboardOpen={dashboardOpen}
           onCloseDashboard={() => setDashboardOpen(false)}
@@ -4132,6 +4148,9 @@ function RoomPage() {
             void handleEndStream();
           }}
           onDisconnected={handleLeftRoom}
+          onActiveSharerChange={setActiveSharerName}
+          audioMixerEnabled={featureAccess.audioMixer.allowed}
+          advancedScreenShareEnabled={featureAccess.advancedScreenShare.allowed}
         />
       )}
 
@@ -4313,17 +4332,22 @@ function RoomPage() {
         />
       </ErrorBoundary>
 
+      {featureAccess.audioMixer.allowed && (
       <AudioMixerModal
         open={showMixer}
         onClose={() => setShowMixer(false)}
       />
+      )}
 
+      {featureAccess.advancedScreenShare.allowed && (
       <ScreenShareRouter
         open={showScreenShareRouter}
         onClose={() => setShowScreenShareRouter(false)}
         mode={screenShareMode}
         onModeChange={setScreenShareMode}
+        activeSharerName={activeSharerName}
       />
+      )}
 
       {/* Recording cap toast (Free plan) */}
       {recordingToast && (

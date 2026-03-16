@@ -102,19 +102,36 @@ export default function AssetLibrary() {
               borderBottom: '1px solid rgba(255,255,255,0.1)'
             }}>
               <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.9rem',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%' }}>
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>
                 {playingVideo.title}
               </span>
-              <button
-                onClick={() => setPlayingVideo(null)}
-                style={{
-                  background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)',
-                  borderRadius: '0.5rem', color: '#ef4444', cursor: 'pointer',
-                  padding: '0.35rem 0.75rem', fontWeight: 600, fontSize: '0.8rem'
-                }}
-              >
-                ✕ Close
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                {playingVideo.url && (
+                  <a
+                    href={playingVideo.url}
+                    download
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.4)',
+                      borderRadius: '0.5rem', color: '#22c55e', cursor: 'pointer',
+                      padding: '0.35rem 0.75rem', fontWeight: 600, fontSize: '0.8rem',
+                      textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.3rem'
+                    }}
+                  >
+                    ⬇ Download
+                  </a>
+                )}
+                <button
+                  onClick={() => setPlayingVideo(null)}
+                  style={{
+                    background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)',
+                    borderRadius: '0.5rem', color: '#ef4444', cursor: 'pointer',
+                    padding: '0.35rem 0.75rem', fontWeight: 600, fontSize: '0.8rem'
+                  }}
+                >
+                  ✕ Close
+                </button>
+              </div>
             </div>
             <video
               src={playingVideo.url}
@@ -460,7 +477,11 @@ export default function AssetLibrary() {
                   recording={recording}
                   id={`recording-${recording.id}`}
                   onPlay={() => {
-                    nav(`/editing/editor/new?recordingId=${encodeURIComponent(recording.id)}&view=raw`);
+                    if (canEditor) {
+                      nav(`/editing/editor/new?recordingId=${encodeURIComponent(recording.id)}&view=raw`);
+                    } else if (recording.videoUrl) {
+                      setPlayingVideo({ url: recording.videoUrl, title: recording.title });
+                    }
                   }}
                   onDelete={async () => {
                     if (!window.confirm(`Delete "${recording.title}"? This will permanently remove the video.`)) return;
@@ -536,7 +557,11 @@ export default function AssetLibrary() {
                     key={asset.id}
                     asset={asset}
                     onPlay={() => {
-                      nav(`/editing/editor/new?assetId=${encodeURIComponent(asset.id)}&view=raw`);
+                      if (canEditor) {
+                        nav(`/editing/editor/new?assetId=${encodeURIComponent(asset.id)}&view=raw`);
+                      } else if (asset.videoUrl) {
+                        setPlayingVideo({ url: asset.videoUrl, title: asset.name });
+                      }
                     }}
                     onDelete={async () => {
                       if (!window.confirm(`Delete "${asset.name}"? This will permanently remove the video.`)) return;

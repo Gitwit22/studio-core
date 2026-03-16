@@ -5,7 +5,9 @@ import {
   BUS_LABELS,
   type BusId,
   type MixerState,
+  type DuckingConfig,
 } from "../../lib/audioMixer";
+import { useLocalRecording } from "../hooks/useLocalRecording";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -82,6 +84,87 @@ export default function AudioMixerModal({ open, onClose }: AudioMixerModalProps)
     [mixer, state],
   );
 
+  // --- Music player state ---
+  const [musicFile, setMusicFile] = useState<File | null>(null);
+  const musicAudioRef = useRef<HTMLAudioElement | null>(null);
+  const musicFileInputRef = useRef<HTMLInputElement>(null);
+  const [musicPlaying, setMusicPlaying] = useState(false);
+
+  const loadMusicFile = useCallback((file: File) => {
+    // Clean up previous
+    if (musicAudioRef.current) {
+      musicAudioRef.current.pause();
+      mixer.disconnectMusicElement();
+      URL.revokeObjectURL(musicAudioRef.current.src);
+      musicAudioRef.current = null;
+    }
+
+    const audio = new Audio();
+    audio.crossOrigin = "anonymous";
+    audio.src = URL.createObjectURL(file);
+    audio.loop = true;
+    musicAudioRef.current = audio;
+    setMusicFile(file);
+    setMusicPlaying(false);
+
+    // Must init context first (user gesture)
+    mixer.init();
+    mixer.connectMusicElement(audio);
+  }, [mixer]);
+
+  const toggleMusicPlay = useCallback(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(() => { /* autoplay blocked */ });
+      setMusicPlaying(true);
+    } else {
+      audio.pause();
+      setMusicPlaying(false);
+    }
+  }, []);
+
+  const stopMusic = useCallback(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+    setMusicPlaying(false);
+  }, []);
+
+  const removeMusic = useCallback(() => {
+    if (musicAudioRef.current) {
+      musicAudioRef.current.pause();
+      mixer.disconnectMusicElement();
+      URL.revokeObjectURL(musicAudioRef.current.src);
+      musicAudioRef.current = null;
+    }
+    setMusicFile(null);
+    setMusicPlaying(false);
+  }, [mixer]);
+
+  // Sync play state if audio ends (for non-loop scenarios)
+  useEffect(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+    const onEnded = () => setMusicPlaying(false);
+    audio.addEventListener("ended", onEnded);
+    return () => audio.removeEventListener("ended", onEnded);
+  });
+
+  // Cleanup music on unmount
+  useEffect(() => {
+    return () => {
+      if (musicAudioRef.current) {
+        musicAudioRef.current.pause();
+        URL.revokeObjectURL(musicAudioRef.current.src);
+      }
+    };
+  }, []);
+
+  // --- Local recording ---
+  const recording = useLocalRecording();
+
   if (!open) return null;
 
   const inputBuses = ALL_BUS_IDS.filter((id) => id !== "masterBus");
@@ -137,7 +220,7 @@ export default function AudioMixerModal({ open, onClose }: AudioMixerModalProps)
               🎛️ Audio Mixer
             </div>
             <div style={{ fontSize: "0.65rem", color: "#9ca3af", marginTop: 2 }}>
-              Monitor &amp; Program outputs
+              Monitor = your headphones &bull; Program = recording/export mix
             </div>
           </div>
           <button
@@ -241,17 +324,205 @@ export default function AudioMixerModal({ open, onClose }: AudioMixerModalProps)
           >
             <OutputFader
               label="Monitor"
+              sublabel="What you hear locally"
               color="#34d399"
               value={state.monitorGain}
               onChange={(v) => mixer.setMonitorGain(v)}
             />
             <OutputFader
               label="Program"
+              sublabel="Recording / export output"
               color="#f87171"
               value={state.programGain}
               onChange={(v) => mixer.setProgramGain(v)}
             />
           </div>
+
+          {/* ---- Music Player ---- */}
+          <div
+            style={{
+              padding: "0.6rem",
+              background: "rgba(15,23,42,0.7)",
+              borderRadius: "0.4rem",
+              border: "1px solid rgba(55,65,81,0.5)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.4rem",
+            }}
+          >
+            <div style={{ fontSize: "0.65rem", fontWeight: 600, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              🎵 Music
+            </div>
+            <input
+              ref={musicFileInputRef}
+              type="file"
+              accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/aac,audio/mp4,audio/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) loadMusicFile(file);
+                e.target.value = "";
+              }}
+            />
+            {!musicFile ? (
+              <button
+                onClick={() => musicFileInputRef.current?.click()}
+                style={{
+                  fontSize: "0.65rem",
+                  padding: "0.4rem 0.6rem",
+                  borderRadius: "0.3rem",
+                  border: "1px solid rgba(139,92,246,0.3)",
+                  background: "rgba(139,92,246,0.1)",
+                  color: "#c4b5fd",
+                  cursor: "pointer",
+                }}
+              >
+                Load audio file…
+              </button>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.6rem", color: "#d1d5db", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {musicFile.name}
+                </span>
+                <button
+                  onClick={toggleMusicPlay}
+                  title={musicPlaying ? "Pause" : "Play"}
+                  style={{
+                    width: 28, height: 22, fontSize: "0.6rem", fontWeight: 700,
+                    borderRadius: "0.25rem", border: "none", cursor: "pointer",
+                    background: musicPlaying ? "#eab308" : "#059669",
+                    color: musicPlaying ? "#000" : "#fff",
+                  }}
+                >
+                  {musicPlaying ? "⏸" : "▶"}
+                </button>
+                <button
+                  onClick={stopMusic}
+                  title="Stop"
+                  style={{
+                    width: 28, height: 22, fontSize: "0.6rem", fontWeight: 700,
+                    borderRadius: "0.25rem", border: "none", cursor: "pointer",
+                    background: "rgba(55,65,81,0.7)", color: "#9ca3af",
+                  }}
+                >
+                  ⏹
+                </button>
+                <button
+                  onClick={() => musicFileInputRef.current?.click()}
+                  title="Replace"
+                  style={{
+                    width: 28, height: 22, fontSize: "0.55rem", fontWeight: 700,
+                    borderRadius: "0.25rem", border: "none", cursor: "pointer",
+                    background: "rgba(55,65,81,0.7)", color: "#9ca3af",
+                  }}
+                >
+                  📂
+                </button>
+                <button
+                  onClick={removeMusic}
+                  title="Remove"
+                  style={{
+                    width: 28, height: 22, fontSize: "0.55rem", fontWeight: 700,
+                    borderRadius: "0.25rem", border: "none", cursor: "pointer",
+                    background: "rgba(220,38,38,0.2)", color: "#f87171",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ---- Local Recording ---- */}
+          <div
+            style={{
+              padding: "0.6rem",
+              background: "rgba(15,23,42,0.7)",
+              borderRadius: "0.4rem",
+              border: recording.state === "recording"
+                ? "1px solid rgba(220,38,38,0.5)"
+                : "1px solid rgba(55,65,81,0.5)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.4rem",
+            }}
+          >
+            <div style={{ fontSize: "0.65rem", fontWeight: 600, color: "#f87171", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              ⏺ Program Recording
+            </div>
+            <div style={{ fontSize: "0.55rem", color: "#6b7280" }}>
+              Records the mixed program output locally. Does not affect LiveKit live audio.
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+              {recording.state === "idle" && !recording.lastResult && (
+                <button
+                  onClick={recording.start}
+                  style={{
+                    fontSize: "0.65rem", padding: "0.35rem 0.6rem",
+                    borderRadius: "0.3rem", border: "1px solid rgba(220,38,38,0.3)",
+                    background: "rgba(220,38,38,0.1)", color: "#f87171",
+                    cursor: "pointer",
+                  }}
+                >
+                  Start Recording
+                </button>
+              )}
+              {recording.state === "recording" && (
+                <button
+                  onClick={recording.stop}
+                  style={{
+                    fontSize: "0.65rem", padding: "0.35rem 0.6rem",
+                    borderRadius: "0.3rem", border: "1px solid rgba(220,38,38,0.5)",
+                    background: "rgba(220,38,38,0.25)", color: "#fca5a5",
+                    cursor: "pointer", animation: "pulse 1.5s ease-in-out infinite",
+                  }}
+                >
+                  ⏹ Stop Recording
+                </button>
+              )}
+              {recording.state === "stopping" && (
+                <span style={{ fontSize: "0.6rem", color: "#9ca3af" }}>Finalizing…</span>
+              )}
+              {recording.lastResult && (
+                <>
+                  <button
+                    onClick={() => recording.download()}
+                    style={{
+                      fontSize: "0.65rem", padding: "0.35rem 0.6rem",
+                      borderRadius: "0.3rem", border: "1px solid rgba(59,130,246,0.3)",
+                      background: "rgba(59,130,246,0.1)", color: "#93c5fd",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ⬇ Download
+                  </button>
+                  <span style={{ fontSize: "0.55rem", color: "#6b7280" }}>
+                    {Math.round(recording.lastResult.durationMs / 1000)}s
+                  </span>
+                  <button
+                    onClick={() => { recording.clearResult(); }}
+                    title="Discard"
+                    style={{
+                      width: 22, height: 22, fontSize: "0.55rem", fontWeight: 700,
+                      borderRadius: "0.25rem", border: "none", cursor: "pointer",
+                      background: "rgba(55,65,81,0.5)", color: "#6b7280",
+                    }}
+                  >
+                    ✕
+                  </button>
+                </>
+              )}
+            </div>
+            {recording.error && (
+              <div style={{ fontSize: "0.55rem", color: "#f87171" }}>{recording.error}</div>
+            )}
+          </div>
+
+          {/* ---- Ducking Settings (Advanced) ---- */}
+          <DuckingControls
+            config={state.ducking}
+            onChange={(partial) => mixer.setDuckingConfig(partial)}
+          />
         </div>
       </div>
     </div>
@@ -387,7 +658,7 @@ function BusStrip({
       <div style={{ textAlign: "center" }}>
         <button
           onClick={() => onOutputToggle(busId, "monitor")}
-          title={`Send to monitor: ${bus.outputs.monitor ? "ON" : "OFF"}`}
+          title={`Monitor (local headphones): ${bus.outputs.monitor ? "ON" : "OFF"}`}
           style={{
             width: 32,
             height: 22,
@@ -408,7 +679,7 @@ function BusStrip({
       <div style={{ textAlign: "center" }}>
         <button
           onClick={() => onOutputToggle(busId, "program")}
-          title={`Send to program: ${bus.outputs.program ? "ON" : "OFF"}`}
+          title={`Program (recording/export mix): ${bus.outputs.program ? "ON" : "OFF"}`}
           style={{
             width: 32,
             height: 22,
@@ -434,12 +705,13 @@ function BusStrip({
 
 interface OutputFaderProps {
   label: string;
+  sublabel?: string;
   color: string;
   value: number;
   onChange: (v: number) => void;
 }
 
-function OutputFader({ label, color, value, onChange }: OutputFaderProps) {
+function OutputFader({ label, sublabel, color, value, onChange }: OutputFaderProps) {
   return (
     <div style={{ flex: 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -450,6 +722,9 @@ function OutputFader({ label, color, value, onChange }: OutputFaderProps) {
           {Math.round(value * 100)}%
         </span>
       </div>
+      {sublabel && (
+        <div style={{ fontSize: "0.5rem", color: "#6b7280", marginBottom: 3 }}>{sublabel}</div>
+      )}
       <input
         type="range"
         min={0}
@@ -464,6 +739,141 @@ function OutputFader({ label, color, value, onChange }: OutputFaderProps) {
           cursor: "pointer",
         }}
         aria-label={`${label} output gain`}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DuckingControls sub-component (collapsible advanced section)
+// ---------------------------------------------------------------------------
+
+interface DuckingControlsProps {
+  config: DuckingConfig;
+  onChange: (partial: Partial<DuckingConfig>) => void;
+}
+
+function DuckingControls({ config, onChange }: DuckingControlsProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div
+      style={{
+        padding: "0.6rem",
+        background: "rgba(15,23,42,0.7)",
+        borderRadius: "0.4rem",
+        border: "1px solid rgba(55,65,81,0.5)",
+      }}
+    >
+      <button
+        onClick={() => setExpanded((prev) => !prev)}
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.3rem",
+          padding: 0,
+          width: "100%",
+        }}
+      >
+        <span style={{ fontSize: "0.65rem", fontWeight: 600, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          ⚙ Ducking
+        </span>
+        <span style={{ fontSize: "0.55rem", color: "#6b7280", marginLeft: "auto" }}>
+          {expanded ? "▲" : "▼"}
+        </span>
+      </button>
+      {expanded && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.5rem" }}>
+          {/* Depth */}
+          <DuckingSlider
+            label="Depth"
+            hint="Lower = more ducking"
+            min={0}
+            max={1}
+            step={0.01}
+            value={config.depth}
+            display={`${Math.round(config.depth * 100)}%`}
+            onChange={(v) => onChange({ depth: v })}
+          />
+          {/* Threshold */}
+          <DuckingSlider
+            label="Threshold"
+            hint="RMS level to trigger ducking"
+            min={0.001}
+            max={0.1}
+            step={0.001}
+            value={config.threshold}
+            display={config.threshold.toFixed(3)}
+            onChange={(v) => onChange({ threshold: v })}
+          />
+          {/* Attack */}
+          <DuckingSlider
+            label="Attack"
+            hint="Speed ducking kicks in"
+            min={10}
+            max={500}
+            step={10}
+            value={config.attackMs}
+            display={`${config.attackMs}ms`}
+            onChange={(v) => onChange({ attackMs: v })}
+          />
+          {/* Release */}
+          <DuckingSlider
+            label="Release"
+            hint="Speed ducking fades out"
+            min={50}
+            max={2000}
+            step={50}
+            value={config.releaseMs}
+            display={`${config.releaseMs}ms`}
+            onChange={(v) => onChange({ releaseMs: v })}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DuckingSlider sub-component
+// ---------------------------------------------------------------------------
+
+interface DuckingSliderProps {
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  display: string;
+  onChange: (v: number) => void;
+}
+
+function DuckingSlider({ label, hint, min, max, step, value, display, onChange }: DuckingSliderProps) {
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ fontSize: "0.6rem", fontWeight: 600, color: "#d1d5db" }}>{label}</span>
+        <span style={{ fontSize: "0.55rem", color: "#6b7280" }}>{display}</span>
+      </div>
+      <div style={{ fontSize: "0.5rem", color: "#4b5563", marginBottom: 2 }}>{hint}</div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{
+          width: "100%",
+          height: 3,
+          accentColor: "#a78bfa",
+          cursor: "pointer",
+        }}
+        aria-label={`Ducking ${label}`}
       />
     </div>
   );

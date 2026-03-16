@@ -26,6 +26,15 @@ export type PlatformFlagsLike = {
   // - Present but false => disabled (must be explicitly enabled)
   myContentEnabled?: unknown;
   myContentRecordingsEnabled?: unknown;
+
+  // Experimental: publish mixer's program audio instead of raw mic via LiveKit
+  mixedAudioPublishEnabled?: unknown;
+
+  // Advanced screen share routing (pop-out, main-stage modes)
+  advancedScreenShareEnabled?: unknown;
+
+  // Audio mixer panel (bus routing, ducking, program output)
+  audioMixerEnabled?: unknown;
 };
 
 function isNewPlatformFlagEnabled(value: unknown): boolean {
@@ -121,6 +130,12 @@ export function computeEffectiveFeatureAccess(input: {
     allowed: boolean;
   };
   myContentRecordings: {
+    allowed: boolean;
+  };
+  advancedScreenShare: {
+    allowed: boolean;
+  };
+  audioMixer: {
     allowed: boolean;
   };
 } {
@@ -225,6 +240,12 @@ export function computeEffectiveFeatureAccess(input: {
     },
     myContentRecordings: {
       allowed: platformMyContentEnabled && platformMyContentRecordingsEnabled,
+    },
+    advancedScreenShare: {
+      allowed: isNewPlatformFlagEnabled((pf as any).advancedScreenShareEnabled),
+    },
+    audioMixer: {
+      allowed: isNewPlatformFlagEnabled((pf as any).audioMixerEnabled),
     },
   };
 }

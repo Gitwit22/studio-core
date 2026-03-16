@@ -197,3 +197,25 @@ button:focus-visible {
 /* Desktop: allow LiveKit to control screen-share tile visuals; no extra overlay */
 @media (min-width: 769px) {
 }
+
+/* ======================================
+   SCREEN SHARE PERMISSION & LAYOUT GATING
+   ====================================== */
+
+/* Hide the screen share toggle button for users without permission */
+.sl-controls-no-screen .lk-control-bar .lk-button-group:has(button[aria-label*="Screen"]),
+.sl-controls-no-screen .lk-control-bar button[aria-label*="Screen"],
+.sl-controls-no-screen .lk-control-bar button[aria-label*="screen"],
+.sl-controls-no-screen .lk-control-bar [data-lk-source="screen_share"] {
+  display: none !important;
+}
+
+/* Off mode: screen share tiles hidden everywhere */
+.sl-screen-off [data-lk-source="screen_share"] {
+  display: none !important;
+}
+
+/* Popout mode: screen share tiles hidden from main stage (shown in pop-out window) */
+.sl-screen-popout [data-lk-source="screen_share"] {
+  display: none !important;
+}
