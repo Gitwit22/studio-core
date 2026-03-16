@@ -1152,9 +1152,15 @@ router.get("/features", async (req, res) => {
         name: doc.id,
         ...doc.data(),
       }))
-      // Advanced permissions is now a legacy flag and should not
-      // be exposed as a toggle in the Admin UI.
-      .filter((f) => f.name !== "advancedPermissions");
+      // Legacy / orphaned flags that should not appear in the Admin UI.
+      .filter((f) => ![
+        "advancedPermissions",
+        "editing_access",
+        "Editing",
+        "editing",
+        "editingEnabled",
+        "postProduction",
+      ].includes(f.name));
 
     for (const seed of seededDefaults) {
       if (!byName.has(seed.name)) {

@@ -50,14 +50,6 @@ function resolveEditingAccess(features: Record<string, unknown> | null | undefin
   return false;
 }
 
-function resolveLegacyEditingPlatformEnabled(platformFlags: Record<string, unknown> | null | undefined): boolean {
-  const f: any = platformFlags || {};
-  // Safety-first: only opt-in when explicitly enabled.
-  const explicit = f.editing ?? f.editingEnabled ?? f.postProduction;
-  if (typeof explicit === "boolean") return explicit;
-  return false;
-}
-
 function resolveRtmpDestinationsMax(effectiveEntitlements: EffectiveEntitlementsLike | null | undefined): number {
   const limits = (effectiveEntitlements && effectiveEntitlements.limits) || {};
   const raw = (limits as any).rtmpDestinationsMax ?? (limits as any).maxDestinations ?? 0;
@@ -135,25 +127,23 @@ export function computeEffectiveFeatureAccess(input: {
   const eff = input.effectiveEntitlements || {};
   const pf = (input.platformFlags && typeof input.platformFlags === "object") ? input.platformFlags : {};
 
-  const platformLegacyEditingEnabled = resolveLegacyEditingPlatformEnabled(pf as any);
-
   // Prefer explicit platform kill-switches; default to enabled when missing.
   const platformHlsEnabled = isPlatformEnabled((pf as any).hlsEnabled ?? (pf as any).hlsSettingsTab);
   const platformTranscodeEnabled = isPlatformEnabled((pf as any).transcodeEnabled);
   const platformRecordingEnabled = isPlatformEnabled((pf as any).recordingEnabled);
 
-  // New segmented flags: missing => disabled.
+  // Segmented flags: missing => disabled.
   const platformContentLibraryEnabled = isNewPlatformFlagEnabled(
     (pf as any).contentLibraryEnabled ?? (pf as any).libraryEnabled
-  ) || platformLegacyEditingEnabled;
-  const platformProjectsEnabled = isNewPlatformFlagEnabled((pf as any).projectsEnabled) || platformLegacyEditingEnabled;
-  const platformEditorEnabled = isNewPlatformFlagEnabled((pf as any).editorEnabled) || platformLegacyEditingEnabled;
+  );
+  const platformProjectsEnabled = isNewPlatformFlagEnabled((pf as any).projectsEnabled);
+  const platformEditorEnabled = isNewPlatformFlagEnabled((pf as any).editorEnabled);
 
-  // My Content: prefer explicit flags when present; otherwise fall back to legacy behavior.
+  // My Content: prefer explicit flags when present; otherwise fall back to derived behavior.
   const hasMyContentEnabledFlag = Object.prototype.hasOwnProperty.call(pf, "myContentEnabled");
   const platformMyContentEnabled = hasMyContentEnabledFlag
     ? isNewPlatformFlagEnabled((pf as any).myContentEnabled)
-    : (platformContentLibraryEnabled || platformProjectsEnabled || platformEditorEnabled || platformLegacyEditingEnabled);
+    : (platformContentLibraryEnabled || platformProjectsEnabled || platformEditorEnabled);
 
   const hasMyContentRecordingsEnabledFlag = Object.prototype.hasOwnProperty.call(pf, "myContentRecordingsEnabled");
   const platformMyContentRecordingsEnabled = hasMyContentRecordingsEnabledFlag
