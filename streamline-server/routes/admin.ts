@@ -1135,6 +1135,11 @@ router.get("/features", async (req, res) => {
     // been explicitly created in Firestore.
     const seededDefaults: Array<{ name: string; enabled: boolean }> = [
       { name: "hlsSettingsTab", enabled: true },
+      { name: "editorEnabled", enabled: true },
+      { name: "contentLibraryEnabled", enabled: true },
+      { name: "projectsEnabled", enabled: true },
+      { name: "myContentEnabled", enabled: true },
+      { name: "myContentRecordingsEnabled", enabled: true },
     ];
 
     const byName = new Map<string, any>();

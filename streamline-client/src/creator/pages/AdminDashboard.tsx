@@ -232,8 +232,11 @@ const FEATURE_META: Record<
   cloud_recording: { category: "Recording", label: "Cloud Recording" },
   vod_downloads: { category: "Recording", label: "VOD Downloads", description: "Enable video downloads." },
 
-  editing_access: { category: "Editing", label: "Editor Access", description: "Allow timeline editor usage." },
-  editing_sharing: { category: "Editing", label: "Editor Sharing", description: "Share projects with collaborators." },
+  editorEnabled: { category: "Editing", label: "Editor Access", description: "Allow timeline editor usage." },
+  projectsEnabled: { category: "Editing", label: "Projects", description: "Allow saved projects / project dashboard." },
+  contentLibraryEnabled: { category: "Access", label: "Content Library", description: "Allow content library access." },
+  myContentEnabled: { category: "Access", label: "My Content", description: "Allow My Content section." },
+  myContentRecordingsEnabled: { category: "Access", label: "My Content Recordings", description: "Allow My Content recordings tab." },
   // Group all AI-related flags under a dedicated AI category
   ai_highlights: { category: "AI", label: "AI Highlights", description: "Generate highlight reels." },
   // If a global flag exists for direct uploads, keep it under Recording
