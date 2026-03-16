@@ -64,6 +64,27 @@ export function registerStudioShortcuts() {
       e.preventDefault()
       runCommand("project:export")
     }
+
+    // V = select tool
+    if (e.key.toLowerCase() === "v" && !e.ctrlKey && !e.metaKey) {
+      runCommand("edit:tool-select")
+    }
+
+    // B = blade tool
+    if (e.key.toLowerCase() === "b" && !e.ctrlKey && !e.metaKey) {
+      runCommand("edit:tool-blade")
+    }
+
+    // S = slip tool (only without modifier to avoid overriding Ctrl+S = save)
+    if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.metaKey) {
+      runCommand("edit:tool-slip")
+    }
+
+    // Ctrl+B = split clip at playhead
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+      e.preventDefault()
+      runCommand("edit:split-at-playhead")
+    }
   }
 
   window.addEventListener("keydown", handler)

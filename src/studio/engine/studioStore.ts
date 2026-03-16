@@ -18,6 +18,8 @@ import {
   defaultTrackPresets,
   MAX_SESSION_SOURCES,
   ModalId,
+  clipDefaults,
+  TimelineEditTool,
 } from "../types/studio"
 
 function generateId(): string {
@@ -47,6 +49,11 @@ interface StudioActions {
   removeClip: (clipId: string) => void
   updateClip: (clipId: string, updates: Partial<Omit<Clip, "id">>) => void
   setSelectedClipId: (clipId: string | null) => void
+  /** Split a clip at a beat position into two non-destructive clips */
+  splitClip: (clipId: string, atBeat: number) => void
+
+  // Edit tool
+  setEditTool: (tool: TimelineEditTool) => void
 
   // Source actions
   addSource: (source: Omit<AudioSource, "id">) => string
@@ -138,6 +145,7 @@ const initialState: StudioState = {
   clipboard: null,
   effects: { ...defaultEffects },
   snapToGrid: true,
+  editTool: "select" as TimelineEditTool,
   isDirty: false,
   activeModal: null,
 }
@@ -246,7 +254,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
   addClip: (clip) =>
     set((state) => {
       const id = generateId()
-      return { clips: [...state.clips, { ...clip, id }], isDirty: true }
+      return { clips: [...state.clips, { ...clipDefaults, ...clip, id }], isDirty: true }
     }),
 
   removeClip: (clipId) =>
@@ -263,6 +271,35 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     })),
 
   setSelectedClipId: (clipId) => set({ selectedClipId: clipId }),
+
+  splitClip: (clipId, atBeat) => {
+    const state = get()
+    const clip = state.clips.find((c) => c.id === clipId)
+    if (!clip) return
+    if (atBeat <= clip.start || atBeat >= clip.end) return
+    get().pushUndo()
+    const leftId = generateId()
+    const rightId = generateId()
+    const leftDuration = atBeat - clip.start
+    const left: Clip = {
+      ...clip,
+      id: leftId,
+      end: atBeat,
+    }
+    const right: Clip = {
+      ...clip,
+      id: rightId,
+      start: atBeat,
+      offset: clip.offset + leftDuration / clip.playbackRate,
+    }
+    set((s) => ({
+      clips: [...s.clips.filter((c) => c.id !== clipId), left, right],
+      selectedClipId: rightId,
+      isDirty: true,
+    }))
+  },
+
+  setEditTool: (tool) => set({ editTool: tool }),
 
   // Sources – with guardrail
   addSource: (source) => {
@@ -458,6 +495,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     get().pushUndo()
     const id = generateId()
     const pasted: Clip = {
+      ...clipDefaults,
       ...state.clipboard,
       id,
       start: state.playhead,

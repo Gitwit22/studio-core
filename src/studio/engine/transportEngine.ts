@@ -45,8 +45,29 @@ export async function playTransport() {
       player.toDestination()
     }
 
-    const startSec = clip.start / (store.bpm / 60)
-    player.sync().start(startSec)
+    // Apply playback rate for time-stretch
+    const rate = clip.playbackRate ?? 1;
+    player.playbackRate = rate;
+
+    const beatsPerSec = store.bpm / 60;
+    const startSec = clip.start / beatsPerSec;
+    const clipDurationSec = (clip.end - clip.start) / beatsPerSec;
+    const offsetSec = (clip.offset ?? 0) / beatsPerSec;
+
+    player.sync().start(startSec, offsetSec, clipDurationSec);
+
+    // Schedule fade-in / fade-out via player volume envelope
+    const fadeIn = clip.fadeInDuration ?? 0;
+    const fadeOut = clip.fadeOutDuration ?? 0;
+    if (fadeIn > 0) {
+      const fadeInSec = fadeIn / beatsPerSec;
+      player.fadeIn = fadeInSec;
+    }
+    if (fadeOut > 0) {
+      const fadeOutSec = fadeOut / beatsPerSec;
+      player.fadeOut = fadeOutSec;
+    }
+
     activePlayers.push(player)
 
     // Collect load promises so we wait for all buffers

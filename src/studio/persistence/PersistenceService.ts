@@ -8,6 +8,7 @@ import { supportsFileSystemAccess } from "./types"
 import { FileSystemAdapter } from "./FileSystemAdapter"
 import { IndexedDbAdapter } from "./IndexedDbAdapter"
 import { recentSessions } from "./RecentSessions"
+import { storeHandle, retrieveHandle } from "./handleStore"
 import { useStudioStore } from "../engine/studioStore"
 import type { SessionSnapshot } from "../types/studio"
 
@@ -66,6 +67,11 @@ class PersistenceService {
       bpm: config.bpm,
     })
 
+    // Persist the directory handle so re-opening skips the picker
+    if (handle.dirHandle) {
+      await storeHandle(handle.id, handle.dirHandle)
+    }
+
     // Do initial save
     await this.save()
 
@@ -88,9 +94,25 @@ class PersistenceService {
     let handle: ProjectHandle
 
     if (ref.adapterType === "filesystem") {
-      // Need to request permission via showDirectoryPicker
-      // The user picks the SESSION FOLDER (not the parent)
-      const dirHandle = await window.showDirectoryPicker({ mode: "readwrite" })
+      // Try to reuse the stored directory handle (avoids showing a picker)
+      let dirHandle: FileSystemDirectoryHandle | null = null
+      try {
+        dirHandle = await retrieveHandle(ref.id)
+        if (dirHandle) {
+          // Verify we still have permission (browser may have revoked it)
+          const perm = await dirHandle.requestPermission({ mode: "readwrite" })
+          if (perm !== "granted") dirHandle = null
+        }
+      } catch {
+        dirHandle = null
+      }
+
+      // Fallback: ask user to pick the folder
+      if (!dirHandle) {
+        dirHandle = await window.showDirectoryPicker({ mode: "readwrite" })
+        await storeHandle(ref.id, dirHandle)
+      }
+
       handle = { id: ref.id, name: ref.name, adapterType: "filesystem", dirHandle }
     } else {
       handle = { id: ref.id, name: ref.name, adapterType: "indexeddb" }

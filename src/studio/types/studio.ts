@@ -105,16 +105,51 @@ export interface AudioSource {
   waveformStatus?: import("./waveform").WaveformStatus
 }
 
+export type TimeStretchMode = "repitch" | "preserve"
+
 export interface Clip {
   id: string
   trackId: string
   sourceId: string
-  start: number        // timeline beat position
-  end: number          // timeline beat position
-  offset: number       // offset inside source in beats or seconds depending on engine choice
+  /** Timeline beat position where the clip starts */
+  start: number
+  /** Timeline beat position where the clip ends */
+  end: number
+  /** Offset inside source (beats) — how far into the source the visible window starts */
+  offset: number
   name: string
   color?: string
+  // ── Stretch / rate ──
+  /** Playback rate multiplier (1 = normal, 2 = double speed, 0.5 = half speed) */
+  playbackRate: number
+  /** Whether pitch preservation is enabled during stretch */
+  preservePitch: boolean
+  /** Stretch algorithm hint for future TSM integration */
+  timeStretchMode: TimeStretchMode
+  // ── Fades ──
+  /** Fade-in duration in beats */
+  fadeInDuration: number
+  /** Fade-out duration in beats */
+  fadeOutDuration: number
+  // ── Gain ──
+  /** Per-clip gain multiplier (0–2, default 1) */
+  gain: number
+  // ── State flags ──
+  locked: boolean
 }
+
+/** Default values for new clip fields — used when creating clips or migrating old data */
+export const clipDefaults: Omit<Clip, "id" | "trackId" | "sourceId" | "start" | "end" | "offset" | "name"> = {
+  playbackRate: 1,
+  preservePitch: false,
+  timeStretchMode: "repitch",
+  fadeInDuration: 0,
+  fadeOutDuration: 0,
+  gain: 1,
+  locked: false,
+}
+
+export type TimelineEditTool = "select" | "blade" | "slip"
 
 export interface LoopRegion {
   start: number
@@ -221,6 +256,7 @@ export interface StudioState {
   markers: TimelineMarker[]
   snapToGrid: boolean
   trackLaneHeight: number   // pixels per track lane (40 = compact, 80 = standard, 120 = large)
+  editTool: TimelineEditTool
   undoStack: UndoSnapshot[]
   redoStack: UndoSnapshot[]
   clipboard: Clip | null

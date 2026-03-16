@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { useRef, useMemo, useState, useEffect, useCallback } from "react";
 import {
   ZoomIn,
@@ -14,9 +13,18 @@ import {
   Maximize2,
   Flag,
   Repeat,
+  MousePointer2,
+  Scissors,
+  Move,
 } from "lucide-react";
 import { useStudioStore } from "@/studio/engine/studioStore";
 import { trackColorPalette } from "@/studio/types/studio";
+import type { TimelineEditTool } from "@/studio/types/studio";
+import WaveformCanvas from "@/components/studio/WaveformCanvas";
+import { selectResolution } from "@/audio/waveformPeaks";
+import type { WaveformPeaks, WaveformStatus, PeakResolution } from "@/studio/types/waveform";
+import { getCachedPeaks, setCachedPeaks } from "@/audio/waveformCache";
+import { generatePeaksFromFile, generatePeaksFromUrl } from "@/audio/waveformPeaks";
 
 // Layout constants
 const TRACK_LABEL_W = 56;       // px – matches Tailwind w-14
@@ -52,38 +60,6 @@ interface ClipDragState {
   startClientY: number;
   undoPushed: boolean;
 }
-=======
-import { useState, useRef, useEffect, useCallback } from "react";
-import { ZoomIn, ZoomOut } from "lucide-react";
-import { useStudioStore } from "@/studio/engine/studioStore";
-import WaveformCanvas from "@/components/studio/WaveformCanvas";
-import { selectResolution } from "@/audio/waveformPeaks";
-import type { WaveformPeaks, WaveformStatus, PeakResolution } from "@/studio/types/waveform";
-import { getCachedPeaks, setCachedPeaks } from "@/audio/waveformCache";
-import { generatePeaksFromFile, generatePeaksFromUrl } from "@/audio/waveformPeaks";
-
-interface TimelineClip {
-  id: string;
-  trackIndex: number;
-  startBeat: number;
-  durationBeats: number;
-  label: string;
-  take: number;
-  color: string;
-  /** Optional source ID linking to an AudioSource with real audio data. */
-  sourceId?: string;
-}
-
-const defaultClips: TimelineClip[] = [
-  { id: "1", trackIndex: 0, startBeat: 0, durationBeats: 32, label: "Beat", take: 1, color: "hsl(217 100% 71%)" },
-  { id: "2", trackIndex: 1, startBeat: 4, durationBeats: 12, label: "Lead", take: 1, color: "hsl(172 72% 55%)" },
-  { id: "3", trackIndex: 1, startBeat: 18, durationBeats: 10, label: "Lead", take: 2, color: "hsl(172 72% 55%)" },
-  { id: "4", trackIndex: 2, startBeat: 6, durationBeats: 8, label: "Double", take: 1, color: "hsl(45 100% 60%)" },
-  { id: "5", trackIndex: 2, startBeat: 20, durationBeats: 6, label: "Double", take: 2, color: "hsl(45 100% 60%)" },
-  { id: "6", trackIndex: 3, startBeat: 10, durationBeats: 4, label: "Ad-Lib", take: 1, color: "hsl(280 70% 60%)" },
-  { id: "7", trackIndex: 3, startBeat: 24, durationBeats: 5, label: "Ad-Lib", take: 2, color: "hsl(280 70% 60%)" },
-];
->>>>>>> 3e0d6f8fb63aa9f7b5612c48f3502410bb854efe
 
 interface ClipTrimState {
   clipId: string;
@@ -91,6 +67,26 @@ interface ClipTrimState {
   initialStart: number;
   initialEnd: number;
   initialOffset: number;
+  startClientX: number;
+  undoPushed: boolean;
+  /** When Alt is held during edge drag, we're time-stretching instead of trimming */
+  stretch: boolean;
+  initialPlaybackRate: number;
+}
+
+interface ClipSlipState {
+  clipId: string;
+  initialOffset: number;
+  startClientX: number;
+  undoPushed: boolean;
+}
+
+interface FadeDragState {
+  clipId: string;
+  edge: "in" | "out";
+  initialDuration: number;
+  clipStart: number;
+  clipEnd: number;
   startClientX: number;
   undoPushed: boolean;
 }
@@ -191,7 +187,6 @@ function useWaveformPeaks() {
 }
 
 const Timeline = () => {
-<<<<<<< HEAD
   const tracks = useStudioStore((s) => s.tracks);
   const clips = useStudioStore((s) => s.clips);
   const mixerChannels = useStudioStore((s) => s.mixerChannels);
@@ -221,19 +216,18 @@ const Timeline = () => {
   const markers = useStudioStore((s) => s.markers);
   const addMarker = useStudioStore((s) => s.addMarker);
   const removeMarker = useStudioStore((s) => s.removeMarker);
-=======
-  const [clips] = useState<TimelineClip[]>(defaultClips);
-  const playheadPosition = useStudioStore((s) => s.playhead);
-  const setPlayhead = useStudioStore((s) => s.setPlayhead);
-  const zoom = useStudioStore((s) => s.zoom);
+  const editTool = useStudioStore((s) => s.editTool);
+  const setEditTool = useStudioStore((s) => s.setEditTool);
+  const splitClip = useStudioStore((s) => s.splitClip);
   const timelineRef = useRef<HTMLDivElement>(null);
   const { peaksMap, statusMap } = useWaveformPeaks();
->>>>>>> 3e0d6f8fb63aa9f7b5612c48f3502410bb854efe
 
   const [ctxMenu, setCtxMenu] = useState<ContextMenu | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const clipDragRef = useRef<ClipDragState | null>(null);
   const clipTrimRef = useRef<ClipTrimState | null>(null);
+  const clipSlipRef = useRef<ClipSlipState | null>(null);
+  const fadeDragRef = useRef<FadeDragState | null>(null);
 
   const beatWidth = PIXELS_PER_BEAT * zoom;
 
@@ -391,7 +385,6 @@ const Timeline = () => {
     setSelectedClipId(null);
   };
 
-<<<<<<< HEAD
   const onClipDragMove = useCallback((e: MouseEvent) => {
     const drag = clipDragRef.current;
     if (!drag || !scrollRef.current || tracks.length === 0) return;
@@ -444,19 +437,40 @@ const Timeline = () => {
 
     const deltaBeat = dx / beatWidth;
 
-    if (trim.edge === "left") {
-      let newStart = trim.initialStart + deltaBeat;
-      if (snapToGrid) newStart = Math.round(newStart * 4) / 4;
-      newStart = Math.max(0, newStart);
-      // Don't let left edge pass right edge
-      newStart = Math.min(newStart, trim.initialEnd - MIN_CLIP_BEATS);
-      const newOffset = trim.initialOffset + (newStart - trim.initialStart);
-      updateClip(trim.clipId, { start: newStart, offset: Math.max(0, newOffset) });
+    if (trim.stretch) {
+      // Time-stretch mode: keep clip endpoints but change playback rate
+      const originalDuration = trim.initialEnd - trim.initialStart;
+      if (trim.edge === "right") {
+        let newEnd = trim.initialEnd + deltaBeat;
+        if (snapToGrid) newEnd = Math.round(newEnd * 4) / 4;
+        newEnd = Math.max(trim.initialStart + MIN_CLIP_BEATS, newEnd);
+        const newDuration = newEnd - trim.initialStart;
+        const newRate = (originalDuration * trim.initialPlaybackRate) / newDuration;
+        updateClip(trim.clipId, { end: newEnd, playbackRate: Math.max(0.1, Math.min(4, newRate)) });
+      } else {
+        let newStart = trim.initialStart + deltaBeat;
+        if (snapToGrid) newStart = Math.round(newStart * 4) / 4;
+        newStart = Math.min(newStart, trim.initialEnd - MIN_CLIP_BEATS);
+        newStart = Math.max(0, newStart);
+        const newDuration = trim.initialEnd - newStart;
+        const newRate = (originalDuration * trim.initialPlaybackRate) / newDuration;
+        updateClip(trim.clipId, { start: newStart, playbackRate: Math.max(0.1, Math.min(4, newRate)) });
+      }
     } else {
-      let newEnd = trim.initialEnd + deltaBeat;
-      if (snapToGrid) newEnd = Math.round(newEnd * 4) / 4;
-      newEnd = Math.max(trim.initialStart + MIN_CLIP_BEATS, newEnd);
-      updateClip(trim.clipId, { end: newEnd });
+      // Normal trim mode
+      if (trim.edge === "left") {
+        let newStart = trim.initialStart + deltaBeat;
+        if (snapToGrid) newStart = Math.round(newStart * 4) / 4;
+        newStart = Math.max(0, newStart);
+        newStart = Math.min(newStart, trim.initialEnd - MIN_CLIP_BEATS);
+        const newOffset = trim.initialOffset + (newStart - trim.initialStart);
+        updateClip(trim.clipId, { start: newStart, offset: Math.max(0, newOffset) });
+      } else {
+        let newEnd = trim.initialEnd + deltaBeat;
+        if (snapToGrid) newEnd = Math.round(newEnd * 4) / 4;
+        newEnd = Math.max(trim.initialStart + MIN_CLIP_BEATS, newEnd);
+        updateClip(trim.clipId, { end: newEnd });
+      }
     }
   }, [beatWidth, pushUndo, snapToGrid, updateClip]);
 
@@ -467,7 +481,7 @@ const Timeline = () => {
     window.removeEventListener("mouseup", onClipTrimEnd);
   }, [onClipTrimMove]);
 
-  const handleTrimMouseDown = useCallback((e: React.MouseEvent, clipId: string, edge: "left" | "right", start: number, end: number, offset: number) => {
+  const handleTrimMouseDown = useCallback((e: React.MouseEvent, clipId: string, edge: "left" | "right", start: number, end: number, offset: number, playbackRate: number) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     setSelectedClipId(clipId);
@@ -479,6 +493,8 @@ const Timeline = () => {
       initialOffset: offset,
       startClientX: e.clientX,
       undoPushed: false,
+      stretch: e.altKey,
+      initialPlaybackRate: playbackRate,
     };
     document.body.style.cursor = "ew-resize";
     window.addEventListener("mousemove", onClipTrimMove);
@@ -504,44 +520,138 @@ const Timeline = () => {
     window.addEventListener("mouseup", onClipDragEnd);
   }, [onClipDragEnd, onClipDragMove, setSelectedClipId, setSelectedTrackId]);
 
+  // ── Slip editing handlers (drag clip content by changing offset only) ──
+
+  const onSlipMove = useCallback((e: MouseEvent) => {
+    const slip = clipSlipRef.current;
+    if (!slip) return;
+    const dx = e.clientX - slip.startClientX;
+    if (Math.abs(dx) > 2 && !slip.undoPushed) {
+      pushUndo();
+      slip.undoPushed = true;
+    }
+    const deltaBeats = dx / beatWidth;
+    updateClip(slip.clipId, { offset: Math.max(0, slip.initialOffset - deltaBeats) });
+  }, [beatWidth, pushUndo, updateClip]);
+
+  const onSlipEnd = useCallback(() => {
+    clipSlipRef.current = null;
+    document.body.style.cursor = "";
+    window.removeEventListener("mousemove", onSlipMove);
+    window.removeEventListener("mouseup", onSlipEnd);
+  }, [onSlipMove]);
+
+  const handleSlipMouseDown = useCallback((e: React.MouseEvent, clipId: string, offset: number) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    setSelectedClipId(clipId);
+    clipSlipRef.current = {
+      clipId,
+      initialOffset: offset,
+      startClientX: e.clientX,
+      undoPushed: false,
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("mousemove", onSlipMove);
+    window.addEventListener("mouseup", onSlipEnd);
+  }, [onSlipEnd, onSlipMove, setSelectedClipId]);
+
+  // ── Fade handle drag ──
+
+  const onFadeDragMove = useCallback((e: MouseEvent) => {
+    const fd = fadeDragRef.current;
+    if (!fd) return;
+    const dx = e.clientX - fd.startClientX;
+    if (Math.abs(dx) > 2 && !fd.undoPushed) {
+      pushUndo();
+      fd.undoPushed = true;
+    }
+    const deltaBeats = dx / beatWidth;
+    const clipDuration = fd.clipEnd - fd.clipStart;
+    if (fd.edge === "in") {
+      const newDur = Math.max(0, Math.min(clipDuration * 0.5, fd.initialDuration + deltaBeats));
+      updateClip(fd.clipId, { fadeInDuration: newDur });
+    } else {
+      const newDur = Math.max(0, Math.min(clipDuration * 0.5, fd.initialDuration - deltaBeats));
+      updateClip(fd.clipId, { fadeOutDuration: newDur });
+    }
+  }, [beatWidth, pushUndo, updateClip]);
+
+  const onFadeDragEnd = useCallback(() => {
+    fadeDragRef.current = null;
+    document.body.style.cursor = "";
+    window.removeEventListener("mousemove", onFadeDragMove);
+    window.removeEventListener("mouseup", onFadeDragEnd);
+  }, [onFadeDragMove]);
+
+  const handleFadeMouseDown = useCallback((e: React.MouseEvent, clipId: string, edge: "in" | "out", currentDuration: number, clipStart: number, clipEnd: number) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    fadeDragRef.current = {
+      clipId,
+      edge,
+      initialDuration: currentDuration,
+      clipStart,
+      clipEnd,
+      startClientX: e.clientX,
+      undoPushed: false,
+    };
+    document.body.style.cursor = "ew-resize";
+    window.addEventListener("mousemove", onFadeDragMove);
+    window.addEventListener("mouseup", onFadeDragEnd);
+  }, [onFadeDragEnd, onFadeDragMove]);
+
+  // ── Blade click handler ──
+
+  const handleBladeClick = useCallback((e: React.MouseEvent, clipId: string, clipStartBeat: number) => {
+    if (editTool !== "blade") return;
+    e.stopPropagation();
+    if (!scrollRef.current) return;
+    const rect = scrollRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + scrollRef.current.scrollLeft - TRACK_LABEL_W;
+    let atBeat = x / beatWidth;
+    if (snapToGrid) atBeat = Math.round(atBeat * 4) / 4;
+    splitClip(clipId, atBeat);
+  }, [editTool, beatWidth, snapToGrid, splitClip]);
+
   useEffect(() => {
     return () => {
       window.removeEventListener("mousemove", onClipDragMove);
       window.removeEventListener("mouseup", onClipDragEnd);
       window.removeEventListener("mousemove", onClipTrimMove);
       window.removeEventListener("mouseup", onClipTrimEnd);
+      window.removeEventListener("mousemove", onSlipMove);
+      window.removeEventListener("mouseup", onSlipEnd);
+      window.removeEventListener("mousemove", onFadeDragMove);
+      window.removeEventListener("mouseup", onFadeDragEnd);
       document.body.style.cursor = "";
     };
-  }, [onClipDragEnd, onClipDragMove, onClipTrimEnd, onClipTrimMove]);
+  }, [onClipDragEnd, onClipDragMove, onClipTrimEnd, onClipTrimMove, onSlipEnd, onSlipMove, onFadeDragEnd, onFadeDragMove]);
 
-  const generateWaveform = useMemo(() => {
-    const cache = new Map<string, string>();
-    return (clipId: string, width: number) => {
-      const key = `${clipId}-${Math.round(width)}`;
-      if (cache.has(key)) return cache.get(key)!;
-      const points: string[] = [];
-      const steps = Math.max(1, Math.floor(width / 3));
-      let seed = clipId.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-      const pseudoRandom = () => {
-        seed = (seed * 16807 + 7) % 2147483647;
-        return (seed & 0xffff) / 0xffff;
-      };
-      for (let i = 0; i <= steps; i++) {
-        const x = (i / steps) * width;
-        const y = 10 + Math.sin(i * 0.8) * 6 + pseudoRandom() * 4;
-        points.push(`${x},${y}`);
+  /** Memoized demo peaks cache keyed by clipId + numPeaks for stability. */
+  const demoPeaksCache = useRef<Record<string, PeakResolution>>({});
+
+  const getClipPeaks = useCallback(
+    (clip: { id: string; sourceId?: string; color?: string }, clipWidth: number): { peaks: PeakResolution | null; status: WaveformStatus } => {
+      // Real audio source — use waveform pipeline
+      if (clip.sourceId && peaksMap[clip.sourceId]) {
+        const waveform = peaksMap[clip.sourceId];
+        return { peaks: selectResolution(waveform, zoom), status: "ready" };
       }
-      const mirroredPoints = points
-        .map((p) => {
-          const [x, y] = p.split(",").map(Number);
-          return `${x},${20 - (y - 10) + 10}`;
-        })
-        .reverse();
-      const path = `M${points.join(" L")} L${mirroredPoints.join(" L")}Z`;
-      cache.set(key, path);
-      return path;
-    };
-  }, []);
+      if (clip.sourceId) {
+        return { peaks: null, status: statusMap[clip.sourceId] ?? "pending" };
+      }
+
+      // Demo clip — generate deterministic peaks
+      const numPeaks = Math.max(10, Math.round(clipWidth / 3));
+      const cacheKey = `${clip.id}_${numPeaks}`;
+      if (!demoPeaksCache.current[cacheKey]) {
+        demoPeaksCache.current[cacheKey] = generateDemoPeaks(clip.id, numPeaks);
+      }
+      return { peaks: demoPeaksCache.current[cacheKey], status: "ready" };
+    },
+    [peaksMap, statusMap, zoom],
+  );
 
   // Fit project: compute zoom so entire project fits in viewport
   const fitProject = useCallback(() => {
@@ -582,32 +692,6 @@ const Timeline = () => {
     if (!name) return;
     addMarker(beat, name);
   }, [beatWidth, addMarker]);
-=======
-  /** Memoized demo peaks cache keyed by clipId + numPeaks for stability. */
-  const demoPeaksCache = useRef<Record<string, PeakResolution>>({});
-
-  const getClipPeaks = useCallback(
-    (clip: TimelineClip, clipWidth: number): { peaks: PeakResolution | null; status: WaveformStatus } => {
-      // Real audio source — use waveform pipeline
-      if (clip.sourceId && peaksMap[clip.sourceId]) {
-        const waveform = peaksMap[clip.sourceId];
-        return { peaks: selectResolution(waveform, zoom), status: "ready" };
-      }
-      if (clip.sourceId) {
-        return { peaks: null, status: statusMap[clip.sourceId] ?? "pending" };
-      }
-
-      // Demo clip — generate deterministic peaks
-      const numPeaks = Math.max(10, Math.round(clipWidth / 3));
-      const cacheKey = `${clip.id}_${numPeaks}`;
-      if (!demoPeaksCache.current[cacheKey]) {
-        demoPeaksCache.current[cacheKey] = generateDemoPeaks(clip.id, numPeaks);
-      }
-      return { peaks: demoPeaksCache.current[cacheKey], status: "ready" };
-    },
-    [peaksMap, statusMap, zoom],
-  );
->>>>>>> 3e0d6f8fb63aa9f7b5612c48f3502410bb854efe
 
   return (
     <div className="studio-panel h-full flex flex-col overflow-hidden">
@@ -621,6 +705,30 @@ const Timeline = () => {
             ● REC
           </span>
         )}
+
+        {/* ── Edit tool selector ── */}
+        <div className="flex items-center gap-0.5 ml-2 border border-border rounded px-0.5 py-0.5">
+          {([
+            { tool: "select" as TimelineEditTool, icon: MousePointer2, label: "Select (V)", key: "V" },
+            { tool: "blade" as TimelineEditTool, icon: Scissors, label: "Blade / Split (B)", key: "B" },
+            { tool: "slip" as TimelineEditTool, icon: Move, label: "Slip (S)", key: "S" },
+          ] as const).map(({ tool, icon: Icon, label }) => (
+            <button
+              key={tool}
+              onClick={() => setEditTool(tool)}
+              className={`p-1 rounded transition-colors ${
+                editTool === tool
+                  ? "bg-studio-teal/20 text-studio-teal"
+                  : "text-studio-text-dim hover:bg-studio-metal"
+              }`}
+              title={label}
+            >
+              <Icon className="w-3.5 h-3.5" />
+            </button>
+          ))}
+        </div>
+        <span className="text-[7px] text-studio-text-dim/50 uppercase">Alt+drag = stretch</span>
+
         <div className="flex-1" />
 
         {/* Loop toggle */}
@@ -772,7 +880,6 @@ const Timeline = () => {
             </div>
           </div>
 
-<<<<<<< HEAD
           {/* ── Track rows ── */}
           {tracks.length === 0 && (
             <div className="flex items-center justify-center min-h-[200px] text-studio-text-dim text-xs uppercase tracking-wider">
@@ -855,21 +962,47 @@ const Timeline = () => {
                     const width = (clip.end - clip.start) * beatWidth;
                     const clipColor = clip.color ?? color;
                     const selected = clip.id === selectedClipId;
-=======
-                {/* Clips */}
-                {clips
-                  .filter(c => c.trackIndex === trackIndex)
-                  .map(clip => {
-                    const width = clip.durationBeats * beatWidth;
                     const { peaks, status } = getClipPeaks(clip, width);
->>>>>>> 3e0d6f8fb63aa9f7b5612c48f3502410bb854efe
+                    const fadeInPx = (clip.fadeInDuration ?? 0) * beatWidth;
+                    const fadeOutPx = (clip.fadeOutDuration ?? 0) * beatWidth;
+                    const rate = clip.playbackRate ?? 1;
+                    const isStretched = Math.abs(rate - 1) > 0.01;
+                    const isLocked = clip.locked ?? false;
+                    const isBladeMode = editTool === "blade";
+                    const isSlipMode = editTool === "slip";
+
+                    // Detect crossfade overlaps on this track
+                    const overlapping = trackClips.some(
+                      (other) =>
+                        other.id !== clip.id &&
+                        other.start < clip.end &&
+                        other.end > clip.start,
+                    );
+
                     return (
                       <div
                         key={clip.id}
-                        className="absolute top-1.5 bottom-1.5 rounded-lg cursor-grab active:cursor-grabbing group overflow-hidden"
-                        onMouseDown={(e) =>
-                          handleClipMouseDown(e, clip.id, track.id, clip.start, clip.end)
-                        }
+                        className={`absolute top-1.5 bottom-1.5 rounded-lg group overflow-hidden ${
+                          isBladeMode
+                            ? "cursor-crosshair"
+                            : isSlipMode
+                            ? "cursor-col-resize"
+                            : isLocked
+                            ? "cursor-not-allowed"
+                            : "cursor-grab active:cursor-grabbing"
+                        }`}
+                        onMouseDown={(e) => {
+                          if (isLocked) { e.stopPropagation(); return; }
+                          if (isBladeMode) {
+                            handleBladeClick(e, clip.id, clip.start);
+                            return;
+                          }
+                          if (isSlipMode) {
+                            handleSlipMouseDown(e, clip.id, clip.offset);
+                            return;
+                          }
+                          handleClipMouseDown(e, clip.id, track.id, clip.start, clip.end);
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedClipId(clip.id);
@@ -887,26 +1020,14 @@ const Timeline = () => {
                             : `inset 0 1px 0 ${clipColor}15, 0 0 8px ${clipColor}10`,
                         }}
                       >
-<<<<<<< HEAD
-                        <svg
-                          className="absolute inset-0 w-full h-full opacity-40"
-                          viewBox={`0 0 ${width} 20`}
-                          preserveAspectRatio="none"
-                        >
-                          <path
-                            d={generateWaveform(clip.id, width)}
-                            fill={clipColor}
-                            opacity="0.5"
-=======
                         {/* Waveform — Canvas-based from peak data */}
                         {status === "ready" && peaks ? (
                           <WaveformCanvas
                             peaks={peaks}
                             width={width}
                             height={CLIP_HEIGHT}
-                            color={clip.color}
+                            color={clipColor}
                             opacity={0.4}
->>>>>>> 3e0d6f8fb63aa9f7b5612c48f3502410bb854efe
                           />
                         ) : status === "analyzing" ? (
                           <div className="absolute inset-0 flex items-center justify-center">
@@ -919,6 +1040,36 @@ const Timeline = () => {
                           </div>
                         ) : null}
 
+                        {/* Fade-in overlay */}
+                        {fadeInPx > 1 && (
+                          <div
+                            className="absolute top-0 bottom-0 left-0 pointer-events-none"
+                            style={{
+                              width: fadeInPx,
+                              background: `linear-gradient(90deg, ${clipColor}50 0%, transparent 100%)`,
+                            }}
+                          />
+                        )}
+
+                        {/* Fade-out overlay */}
+                        {fadeOutPx > 1 && (
+                          <div
+                            className="absolute top-0 bottom-0 right-0 pointer-events-none"
+                            style={{
+                              width: fadeOutPx,
+                              background: `linear-gradient(270deg, ${clipColor}50 0%, transparent 100%)`,
+                            }}
+                          />
+                        )}
+
+                        {/* Crossfade overlap indicator */}
+                        {overlapping && (
+                          <div
+                            className="absolute inset-0 pointer-events-none border-2 border-dashed rounded-lg"
+                            style={{ borderColor: `${clipColor}60` }}
+                          />
+                        )}
+
                         {/* Center line */}
                         <div
                           className="absolute left-0 right-0 h-px top-1/2 -translate-y-px pointer-events-none"
@@ -929,25 +1080,72 @@ const Timeline = () => {
                           <span className="text-[8px] font-semibold" style={{ color: clipColor }}>
                             {clip.name}
                           </span>
+                          {/* Playback rate badge */}
+                          {isStretched && (
+                            <span
+                              className="text-[7px] font-bold px-1 rounded"
+                              style={{
+                                color: clipColor,
+                                background: `${clipColor}20`,
+                              }}
+                            >
+                              {(rate * 100).toFixed(0)}%
+                            </span>
+                          )}
+                          {isLocked && (
+                            <span className="text-[7px] text-studio-text-dim">🔒</span>
+                          )}
                         </div>
 
-                        {/* Trim handles */}
-                        <div
-                          className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                          onMouseDown={(e) =>
-                            handleTrimMouseDown(e, clip.id, "left", clip.start, clip.end, clip.offset)
-                          }
-                          style={{ background: `linear-gradient(90deg, ${clipColor}, transparent)` }}
-                        />
-                        <div
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                          onMouseDown={(e) =>
-                            handleTrimMouseDown(e, clip.id, "right", clip.start, clip.end, clip.offset)
-                          }
-                          style={{
-                            background: `linear-gradient(270deg, ${clipColor}, transparent)`,
-                          }}
-                        />
+                        {/* Fade-in handle (top-left triangle) */}
+                        {!isBladeMode && !isSlipMode && (
+                          <div
+                            className="absolute top-0 left-0 w-3 h-3 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity z-20"
+                            onMouseDown={(e) =>
+                              handleFadeMouseDown(e, clip.id, "in", clip.fadeInDuration ?? 0, clip.start, clip.end)
+                            }
+                            style={{
+                              background: `linear-gradient(135deg, ${clipColor} 50%, transparent 50%)`,
+                            }}
+                            title="Drag to set fade-in"
+                          />
+                        )}
+
+                        {/* Fade-out handle (top-right triangle) */}
+                        {!isBladeMode && !isSlipMode && (
+                          <div
+                            className="absolute top-0 right-0 w-3 h-3 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity z-20"
+                            onMouseDown={(e) =>
+                              handleFadeMouseDown(e, clip.id, "out", clip.fadeOutDuration ?? 0, clip.start, clip.end)
+                            }
+                            style={{
+                              background: `linear-gradient(225deg, ${clipColor} 50%, transparent 50%)`,
+                            }}
+                            title="Drag to set fade-out"
+                          />
+                        )}
+
+                        {/* Trim handles (hidden in blade & slip modes) */}
+                        {!isBladeMode && !isSlipMode && (
+                          <>
+                            <div
+                              className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                              onMouseDown={(e) =>
+                                handleTrimMouseDown(e, clip.id, "left", clip.start, clip.end, clip.offset, rate)
+                              }
+                              style={{ background: `linear-gradient(90deg, ${clipColor}, transparent)` }}
+                            />
+                            <div
+                              className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                              onMouseDown={(e) =>
+                                handleTrimMouseDown(e, clip.id, "right", clip.start, clip.end, clip.offset, rate)
+                              }
+                              style={{
+                                background: `linear-gradient(270deg, ${clipColor}, transparent)`,
+                              }}
+                            />
+                          </>
+                        )}
                       </div>
                     );
                   })}

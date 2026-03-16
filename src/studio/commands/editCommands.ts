@@ -36,3 +36,20 @@ registerCommand("edit:delete", () => {
 registerCommand("edit:selectAll", () => {
   console.log("Select all");
 });
+
+registerCommand("edit:tool-select", () => {
+  useStudioStore.getState().setEditTool("select")
+})
+
+registerCommand("edit:tool-blade", () => {
+  useStudioStore.getState().setEditTool("blade")
+})
+
+registerCommand("edit:tool-slip", () => {
+  useStudioStore.getState().setEditTool("slip")
+})
+
+registerCommand("edit:split-at-playhead", () => {
+  const s = useStudioStore.getState()
+  if (s.selectedClipId) s.splitClip(s.selectedClipId, s.playhead)
+})
