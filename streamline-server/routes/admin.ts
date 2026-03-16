@@ -1140,6 +1140,9 @@ router.get("/features", async (req, res) => {
       { name: "projectsEnabled", enabled: true },
       { name: "myContentEnabled", enabled: true },
       { name: "myContentRecordingsEnabled", enabled: true },
+      { name: "audioMixerEnabled", enabled: false },
+      { name: "advancedScreenShareEnabled", enabled: false },
+      { name: "mixedAudioPublishEnabled", enabled: false },
     ];
 
     const byName = new Map<string, any>();

@@ -87,6 +87,7 @@ type FeatureCategory =
   | "Editing"
   | "AI"
   | "Collaboration"
+  | "Room Features"
   | "Billing"
   | "Access"
   | "Site Tools"
@@ -208,6 +209,7 @@ const FEATURE_CATEGORY_ORDER: FeatureCategory[] = [
   "Editing",
   "AI",
   "Collaboration",
+  "Room Features",
   "Billing",
   "Access",
   "Site Tools",
@@ -258,6 +260,10 @@ const FEATURE_META: Record<
   experiment_b: { category: "Experiments", label: "Experiment B" },
     forcesimplemode: { category: "Security", label: "Advanced Permissions Global Lock", description: "Force everyone into Simple permissions temporarily." },
   hlssettingstab: { category: "Streaming", label: "HLS Settings Tab", description: "Globally toggle the HLS controls section in room settings." },
+
+  audiomixerenabled: { category: "Room Features", label: "Audio Mixer", description: "Enable the bus-based audio mixer panel (gain, ducking, program output) in rooms." },
+  advancedscreenshareenabled: { category: "Room Features", label: "Advanced Screen Share", description: "Enable advanced screen share routing (pop-out window, main-stage modes) in rooms." },
+  mixedaudiopublishenabled: { category: "Room Features", label: "Mixed Audio Publish", description: "Publish the mixer's program audio instead of the raw microphone track." },
 };
 
 const titleize = (value: string) =>
@@ -311,6 +317,8 @@ function categorizeFeature(flag: FeatureFlag): { category: FeatureCategory; labe
     return { category: "Billing", label: titleize(flag.name) };
   if (key.includes("guard") || key.includes("security") || key.includes("auth"))
     return { category: "Security", label: titleize(flag.name) };
+  if (key.includes("mixer") || key.includes("screenshare"))
+    return { category: "Room Features", label: titleize(flag.name) };
 
   return { category: "Other", label: titleize(flag.name) };
 }

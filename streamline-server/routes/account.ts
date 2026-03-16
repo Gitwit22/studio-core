@@ -232,12 +232,18 @@ async function getSegmentedUiFlags() {
     editorSnap,
     myContentSnap,
     myContentRecordingsSnap,
+    audioMixerSnap,
+    advancedScreenShareSnap,
+    mixedAudioPublishSnap,
   ] = await Promise.all([
     firestore.collection("featureFlags").doc("contentLibraryEnabled").get(),
     firestore.collection("featureFlags").doc("projectsEnabled").get(),
     firestore.collection("featureFlags").doc("editorEnabled").get(),
     firestore.collection("featureFlags").doc("myContentEnabled").get(),
     firestore.collection("featureFlags").doc("myContentRecordingsEnabled").get(),
+    firestore.collection("featureFlags").doc("audioMixerEnabled").get(),
+    firestore.collection("featureFlags").doc("advancedScreenShareEnabled").get(),
+    firestore.collection("featureFlags").doc("mixedAudioPublishEnabled").get(),
   ]);
 
   // Default to ENABLED when the Firestore document doesn't exist.
@@ -249,12 +255,24 @@ async function getSegmentedUiFlags() {
     return d.enabled !== false;                   // explicit false → disabled
   };
 
+  // Room feature flags default to DISABLED (opt-in) — set `{ enabled: true }` in
+  // Firestore to activate. This is the opposite of the UI flags above which
+  // default to enabled.
+  const resolveOptIn = (snap: FirebaseFirestore.DocumentSnapshot) => {
+    if (!snap.exists) return false;              // missing → disabled
+    const d = (snap.data() as any) || {};
+    return d.enabled === true;                   // only explicit true → enabled
+  };
+
   return {
     contentLibraryEnabled: resolve(contentLibrarySnap),
     projectsEnabled: resolve(projectsSnap),
     editorEnabled: resolve(editorSnap),
     myContentEnabled: resolve(myContentSnap),
     myContentRecordingsEnabled: resolve(myContentRecordingsSnap),
+    audioMixerEnabled: resolveOptIn(audioMixerSnap),
+    advancedScreenShareEnabled: resolveOptIn(advancedScreenShareSnap),
+    mixedAudioPublishEnabled: resolveOptIn(mixedAudioPublishSnap),
   };
 }
 // Advanced permissions have been fully removed in favor of a single,
