@@ -8,6 +8,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useAuthMe } from "../../hooks/useAuthMe";
 import { useNavigate } from "react-router-dom";
+import { clearMeCache } from "../../lib/meCache";
+import { clearPlatformFlagsCache } from "../../lib/platformFlagsCache";
 
 // Normalize base so if you set VITE_API_BASE to ".../api" it won't double up.
 const API_BASE = (import.meta.env.VITE_API_BASE || "")
@@ -232,11 +234,11 @@ const FEATURE_META: Record<
   cloud_recording: { category: "Recording", label: "Cloud Recording" },
   vod_downloads: { category: "Recording", label: "VOD Downloads", description: "Enable video downloads." },
 
-  editorEnabled: { category: "Editing", label: "Editor Access", description: "Allow timeline editor usage." },
-  projectsEnabled: { category: "Editing", label: "Projects", description: "Allow saved projects / project dashboard." },
-  contentLibraryEnabled: { category: "Access", label: "Content Library", description: "Allow content library access." },
-  myContentEnabled: { category: "Access", label: "My Content", description: "Allow My Content section." },
-  myContentRecordingsEnabled: { category: "Access", label: "My Content Recordings", description: "Allow My Content recordings tab." },
+  editorenabled: { category: "Editing", label: "Editor Access", description: "Allow timeline editor usage." },
+  projectsenabled: { category: "Editing", label: "Projects", description: "Allow saved projects / project dashboard." },
+  contentlibraryenabled: { category: "Access", label: "Content Library", description: "Allow content library access." },
+  mycontentenabled: { category: "Access", label: "My Content", description: "Allow My Content section." },
+  mycontentrecordingsenabled: { category: "Access", label: "My Content Recordings", description: "Allow My Content recordings tab." },
   // Group all AI-related flags under a dedicated AI category
   ai_highlights: { category: "AI", label: "AI Highlights", description: "Generate highlight reels." },
   // If a global flag exists for direct uploads, keep it under Recording
@@ -519,6 +521,9 @@ export default function AdminDashboard() {
         body: JSON.stringify({ featureName: name, enabled: newEnabled }),
       });
       if (!res.ok) throw new Error("toggle failed");
+      // Invalidate cached /me and platform flags so other pages pick up the change
+      clearMeCache();
+      clearPlatformFlagsCache();
       showToast(`${name.replace(/_/g, " ")} ${newEnabled ? "enabled" : "disabled"}`);
     } catch {
       setFeatures(prev);
