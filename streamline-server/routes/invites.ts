@@ -177,13 +177,40 @@ router.post("/legacy/resolve", async (req, res) => {
     await firestore.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       if (snap.exists) {
-        // Do not allow later resolves to extend invite lifetime.
-        // If we can infer an earlier expiry from the JWT, only shorten.
+        const existing = (snap.data() as any) || {};
+
+        // If the existing invite has expired or been revoked, reset it so a
+        // fresh JWT for the same room/day re-activates the invite instead of
+        // leaving the participant stuck on "expired or reached its use limit".
+        const now = Date.now();
+        const existingExpiresMs = (existing.expiresAt as any)?.toMillis?.() ?? null;
+        const isExpired = existingExpiresMs && existingExpiresMs < now;
+        const isRevoked = !!existing.revokedAt;
+
+        if (isExpired || isRevoked) {
+          tx.set(ref, {
+            roomId: resolved.roomId,
+            mode: "guest",
+            role: "viewer",
+            expiresAt,
+            maxUses: null,
+            useCount: 0,
+            revokedAt: null,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdByUid: creator,
+            legacy: {
+              tokenHash: tokenHash.slice(0, 40),
+              source: "jwt",
+              resetAt: new Date(),
+            },
+          } as any, { merge: false });
+          return;
+        }
+
+        // Doc is still valid — only shorten expiry, never extend it.
         if (expiresAt) {
-          const existing = (snap.data() as any) || {};
-          const existingExpires = (existing.expiresAt as any)?.toMillis?.() ?? null;
           const nextExpires = expiresAt.toMillis();
-          if (!existingExpires || (Number.isFinite(existingExpires) && nextExpires < Number(existingExpires))) {
+          if (!existingExpiresMs || (Number.isFinite(existingExpiresMs) && nextExpires < existingExpiresMs)) {
             tx.update(ref, { expiresAt });
           }
         }
