@@ -35,12 +35,6 @@ registerCommand("instrument:sampler", () => {
   console.log("Opening sampler");
 });
 
-registerCommand("track:addVocal", () => {
-  const state = useStudioStore.getState();
-  const vocalCount = state.tracks.filter(t => t.name.startsWith("Vocal")).length + 1;
-  state.addTrack("audio", `Vocal ${vocalCount}`);
-});
-
 registerCommand("track:duplicate", () => {
   console.log("Duplicate track");
 });
@@ -64,11 +58,15 @@ registerCommand("track:arm", () => {
   }
 });
 
+// Mute/solo must go through updateMixerChannel so MixerEngine sees the change
 registerCommand("track:mute", () => {
   const state = useStudioStore.getState();
   if (state.selectedTrackId) {
     const track = state.tracks.find(t => t.id === state.selectedTrackId);
-    if (track) state.updateTrack(track.id, { mute: !track.mute });
+    if (track) {
+      const ch = state.mixerChannels.find(c => c.id === track.channelId);
+      if (ch) state.updateMixerChannel(ch.id, { mute: !ch.mute });
+    }
   }
 });
 
@@ -76,12 +74,11 @@ registerCommand("track:solo", () => {
   const state = useStudioStore.getState();
   if (state.selectedTrackId) {
     const track = state.tracks.find(t => t.id === state.selectedTrackId);
-    if (track) state.updateTrack(track.id, { solo: !track.solo });
+    if (track) {
+      const ch = state.mixerChannels.find(c => c.id === track.channelId);
+      if (ch) state.updateMixerChannel(ch.id, { solo: !ch.solo });
+    }
   }
-});
-
-registerCommand("track:import", () => {
-  console.log("Import to selected track");
 });
 
 registerCommand("track:moveUp", () => {

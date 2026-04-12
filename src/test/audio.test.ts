@@ -176,7 +176,7 @@ describe("TransportController", () => {
       ondataavailable: null,
       onstop: null,
       state: "inactive",
-    })) as any;
+    })) as unknown as typeof MediaRecorder;
 
     const Tone = await import("tone");
     const transport = Tone.getTransport();

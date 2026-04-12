@@ -248,8 +248,6 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     }))
   },
 
-  // SelectedTrackId: (trackId) => set({ selectedTrackId: trackId }),
-
   // Clips
   addClip: (clip) =>
     set((state) => {
@@ -306,6 +304,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     const state = get()
     if (state.sources.length >= MAX_SESSION_SOURCES) {
       console.warn(`Session source limit (${MAX_SESSION_SOURCES}) reached. Save and start a new session.`)
+      return ""
     }
     const id = generateId()
     set((s) => ({

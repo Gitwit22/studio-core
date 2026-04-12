@@ -179,8 +179,8 @@ export const defaultMasterBus: MasterBusState = {
 /** Approximate max sources before a memory warning is shown */
 export const MAX_SESSION_SOURCES = 50
 
-/** Autosave interval in milliseconds (30 seconds) */
-export const AUTOSAVE_INTERVAL_MS = 30_000
+/** Autosave interval in milliseconds (15 seconds) */
+export const AUTOSAVE_INTERVAL_MS = 15_000
 
 /** Shape of a serialised session stored in localStorage / IndexedDB */
 export interface SessionSnapshot {
