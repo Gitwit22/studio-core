@@ -69,7 +69,7 @@ describe("transportEngine", () => {
       ondataavailable: null,
       onstop: null,
       state: "inactive",
-    })) as any
+    })) as unknown as typeof MediaRecorder
     Object.defineProperty(navigator, "mediaDevices", {
       value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [] }) },
       writable: true,

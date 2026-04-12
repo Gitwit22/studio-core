@@ -56,7 +56,7 @@ export function stopAutosave() {
 
 registerCommand("project:export", async () => {
   const state = useStudioStore.getState()
-  const maxBeat = Math.max(...state.clips.map((c) => c.end), 8)
+  const maxBeat = state.clips.reduce((max, c) => Math.max(max, c.end), 8)
   const durationSec = maxBeat / (state.bpm / 60)
 
   const buffer = await exportMix(durationSec, () => {

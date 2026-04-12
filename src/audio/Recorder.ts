@@ -3,6 +3,7 @@ export class Recorder {
   chunks: Blob[] = [];
 
   start(stream: MediaStream) {
+    this.chunks = [];
     this.mediaRecorder = new MediaRecorder(stream);
 
     this.mediaRecorder.ondataavailable = (e) => {
