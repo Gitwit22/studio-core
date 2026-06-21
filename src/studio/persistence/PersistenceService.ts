@@ -11,6 +11,14 @@ import { recentSessions } from "./RecentSessions"
 import { storeHandle, retrieveHandle } from "./handleStore"
 import { useStudioStore } from "../engine/studioStore"
 import type { SessionSnapshot } from "../types/studio"
+import {
+  canHydrateFromCloud,
+  fetchStudioState,
+  getStudioApiBaseUrl,
+  getStudioWorkspaceId,
+  pushStudioState,
+  stableSnapshotHash,
+} from "./cloudStateSync"
 
 const AUTOSAVE_INTERVAL_MS = 15_000 // 15 seconds if dirty
 
@@ -23,6 +31,7 @@ class PersistenceService {
   private handle: ProjectHandle | null = null
   private autosaveTimer: ReturnType<typeof setInterval> | null = null
   private _isDirty = false
+  private lastRemoteHash = ""
 
   // ── Getters ──
 
@@ -144,7 +153,40 @@ class PersistenceService {
 
     await recentSessions.touch(ref.id)
     this.clearDirty()
+    this.lastRemoteHash = stableSnapshotHash(this.buildSnapshot())
     this.startAutosave()
+  }
+
+  async hydrateFromCloud(): Promise<boolean> {
+    const context = this.getCloudContext()
+    if (!context) {
+      return false
+    }
+
+    const state = useStudioStore.getState()
+    const alreadyHasLocalState = Boolean(state.projectId)
+      || state.tracks.length > 0
+      || state.clips.length > 0
+      || state.sources.length > 0
+
+    if (alreadyHasLocalState) {
+      return false
+    }
+
+    try {
+      const remote = await fetchStudioState(context.apiBaseUrl, context.workspaceId)
+      if (!remote?.state || !canHydrateFromCloud(remote.state)) {
+        return false
+      }
+
+      this.restoreSnapshot(remote.state)
+      this.lastRemoteHash = stableSnapshotHash(remote.state)
+      this.clearDirty()
+      return true
+    } catch (error) {
+      console.warn("Cloud hydration failed:", error)
+      return false
+    }
   }
 
   async save(): Promise<void> {
@@ -156,6 +198,7 @@ class PersistenceService {
     const snapshot = this.buildSnapshot()
     await this.adapter.saveSession(this.handle, snapshot)
     this.clearDirty()
+    void this.syncToCloud(snapshot)
     console.log("Session saved:", this.handle.name)
   }
 
@@ -196,6 +239,7 @@ class PersistenceService {
         await this.adapter.saveAutosaveBackup(this.handle, snapshot)
         await this.adapter.saveSession(this.handle, snapshot)
         this.clearDirty()
+        void this.syncToCloud(snapshot)
         console.log("Autosaved at", new Date().toLocaleTimeString())
       } catch (err) {
         console.warn("Autosave failed:", err)
@@ -265,6 +309,37 @@ class PersistenceService {
       snapToGrid: saved.snapToGrid ?? true,
       sources: saved.sources?.map((s) => ({ ...s, file: undefined as unknown as File })) ?? [],
     })
+  }
+
+  private getCloudContext(): { apiBaseUrl: string; workspaceId: string } | null {
+    const apiBaseUrl = getStudioApiBaseUrl()
+    if (!apiBaseUrl) {
+      return null
+    }
+
+    return {
+      apiBaseUrl,
+      workspaceId: getStudioWorkspaceId(),
+    }
+  }
+
+  private async syncToCloud(snapshot: SessionSnapshot): Promise<void> {
+    const context = this.getCloudContext()
+    if (!context) {
+      return
+    }
+
+    const nextHash = stableSnapshotHash(snapshot)
+    if (nextHash === this.lastRemoteHash) {
+      return
+    }
+
+    try {
+      await pushStudioState(context.apiBaseUrl, context.workspaceId, snapshot)
+      this.lastRemoteHash = nextHash
+    } catch (error) {
+      console.warn("Cloud sync failed:", error)
+    }
   }
 }
 

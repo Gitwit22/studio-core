@@ -1,5 +1,14 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+  readonly VITE_API_BASE_URL?: string
+  readonly VITE_STUDIO_WORKSPACE_ID?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+
 // File System Access API types (not yet in all lib.dom versions)
 interface FileSystemDirectoryHandle {
   kind: "directory"
