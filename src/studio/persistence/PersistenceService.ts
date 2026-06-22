@@ -10,7 +10,7 @@ import { IndexedDbAdapter } from "./IndexedDbAdapter"
 import { recentSessions } from "./RecentSessions"
 import { storeHandle, retrieveHandle } from "./handleStore"
 import { useStudioStore } from "../engine/studioStore"
-import type { SessionSnapshot } from "../types/studio"
+import { AUTOSAVE_INTERVAL_MS, type SessionSnapshot } from "../types/studio"
 import {
   canHydrateFromCloud,
   fetchStudioState,
@@ -19,8 +19,6 @@ import {
   pushStudioState,
   stableSnapshotHash,
 } from "./cloudStateSync"
-
-const AUTOSAVE_INTERVAL_MS = 15_000 // 15 seconds if dirty
 
 /**
  * Singleton service that sits between the store and storage adapters.
@@ -307,7 +305,7 @@ class PersistenceService {
       effects: saved.effects ?? useStudioStore.getState().effects,
       markers: saved.markers ?? [],
       snapToGrid: saved.snapToGrid ?? true,
-      sources: saved.sources?.map((s) => ({ ...s, file: undefined as unknown as File })) ?? [],
+      sources: saved.sources?.map((s) => ({ ...s, file: undefined })) ?? [],
     })
   }
 

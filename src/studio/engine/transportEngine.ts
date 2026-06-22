@@ -8,7 +8,8 @@ import { persistenceService } from "../persistence"
 // ── Internal state ──
 let animationFrame: number | null = null
 let lastTime = 0
-let activePlayers: Tone.Player[] = []
+interface ActivePlayer { player: Tone.Player; gain: Tone.Gain }
+let activePlayers: ActivePlayer[] = []
 const recorder = new Recorder()
 let micStream: MediaStream | null = null
 
@@ -39,11 +40,16 @@ export async function playTransport() {
     const channel = mixerEngine.getInput(track.id)
 
     const player = new Tone.Player(src.url)
+
+    // Apply per-clip gain (0–2 multiplier, default 1)
+    const clipGain = new Tone.Gain(clip.gain ?? 1)
+    player.connect(clipGain)
     if (channel) {
-      player.connect(channel)
+      clipGain.connect(channel)
     } else {
-      player.toDestination()
+      clipGain.toDestination()
     }
+    activePlayers.push({ player, gain: clipGain })
 
     // Apply playback rate for time-stretch
     const rate = clip.playbackRate ?? 1;
@@ -67,8 +73,6 @@ export async function playTransport() {
       const fadeOutSec = fadeOut / beatsPerSec;
       player.fadeOut = fadeOutSec;
     }
-
-    activePlayers.push(player)
 
     // Collect load promises so we wait for all buffers
     loadPromises.push(
@@ -268,8 +272,9 @@ export function getPosition(): string {
 // ── Internal helpers ──
 
 function disposeActivePlayers() {
-  for (const p of activePlayers) {
-    try { p.unsync(); p.stop(); p.dispose() } catch { /* already disposed */ }
+  for (const { player, gain } of activePlayers) {
+    try { player.unsync(); player.stop(); player.dispose() } catch { /* already disposed */ }
+    try { gain.dispose() } catch { /* already disposed */ }
   }
   activePlayers = []
 }
