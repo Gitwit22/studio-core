@@ -21,7 +21,10 @@ export class Recorder {
       }
 
       this.mediaRecorder.onstop = () => {
-        const blob = new Blob(this.chunks, { type: "audio/wav" });
+        // MediaRecorder emits a compressed container (webm/ogg/mp4), not WAV —
+        // label the blob with what the browser actually produced.
+        const type = this.mediaRecorder?.mimeType || this.chunks[0]?.type || "audio/webm";
+        const blob = new Blob(this.chunks, { type });
         resolve(blob);
         this.chunks = [];
       };

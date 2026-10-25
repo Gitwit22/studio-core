@@ -18,6 +18,8 @@ interface FileSystemDirectoryHandle {
   removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>
   resolve(possibleDescendant: FileSystemHandle): Promise<string[] | null>
   values(): AsyncIterableIterator<FileSystemHandle>
+  queryPermission(descriptor?: { mode?: "read" | "readwrite" }): Promise<PermissionState>
+  requestPermission(descriptor?: { mode?: "read" | "readwrite" }): Promise<PermissionState>
 }
 
 interface FileSystemFileHandle {

@@ -19,6 +19,7 @@ import {
   MAX_SESSION_SOURCES,
   ModalId,
   clipDefaults,
+  NewClipInput,
   TimelineEditTool,
 } from "../types/studio"
 
@@ -45,7 +46,7 @@ interface StudioActions {
   moveTrackToBus: (trackId: string, busId: string | undefined) => void
 
   // Clip actions
-  addClip: (clip: Omit<Clip, "id">) => void
+  addClip: (clip: NewClipInput) => void
   removeClip: (clipId: string) => void
   updateClip: (clipId: string, updates: Partial<Omit<Clip, "id">>) => void
   setSelectedClipId: (clipId: string | null) => void
@@ -325,11 +326,13 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
   setLoop: (start, end) =>
     set((state) => ({
       loop: { ...state.loop, start, end },
+      isDirty: true,
     })),
 
   toggleLoop: () =>
     set((state) => ({
       loop: { ...state.loop, enabled: !state.loop.enabled },
+      isDirty: true,
     })),
 
   addMarker: (position, name, color) => {
@@ -451,6 +454,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
       clips: snap.clips,
       sources: snap.sources,
       mixerChannels: snap.mixerChannels,
+      isDirty: true,
     })
   },
 
@@ -466,6 +470,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
       clips: snap.clips,
       sources: snap.sources,
       mixerChannels: snap.mixerChannels,
+      isDirty: true,
     })
   },
 
@@ -479,6 +484,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
       clipboard: clip,
       clips: s.clips.filter((c) => c.id !== clip.id),
       selectedClipId: null,
+      isDirty: true,
     }))
   },
 
@@ -503,6 +509,7 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     set((s) => ({
       clips: [...s.clips, pasted],
       selectedClipId: id,
+      isDirty: true,
     }))
   },
 

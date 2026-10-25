@@ -1,4 +1,5 @@
 import * as Tone from "tone"
+import { toast } from "sonner"
 import { useStudioStore } from "./studioStore"
 import { audioEngine } from "@/audio/AudioEngine"
 import { mixerEngine } from "@/audio/MixerEngine"
@@ -167,7 +168,7 @@ export async function recordTransport() {
 
   // Get microphone (dry path — no FX on capture)
   // Use the armed track's selected input device if available
-  const audioConstraints: MediaTrackConstraints = armedTrack.inputDeviceId
+  const audioConstraints: MediaTrackConstraints | boolean = armedTrack.inputDeviceId
     ? { deviceId: { exact: armedTrack.inputDeviceId } }
     : true
 
@@ -201,7 +202,7 @@ export async function stopRecording() {
   if (blob.size === 0) return
 
   // Save recording to project folder (or fall back to blob URL)
-  const recordingName = `recording-${Date.now()}.wav`
+  const recordingName = `recording-${Date.now()}.${extensionForMime(blob.type)}`
   let url: string
   let savedRelativePath: string | undefined
   try {
@@ -217,12 +218,12 @@ export async function stopRecording() {
   }
 
   // Calculate duration in beats
-  const audio = new Audio()
-  audio.src = url
-  await new Promise<void>((resolve) => {
-    audio.addEventListener("loadedmetadata", () => resolve(), { once: true })
-  })
-  const durationSeconds = audio.duration
+  const durationSeconds = await measureDurationSeconds(blob)
+  if (!durationSeconds) {
+    console.warn("Recording could not be decoded; no clip created")
+    toast.error("Recording could not be decoded, so no clip was added.")
+    return
+  }
   const durationBeats = durationSeconds * (state.bpm / 60)
 
   const armedTrack = state.tracks.find((t) => t.armed)
@@ -270,6 +271,32 @@ export function getPosition(): string {
 }
 
 // ── Internal helpers ──
+
+function extensionForMime(mime: string): string {
+  if (mime.includes("webm")) return "webm"
+  if (mime.includes("ogg")) return "ogg"
+  if (mime.includes("mp4") || mime.includes("aac")) return "m4a"
+  if (mime.includes("wav")) return "wav"
+  return "webm"
+}
+
+/**
+ * Decode the recording to get its real length. HTMLAudioElement metadata is
+ * unreliable here: Chrome reports `Infinity` for MediaRecorder webm output
+ * (which then serialises as `null` clip ends) and never fires on decode errors.
+ */
+async function measureDurationSeconds(blob: Blob): Promise<number | null> {
+  let ctx: AudioContext | null = null
+  try {
+    ctx = new AudioContext()
+    const decoded = await ctx.decodeAudioData(await blob.arrayBuffer())
+    return Number.isFinite(decoded.duration) && decoded.duration > 0 ? decoded.duration : null
+  } catch {
+    return null
+  } finally {
+    void ctx?.close()
+  }
+}
 
 function disposeActivePlayers() {
   for (const { player, gain } of activePlayers) {
