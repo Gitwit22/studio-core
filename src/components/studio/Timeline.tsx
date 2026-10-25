@@ -307,7 +307,7 @@ const Timeline = () => {
   const handleDuplicateTrack = useCallback(() => {
     if (!ctxMenu) return;
     const track = tracks.find((t) => t.id === ctxMenu.trackId);
-    if (!track) return;
+    if (!track || track.type === "master") return;
 
     pushUndo();
     const store = useStudioStore.getState();
@@ -318,10 +318,12 @@ const Timeline = () => {
       fxChain: track.fxChain.map((slot) => ({ ...slot, params: { ...slot.params } })),
     });
 
-    const sourceTrackChannel = store.mixerChannels.find((c) => c.id === track.channelId);
-    const newTrack = store.tracks.find((t) => t.id === newId);
+    // `store` was captured before addTrack, so read fresh state to find the new track's channel.
+    const latest = useStudioStore.getState();
+    const sourceTrackChannel = latest.mixerChannels.find((c) => c.id === track.channelId);
+    const newTrack = latest.tracks.find((t) => t.id === newId);
     const targetChannel = newTrack
-      ? store.mixerChannels.find((c) => c.id === newTrack.channelId)
+      ? latest.mixerChannels.find((c) => c.id === newTrack.channelId)
       : undefined;
     if (sourceTrackChannel && targetChannel) {
       store.updateMixerChannel(targetChannel.id, {
@@ -334,15 +336,9 @@ const Timeline = () => {
 
     const trackClips = clips.filter((c) => c.trackId === track.id);
     for (const clip of trackClips) {
-      store.addClip({
-        trackId: newId,
-        sourceId: clip.sourceId,
-        start: clip.start,
-        end: clip.end,
-        offset: clip.offset,
-        name: clip.name,
-        color: clip.color,
-      });
+      // Copy every clip property (gain, fades, rate, lock) — only id and track change.
+      const { id: _id, ...clipProps } = clip;
+      store.addClip({ ...clipProps, trackId: newId });
     }
 
     setCtxMenu(null);

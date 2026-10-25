@@ -38,12 +38,11 @@ class MixerEngine {
     if (this.initialized) return
     this.initialized = true
 
+    // Full sync (not just strip creation) so bus routing and solo are applied
+    // for a freshly opened session — otherwise tracks sent to a bus play
+    // straight to master until the first edit.
     const state = useStudioStore.getState()
-    for (const track of state.tracks) {
-      const ch = state.mixerChannels.find((c) => c.id === track.channelId)
-      if (ch) this.ensureStrip(track, ch)
-    }
-    this.applySolo(state.mixerChannels)
+    this.syncTracks(state.tracks, state.mixerChannels)
 
     // Subscribe to store changes
     this.unsubscribe = useStudioStore.subscribe((curr, prev) => {
@@ -180,12 +179,17 @@ class MixerEngine {
       if (!trackIds.has(id)) this.removeStrip(id)
     }
 
-    // Add or update strips
+    // Create every strip first so bus routing below can find bus strips that
+    // appear later in the track order.
+    for (const track of tracks) {
+      const ch = channels.find((c) => c.id === track.channelId)
+      if (ch) this.ensureStrip(track, ch)
+    }
+
+    // Update strips
     for (const track of tracks) {
       const ch = channels.find((c) => c.id === track.channelId)
       if (!ch) continue
-
-      this.ensureStrip(track, ch)
       const strip = this.strips.get(track.id)!
 
       // Update channel from mixer channel state
@@ -199,7 +203,7 @@ class MixerEngine {
       this.routeTrack(track, tracks)
     }
 
-    this.applySolo(channels)
+    this.applySolo(tracks, channels)
   }
 
   /** Route a track's output to its bus (if assigned) or to master effects chain */
@@ -267,20 +271,16 @@ class MixerEngine {
     }
   }
 
-  /** Solo logic: if any channel has solo=true, mute all non-soloed. */
-  private applySolo(channels: MixerChannel[]) {
-    const anySolo = channels.some((c) => c.solo)
-    for (const ch of channels) {
-      const strip = this.strips.get(ch.trackId)
-      if (!strip) continue
-      strip.channel.mute = anySolo ? !ch.solo : ch.mute
+  private applySolo(tracks: StudioTrack[], channels: MixerChannel[]) {
+    const muted = computeEffectiveMutes(tracks, channels)
+    for (const [trackId, isMuted] of muted) {
+      const strip = this.strips.get(trackId)
+      if (strip) strip.channel.mute = isMuted
     }
   }
 
-  /** 0-1 linear volume → dB (clamp to -60 dB min) */
   private linearToDb(v: number): number {
-    if (v <= 0) return -Infinity
-    return 20 * Math.log10(v)
+    return linearToDb(v)
   }
 
   // ── Mapping helpers ──
@@ -293,6 +293,37 @@ class MixerEngine {
   private mapEqGain(v: number): number { return ((v - 50) / 50) * 12 }
   private mapPitchSemitones(v: number): number { return ((v - 50) / 50) * 12 }
   private mapLimiterCeiling(v: number): number { return -30 + (v / 100) * 30 }
+}
+
+/** 0-1 linear volume → dB */
+export function linearToDb(v: number): number {
+  if (v <= 0) return -Infinity
+  return 20 * Math.log10(v)
+}
+
+/**
+ * Effective mute per track id, shared by live playback and export.
+ * If any channel is soloed, everything outside the solo path is muted. A
+ * soloed track keeps the bus it feeds audible, and tracks feeding a soloed bus
+ * stay audible — otherwise soloing a bussed vocal would be silent.
+ */
+export function computeEffectiveMutes(
+  tracks: StudioTrack[],
+  channels: MixerChannel[],
+): Map<string, boolean> {
+  const anySolo = channels.some((c) => c.solo)
+  const soloedTrackIds = new Set(channels.filter((c) => c.solo).map((c) => c.trackId))
+  const inSoloPath = new Set(soloedTrackIds)
+  for (const track of tracks) {
+    if (!track.busId) continue
+    if (soloedTrackIds.has(track.id)) inSoloPath.add(track.busId)
+    if (soloedTrackIds.has(track.busId)) inSoloPath.add(track.id)
+  }
+  const result = new Map<string, boolean>()
+  for (const ch of channels) {
+    result.set(ch.trackId, anySolo ? !inSoloPath.has(ch.trackId) : ch.mute)
+  }
+  return result
 }
 
 export const mixerEngine = new MixerEngine()

@@ -149,6 +149,9 @@ export const clipDefaults: Omit<Clip, "id" | "trackId" | "sourceId" | "start" | 
   locked: false,
 }
 
+/** Input accepted by addClip — fields covered by clipDefaults are optional. */
+export type NewClipInput = Omit<Clip, "id" | keyof typeof clipDefaults> & Partial<typeof clipDefaults>
+
 export type TimelineEditTool = "select" | "blade" | "slip"
 
 export interface LoopRegion {
@@ -202,7 +205,7 @@ export interface SessionSnapshot {
 
 // ── Default track presets for new sessions ──
 
-export const defaultTrackPresets: { name: string; type: TrackType; color: string; armed: boolean; busId?: string }[] = [
+export const defaultTrackPresets: { name: string; type: Exclude<TrackType, "master">; color: string; armed: boolean; busId?: string }[] = [
   { name: "Beat", type: "beat", color: "hsl(217 100% 71%)", armed: false },
   { name: "Lead Vocal", type: "vocal", color: "hsl(142 60% 50%)", armed: true, busId: "__vocal_bus__" },
   { name: "Double", type: "vocal", color: "hsl(45 100% 60%)", armed: false, busId: "__vocal_bus__" },

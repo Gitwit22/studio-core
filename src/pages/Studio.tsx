@@ -10,8 +10,6 @@ import NewSessionDialog from "@/components/studio/NewSessionDialog";
 import SettingsModal from "@/components/studio/SettingsModal";
 import AboutModal from "@/components/studio/AboutModal";
 import {
-  NewSessionModal,
-  OpenSessionModal,
   SaveSessionAsModal,
   SessionInfoModal,
   KeyboardShortcutsModal,
@@ -39,9 +37,22 @@ const Studio = () => {
 
   const handleSessionReady = useCallback(() => {
     setSessionReady(true);
+    // A New/Open request made while the launch dialog was up must not re-open it.
+    useStudioStore.getState().setActiveModal(null);
     audioEffectsManager.init();
     mixerEngine.init();
     startAutosave();
+  }, []);
+
+  // Warn before leaving with edits that autosave has not written yet.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!useStudioStore.getState().isDirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
   useEffect(() => {
@@ -91,8 +102,14 @@ const Studio = () => {
       <ExportModal open={activeModal === "exportMix"} onClose={closeModal} />
       <SettingsModal open={activeModal === "settings"} onClose={closeModal} />
       <AboutModal open={activeModal === "about"} onClose={closeModal} />
-      <NewSessionModal open={activeModal === "newSession"} onClose={closeModal} />
-      <OpenSessionModal open={activeModal === "openSession"} onClose={closeModal} />
+      {/* In-session New / Open use the real session dialog (saves the current session first) */}
+      <NewSessionDialog
+        open={sessionReady && (activeModal === "newSession" || activeModal === "openSession")}
+        initialTab={activeModal === "openSession" ? "recent" : "new"}
+        onClose={closeModal}
+        onCancel={closeModal}
+        onSessionReady={handleSessionReady}
+      />
       <SaveSessionAsModal open={activeModal === "saveSessionAs"} onClose={closeModal} />
       <SessionInfoModal open={activeModal === "sessionInfo"} onClose={closeModal} />
       <KeyboardShortcutsModal open={activeModal === "keyboardShortcuts"} onClose={closeModal} />

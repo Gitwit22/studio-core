@@ -55,8 +55,9 @@ export function getStudioWorkspaceId(hostname = window.location.hostname): strin
 export async function fetchStudioState(
   apiBaseUrl: string,
   workspaceId: string,
+  signal?: AbortSignal,
 ): Promise<StudioStateRecord | null> {
-  const response = await fetch(`${apiBaseUrl}/studio-core/state/${encodeURIComponent(workspaceId)}`)
+  const response = await fetch(`${apiBaseUrl}/studio-core/state/${encodeURIComponent(workspaceId)}`, { signal })
   if (!response.ok) {
     return null
   }

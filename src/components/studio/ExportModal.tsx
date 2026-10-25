@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { X, Download, FileAudio, Check } from "lucide-react";
-import { runCommand } from "@/studio/commandBus";
+import { exportProjectMix } from "@/studio/commands/projectCommands";
 import { useStudioStore } from "@/studio/engine/studioStore";
 
 interface ExportModalProps {
@@ -21,26 +22,22 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
   const [silencePadding, setSilencePadding] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [rendering, setRendering] = useState(false);
-  const [progress, setProgress] = useState(0);
 
-  useEffect(() => {
-    if (!rendering) return;
-    const interval = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setRendering(false);
-            setProgress(0);
-            onClose();
-          }, 500);
-          return 100;
-        }
-        return p + Math.random() * 8 + 2;
-      });
-    }, 200);
-    return () => clearInterval(interval);
-  }, [rendering, onClose]);
+  // Progress reflects the real offline render: the modal closes only after the
+  // WAV has been produced, and failures are reported instead of faked success.
+  const handleRender = async () => {
+    setRendering(true);
+    try {
+      await exportProjectMix(fileName);
+      toast.success("Mix exported");
+      onClose();
+    } catch (err) {
+      console.warn("Export failed:", err);
+      toast.error("Export failed", { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setRendering(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -207,13 +204,11 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] uppercase tracking-widest text-studio-teal font-semibold">Rendering...</span>
-                <span className="text-xs font-mono text-studio-teal">{Math.min(Math.round(progress), 100)}%</span>
               </div>
               <div className="h-2 rounded-full bg-studio-metal overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all duration-200"
+                  className="h-full w-full rounded-full animate-pulse"
                   style={{
-                    width: `${Math.min(progress, 100)}%`,
                     background: "linear-gradient(90deg, hsl(172 72% 55%), hsl(217 100% 71%))",
                     boxShadow: "0 0 12px hsl(172 72% 55% / 0.4)",
                   }}
@@ -225,7 +220,7 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
           {/* Actions */}
           <div className="flex gap-3 pt-2">
             <button
-              onClick={() => { setRendering(true); runCommand("project:export"); }}
+              onClick={handleRender}
               disabled={rendering}
               className="flex-1 py-2.5 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_hsl(172_72%_55%/0.1)]"
             >

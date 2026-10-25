@@ -41,6 +41,25 @@ export class FileSystemAdapter implements StorageAdapter {
     return JSON.parse(await blob.text()) as T
   }
 
+  private async containsSession(parent: FileSystemDirectoryHandle, name: string): Promise<boolean> {
+    try {
+      const dir = await parent.getDirectoryHandle(name)
+      await dir.getFileHandle(SESSION_FILENAME)
+      return true
+    } catch {
+      return false // folder or session.json does not exist
+    }
+  }
+
+  private async availableProjectName(parent: FileSystemDirectoryHandle, name: string): Promise<string> {
+    if (!(await this.containsSession(parent, name))) return name
+    for (let n = 2; n < 1000; n++) {
+      const candidate = `${name} (${n})`
+      if (!(await this.containsSession(parent, candidate))) return candidate
+    }
+    throw new Error(`Could not find a free folder name for "${name}"`)
+  }
+
   // ── interface ──
 
   async createProject(
@@ -51,7 +70,10 @@ export class FileSystemAdapter implements StorageAdapter {
       parentDirHandle ??
       (await window.showDirectoryPicker({ mode: "readwrite" }))
 
-    const projectDir = await this.getOrCreateDir(parent, name)
+    // Never reuse a folder that already holds a session: that would overwrite
+    // the existing project's session.json. Pick "Name (2)", "Name (3)", ... instead.
+    const folderName = await this.availableProjectName(parent, name)
+    const projectDir = await this.getOrCreateDir(parent, folderName)
 
     // Scaffold sub-folders
     for (const folder of PROJECT_FOLDERS) {
@@ -63,12 +85,12 @@ export class FileSystemAdapter implements StorageAdapter {
     // Write an initial empty session.json
     const initial: Partial<SessionSnapshot> = {
       projectId: id,
-      projectName: name,
+      projectName: folderName,
       savedAt: Date.now(),
     }
     await this.writeJson(projectDir, SESSION_FILENAME, initial)
 
-    return { id, name, adapterType: "filesystem", dirHandle: projectDir }
+    return { id, name: folderName, adapterType: "filesystem", dirHandle: projectDir }
   }
 
   async openProject(handle: ProjectHandle): Promise<SessionSnapshot> {

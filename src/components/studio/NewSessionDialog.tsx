@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Music, FolderOpen, Clock, Check } from "lucide-react";
+import { Music, FolderOpen, Clock, Check, X } from "lucide-react";
+import { toast } from "sonner";
 import { persistenceService, recentSessions, supportsFileSystemAccess } from "@/studio/persistence";
 import type { ProjectRef, NewSessionConfig } from "@/studio/persistence";
 
@@ -7,10 +8,18 @@ interface NewSessionDialogProps {
   open: boolean;
   onClose: () => void;
   onSessionReady: () => void;
+  /** Tab shown each time the dialog opens */
+  initialTab?: "new" | "recent";
+  /** When provided the dialog can be dismissed (used from inside an open session) */
+  onCancel?: () => void;
 }
 
-const NewSessionDialog = ({ open, onClose, onSessionReady }: NewSessionDialogProps) => {
-  const [tab, setTab] = useState<"new" | "recent">("new");
+function errorDescription(err: unknown): string | undefined {
+  return err instanceof Error ? err.message : undefined;
+}
+
+const NewSessionDialog = ({ open, onClose, onSessionReady, initialTab = "new", onCancel }: NewSessionDialogProps) => {
+  const [tab, setTab] = useState<"new" | "recent">(initialTab);
   const [name, setName] = useState("Untitled Session");
   const [bpm, setBpm] = useState(120);
   const [sampleRate, setSampleRate] = useState(48000);
@@ -19,6 +28,10 @@ const NewSessionDialog = ({ open, onClose, onSessionReady }: NewSessionDialogPro
   const [folderLabel, setFolderLabel] = useState("");
   const [recents, setRecents] = useState<ProjectRef[]>([]);
   const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [open, initialTab]);
 
   useEffect(() => {
     if (!open) return;
@@ -51,6 +64,7 @@ const NewSessionDialog = ({ open, onClose, onSessionReady }: NewSessionDialogPro
       onClose();
     } catch (err) {
       console.error("Failed to create session:", err);
+      toast.error("Could not create session", { description: errorDescription(err) });
     } finally {
       setCreating(false);
     }
@@ -64,6 +78,7 @@ const NewSessionDialog = ({ open, onClose, onSessionReady }: NewSessionDialogPro
       onClose();
     } catch (err) {
       console.error("Failed to open session:", err);
+      toast.error("Could not open session", { description: errorDescription(err) });
     } finally {
       setCreating(false);
     }
@@ -83,6 +98,7 @@ const NewSessionDialog = ({ open, onClose, onSessionReady }: NewSessionDialogPro
       onClose();
     } catch (err) {
       console.error("Quick start failed:", err);
+      toast.error("Could not create session", { description: errorDescription(err) });
     } finally {
       setCreating(false);
     }
@@ -105,6 +121,16 @@ const NewSessionDialog = ({ open, onClose, onSessionReady }: NewSessionDialogPro
               StreamLine Studio
             </span>
           </div>
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              disabled={creating}
+              aria-label="Close"
+              className="p-1 rounded hover:bg-studio-metal transition-colors disabled:opacity-50"
+            >
+              <X className="w-4 h-4 text-studio-text-dim" />
+            </button>
+          )}
         </div>
 
         {/* Tab bar */}
