@@ -7,9 +7,11 @@ import { mixerEngine } from "@/audio/MixerEngine";
 import { trackTypeConfig } from "@/studio/types/studio";
 import { useAudioInputDevices } from "@/hooks/use-audio-inputs";
 import { persistenceService } from "@/studio/persistence";
+import { useStudioSettings } from "@/studio/settings/studioSettings";
 
 const ChannelStrips = () => {
   const tracks = useStudioStore((s) => s.tracks);
+  const showTrackMeters = useStudioSettings((s) => s.showTrackMeters);
   const mixerChannels = useStudioStore((s) => s.mixerChannels);
   const isPlaying = useStudioStore((s) => s.isPlaying);
   const isRecording = useStudioStore((s) => s.isRecording);
@@ -336,13 +338,15 @@ const ChannelStrips = () => {
                 active={!muted}
               />
 
-              {/* VU Meter */}
-              <VUMeter
-                bars={10}
-                active={!muted && audioActive}
-                height={60}
-                level={trackLevels[track.id] ?? 0}
-              />
+              {/* VU Meter — hidden while idle unless "Always show track meters" is on */}
+              {(showTrackMeters || audioActive) && (
+                <VUMeter
+                  bars={10}
+                  active={!muted && audioActive}
+                  height={60}
+                  level={trackLevels[track.id] ?? 0}
+                />
+              )}
 
               {/* Color strip at bottom + left sidebar */}
               <div

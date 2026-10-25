@@ -91,10 +91,14 @@ export class IndexedDbAdapter implements StorageAdapter {
   }
 
   async loadAudioFile(handle: ProjectHandle, relativePath: string): Promise<string> {
+    return URL.createObjectURL(await this.loadAudioBlob(handle, relativePath))
+  }
+
+  async loadAudioBlob(handle: ProjectHandle, relativePath: string): Promise<Blob> {
     const key = `${handle.id}/${relativePath}`
     const blob = await getValue<Blob>(AUDIO_STORE, key)
     if (!blob) throw new Error(`Audio file not found: ${key}`)
-    return URL.createObjectURL(blob)
+    return blob
   }
 
   async saveAutosaveBackup(handle: ProjectHandle, snapshot: SessionSnapshot): Promise<void> {

@@ -22,6 +22,7 @@ import {
   NewClipInput,
   TimelineEditTool,
 } from "../types/studio"
+import { getStudioSettings } from "../settings/studioSettings"
 
 function generateId(): string {
   return crypto.randomUUID()
@@ -52,6 +53,8 @@ interface StudioActions {
   setSelectedClipId: (clipId: string | null) => void
   /** Split a clip at a beat position into two non-destructive clips */
   splitClip: (clipId: string, atBeat: number) => void
+  /** Copy a clip to start right where it ends (same track); selects the copy */
+  duplicateClip: (clipId: string) => void
 
   // Edit tool
   setEditTool: (tool: TimelineEditTool) => void
@@ -298,6 +301,19 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
     }))
   },
 
+  duplicateClip: (clipId) => {
+    const clip = get().clips.find((c) => c.id === clipId)
+    if (!clip) return
+    get().pushUndo()
+    const id = generateId()
+    const length = clip.end - clip.start
+    set((s) => ({
+      clips: [...s.clips, { ...clip, id, start: clip.end, end: clip.end + length, locked: false }],
+      selectedClipId: id,
+      isDirty: true,
+    }))
+  },
+
   setEditTool: (tool) => set({ editTool: tool }),
 
   // Sources – with guardrail
@@ -517,8 +533,13 @@ export const useStudioStore = create<StudioState & StudioActions>()((set, get) =
 
   // ── Session ──
   newSession: () => {
-    // Full reset first
-    set({ ...initialState, masterBus: { ...defaultMasterBus }, isDirty: false })
+    // Full reset first (snap preference comes from user settings; opened sessions restore their own)
+    set({
+      ...initialState,
+      masterBus: { ...defaultMasterBus },
+      snapToGrid: getStudioSettings().snapByDefault,
+      isDirty: false,
+    })
 
     const store = get()
 

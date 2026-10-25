@@ -34,8 +34,8 @@ const PERSISTED_KEYS = [
 ] as const satisfies readonly (keyof StudioState)[]
 import { useStudioStore } from "../engine/studioStore"
 import { toast } from "sonner"
+import { autosaveIntervalMs } from "../settings/studioSettings"
 import {
-  AUTOSAVE_INTERVAL_MS,
   clipDefaults,
   type SessionSnapshot,
   type StudioState,
@@ -58,6 +58,7 @@ class PersistenceService {
   private handle: ProjectHandle | null = null
   private autosaveTimer: ReturnType<typeof setInterval> | null = null
   private lastRemoteHash = ""
+  private _lastSavedAt: number | null = null
 
   // ── Getters ──
 
@@ -65,6 +66,15 @@ class PersistenceService {
   /** The store's isDirty flag is the single source of truth (every edit action sets it). */
   get isDirty() { return useStudioStore.getState().isDirty }
   get isFileSystem() { return this.adapter?.type === "filesystem" }
+  get lastSavedAt() { return this._lastSavedAt }
+
+  /** Where the open session is stored, for display. Null when no session is open. */
+  get storageLocation(): { kind: "filesystem" | "indexeddb"; label: string } | null {
+    if (!this.adapter || !this.handle) return null
+    return this.adapter.type === "filesystem"
+      ? { kind: "filesystem", label: `Folder "${this.handle.name}"` }
+      : { kind: "indexeddb", label: "Browser storage (this browser only)" }
+  }
 
   // ── Dirty tracking ──
 
@@ -218,6 +228,7 @@ class PersistenceService {
     }
 
     await recentSessions.touch(ref.id)
+    this._lastSavedAt = snapshot.savedAt ?? null
     this.clearDirty()
     this.lastRemoteHash = stableSnapshotHash(this.buildSnapshot())
   }
@@ -268,6 +279,7 @@ class PersistenceService {
     const state = useStudioStore.getState()
     const snapshot = this.buildSnapshot(state)
     await this.adapter.saveSession(this.handle, snapshot)
+    this._lastSavedAt = snapshot.savedAt
     this.clearDirtyIfUnchanged(state)
     void this.syncToCloud(snapshot)
     console.log("Session saved:", this.handle.name)
@@ -280,6 +292,55 @@ class PersistenceService {
     this.handle = { ...this.handle, name }
     await this.save()
     await recentSessions.touch(this.handle.id)
+  }
+
+  /**
+   * Save the current session (including unsaved edits) as a new, separate
+   * project and continue working in the copy. The original project is left
+   * exactly as it was last saved. Audio files are copied so the new project
+   * is self-contained.
+   *
+   * For filesystem sessions `parentDirHandle` is the folder to create the copy
+   * in (a picker is shown if omitted).
+   */
+  async saveAsCopy(name: string, parentDirHandle?: FileSystemDirectoryHandle): Promise<void> {
+    if (!this.adapter || !this.handle) throw new Error("No open session")
+    const oldAdapter = this.adapter
+    const oldHandle = this.handle
+
+    this.stopAutosave()
+    try {
+      const adapter = this.pickAdapter(oldAdapter.type === "filesystem")
+      const handle = await adapter.createProject(name, parentDirHandle)
+
+      // Copy every saved audio file the session references
+      for (const src of useStudioStore.getState().sources) {
+        if (!src.relativePath) continue
+        const blob = await oldAdapter.loadAudioBlob(oldHandle, src.relativePath)
+        const filename = src.relativePath.split("/").pop()!
+        const copiedPath = await adapter.saveAudioFile(handle, filename, blob)
+        if (copiedPath !== src.relativePath) {
+          throw new Error(`Unexpected audio path when copying ${src.relativePath}`)
+        }
+      }
+
+      if (handle.dirHandle) await storeHandle(handle.id, handle.dirHandle)
+
+      // Switch to the copy only once everything it needs is written
+      this.adapter = adapter
+      this.handle = handle
+      useStudioStore.setState({ projectId: handle.id, projectName: handle.name })
+      await this.save()
+      await recentSessions.add({
+        id: handle.id,
+        name: handle.name,
+        path: adapter.type === "filesystem" ? handle.name : "Browser Storage",
+        lastOpenedAt: Date.now(),
+        adapterType: adapter.type,
+      })
+    } finally {
+      if (this.handle) this.startAutosave()
+    }
   }
 
   /** Save an audio file into the project's audio/ folder */
@@ -303,8 +364,11 @@ class PersistenceService {
 
   // ── Autosave ──
 
+  /** (Re)start autosave using the interval from user settings ("Off" disables it). */
   startAutosave() {
     this.stopAutosave()
+    const intervalMs = autosaveIntervalMs()
+    if (intervalMs === null) return
     this.autosaveTimer = setInterval(async () => {
       if (!this.isDirty || !this.adapter || !this.handle) return
       try {
@@ -314,6 +378,7 @@ class PersistenceService {
         await this.adapter.saveSession(this.handle, snapshot)
         this.clearDirtyIfUnchanged(state)
         void this.syncToCloud(snapshot)
+        this._lastSavedAt = snapshot.savedAt
         console.log("Autosaved at", new Date().toLocaleTimeString())
       } catch (err) {
         console.warn("Autosave failed:", err)
@@ -323,7 +388,7 @@ class PersistenceService {
           description: err instanceof Error ? err.message : undefined,
         })
       }
-    }, AUTOSAVE_INTERVAL_MS)
+    }, intervalMs)
   }
 
   stopAutosave() {

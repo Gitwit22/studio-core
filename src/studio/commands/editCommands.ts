@@ -26,16 +26,17 @@ registerCommand("edit:toggle-grid-snap", () => {
 })
 
 registerCommand("edit:duplicateClip", () => {
-  console.log("Duplicate clip");
-});
+  const s = useStudioStore.getState()
+  if (s.selectedClipId) s.duplicateClip(s.selectedClipId)
+})
 
 registerCommand("edit:delete", () => {
-  console.log("Delete");
-});
-
-registerCommand("edit:selectAll", () => {
-  console.log("Select all");
-});
+  const s = useStudioStore.getState()
+  const clip = s.clips.find((c) => c.id === s.selectedClipId)
+  if (!clip || clip.locked) return
+  s.pushUndo()
+  s.removeClip(clip.id)
+})
 
 registerCommand("edit:tool-select", () => {
   useStudioStore.getState().setEditTool("select")

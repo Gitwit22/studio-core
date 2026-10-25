@@ -1,6 +1,19 @@
-import { useState } from "react";
-import { Settings, Mic, Volume2, Clock, HardDrive, Monitor, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Settings, Mic, Volume2, Clock, HardDrive, Monitor } from "lucide-react";
+import * as Tone from "tone";
+import { toast } from "sonner";
 import StudioModal from "./StudioModal";
+import { useAudioInputDevices } from "@/hooks/use-audio-inputs";
+import { audioEngine, supportsOutputDeviceSelection } from "@/audio/AudioEngine";
+import { resetAudioEngine } from "@/studio/commands/projectCommands";
+import { persistenceService } from "@/studio/persistence";
+import {
+  useStudioSettings,
+  gridDivisionOptions,
+  autosaveIntervalOptions,
+  type GridDivision,
+  type AutosaveInterval,
+} from "@/studio/settings/studioSettings";
 
 interface SettingsModalProps {
   open: boolean;
@@ -43,25 +56,51 @@ const ToggleRow = ({ label, checked, onChange }: { label: string; checked: boole
   </button>
 );
 
-const SelectRow = ({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (v: string) => void }) => (
-  <div className="flex items-center justify-between py-2 px-3">
-    <span className="text-xs text-studio-text-dim">{label}</span>
+const SelectRow = <T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}) => (
+  <div className="flex items-center justify-between gap-3 py-2 px-3">
+    {label && <span className="text-xs text-studio-text-dim shrink-0">{label}</span>}
     <select
       value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="bg-studio-metal border border-border rounded px-2 py-1 text-xs text-foreground outline-none"
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value as T)}
+      className="bg-studio-metal border border-border rounded px-2 py-1 text-xs text-foreground outline-none min-w-0 flex-1 max-w-[260px] disabled:opacity-50"
     >
       {options.map((opt) => (
-        <option key={opt} value={opt}>{opt}</option>
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
       ))}
     </select>
   </div>
 );
 
-const ActionButton = ({ label, onClick, variant = "default" }: { label: string; onClick: () => void; variant?: "default" | "teal" }) => (
+/** A feature that is not built yet — shown so users know it is planned, but not interactive. */
+const ComingSoonRow = ({ label }: { label: string }) => (
+  <div className="w-full flex items-center justify-between py-2 px-3 text-xs text-studio-text-dim/60">
+    <span>{label}</span>
+    <span className="text-[9px] uppercase tracking-wider">Coming soon</span>
+  </div>
+);
+
+const Hint = ({ children }: { children: React.ReactNode }) => (
+  <p className="px-3 text-[10px] text-studio-text-dim leading-relaxed">{children}</p>
+);
+
+const ActionButton = ({ label, onClick, variant = "default", disabled = false }: { label: string; onClick: () => void; variant?: "default" | "teal"; disabled?: boolean }) => (
   <button
     onClick={onClick}
-    className={`px-3 py-1.5 rounded text-xs font-medium transition-all border ${
+    disabled={disabled}
+    className={`px-3 py-1.5 rounded text-xs font-medium transition-all border disabled:opacity-50 disabled:cursor-not-allowed ${
       variant === "teal"
         ? "border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25"
         : "border-border bg-studio-metal text-studio-text-dim hover:text-foreground hover:border-studio-metal-light"
@@ -71,42 +110,145 @@ const ActionButton = ({ label, onClick, variant = "default" }: { label: string; 
   </button>
 );
 
-const SettingsModal = ({ open, onClose }: SettingsModalProps) => {
+/** Live mic level + optional monitoring, using the audio engine's context so it follows the output device. */
+function useMicTest(deviceId: string | null) {
+  const [testing, setTesting] = useState(false);
+  const [monitoring, setMonitoring] = useState(false);
+  const [levelDb, setLevelDb] = useState(-Infinity);
+  const nodes = useRef<{ stream: MediaStream; source: MediaStreamAudioSourceNode; analyser: AnalyserNode; raf: number } | null>(null);
+
+  const stop = useCallback(() => {
+    const n = nodes.current;
+    if (n) {
+      cancelAnimationFrame(n.raf);
+      n.source.disconnect();
+      n.stream.getTracks().forEach((t) => t.stop());
+      nodes.current = null;
+    }
+    setTesting(false);
+    setMonitoring(false);
+    setLevelDb(-Infinity);
+  }, []);
+
+  const start = useCallback(async () => {
+    try {
+      await audioEngine.init();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+      });
+      const ctx = Tone.getContext().rawContext as AudioContext;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      const data = new Float32Array(analyser.fftSize);
+      const tick = () => {
+        analyser.getFloatTimeDomainData(data);
+        let sum = 0;
+        for (const v of data) sum += v * v;
+        const rms = Math.sqrt(sum / data.length);
+        setLevelDb(rms > 0 ? 20 * Math.log10(rms) : -Infinity);
+        if (nodes.current) nodes.current.raf = requestAnimationFrame(tick);
+      };
+      nodes.current = { stream, source, analyser, raf: requestAnimationFrame(tick) };
+      setTesting(true);
+    } catch (err) {
+      toast.error("Could not open the microphone", { description: err instanceof Error ? err.message : undefined });
+      stop();
+    }
+  }, [deviceId, stop]);
+
+  const toggleMonitor = useCallback(() => {
+    const n = nodes.current;
+    if (!n) return;
+    const ctx = Tone.getContext().rawContext as AudioContext;
+    if (monitoring) {
+      n.source.disconnect(ctx.destination);
+    } else {
+      n.source.connect(ctx.destination);
+    }
+    setMonitoring(!monitoring);
+  }, [monitoring]);
+
+  // Restart on device change; always release the mic when the modal closes
+  useEffect(() => stop, [deviceId, stop]);
+
+  return { testing, monitoring, levelDb, start, stop, toggleMonitor };
+}
+
+const SettingsModal = ({ open, onClose }: SettingsModalProps) => (
+  <StudioModal
+    open={open}
+    onClose={onClose}
+    title="Settings"
+    icon={<Settings className="w-4 h-4 text-studio-teal" />}
+    width="560px"
+  >
+    {/* Rendered only while open, so device enumeration (which asks for mic permission) waits until needed */}
+    <SettingsContent />
+  </StudioModal>
+);
+
+const SettingsContent = () => {
   const [activeTab, setActiveTab] = useState<SettingsTab>("audio");
+  const settings = useStudioSettings();
+  const { updateSettings } = settings;
 
-  // Audio settings
-  const [inputDevice, setInputDevice] = useState("Default Microphone");
-  const [outputDevice, setOutputDevice] = useState("Default Speakers");
+  const { devices: inputs, error: inputError, refresh } = useAudioInputDevices();
+  const [outputs, setOutputs] = useState<{ deviceId: string; label: string }[]>([]);
 
-  // Recording settings
-  const [countIn, setCountIn] = useState(false);
-  const [metronome, setMetronome] = useState(false);
-  const [autoMonitor, setAutoMonitor] = useState(true);
-  const [recordBehavior, setRecordBehavior] = useState("Replace");
+  // Output labels are only exposed after mic permission, so re-list whenever inputs refresh
+  useEffect(() => {
+    if (!supportsOutputDeviceSelection) return;
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then((all) =>
+        setOutputs(
+          all
+            .filter((d) => d.kind === "audiooutput" && d.deviceId !== "default")
+            .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Output ${i + 1}` })),
+        ),
+      )
+      .catch(() => setOutputs([]));
+  }, [inputs]);
 
-  // Timeline settings
-  const [snapDefault, setSnapDefault] = useState(true);
-  const [gridDivision, setGridDivision] = useState("1/4 Beat");
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [dragBehavior, setDragBehavior] = useState("Snap to Grid");
+  const mic = useMicTest(settings.inputDeviceId);
+  const micPercent = Number.isFinite(mic.levelDb) ? Math.max(0, Math.min(100, ((mic.levelDb + 60) / 60) * 100)) : 0;
 
-  // Storage settings
-  const [storageMode, setStorageMode] = useState("Local");
-  const [autosaveInterval, setAutosaveInterval] = useState("30 seconds");
+  const handleOutputChange = async (value: string) => {
+    const deviceId = value || null;
+    updateSettings({ outputDeviceId: deviceId });
+    if (!audioEngine.contextStarted) return; // applied when audio starts
+    try {
+      await audioEngine.setOutputDevice(deviceId);
+    } catch (err) {
+      toast.error("Could not switch output device", { description: err instanceof Error ? err.message : undefined });
+    }
+  };
 
-  // Interface settings
-  const [showTrackMeters, setShowTrackMeters] = useState(true);
-  const [showFXBadges, setShowFXBadges] = useState(true);
-  const [compactMixer, setCompactMixer] = useState(false);
+  const testSpeakers = async () => {
+    await audioEngine.init();
+    const osc = new Tone.Oscillator(440, "sine").toDestination();
+    osc.volume.value = -15;
+    osc.start();
+    osc.stop("+0.6");
+    setTimeout(() => osc.dispose(), 1000);
+  };
+
+  const handleResetEngine = () => {
+    mic.stop();
+    resetAudioEngine();
+    toast.success("Audio engine reset");
+  };
+
+  const handleAutosaveChange = (value: AutosaveInterval) => {
+    updateSettings({ autosaveInterval: value });
+    if (persistenceService.currentHandle) persistenceService.startAutosave();
+  };
+
+  const location = persistenceService.storageLocation;
 
   return (
-    <StudioModal
-      open={open}
-      onClose={onClose}
-      title="Settings"
-      icon={<Settings className="w-4 h-4 text-studio-teal" />}
-      width="560px"
-    >
       <div className="flex gap-4">
         {/* Tab sidebar */}
         <div className="flex flex-col gap-1 min-w-[120px]">
@@ -127,55 +269,66 @@ const SettingsModal = ({ open, onClose }: SettingsModalProps) => {
         </div>
 
         {/* Tab content */}
-        <div className="flex-1 min-h-[320px]">
+        <div className="flex-1 min-w-0 min-h-[320px]">
           {activeTab === "audio" && (
             <div className="space-y-4">
               <div>
-                <SectionLabel>Input Device</SectionLabel>
+                <SectionLabel>Default Input Device</SectionLabel>
                 <SelectRow
                   label=""
-                  value={inputDevice}
-                  options={["Default Microphone", "Built-in Microphone", "USB Audio Interface"]}
-                  onChange={setInputDevice}
+                  value={settings.inputDeviceId ?? ""}
+                  options={[{ value: "", label: "Browser default" }, ...inputs.map((d) => ({ value: d.deviceId, label: d.label }))]}
+                  onChange={(v) => updateSettings({ inputDeviceId: v || null })}
                 />
+                <Hint>
+                  {inputError ?? "Used for recording on tracks that don't have their own input selected."}
+                </Hint>
               </div>
 
               <div>
                 <SectionLabel>Output Device</SectionLabel>
                 <SelectRow
                   label=""
-                  value={outputDevice}
-                  options={["Default Speakers", "Built-in Speakers", "Headphones", "USB Audio Interface"]}
-                  onChange={setOutputDevice}
+                  value={settings.outputDeviceId ?? ""}
+                  options={[{ value: "", label: "System default" }, ...outputs.map((d) => ({ value: d.deviceId, label: d.label }))]}
+                  onChange={handleOutputChange}
+                  disabled={!supportsOutputDeviceSelection}
                 />
+                {!supportsOutputDeviceSelection && (
+                  <Hint>This browser can't choose an output device; it uses the system default.</Hint>
+                )}
               </div>
 
               <div>
                 <SectionLabel>Mic Level</SectionLabel>
                 <div className="flex items-center gap-3 px-3 py-2">
-                  <Mic className="w-3.5 h-3.5 text-studio-teal" />
+                  <Mic className={`w-3.5 h-3.5 ${mic.testing ? "text-studio-teal" : "text-studio-text-dim"}`} />
                   <div className="flex-1 h-2 rounded-full bg-studio-metal overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-studio-teal to-studio-blue"
-                      style={{ width: "35%" }}
+                      className="h-full rounded-full bg-gradient-to-r from-studio-teal to-studio-blue transition-[width] duration-75"
+                      style={{ width: `${micPercent}%` }}
                     />
                   </div>
-                  <span className="text-[10px] font-mono text-studio-text-dim">-18dB</span>
+                  <span className="text-[10px] font-mono text-studio-text-dim w-12 text-right">
+                    {mic.testing && Number.isFinite(mic.levelDb) ? `${Math.round(mic.levelDb)}dB` : "—"}
+                  </span>
                 </div>
               </div>
 
               <div>
                 <SectionLabel>Actions</SectionLabel>
                 <div className="flex flex-wrap gap-2 px-3">
-                  <ActionButton label="Test Mic" onClick={() => console.log("Test mic")} variant="teal" />
-                  <ActionButton label="Monitor Mic" onClick={() => console.log("Monitor mic")} />
-                  <ActionButton label="Test Speakers" onClick={() => console.log("Test speakers")} />
-                  <ActionButton label="Reconnect Devices" onClick={() => console.log("Reconnect devices")} />
+                  <ActionButton label={mic.testing ? "Stop Mic Test" : "Test Mic"} onClick={mic.testing ? mic.stop : mic.start} variant="teal" />
                   <ActionButton
-                    label="Reset Audio Engine"
-                    onClick={() => console.log("Reset audio engine")}
+                    label={mic.monitoring ? "Stop Monitoring" : "Monitor Mic"}
+                    onClick={mic.toggleMonitor}
+                    disabled={!mic.testing}
                   />
+                  <ActionButton label="Test Speakers" onClick={testSpeakers} />
+                  <ActionButton label="Reconnect Devices" onClick={refresh} />
+                  <ActionButton label="Reset Audio Engine" onClick={handleResetEngine} />
                 </div>
+                <Hint>Use headphones when monitoring to avoid feedback.</Hint>
               </div>
             </div>
           )}
@@ -183,17 +336,14 @@ const SettingsModal = ({ open, onClose }: SettingsModalProps) => {
           {activeTab === "recording" && (
             <div className="space-y-2">
               <SectionLabel>Recording Options</SectionLabel>
-              <ToggleRow label="Count-in before recording" checked={countIn} onChange={setCountIn} />
-              <ToggleRow label="Metronome" checked={metronome} onChange={setMetronome} />
-              <ToggleRow label="Auto-monitor while armed" checked={autoMonitor} onChange={setAutoMonitor} />
+              <ToggleRow label="Metronome during playback & recording" checked={settings.metronome} onChange={(v) => updateSettings({ metronome: v })} />
+              <Hint>The click goes to your speakers only — it is never recorded or exported.</Hint>
+              <ComingSoonRow label="Count-in before recording" />
+              <ComingSoonRow label="Auto-monitor while armed" />
               <div className="pt-2">
                 <SectionLabel>Recording Behavior</SectionLabel>
-                <SelectRow
-                  label="On overlap"
-                  value={recordBehavior}
-                  options={["Replace", "Layer", "Create New Take"]}
-                  onChange={setRecordBehavior}
-                />
+                <Hint>New recordings are added as a new clip; existing clips are never replaced.</Hint>
+                <ComingSoonRow label="Replace / take lanes on overlap" />
               </div>
             </div>
           )}
@@ -201,25 +351,17 @@ const SettingsModal = ({ open, onClose }: SettingsModalProps) => {
           {activeTab === "timeline" && (
             <div className="space-y-2">
               <SectionLabel>Grid & Snap</SectionLabel>
-              <ToggleRow label="Snap to grid by default" checked={snapDefault} onChange={setSnapDefault} />
-              <SelectRow
+              <ToggleRow label="Snap to grid in new sessions" checked={settings.snapByDefault} onChange={(v) => updateSettings({ snapByDefault: v })} />
+              <SelectRow<GridDivision>
                 label="Grid division"
-                value={gridDivision}
-                options={["1 Bar", "1/2 Beat", "1/4 Beat", "1/8 Beat", "1/16 Beat"]}
-                onChange={setGridDivision}
+                value={settings.gridDivision}
+                options={gridDivisionOptions}
+                onChange={(v) => updateSettings({ gridDivision: v })}
               />
+              <Hint>Toggle snapping for the current session with G or View → Snap to Grid / Free Move.</Hint>
               <div className="pt-2">
                 <SectionLabel>Playback</SectionLabel>
-                <ToggleRow label="Auto-scroll during playback" checked={autoScroll} onChange={setAutoScroll} />
-              </div>
-              <div className="pt-2">
-                <SectionLabel>Drag Behavior</SectionLabel>
-                <SelectRow
-                  label="Default mode"
-                  value={dragBehavior}
-                  options={["Snap to Grid", "Free Move"]}
-                  onChange={setDragBehavior}
-                />
+                <ToggleRow label="Auto-scroll during playback" checked={settings.autoScroll} onChange={(v) => updateSettings({ autoScroll: v })} />
               </div>
             </div>
           )}
@@ -227,40 +369,25 @@ const SettingsModal = ({ open, onClose }: SettingsModalProps) => {
           {activeTab === "storage" && (
             <div className="space-y-4">
               <div>
-                <SectionLabel>Storage Mode</SectionLabel>
-                <SelectRow
-                  label="Mode"
-                  value={storageMode}
-                  options={["Local", "Cloud"]}
-                  onChange={setStorageMode}
-                />
-              </div>
-              <div>
-                <SectionLabel>Save Location</SectionLabel>
-                <div className="flex items-center gap-2 px-3 py-2 rounded border border-border bg-studio-metal">
-                  <span className="text-xs text-studio-text-dim font-mono flex-1 truncate">
-                    ~/StreamLine/Sessions
-                  </span>
-                  <ActionButton label="Change" onClick={() => console.log("Change save location")} />
+                <SectionLabel>Current Session</SectionLabel>
+                <div className="px-3 py-2 rounded border border-border bg-studio-metal">
+                  <span className="text-xs text-studio-text-dim font-mono">{location?.label ?? "No session open"}</span>
                 </div>
-              </div>
-              <div>
-                <SectionLabel>Actions</SectionLabel>
-                <div className="flex gap-2 px-3">
-                  <ActionButton
-                    label="Reconnect Folder"
-                    onClick={() => console.log("Reconnect folder")}
-                  />
-                </div>
+                <Hint>
+                  Where a session is stored is chosen when you create it (File → New Session). Use File → Save Session As to copy it somewhere else.
+                </Hint>
               </div>
               <div>
                 <SectionLabel>Autosave</SectionLabel>
-                <SelectRow
+                <SelectRow<AutosaveInterval>
                   label="Interval"
-                  value={autosaveInterval}
-                  options={["Off", "15 seconds", "30 seconds", "1 minute", "5 minutes"]}
-                  onChange={setAutosaveInterval}
+                  value={settings.autosaveInterval}
+                  options={autosaveIntervalOptions.map(({ value, label }) => ({ value, label }))}
+                  onChange={handleAutosaveChange}
                 />
+                {settings.autosaveInterval === "off" && (
+                  <Hint>Autosave is off — only Ctrl+S, recordings and imports save your session.</Hint>
+                )}
               </div>
             </div>
           )}
@@ -268,14 +395,12 @@ const SettingsModal = ({ open, onClose }: SettingsModalProps) => {
           {activeTab === "interface" && (
             <div className="space-y-2">
               <SectionLabel>Display Options</SectionLabel>
-              <ToggleRow label="Always show track meters" checked={showTrackMeters} onChange={setShowTrackMeters} />
-              <ToggleRow label="Show FX badges on track headers" checked={showFXBadges} onChange={setShowFXBadges} />
-              <ToggleRow label="Compact mixer (placeholder)" checked={compactMixer} onChange={setCompactMixer} />
+              <ToggleRow label="Always show track meters" checked={settings.showTrackMeters} onChange={(v) => updateSettings({ showTrackMeters: v })} />
+              <ToggleRow label="Show FX badges on track headers" checked={settings.showFXBadges} onChange={(v) => updateSettings({ showFXBadges: v })} />
             </div>
           )}
         </div>
       </div>
-    </StudioModal>
   );
 };
 

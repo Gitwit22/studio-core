@@ -1,40 +1,38 @@
+import { useEffect, useState } from "react";
 import {
-  FilePlus,
-  FolderOpen,
   SaveAll,
   FileText,
   Keyboard,
   Rocket,
   Wrench,
   AlertTriangle,
-  Trash2,
   AlertCircle,
+  FolderOpen,
 } from "lucide-react";
+import * as Tone from "tone";
+import { toast } from "sonner";
 import StudioModal from "./StudioModal";
-
-/* ------------------------------------------------------------------ */
-/*  Shared placeholder content                                        */
-/* ------------------------------------------------------------------ */
-
-const PlaceholderContent = ({ description }: { description: string }) => (
-  <div className="text-center py-6">
-    <p className="text-xs text-studio-text-dim leading-relaxed">{description}</p>
-  </div>
-);
+import { useStudioStore } from "@/studio/engine/studioStore";
+import { persistenceService } from "@/studio/persistence";
+import { audioEngine } from "@/audio/AudioEngine";
+import { closeSession } from "@/studio/commands/projectCommands";
 
 const ModalActions = ({
   primaryLabel,
   onPrimary,
   onCancel,
+  primaryDisabled = false,
 }: {
   primaryLabel: string;
   onPrimary: () => void;
   onCancel: () => void;
+  primaryDisabled?: boolean;
 }) => (
   <div className="flex gap-3 pt-4">
     <button
       onClick={onPrimary}
-      className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25"
+      disabled={primaryDisabled}
+      className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25 disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {primaryLabel}
     </button>
@@ -47,6 +45,21 @@ const ModalActions = ({
   </div>
 );
 
+const InfoRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="flex justify-between gap-4 text-xs py-1.5 px-3 rounded bg-studio-metal/50">
+    <span className="text-studio-text-dim shrink-0">{label}</span>
+    <span className="text-foreground font-mono text-right truncate">{value}</span>
+  </div>
+);
+
+const fieldLabelClass = "text-[10px] uppercase tracking-widest text-studio-text-dim font-semibold mb-2 block";
+const inputClass =
+  "w-full bg-studio-metal border border-border rounded px-3 py-2 text-xs text-foreground outline-none focus:border-studio-teal/50 transition-colors";
+
+function errorDescription(err: unknown): string | undefined {
+  return err instanceof Error ? err.message : undefined;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Modal Props                                                       */
 /* ------------------------------------------------------------------ */
@@ -57,86 +70,129 @@ interface ModalProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  New Session Modal                                                 */
-/* ------------------------------------------------------------------ */
-
-export const NewSessionModal = ({ open, onClose }: ModalProps) => (
-  <StudioModal open={open} onClose={onClose} title="New Session" icon={<FilePlus className="w-4 h-4 text-studio-teal" />}>
-    <div className="space-y-4">
-      <div>
-        <label className="text-[10px] uppercase tracking-widest text-studio-text-dim font-semibold mb-2 block">
-          Session Name
-        </label>
-        <input
-          type="text"
-          placeholder="Untitled Session"
-          className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-xs text-foreground outline-none focus:border-studio-teal/50 transition-colors"
-        />
-      </div>
-      <ModalActions primaryLabel="Create" onPrimary={onClose} onCancel={onClose} />
-    </div>
-  </StudioModal>
-);
-
-/* ------------------------------------------------------------------ */
-/*  Open Session Modal                                                */
-/* ------------------------------------------------------------------ */
-
-export const OpenSessionModal = ({ open, onClose }: ModalProps) => (
-  <StudioModal open={open} onClose={onClose} title="Open Session" icon={<FolderOpen className="w-4 h-4 text-studio-teal" />}>
-    <PlaceholderContent description="Browse and open a previously saved session. File picker integration will be connected to the storage layer." />
-    <ModalActions primaryLabel="Browse" onPrimary={onClose} onCancel={onClose} />
-  </StudioModal>
-);
-
-/* ------------------------------------------------------------------ */
 /*  Save Session As Modal                                             */
 /* ------------------------------------------------------------------ */
 
-export const SaveSessionAsModal = ({ open, onClose }: ModalProps) => (
-  <StudioModal open={open} onClose={onClose} title="Save Session As" icon={<SaveAll className="w-4 h-4 text-studio-teal" />}>
-    <div className="space-y-4">
-      <div>
-        <label className="text-[10px] uppercase tracking-widest text-studio-text-dim font-semibold mb-2 block">
-          File Name
-        </label>
-        <input
-          type="text"
-          placeholder="My Session"
-          className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-xs text-foreground outline-none focus:border-studio-teal/50 transition-colors"
-        />
-      </div>
-      <ModalActions primaryLabel="Save" onPrimary={onClose} onCancel={onClose} />
-    </div>
-  </StudioModal>
-);
+/** Saves the session (with unsaved edits) as a new project and switches to it. */
+export const SaveSessionAsModal = ({ open, onClose }: ModalProps) => {
+  const projectName = useStudioStore((s) => s.projectName);
+  const [name, setName] = useState("");
+  const [parentDir, setParentDir] = useState<FileSystemDirectoryHandle | undefined>();
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setName(`${projectName} Copy`);
+    setParentDir(undefined);
+    // Only reset when the modal opens, not on later store changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const location = open ? persistenceService.storageLocation : null;
+  const isFileSystem = location?.kind === "filesystem";
+
+  const chooseFolder = async () => {
+    try {
+      setParentDir(await window.showDirectoryPicker({ mode: "readwrite" }));
+    } catch {
+      // picker cancelled
+    }
+  };
+
+  const handleSave = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    try {
+      await persistenceService.saveAsCopy(trimmed, parentDir);
+      toast.success(`Saved as "${useStudioStore.getState().projectName}"`);
+      onClose();
+    } catch (err) {
+      console.warn("Save As failed:", err);
+      toast.error("Save As failed", { description: errorDescription(err) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <StudioModal open={open} onClose={onClose} title="Save Session As" icon={<SaveAll className="w-4 h-4 text-studio-teal" />}>
+      {!location ? (
+        <p className="text-xs text-studio-text-dim text-center py-4">No session is open.</p>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <label className={fieldLabelClass}>New Session Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
+              className={inputClass}
+              autoFocus
+            />
+          </div>
+          {isFileSystem && (
+            <div>
+              <label className={fieldLabelClass}>Save In Folder</label>
+              <button
+                onClick={chooseFolder}
+                className="w-full flex items-center gap-2 bg-studio-metal border border-border rounded px-3 py-2 text-xs text-studio-text-dim hover:text-foreground transition-colors"
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                {parentDir ? parentDir.name : "Choose folder…"}
+              </button>
+            </div>
+          )}
+          <p className="text-[11px] text-studio-text-dim leading-relaxed">
+            Creates a separate copy (including its audio) and continues in the copy.
+            &ldquo;{projectName}&rdquo; stays as it was last saved.
+          </p>
+          <ModalActions
+            primaryLabel={saving ? "Saving…" : "Save Copy"}
+            onPrimary={handleSave}
+            onCancel={onClose}
+            primaryDisabled={saving || !name.trim() || (isFileSystem && !parentDir)}
+          />
+        </div>
+      )}
+    </StudioModal>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Session Info Modal                                                */
 /* ------------------------------------------------------------------ */
 
-export const SessionInfoModal = ({ open, onClose }: ModalProps) => (
-  <StudioModal open={open} onClose={onClose} title="Session Info" icon={<FileText className="w-4 h-4 text-studio-teal" />}>
-    <div className="space-y-3">
-      <div className="flex justify-between text-xs py-1.5 px-3 rounded bg-studio-metal/50">
-        <span className="text-studio-text-dim">Session Name</span>
-        <span className="text-foreground font-mono">Vocal_Session_01</span>
+export const SessionInfoModal = ({ open, onClose }: ModalProps) => {
+  const projectName = useStudioStore((s) => s.projectName);
+  const bpm = useStudioStore((s) => s.bpm);
+  const trackCount = useStudioStore((s) => s.tracks.length);
+  const clipCount = useStudioStore((s) => s.clips.length);
+  const sourceCount = useStudioStore((s) => s.sources.length);
+  const isDirty = useStudioStore((s) => s.isDirty);
+
+  if (!open) return null;
+  const location = persistenceService.storageLocation;
+  const lastSavedAt = persistenceService.lastSavedAt;
+  const sampleRate = audioEngine.contextStarted ? `${Tone.getContext().sampleRate} Hz` : "Starts on first playback";
+
+  return (
+    <StudioModal open={open} onClose={onClose} title="Session Info" icon={<FileText className="w-4 h-4 text-studio-teal" />}>
+      <div className="space-y-3">
+        <InfoRow label="Session Name" value={projectName} />
+        <InfoRow label="Stored In" value={location?.label ?? "Not saved"} />
+        <InfoRow label="Last Saved" value={lastSavedAt ? new Date(lastSavedAt).toLocaleString() : "Never"} />
+        <InfoRow label="Unsaved Changes" value={isDirty ? "Yes" : "No"} />
+        <InfoRow label="BPM" value={bpm} />
+        <InfoRow label="Tracks" value={trackCount} />
+        <InfoRow label="Clips" value={clipCount} />
+        <InfoRow label="Audio Files" value={sourceCount} />
+        <InfoRow label="Engine Sample Rate" value={sampleRate} />
       </div>
-      <div className="flex justify-between text-xs py-1.5 px-3 rounded bg-studio-metal/50">
-        <span className="text-studio-text-dim">Tracks</span>
-        <span className="text-foreground font-mono">0</span>
-      </div>
-      <div className="flex justify-between text-xs py-1.5 px-3 rounded bg-studio-metal/50">
-        <span className="text-studio-text-dim">Sample Rate</span>
-        <span className="text-foreground font-mono">48000 Hz</span>
-      </div>
-      <div className="flex justify-between text-xs py-1.5 px-3 rounded bg-studio-metal/50">
-        <span className="text-studio-text-dim">BPM</span>
-        <span className="text-foreground font-mono">120</span>
-      </div>
-    </div>
-  </StudioModal>
-);
+    </StudioModal>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Keyboard Shortcuts Modal                                          */
@@ -146,13 +202,15 @@ const shortcutList = [
   { key: "Space", desc: "Play / Pause" },
   { key: "R", desc: "Record" },
   { key: "Ctrl+S", desc: "Save Session" },
+  { key: "Ctrl+Shift+S", desc: "Save Session As" },
   { key: "Ctrl+Z", desc: "Undo" },
   { key: "Ctrl+Shift+Z", desc: "Redo" },
   { key: "Ctrl+N", desc: "New Session" },
   { key: "Ctrl+X", desc: "Cut" },
   { key: "Ctrl+C", desc: "Copy" },
   { key: "Ctrl+V", desc: "Paste" },
-  { key: "Del", desc: "Delete" },
+  { key: "Ctrl+D", desc: "Duplicate Clip" },
+  { key: "Del", desc: "Delete Clip" },
   { key: "Ctrl+=", desc: "Zoom In" },
   { key: "Ctrl+-", desc: "Zoom Out" },
 ];
@@ -216,8 +274,8 @@ export const TroubleshootingModal = ({ open, onClose }: ModalProps) => (
   <StudioModal open={open} onClose={onClose} title="Troubleshooting" icon={<Wrench className="w-4 h-4 text-studio-teal" />} width="460px">
     <div className="space-y-3">
       {[
-        { q: "No audio input detected", a: "Check that your microphone is connected and browser permissions are granted. Try Settings → Audio → Reconnect Devices." },
-        { q: "Playback is stuttering", a: "Close other browser tabs and applications. Try increasing the buffer size in audio settings." },
+        { q: "No audio input detected", a: "Check that your microphone is connected and browser permissions are granted. Try Settings → Audio → Reconnect Devices, then Test Mic." },
+        { q: "Playback is stuttering", a: "Close other browser tabs and applications. If it persists, use Settings → Audio → Reset Audio Engine." },
         { q: "Recording not starting", a: "Make sure a track is armed for recording. Check the track header for the arm button." },
         { q: "Export not working", a: "Ensure you have at least one clip on the timeline before exporting." },
       ].map((item) => (
@@ -230,86 +288,119 @@ export const TroubleshootingModal = ({ open, onClose }: ModalProps) => (
   </StudioModal>
 );
 
+
 /* ------------------------------------------------------------------ */
 /*  Report Problem Modal                                              */
 /* ------------------------------------------------------------------ */
 
-export const ReportProblemModal = ({ open, onClose }: ModalProps) => (
-  <StudioModal open={open} onClose={onClose} title="Report Problem" icon={<AlertCircle className="w-4 h-4 text-studio-teal" />}>
-    <div className="space-y-4">
-      <div>
-        <label className="text-[10px] uppercase tracking-widest text-studio-text-dim font-semibold mb-2 block">
-          Describe the Issue
-        </label>
-        <textarea
-          rows={4}
-          placeholder="What happened?"
-          className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-xs text-foreground outline-none resize-none focus:border-studio-teal/50 transition-colors"
-        />
+function buildProblemReport(description: string): string {
+  const s = useStudioStore.getState();
+  return [
+    "StreamLine Studio — problem report",
+    `Time: ${new Date().toISOString()}`,
+    `Browser: ${navigator.userAgent}`,
+    `Storage: ${persistenceService.storageLocation?.label ?? "No session open"}`,
+    `Tracks: ${s.tracks.length}, Clips: ${s.clips.length}, Audio files: ${s.sources.length}, BPM: ${s.bpm}`,
+    `Playing: ${s.isPlaying}, Recording: ${s.isRecording}, Unsaved changes: ${s.isDirty}`,
+    "",
+    "What happened:",
+    description.trim() || "(no description)",
+  ].join("\n");
+}
+
+/**
+ * There is no problem-report backend, so the report (description + basic
+ * diagnostics, no audio or session content) is copied for the user to send.
+ */
+export const ReportProblemModal = ({ open, onClose }: ModalProps) => {
+  const [description, setDescription] = useState("");
+
+  useEffect(() => {
+    if (open) setDescription("");
+  }, [open]);
+
+  const handleCopy = async () => {
+    const report = buildProblemReport(description);
+    try {
+      await navigator.clipboard.writeText(report);
+      toast.success("Report copied — paste it into an email or issue");
+      onClose();
+    } catch (err) {
+      toast.error("Could not copy the report", { description: errorDescription(err) });
+    }
+  };
+
+  return (
+    <StudioModal open={open} onClose={onClose} title="Report Problem" icon={<AlertCircle className="w-4 h-4 text-studio-teal" />}>
+      <div className="space-y-4">
+        <div>
+          <label className={fieldLabelClass}>Describe the Issue</label>
+          <textarea
+            rows={4}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What happened?"
+            className={`${inputClass} resize-none`}
+          />
+        </div>
+        <p className="text-[11px] text-studio-text-dim leading-relaxed">
+          Copies your description plus browser and session stats (no audio or session content) to the clipboard.
+        </p>
+        <ModalActions primaryLabel="Copy Report" onPrimary={handleCopy} onCancel={onClose} />
       </div>
-      <ModalActions primaryLabel="Submit" onPrimary={onClose} onCancel={onClose} />
-    </div>
-  </StudioModal>
-);
+    </StudioModal>
+  );
+};
 
 /* ------------------------------------------------------------------ */
-/*  Confirm Delete Modal                                              */
+/*  Unsaved Changes Warning Modal (shown by File → Close Session)     */
 /* ------------------------------------------------------------------ */
 
-export const ConfirmDeleteModal = ({ open, onClose }: ModalProps) => (
-  <StudioModal open={open} onClose={onClose} title="Confirm Delete" icon={<Trash2 className="w-4 h-4 text-red-400" />} width="360px">
-    <div className="space-y-4">
-      <p className="text-xs text-studio-text-dim text-center leading-relaxed">
-        Are you sure you want to delete this item? This action cannot be undone.
-      </p>
-      <div className="flex gap-3">
-        <button
-          onClick={onClose}
-          className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-red-400/40 bg-red-400/15 text-red-400 hover:bg-red-400/25"
-        >
-          Delete
-        </button>
-        <button
-          onClick={onClose}
-          className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-border bg-studio-metal text-studio-text-dim hover:text-foreground hover:border-studio-metal-light"
-        >
-          Cancel
-        </button>
+export const UnsavedChangesModal = ({ open, onClose }: ModalProps) => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await persistenceService.save();
+      closeSession();
+    } catch (err) {
+      console.warn("Save before close failed:", err);
+      toast.error("Save failed — session not closed", { description: errorDescription(err) });
+      setSaving(false);
+    }
+  };
+
+  return (
+    <StudioModal open={open} onClose={onClose} title="Unsaved Changes" icon={<AlertTriangle className="w-4 h-4 text-yellow-400" />} width="380px">
+      <div className="space-y-4">
+        <p className="text-xs text-studio-text-dim text-center leading-relaxed">
+          This session has changes that are not saved yet. Save before closing?
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button
+            onClick={() => closeSession()}
+            disabled={saving}
+            className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-red-400/40 bg-red-400/10 text-red-400 hover:bg-red-400/20 disabled:opacity-50"
+          >
+            Discard
+          </button>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-border bg-studio-metal text-studio-text-dim hover:text-foreground hover:border-studio-metal-light disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
-    </div>
-  </StudioModal>
-);
-
-/* ------------------------------------------------------------------ */
-/*  Unsaved Changes Warning Modal                                     */
-/* ------------------------------------------------------------------ */
-
-export const UnsavedChangesModal = ({ open, onClose }: ModalProps) => (
-  <StudioModal open={open} onClose={onClose} title="Unsaved Changes" icon={<AlertTriangle className="w-4 h-4 text-yellow-400" />} width="380px">
-    <div className="space-y-4">
-      <p className="text-xs text-studio-text-dim text-center leading-relaxed">
-        You have unsaved changes. Would you like to save before continuing?
-      </p>
-      <div className="flex gap-3">
-        <button
-          onClick={onClose}
-          className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25"
-        >
-          Save
-        </button>
-        <button
-          onClick={onClose}
-          className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-red-400/40 bg-red-400/10 text-red-400 hover:bg-red-400/20"
-        >
-          Discard
-        </button>
-        <button
-          onClick={onClose}
-          className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-border bg-studio-metal text-studio-text-dim hover:text-foreground hover:border-studio-metal-light"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  </StudioModal>
-);
+    </StudioModal>
+  );
+};

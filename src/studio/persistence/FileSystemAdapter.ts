@@ -118,6 +118,10 @@ export class FileSystemAdapter implements StorageAdapter {
   }
 
   async loadAudioFile(handle: ProjectHandle, relativePath: string): Promise<string> {
+    return URL.createObjectURL(await this.loadAudioBlob(handle, relativePath))
+  }
+
+  async loadAudioBlob(handle: ProjectHandle, relativePath: string): Promise<Blob> {
     if (!handle.dirHandle) throw new Error("No directory handle")
     // relativePath is e.g. "audio/recording-1.wav"
     const parts = relativePath.split("/")
@@ -126,8 +130,7 @@ export class FileSystemAdapter implements StorageAdapter {
       dir = await dir.getDirectoryHandle(part)
     }
     const file = await dir.getFileHandle(parts[parts.length - 1])
-    const blob = await file.getFile()
-    return URL.createObjectURL(blob)
+    return file.getFile()
   }
 
   async saveAutosaveBackup(handle: ProjectHandle, snapshot: SessionSnapshot): Promise<void> {

@@ -1,8 +1,13 @@
 import { runCommand } from "./commandBus"
+import { useStudioStore } from "./engine/studioStore"
 
 export function registerStudioShortcuts() {
   const handler = (e: KeyboardEvent) => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+    if (
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      e.target instanceof HTMLSelectElement
+    ) return
 
     if (e.key === " ") {
       e.preventDefault()
@@ -50,7 +55,7 @@ export function registerStudioShortcuts() {
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
       e.preventDefault()
-      runCommand("project:save")
+      runCommand(e.shiftKey ? "session:saveAs" : "project:save")
     }
 
     // Ctrl+N = new session
@@ -84,6 +89,31 @@ export function registerStudioShortcuts() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
       e.preventDefault()
       runCommand("edit:split-at-playhead")
+    }
+
+    // Ctrl+= / Ctrl+- = timeline zoom (instead of browser zoom)
+    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")) {
+      e.preventDefault()
+      runCommand("view:zoomIn")
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "-") {
+      e.preventDefault()
+      runCommand("view:zoomOut")
+    }
+
+    // Clip edits — ignored while a modal is open so they can't hit the timeline behind it
+    if (useStudioStore.getState().activeModal) return
+
+    // Ctrl+D = duplicate selected clip
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+      e.preventDefault()
+      runCommand("edit:duplicateClip")
+    }
+
+    // Delete / Backspace = delete selected clip
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault()
+      runCommand("edit:delete")
     }
   }
 

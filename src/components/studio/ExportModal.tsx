@@ -2,6 +2,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { X, Download, FileAudio, Check } from "lucide-react";
 import { exportProjectMix } from "@/studio/commands/projectCommands";
+import type { WavBitDepth } from "@/audio/ExportEngine";
+
+const SILENCE_PADDING_SECONDS = 2;
 import { useStudioStore } from "@/studio/engine/studioStore";
 
 interface ExportModalProps {
@@ -17,8 +20,6 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
   const projectName = useStudioStore((s) => s.projectName);
   const [fileName, setFileName] = useState(projectName || "Untitled Session");
   const [normalize, setNormalize] = useState(true);
-  const [includeEffects, setIncludeEffects] = useState(true);
-  const [includeAutomation, setIncludeAutomation] = useState(true);
   const [silencePadding, setSilencePadding] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [rendering, setRendering] = useState(false);
@@ -28,8 +29,15 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
   const handleRender = async () => {
     setRendering(true);
     try {
-      await exportProjectMix(fileName);
-      toast.success("Mix exported");
+      await exportProjectMix({
+        fileName,
+        bitDepth: Number(bitDepth) as WavBitDepth,
+        sampleRate: Number(sampleRate),
+        normalize,
+        tailSeconds: silencePadding ? SILENCE_PADDING_SECONDS : 0,
+        perTrack: exportType === "tracks",
+      });
+      toast.success(exportType === "tracks" ? "Tracks exported" : "Mix exported");
       onClose();
     } catch (err) {
       console.warn("Export failed:", err);
@@ -41,14 +49,19 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
 
   if (!open) return null;
 
-  const formats = ["WAV", "MP3", "FLAC"];
+  // Only WAV has an encoder; the others are listed as planned but cannot be selected.
+  const formats = [
+    { value: "WAV", available: true },
+    { value: "MP3", available: false },
+    { value: "FLAC", available: false },
+  ];
   const bitDepths = ["16", "24", "32"];
   const sampleRates = ["44100", "48000"];
   const exportTypes = [
-    { value: "master", label: "Master Mix" },
-    { value: "tracks", label: "Individual Tracks" },
-    { value: "stems", label: "Stems" },
-    { value: "video", label: "Video" },
+    { value: "master", label: "Master Mix", available: true },
+    { value: "tracks", label: "Individual Tracks (one WAV per track)", available: true },
+    { value: "stems", label: "Stems", available: false },
+    { value: "video", label: "Video", available: false },
   ];
 
   const ToggleOption = ({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) => (
@@ -85,17 +98,20 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
           <div>
             <label className="text-[10px] uppercase tracking-widest text-studio-text-dim font-semibold mb-2 block">Format</label>
             <div className="flex gap-2">
-              {formats.map((f) => (
+              {formats.map(({ value: f, available }) => (
                 <button
                   key={f}
                   onClick={() => setFormat(f)}
-                  className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border ${
+                  disabled={!available}
+                  title={available ? undefined : "Coming soon"}
+                  className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border disabled:opacity-40 disabled:cursor-not-allowed ${
                     format === f
                       ? "bg-studio-teal/15 text-studio-teal border-studio-teal/40 shadow-[0_0_12px_hsl(172_72%_55%/0.15)]"
                       : "bg-studio-metal text-studio-text-dim border-border hover:border-studio-metal-light"
                   }`}
                 >
                   {f}
+                  {!available && <span className="block text-[8px] font-normal normal-case tracking-normal">soon</span>}
                 </button>
               ))}
             </div>
@@ -115,7 +131,7 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
                       : "bg-studio-metal text-studio-text-dim border-border hover:border-studio-metal-light"
                   }`}
                 >
-                  {b} bit
+                  {b} bit{b === "32" ? " float" : ""}
                 </button>
               ))}
             </div>
@@ -149,7 +165,8 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
                 <button
                   key={t.value}
                   onClick={() => setExportType(t.value)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs transition-all border ${
+                  disabled={!t.available}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded text-xs transition-all border disabled:opacity-40 disabled:cursor-not-allowed ${
                     exportType === t.value
                       ? "bg-studio-teal/10 text-studio-teal border-studio-teal/30"
                       : "bg-studio-metal text-studio-text-dim border-border hover:border-studio-metal-light"
@@ -161,6 +178,7 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
                     {exportType === t.value && <div className="w-1.5 h-1.5 rounded-full bg-studio-teal" />}
                   </div>
                   {t.label}
+                  {!t.available && <span className="ml-auto text-[9px] uppercase tracking-wider">Coming soon</span>}
                 </button>
               ))}
             </div>
@@ -191,10 +209,11 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
             </button>
             {showAdvanced && (
               <div className="mt-3 space-y-2.5 pl-2">
-                <ToggleOption checked={normalize} onChange={setNormalize} label="Normalize Output" />
-                <ToggleOption checked={includeEffects} onChange={setIncludeEffects} label="Include Effects" />
-                <ToggleOption checked={includeAutomation} onChange={setIncludeAutomation} label="Include Automation" />
-                <ToggleOption checked={silencePadding} onChange={setSilencePadding} label="Include Silence Padding" />
+                <ToggleOption checked={normalize} onChange={setNormalize} label="Normalize Output (peak −0.1 dB)" />
+                <ToggleOption checked={silencePadding} onChange={setSilencePadding} label={`Add ${SILENCE_PADDING_SECONDS}s Silence at End`} />
+                <p className="text-[10px] text-studio-text-dim/70 leading-relaxed">
+                  Track and master FX are not included in exports yet.
+                </p>
               </div>
             )}
           </div>

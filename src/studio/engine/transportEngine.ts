@@ -5,6 +5,7 @@ import { audioEngine } from "@/audio/AudioEngine"
 import { mixerEngine } from "@/audio/MixerEngine"
 import { Recorder } from "@/audio/Recorder"
 import { persistenceService } from "../persistence"
+import { getStudioSettings } from "../settings/studioSettings"
 
 // ── Internal state ──
 let animationFrame: number | null = null
@@ -13,6 +14,7 @@ interface ActivePlayer { player: Tone.Player; gain: Tone.Gain }
 let activePlayers: ActivePlayer[] = []
 const recorder = new Recorder()
 let micStream: MediaStream | null = null
+let metronome: { loop: Tone.Loop; synth: Tone.Synth } | null = null
 
 // ── Playback ──
 
@@ -94,6 +96,8 @@ export async function playTransport() {
     await Promise.all(loadPromises)
   }
 
+  if (getStudioSettings().metronome) startMetronome()
+
   Tone.getTransport().start(undefined, `${store.playhead / (store.bpm / 60)}`)
 
   useStudioStore.getState().setPlaying(true)
@@ -142,6 +146,7 @@ export function stopTransport() {
   if (animationFrame) cancelAnimationFrame(animationFrame)
   animationFrame = null
   disposeActivePlayers()
+  disposeMetronome()
 }
 
 export function rewindTransport() {
@@ -168,8 +173,10 @@ export async function recordTransport() {
 
   // Get microphone (dry path — no FX on capture)
   // Use the armed track's selected input device if available
-  const audioConstraints: MediaTrackConstraints | boolean = armedTrack.inputDeviceId
-    ? { deviceId: { exact: armedTrack.inputDeviceId } }
+  // Track's own input first, then the default input from Settings, then the browser default
+  const inputDeviceId = armedTrack.inputDeviceId ?? getStudioSettings().inputDeviceId
+  const audioConstraints: MediaTrackConstraints | boolean = inputDeviceId
+    ? { deviceId: { exact: inputDeviceId } }
     : true
 
   // Always request a fresh stream so device selection takes effect
@@ -271,6 +278,33 @@ export function getPosition(): string {
 }
 
 // ── Internal helpers ──
+
+/**
+ * Click on every beat (accented on the bar), synced to the transport and sent
+ * straight to the output — never through the mixer, so it is not recorded or
+ * exported. Turning the setting off mid-playback silences it immediately.
+ */
+function startMetronome() {
+  disposeMetronome()
+  const synth = new Tone.Synth({
+    oscillator: { type: "square" },
+    envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 },
+    volume: -12,
+  }).toDestination()
+  const transport = Tone.getTransport()
+  const loop = new Tone.Loop((time) => {
+    if (!getStudioSettings().metronome) return
+    const beat = Math.round(transport.getTicksAtTime(time) / transport.PPQ)
+    synth.triggerAttackRelease(beat % 4 === 0 ? "C6" : "G5", "32n", time)
+  }, "4n").start(0)
+  metronome = { loop, synth }
+}
+
+function disposeMetronome() {
+  if (!metronome) return
+  try { metronome.loop.dispose(); metronome.synth.dispose() } catch { /* already disposed */ }
+  metronome = null
+}
 
 function extensionForMime(mime: string): string {
   if (mime.includes("webm")) return "webm"

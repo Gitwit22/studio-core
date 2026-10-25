@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useStudioStore } from "@/studio/engine/studioStore";
 import { trackColorPalette } from "@/studio/types/studio";
+import { snapBeat, useStudioSettings } from "@/studio/settings/studioSettings";
 import type { TimelineEditTool } from "@/studio/types/studio";
 import WaveformCanvas from "@/components/studio/WaveformCanvas";
 import { selectResolution } from "@/audio/waveformPeaks";
@@ -208,6 +209,8 @@ const Timeline = () => {
   const updateMixerChannel = useStudioStore((s) => s.updateMixerChannel);
   const pushUndo = useStudioStore((s) => s.pushUndo);
   const snapToGrid = useStudioStore((s) => s.snapToGrid);
+  const autoScroll = useStudioSettings((s) => s.autoScroll);
+  const showFXBadges = useStudioSettings((s) => s.showFXBadges);
   const toggleSnapToGrid = useStudioStore((s) => s.toggleSnapToGrid);
   const trackLaneHeight = useStudioStore((s) => s.trackLaneHeight);
   const setTrackLaneHeight = useStudioStore((s) => s.setTrackLaneHeight);
@@ -396,7 +399,7 @@ const Timeline = () => {
     const duration = drag.initialEnd - drag.initialStart;
     let nextStart = drag.initialStart + dx / beatWidth;
     if (snapToGrid) {
-      nextStart = Math.round(nextStart);
+      nextStart = snapBeat(nextStart, 1);
     }
     nextStart = Math.max(0, nextStart);
 
@@ -438,14 +441,14 @@ const Timeline = () => {
       const originalDuration = trim.initialEnd - trim.initialStart;
       if (trim.edge === "right") {
         let newEnd = trim.initialEnd + deltaBeat;
-        if (snapToGrid) newEnd = Math.round(newEnd * 4) / 4;
+        if (snapToGrid) newEnd = snapBeat(newEnd, 0.25);
         newEnd = Math.max(trim.initialStart + MIN_CLIP_BEATS, newEnd);
         const newDuration = newEnd - trim.initialStart;
         const newRate = (originalDuration * trim.initialPlaybackRate) / newDuration;
         updateClip(trim.clipId, { end: newEnd, playbackRate: Math.max(0.1, Math.min(4, newRate)) });
       } else {
         let newStart = trim.initialStart + deltaBeat;
-        if (snapToGrid) newStart = Math.round(newStart * 4) / 4;
+        if (snapToGrid) newStart = snapBeat(newStart, 0.25);
         newStart = Math.min(newStart, trim.initialEnd - MIN_CLIP_BEATS);
         newStart = Math.max(0, newStart);
         const newDuration = trim.initialEnd - newStart;
@@ -456,14 +459,14 @@ const Timeline = () => {
       // Normal trim mode
       if (trim.edge === "left") {
         let newStart = trim.initialStart + deltaBeat;
-        if (snapToGrid) newStart = Math.round(newStart * 4) / 4;
+        if (snapToGrid) newStart = snapBeat(newStart, 0.25);
         newStart = Math.max(0, newStart);
         newStart = Math.min(newStart, trim.initialEnd - MIN_CLIP_BEATS);
         const newOffset = trim.initialOffset + (newStart - trim.initialStart);
         updateClip(trim.clipId, { start: newStart, offset: Math.max(0, newOffset) });
       } else {
         let newEnd = trim.initialEnd + deltaBeat;
-        if (snapToGrid) newEnd = Math.round(newEnd * 4) / 4;
+        if (snapToGrid) newEnd = snapBeat(newEnd, 0.25);
         newEnd = Math.max(trim.initialStart + MIN_CLIP_BEATS, newEnd);
         updateClip(trim.clipId, { end: newEnd });
       }
@@ -606,7 +609,7 @@ const Timeline = () => {
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft - TRACK_LABEL_W;
     let atBeat = x / beatWidth;
-    if (snapToGrid) atBeat = Math.round(atBeat * 4) / 4;
+    if (snapToGrid) atBeat = snapBeat(atBeat, 0.25);
     splitClip(clipId, atBeat);
   }, [editTool, beatWidth, snapToGrid, splitClip]);
 
@@ -660,7 +663,7 @@ const Timeline = () => {
 
   // Auto-scroll during playback / recording
   useEffect(() => {
-    if ((!isPlaying && !isRecording) || !scrollRef.current) return;
+    if (!autoScroll || (!isPlaying && !isRecording) || !scrollRef.current) return;
     const el = scrollRef.current;
     const playheadPx = TRACK_LABEL_W + playheadPosition * beatWidth;
     const viewLeft = el.scrollLeft;
@@ -668,7 +671,7 @@ const Timeline = () => {
     if (playheadPx > viewRight - 60 || playheadPx < viewLeft + TRACK_LABEL_W) {
       el.scrollLeft = playheadPx - el.clientWidth * 0.33;
     }
-  }, [playheadPosition, beatWidth, isPlaying, isRecording]);
+  }, [playheadPosition, beatWidth, isPlaying, isRecording, autoScroll]);
 
   // Format beat position as seconds string
   const beatToSeconds = useCallback((beat: number) => {
@@ -910,7 +913,7 @@ const Timeline = () => {
                   >
                     {track.name}
                   </span>
-                  {trackLaneHeight >= 60 && (
+                  {showFXBadges && trackLaneHeight >= 60 && (
                     <div className="flex flex-wrap justify-center gap-px mt-0.5">
                       {track.fxChain.map((fx) => (
                         <span

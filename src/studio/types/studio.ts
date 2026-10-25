@@ -233,7 +233,6 @@ export type ModalId =
   | "troubleshooting"
   | "reportProblem"
   | "about"
-  | "confirmDelete"
   | "unsavedChanges"
   | null
 

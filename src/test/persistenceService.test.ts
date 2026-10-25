@@ -30,6 +30,7 @@ function makeAdapter(overrides: Partial<StorageAdapter> = {}) {
     saveSession: vi.fn(async (h: ProjectHandle, s: SessionSnapshot) => { sessions.set(h.id, s) }),
     saveAudioFile: vi.fn(async (_h: ProjectHandle, filename: string) => `audio/${filename}`),
     loadAudioFile: vi.fn(async () => "blob:test"),
+    loadAudioBlob: vi.fn(async () => new Blob(["audio"])),
     saveAutosaveBackup: vi.fn(async () => {}),
     ...overrides,
   }
@@ -228,3 +229,52 @@ describe("FileSystemAdapter.createProject", () => {
     expect(second.dirHandle).not.toBe(first.dirHandle)
   })
 })
+
+describe("PersistenceService.saveAsCopy", () => {
+  beforeEach(() => {
+    persistenceService.stopAutosave()
+    useStudioStore.getState().reset()
+    useStudioStore.getState().newSession()
+  })
+
+  it("copies the session and its audio into a new project and switches to it", async () => {
+    const oldAdapter = makeAdapter()
+    const oldHandle = attach(oldAdapter, "original")
+    useStudioStore.getState().addSource({ name: "v", url: "blob:x", relativePath: "audio/ab12-vocal.wav", duration: 1 })
+    useStudioStore.getState().setBpm(97) // unsaved edit goes to the copy
+
+    const IDB = (await import("@/studio/persistence/IndexedDbAdapter")).IndexedDbAdapter
+    const created: ProjectHandle = { id: "copy-id", name: "My Copy", adapterType: "indexeddb" }
+    const createSpy = vi.spyOn(IDB.prototype, "createProject").mockResolvedValue(created)
+    const audioSpy = vi.spyOn(IDB.prototype, "saveAudioFile").mockImplementation(async (_h, f) => `audio/${f}`)
+    const saveSpy = vi.spyOn(IDB.prototype, "saveSession").mockResolvedValue()
+
+    await persistenceService.saveAsCopy("My Copy")
+    persistenceService.stopAutosave()
+
+    expect(oldAdapter.loadAudioBlob).toHaveBeenCalledWith(oldHandle, "audio/ab12-vocal.wav")
+    expect(audioSpy).toHaveBeenCalledWith(created, "ab12-vocal.wav", expect.any(Blob))
+    const saved = saveSpy.mock.calls[0][1] as SessionSnapshot
+    expect(saved).toMatchObject({ projectId: "copy-id", projectName: "My Copy", bpm: 97 })
+    expect(oldAdapter.saveSession).not.toHaveBeenCalled() // original untouched
+    expect(internals().handle).toBe(created)
+    expect(useStudioStore.getState().projectId).toBe("copy-id")
+    createSpy.mockRestore(); audioSpy.mockRestore(); saveSpy.mockRestore()
+  })
+
+  it("stays on the original project if copying audio fails", async () => {
+    const oldAdapter = makeAdapter({ loadAudioBlob: vi.fn().mockRejectedValue(new Error("gone")) })
+    const oldHandle = attach(oldAdapter, "original")
+    useStudioStore.getState().addSource({ name: "v", url: "blob:x", relativePath: "audio/a.wav", duration: 1 })
+    const IDB = (await import("@/studio/persistence/IndexedDbAdapter")).IndexedDbAdapter
+    const createSpy = vi.spyOn(IDB.prototype, "createProject")
+      .mockResolvedValue({ id: "copy", name: "Copy", adapterType: "indexeddb" })
+
+    await expect(persistenceService.saveAsCopy("Copy")).rejects.toThrow("gone")
+    persistenceService.stopAutosave()
+
+    expect(internals().handle).toBe(oldHandle)
+    createSpy.mockRestore()
+  })
+})
+

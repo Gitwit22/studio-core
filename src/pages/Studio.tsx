@@ -16,7 +16,6 @@ import {
   QuickStartModal,
   TroubleshootingModal,
   ReportProblemModal,
-  ConfirmDeleteModal,
   UnsavedChangesModal,
 } from "@/components/studio/StudioModals";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
@@ -116,7 +115,6 @@ const Studio = () => {
       <QuickStartModal open={activeModal === "quickStart"} onClose={closeModal} />
       <TroubleshootingModal open={activeModal === "troubleshooting"} onClose={closeModal} />
       <ReportProblemModal open={activeModal === "reportProblem"} onClose={closeModal} />
-      <ConfirmDeleteModal open={activeModal === "confirmDelete"} onClose={closeModal} />
       <UnsavedChangesModal open={activeModal === "unsavedChanges"} onClose={closeModal} />
     </div>
   );

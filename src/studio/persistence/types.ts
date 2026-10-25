@@ -42,6 +42,9 @@ export interface StorageAdapter {
   /** Load an audio file from the project and return a blob URL */
   loadAudioFile(handle: ProjectHandle, relativePath: string): Promise<string>
 
+  /** Read an audio file's bytes from the project */
+  loadAudioBlob(handle: ProjectHandle, relativePath: string): Promise<Blob>
+
   /** Write autosave backups (rotated: autosave.json → autosave.1.json → autosave.2.json) */
   saveAutosaveBackup(handle: ProjectHandle, snapshot: SessionSnapshot): Promise<void>
 }

@@ -23,7 +23,7 @@ export const studioMenu: MenuGroup[] = [
       { label: "Import Audio", action: "file:importAudio" },
       { label: "Export Mix", action: "file:exportMix" },
       { label: "", action: "", separator: true },
-      { label: "Recent Sessions", action: "session:recent", disabled: true },
+      { label: "Recent Sessions", action: "session:recent" },
       { label: "Session Info", action: "session:info" },
       { label: "", action: "", separator: true },
       { label: "Close Session", action: "session:close" },
@@ -41,7 +41,8 @@ export const studioMenu: MenuGroup[] = [
       { label: "", action: "", separator: true },
       { label: "Duplicate Clip", action: "edit:duplicateClip", shortcut: "Ctrl+D" },
       { label: "Delete", action: "edit:delete", shortcut: "Del" },
-      { label: "Select All", action: "edit:selectAll", shortcut: "Ctrl+A" },
+      // Disabled until the timeline supports multi-clip selection
+      { label: "Select All", action: "edit:selectAll", shortcut: "Ctrl+A", disabled: true },
     ],
   },
   {
