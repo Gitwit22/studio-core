@@ -27,10 +27,24 @@ export function bufferToWav(buffer: Tone.ToneAudioBuffer | AudioBuffer, bitDepth
   if (!audioBuffer) {
     return new Blob([], { type: "audio/wav" });
   }
+  const channels: Float32Array[] = [];
+  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+    channels.push(audioBuffer.getChannelData(ch));
+  }
+  return encodeWav(channels, audioBuffer.sampleRate, bitDepth, audioBuffer.length);
+}
 
-  const numberOfChannels = audioBuffer.numberOfChannels;
-  const sampleRate = audioBuffer.sampleRate;
-  const length = audioBuffer.length;
+/**
+ * Encode channel data as WAV. 16/24-bit are integer PCM; 32-bit is IEEE float
+ * (format 3), which stores Web Audio's Float32 samples bit-for-bit.
+ */
+export function encodeWav(
+  channels: Float32Array[],
+  sampleRate: number,
+  bitDepth: WavBitDepth,
+  length = channels[0]?.length ?? 0,
+): Blob {
+  const numberOfChannels = channels.length;
   const bytesPerSample = bitDepth / 8;
   const blockAlign = numberOfChannels * bytesPerSample;
   const dataSize = length * blockAlign;
@@ -53,26 +67,24 @@ export function bufferToWav(buffer: Tone.ToneAudioBuffer | AudioBuffer, bitDepth
   writeString(view, 36, "data");
   view.setUint32(40, dataSize, true);
 
-  // Interleave channel data
-  const channels: Float32Array[] = [];
-  for (let ch = 0; ch < numberOfChannels; ch++) {
-    channels.push(audioBuffer.getChannelData(ch));
-  }
-
   let offset = headerSize;
   for (let i = 0; i < length; i++) {
     for (let ch = 0; ch < numberOfChannels; ch++) {
-      const sample = Math.max(-1, Math.min(1, channels[ch][i]));
+      const raw = channels[ch][i];
       if (bitDepth === 32) {
-        view.setFloat32(offset, sample, true);
-      } else if (bitDepth === 24) {
-        const int = Math.round(sample < 0 ? sample * 0x800000 : sample * 0x7fffff);
-        view.setUint8(offset, int & 0xff);
-        view.setUint8(offset + 1, (int >> 8) & 0xff);
-        view.setUint8(offset + 2, (int >> 16) & 0xff);
+        // Float WAV keeps the original value, including any overs above 0 dBFS
+        view.setFloat32(offset, raw, true);
       } else {
-        const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-        view.setInt16(offset, intSample, true);
+        const sample = Math.max(-1, Math.min(1, raw));
+        if (bitDepth === 24) {
+          const int = Math.round(sample < 0 ? sample * 0x800000 : sample * 0x7fffff);
+          view.setUint8(offset, int & 0xff);
+          view.setUint8(offset + 1, (int >> 8) & 0xff);
+          view.setUint8(offset + 2, (int >> 16) & 0xff);
+        } else {
+          const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+          view.setInt16(offset, intSample, true);
+        }
       }
       offset += bytesPerSample;
     }

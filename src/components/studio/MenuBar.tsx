@@ -23,40 +23,8 @@ export default function MenuBar() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        runCommand("project:save");
-        e.preventDefault();
-      }
-
-      if (e.code === "Space") {
-        // Only trigger if not focused on an input/textarea
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag !== "INPUT" && tag !== "TEXTAREA") {
-          runCommand("transport:play");
-          e.preventDefault();
-        }
-      }
-
-      if (e.key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag !== "INPUT" && tag !== "TEXTAREA") {
-          runCommand("transport:record");
-          e.preventDefault();
-        }
-      }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
-        runCommand("edit:undo");
-        e.preventDefault();
-      }
-    };
-
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, []);
+  // Keyboard shortcuts live in registerStudioShortcuts (registered by the Studio page).
+  // A second listener here made Space, R, Ctrl+S and Ctrl+Z fire twice.
 
   return (
     <div

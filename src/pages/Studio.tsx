@@ -27,6 +27,7 @@ import { registerStudioShortcuts } from "@/studio/registerShortcuts";
 import { useStudioStore } from "@/studio/engine/studioStore";
 import { audioEffectsManager } from "@/audio/AudioEffectsManager";
 import { mixerEngine } from "@/audio/MixerEngine";
+import { recoverInterruptedTakes } from "@/studio/engine/transportEngine";
 
 const Studio = () => {
   const [showNewSession, setShowNewSession] = useState(true);
@@ -41,12 +42,15 @@ const Studio = () => {
     audioEffectsManager.init();
     mixerEngine.init();
     startAutosave();
+    // Offer to rebuild any take interrupted by a crash or closed tab
+    void recoverInterruptedTakes();
   }, []);
 
   // Warn before leaving with edits that autosave has not written yet.
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!useStudioStore.getState().isDirty) return;
+      const { isDirty, isRecording } = useStudioStore.getState();
+      if (!isDirty && !isRecording) return;
       e.preventDefault();
       e.returnValue = "";
     };

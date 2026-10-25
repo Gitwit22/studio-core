@@ -6,6 +6,8 @@ import StudioModal from "./StudioModal";
 import { useAudioInputDevices } from "@/hooks/use-audio-inputs";
 import { audioEngine, supportsOutputDeviceSelection } from "@/audio/AudioEngine";
 import { resetAudioEngine } from "@/studio/commands/projectCommands";
+import { getLatencyEstimate } from "@/studio/engine/transportEngine";
+import { openCaptureStream, type CaptureReport } from "@/audio/captureConstraints";
 import { persistenceService } from "@/studio/persistence";
 import {
   useStudioSettings,
@@ -115,6 +117,7 @@ function useMicTest(deviceId: string | null) {
   const [testing, setTesting] = useState(false);
   const [monitoring, setMonitoring] = useState(false);
   const [levelDb, setLevelDb] = useState(-Infinity);
+  const [report, setReport] = useState<CaptureReport | null>(null);
   const nodes = useRef<{ stream: MediaStream; source: MediaStreamAudioSourceNode; analyser: AnalyserNode; raf: number } | null>(null);
 
   const stop = useCallback(() => {
@@ -133,9 +136,9 @@ function useMicTest(deviceId: string | null) {
   const start = useCallback(async () => {
     try {
       await audioEngine.init();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: deviceId ? { deviceId: { exact: deviceId } } : true,
-      });
+      // Same constraints as recording, so the meter and report reflect real capture
+      const { stream, report: captureReport } = await openCaptureStream(deviceId, false);
+      setReport(captureReport);
       const ctx = Tone.getContext().rawContext as AudioContext;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
@@ -144,10 +147,10 @@ function useMicTest(deviceId: string | null) {
       const data = new Float32Array(analyser.fftSize);
       const tick = () => {
         analyser.getFloatTimeDomainData(data);
-        let sum = 0;
-        for (const v of data) sum += v * v;
-        const rms = Math.sqrt(sum / data.length);
-        setLevelDb(rms > 0 ? 20 * Math.log10(rms) : -Infinity);
+        // Peak (not RMS) so the reading shows how close the input is to clipping
+        let peak = 0;
+        for (const v of data) peak = Math.max(peak, Math.abs(v));
+        setLevelDb(peak > 0 ? 20 * Math.log10(peak) : -Infinity);
         if (nodes.current) nodes.current.raf = requestAnimationFrame(tick);
       };
       nodes.current = { stream, source, analyser, raf: requestAnimationFrame(tick) };
@@ -173,7 +176,7 @@ function useMicTest(deviceId: string | null) {
   // Restart on device change; always release the mic when the modal closes
   useEffect(() => stop, [deviceId, stop]);
 
-  return { testing, monitoring, levelDb, start, stop, toggleMonitor };
+  return { testing, monitoring, levelDb, report, start, stop, toggleMonitor };
 }
 
 const SettingsModal = ({ open, onClose }: SettingsModalProps) => (
@@ -247,6 +250,7 @@ const SettingsContent = () => {
   };
 
   const location = persistenceService.storageLocation;
+  const latency = getLatencyEstimate(mic.report?.latency);
 
   return (
       <div className="flex gap-4">
@@ -309,10 +313,17 @@ const SettingsContent = () => {
                       style={{ width: `${micPercent}%` }}
                     />
                   </div>
-                  <span className="text-[10px] font-mono text-studio-text-dim w-12 text-right">
-                    {mic.testing && Number.isFinite(mic.levelDb) ? `${Math.round(mic.levelDb)}dB` : "—"}
+                  <span className="text-[10px] font-mono text-studio-text-dim w-16 text-right">
+                    {mic.testing && Number.isFinite(mic.levelDb) ? `${Math.round(mic.levelDb)} dBFS` : "—"}
                   </span>
                 </div>
+                {mic.report && (
+                  <Hint>
+                    {mic.report.processingActive.length === 0
+                      ? `Clean capture: echo cancellation, noise suppression and auto gain are off${mic.report.sampleRate ? ` · ${mic.report.sampleRate} Hz` : ""}.`
+                      : `This browser kept ${mic.report.processingActive.join(", ")} on for this device — recordings may sound processed.`}
+                  </Hint>
+                )}
               </div>
 
               <div>
@@ -339,7 +350,44 @@ const SettingsContent = () => {
               <ToggleRow label="Metronome during playback & recording" checked={settings.metronome} onChange={(v) => updateSettings({ metronome: v })} />
               <Hint>The click goes to your speakers only — it is never recorded or exported.</Hint>
               <ComingSoonRow label="Count-in before recording" />
-              <ComingSoonRow label="Auto-monitor while armed" />
+              <ToggleRow label="Record in stereo" checked={settings.recordStereo} onChange={(v) => updateSettings({ recordStereo: v })} />
+              <Hint>Off (mono) suits most vocal and instrument mics. Takes are saved as lossless 32-bit float WAV.</Hint>
+
+              <div className="pt-2">
+                <SectionLabel>Monitoring</SectionLabel>
+                <ToggleRow
+                  label="Hear input through track FX while recording"
+                  checked={settings.monitorInputThroughFX}
+                  onChange={(v) => updateSettings({ monitorInputThroughFX: v })}
+                />
+                <Hint>
+                  Only what you hear goes through the FX — the recorded take is always the dry, original signal. Use headphones.
+                  {latency && ` Estimated delay you'll hear: ~${Math.round((latency.base + latency.output + latency.input) * 1000)} ms (output ${Math.round((latency.base + latency.output) * 1000)} ms + input ${Math.round(latency.input * 1000)} ms, plus FX).`}
+                </Hint>
+              </div>
+
+              <div className="pt-2">
+                <SectionLabel>Latency Compensation</SectionLabel>
+                <div className="flex items-center justify-between gap-3 py-2 px-3">
+                  <span className="text-xs text-studio-text-dim">Extra offset (ms)</span>
+                  <input
+                    type="number"
+                    min={-500}
+                    max={500}
+                    step={1}
+                    value={settings.recordingOffsetMs}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) updateSettings({ recordingOffsetMs: Math.max(-500, Math.min(500, Math.round(v))) });
+                    }}
+                    className="w-20 bg-studio-metal border border-border rounded px-2 py-1 text-xs text-foreground outline-none text-right"
+                  />
+                </div>
+                <Hint>
+                  Takes are shifted earlier by the latency the browser reports. If takes still land late, increase this; if early, decrease it.
+                </Hint>
+              </div>
+
               <div className="pt-2">
                 <SectionLabel>Recording Behavior</SectionLabel>
                 <Hint>New recordings are added as a new clip; existing clips are never replaced.</Hint>

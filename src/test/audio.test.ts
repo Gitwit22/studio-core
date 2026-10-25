@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock Tone.js before importing modules
 vi.mock("tone", () => ({
   start: vi.fn().mockResolvedValue(undefined),
+  now: vi.fn().mockReturnValue(0),
   Gain: vi.fn().mockImplementation(() => ({
     toDestination: vi.fn().mockReturnThis(),
     connect: vi.fn(),

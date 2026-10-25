@@ -35,6 +35,12 @@ export interface StudioSettings {
   /** Output device for playback (null = system default) */
   outputDeviceId: string | null
   metronome: boolean
+  /** Capture two channels instead of one (most vocal/instrument mics are mono) */
+  recordStereo: boolean
+  /** Extra latency compensation (ms) for devices that misreport their latency; positive moves takes earlier */
+  recordingOffsetMs: number
+  /** Send the live input through the armed track's FX to the outputs while recording (the take stays dry) */
+  monitorInputThroughFX: boolean
   snapByDefault: boolean
   gridDivision: GridDivision
   autoScroll: boolean
@@ -47,6 +53,9 @@ export const defaultStudioSettings: StudioSettings = {
   inputDeviceId: null,
   outputDeviceId: null,
   metronome: false,
+  recordStereo: false,
+  recordingOffsetMs: 0,
+  monitorInputThroughFX: false,
   snapByDefault: true,
   gridDivision: "auto",
   autoScroll: true,

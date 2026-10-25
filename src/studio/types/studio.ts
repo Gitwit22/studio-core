@@ -103,6 +103,21 @@ export interface AudioSource {
   waveform?: number[]
   /** Status of waveform peak generation for this source. */
   waveformStatus?: import("./waveform").WaveformStatus
+  /** How a recording was captured (absent for imports and older recordings) */
+  capture?: SourceCaptureInfo
+}
+
+export interface SourceCaptureInfo {
+  /** "wav-float32" = lossless worklet capture; "compressed" = MediaRecorder fallback */
+  format: "wav-float32" | "compressed"
+  deviceLabel: string
+  sampleRate?: number
+  channelCount?: number
+  /** Voice-call processing the browser kept on despite our request (empty = clean) */
+  processingActive: string[]
+  clipped?: boolean
+  /** Latency compensation applied when placing the take (ms) */
+  latencyCompensationMs?: number
 }
 
 export type TimeStretchMode = "repitch" | "preserve"

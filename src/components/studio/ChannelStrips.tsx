@@ -8,6 +8,7 @@ import { trackTypeConfig } from "@/studio/types/studio";
 import { useAudioInputDevices } from "@/hooks/use-audio-inputs";
 import { persistenceService } from "@/studio/persistence";
 import { useStudioSettings } from "@/studio/settings/studioSettings";
+import { useInputMeter, peakToMeter } from "@/studio/engine/inputMeter";
 
 const ChannelStrips = () => {
   const tracks = useStudioStore((s) => s.tracks);
@@ -15,6 +16,7 @@ const ChannelStrips = () => {
   const mixerChannels = useStudioStore((s) => s.mixerChannels);
   const isPlaying = useStudioStore((s) => s.isPlaying);
   const isRecording = useStudioStore((s) => s.isRecording);
+  const inputMeter = useInputMeter();
   const updateTrack = useStudioStore((s) => s.updateTrack);
   const updateMixerChannel = useStudioStore((s) => s.updateMixerChannel);
   const reorderTrack = useStudioStore((s) => s.reorderTrack);
@@ -338,15 +340,30 @@ const ChannelStrips = () => {
                 active={!muted}
               />
 
-              {/* VU Meter — hidden while idle unless "Always show track meters" is on */}
-              {(showTrackMeters || audioActive) && (
-                <VUMeter
-                  bars={10}
-                  active={!muted && audioActive}
-                  height={60}
-                  level={trackLevels[track.id] ?? 0}
-                />
-              )}
+              {/* VU Meter — hidden while idle unless "Always show track meters" is on.
+                  While this track records it shows the raw input (pre-fader, pre-FX). */}
+              {(() => {
+                const showingInput = isRecording && inputMeter.trackId === track.id;
+                return (showTrackMeters || audioActive) && (
+                  <div className="flex flex-col items-center gap-1">
+                    <VUMeter
+                      bars={10}
+                      active={showingInput || (!muted && audioActive)}
+                      height={60}
+                      level={showingInput ? peakToMeter(inputMeter.peak) : (trackLevels[track.id] ?? 0)}
+                    />
+                    {inputMeter.clipped && inputMeter.trackId === track.id && (
+                      <button
+                        onClick={inputMeter.clearClip}
+                        title="Input clipped — lower your interface gain. Click to clear."
+                        className="text-[7px] font-bold uppercase px-1 rounded-sm bg-red-500/80 text-white leading-tight"
+                      >
+                        Clip
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Color strip at bottom + left sidebar */}
               <div

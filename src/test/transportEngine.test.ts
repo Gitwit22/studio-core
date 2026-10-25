@@ -4,6 +4,7 @@ import { useStudioStore } from "@/studio/engine/studioStore"
 // Mock Tone.js
 vi.mock("tone", () => ({
   start: vi.fn().mockResolvedValue(undefined),
+  now: vi.fn().mockReturnValue(0),
   getTransport: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { bufferToWav, normalizeBuffer } from "@/audio/ExportEngine"
+import { bufferToWav, encodeWav, normalizeBuffer } from "@/audio/ExportEngine"
 
 vi.mock("tone", () => ({}))
 
@@ -65,3 +65,14 @@ describe("normalizeBuffer", () => {
     expect(Array.from(buf.getChannelData(0))).toEqual([0, 0])
   })
 })
+
+describe("encodeWav (recording path)", () => {
+  it("stores Float32 samples bit-for-bit, including overs above 0 dBFS", async () => {
+    const v = await view(encodeWav([Float32Array.from([1.5, -0.123456])], 44100, 32))
+    expect(v.getUint16(20, true)).toBe(3)
+    expect(v.getUint32(24, true)).toBe(44100)
+    expect(v.getFloat32(44, true)).toBe(1.5)
+    expect(v.getFloat32(48, true)).toBe(Math.fround(-0.123456))
+  })
+})
+

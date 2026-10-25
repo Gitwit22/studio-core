@@ -12,6 +12,10 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
+  build: {
+    // AudioWorklet modules must be real files: some browsers refuse data: URLs in audioWorklet.addModule()
+    assetsInlineLimit: (filePath: string) => (filePath.includes("/worklets/") ? false : undefined),
+  },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
     alias: {
