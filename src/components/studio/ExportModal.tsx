@@ -68,9 +68,9 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative studio-panel rounded-lg w-[420px] max-h-[85vh] overflow-y-auto shadow-2xl shadow-black/60">
+      <div className="relative studio-panel rounded-2xl w-[420px] max-h-[85vh] overflow-y-auto shadow-2xl shadow-black/60">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-studio-panel-header rounded-t-[inherit]">
           <div className="flex items-center gap-2">
             <Download className="w-4 h-4 text-studio-teal" />
             <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Export Project</span>
@@ -91,7 +91,7 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
                   onClick={() => setFormat(f)}
                   className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border ${
                     format === f
-                      ? "bg-studio-teal/15 text-studio-teal border-studio-teal/40 shadow-[0_0_12px_hsl(172_72%_55%/0.15)]"
+                      ? "bg-studio-teal/15 text-studio-teal border-studio-teal/40 shadow-[0_0_12px_hsl(var(--studio-glow-teal)/0.2)]"
                       : "bg-studio-metal text-studio-text-dim border-border hover:border-studio-metal-light"
                   }`}
                 >
@@ -209,8 +209,8 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
                 <div
                   className="h-full w-full rounded-full animate-pulse"
                   style={{
-                    background: "linear-gradient(90deg, hsl(172 72% 55%), hsl(217 100% 71%))",
-                    boxShadow: "0 0 12px hsl(172 72% 55% / 0.4)",
+                    background: "var(--accent-gradient)",
+                    boxShadow: "0 0 12px hsl(var(--studio-glow-teal) / 0.4)",
                   }}
                 />
               </div>
@@ -222,13 +222,13 @@ const ExportModal = ({ open, onClose }: ExportModalProps) => {
             <button
               onClick={handleRender}
               disabled={rendering}
-              className="flex-1 py-2.5 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_hsl(172_72%_55%/0.1)]"
+              className="flex-1 py-2.5 studio-btn-primary text-xs uppercase tracking-wider"
             >
               {rendering ? "Rendering..." : "Render"}
             </button>
             <button
               onClick={onClose}
-              className="flex-1 py-2.5 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-border bg-studio-metal text-studio-text-dim hover:text-foreground hover:border-studio-metal-light"
+              className="flex-1 py-2.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all border border-studio-line-strong bg-studio-metal text-studio-text-dim hover:text-foreground hover:bg-studio-metal-light"
             >
               Cancel
             </button>

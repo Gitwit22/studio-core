@@ -29,6 +29,10 @@ import { useStudioStore } from "@/studio/engine/studioStore";
 import { audioEffectsManager } from "@/audio/AudioEffectsManager";
 import { mixerEngine } from "@/audio/MixerEngine";
 
+/** Resize handles render as transparent gutters with a slim grip pill between floating panels. */
+const GUTTER_HANDLE_CLASS =
+  "w-1.5 bg-transparent transition-colors [&>div]:h-10 [&>div]:w-1 [&>div]:rounded-full [&>div]:border-0 [&>div]:bg-studio-metal-light [&>div]:transition-colors hover:[&>div]:bg-studio-teal data-[resize-handle-state=drag]:[&>div]:bg-studio-teal [&_svg]:hidden";
+
 const Studio = () => {
   const [showNewSession, setShowNewSession] = useState(true);
   const [sessionReady, setSessionReady] = useState(false);
@@ -77,26 +81,29 @@ const Studio = () => {
       {/* DAW Menu Bar */}
       <MenuBar />
 
-      {/* Top Console Bar */}
-      <ConsoleBar />
+      {/* Workspace: floating panels separated by gutters on the darker backdrop */}
+      <div className="flex-1 min-h-0 flex flex-col gap-1.5 p-1.5">
+        {/* Top Console Bar */}
+        <ConsoleBar />
 
-      {/* Main workspace */}
-      <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
-        <ResizablePanel defaultSize={18} minSize={10} maxSize={35}>
-          <ChannelStrips />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={62} minSize={30}>
-          <Timeline />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={20} minSize={10} maxSize={35}>
-          <FXRack />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        {/* Main workspace */}
+        <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 overflow-hidden">
+          <ResizablePanel defaultSize={20} minSize={10} maxSize={35}>
+            <ChannelStrips />
+          </ResizablePanel>
+          <ResizableHandle withHandle className={GUTTER_HANDLE_CLASS} />
+          <ResizablePanel defaultSize={60} minSize={30}>
+            <Timeline />
+          </ResizablePanel>
+          <ResizableHandle withHandle className={GUTTER_HANDLE_CLASS} />
+          <ResizablePanel defaultSize={20} minSize={10} maxSize={35}>
+            <FXRack />
+          </ResizablePanel>
+        </ResizablePanelGroup>
 
-      {/* Bottom: Transport Controls */}
-      <TransportControls />
+        {/* Bottom: Transport Controls */}
+        <TransportControls />
+      </div>
 
       {/* Modals */}
       <ExportModal open={activeModal === "exportMix"} onClose={closeModal} />

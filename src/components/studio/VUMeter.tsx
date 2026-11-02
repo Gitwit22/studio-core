@@ -40,8 +40,8 @@ const VUMeter = ({ bars = 8, active = true, vertical = true, height = 80, level 
   const getBarColor = (index: number, level: number) => {
     const ratio = index / bars;
     if (ratio > 0.85) return level > 0.7 ? "bg-studio-record" : "bg-studio-metal-light";
-    if (ratio > 0.65) return level > 0.4 ? "bg-yellow-500" : "bg-studio-metal-light";
-    return level > 0.1 ? "bg-studio-teal" : "bg-studio-metal-light";
+    if (ratio > 0.65) return level > 0.4 ? "bg-studio-warn" : "bg-studio-metal-light";
+    return level > 0.1 ? "bg-studio-ok" : "bg-studio-metal-light";
   };
 
   if (vertical) {
@@ -53,9 +53,9 @@ const VUMeter = ({ bars = 8, active = true, vertical = true, height = 80, level 
               key={i}
               className={`flex-1 rounded-[1px] transition-all duration-75 ${getBarColor(i, levels[i])}`}
               style={{
-                opacity: levels[i] > i / bars ? 1 : 0.2,
+                opacity: levels[i] > i / bars ? 1 : 0.35,
                 boxShadow: levels[i] > i / bars && i / bars < 0.65
-                  ? "0 0 4px hsl(172 72% 55% / 0.3)"
+                  ? "0 0 4px hsl(var(--studio-ok) / 0.4)"
                   : undefined,
               }}
             />
@@ -74,12 +74,13 @@ const VUMeter = ({ bars = 8, active = true, vertical = true, height = 80, level 
             i / bars > 0.85 && level > 0.7
               ? "bg-studio-record"
               : i / bars > 0.65 && level > 0.4
-              ? "bg-yellow-500"
-              : "bg-studio-teal"
+              ? "bg-studio-warn"
+              : "bg-studio-ok"
           }`}
           style={{
-            height: `${level * 100}%`,
-            boxShadow: level > 0.3 ? "0 0 4px hsl(172 72% 55% / 0.3)" : undefined,
+            height: `${Math.max(level * 100, 8)}%`,
+            opacity: level > 0.02 ? 1 : 0.25,
+            boxShadow: level > 0.3 ? "0 0 4px hsl(var(--studio-ok) / 0.4)" : undefined,
           }}
         />
       ))}

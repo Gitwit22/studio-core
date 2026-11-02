@@ -36,7 +36,7 @@ const ToggleRow = ({ label, checked, onChange }: { label: string; checked: boole
     >
       <div
         className={`absolute top-0.5 w-3 h-3 rounded-full transition-all ${
-          checked ? "left-4 bg-studio-teal shadow-[0_0_6px_hsl(172_72%_55%/0.5)]" : "left-0.5 bg-gray-500"
+          checked ? "left-4 bg-studio-teal shadow-[0_0_6px_hsl(var(--studio-glow-teal)/0.5)]" : "left-0.5 bg-gray-500"
         }`}
       />
     </div>

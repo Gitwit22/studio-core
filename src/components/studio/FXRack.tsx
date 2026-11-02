@@ -29,38 +29,35 @@ const FXRack = () => {
   return (
     <div className="studio-panel h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-studio-text-dim">
-          FX Rack
-        </span>
-        <div className="flex gap-1.5">
-          <div className="studio-screw" />
-          <div className="studio-screw" />
+      <div className="studio-panel-header">
+        <span className="studio-panel-title">FX Rack</span>
+      </div>
+
+      {/* Track indicator + signal chain */}
+      <div className="px-3 py-2 border-b border-border space-y-2">
+        <div className="flex items-center gap-2">
+          <span
+            className="w-2 h-2 rounded-full shrink-0"
+            style={{ background: selectedTrack?.color ?? "hsl(var(--studio-text-dim))" }}
+          />
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground truncate">
+            {selectedTrack?.name ?? "No track selected"}
+          </span>
+        </div>
+        <div className="flex items-center gap-0.5 flex-wrap">
+          {["In", "Comp", "EQ", "Dly", "Rev", "Pitch", "Lim", "Out"].map((s, i, arr) => (
+            <span key={s} className="flex items-center gap-0.5">
+              <span className="text-[7px] font-medium text-studio-text-dim uppercase tracking-wider px-1 py-0.5 rounded bg-studio-inset border border-studio-line">
+                {s}
+              </span>
+              {i < arr.length - 1 && <span className="text-[8px] text-studio-teal/70">›</span>}
+            </span>
+          ))}
         </div>
       </div>
 
-      {/* Track indicator */}
-      <div className="px-3 py-1.5 border-b border-border">
-        <span
-          className="text-[9px] font-semibold uppercase tracking-wider"
-          style={{ color: selectedTrack?.color ?? "hsl(220 15% 60%)" }}
-        >
-          {selectedTrack?.name ?? "No track selected"}
-        </span>
-      </div>
-
-      {/* Signal chain indicator */}
-      <div className="px-3 py-1.5 border-b border-border flex items-center gap-1 flex-wrap">
-        {["In", "Comp", "EQ", "Dly", "Rev", "Pitch", "Lim", "Out"].map((s, i, arr) => (
-          <span key={s} className="flex items-center gap-1">
-            <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">{s}</span>
-            {i < arr.length - 1 && <span className="text-[8px] text-studio-teal">→</span>}
-          </span>
-        ))}
-      </div>
-
       {/* FX Modules */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {selectedTrack ? moduleLabels.map(({ type, name }) => {
           const slot = getSlot(type);
           const active = slot?.enabled ?? false;
@@ -69,18 +66,21 @@ const FXRack = () => {
           return (
             <div
               key={type}
-              className="border-b border-border p-3"
+              className={`rounded-lg border p-3 transition-colors ${
+                active ? "border-studio-teal/25" : "border-studio-line-strong"
+              }`}
               style={{
                 background: active
-                  ? "linear-gradient(180deg, hsl(172 72% 55% / 0.02), transparent)"
-                  : undefined,
+                  ? "linear-gradient(180deg, hsl(var(--studio-glow-teal) / 0.07), hsl(var(--studio-panel-top)) 60%)"
+                  : "hsl(var(--studio-panel-top))",
+                boxShadow: "inset 0 1px 0 hsl(0 0% 100% / 0.04)",
               }}
             >
               {/* Module header */}
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <div className={`studio-led ${active ? "active" : ""}`} />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${active ? "text-foreground" : "text-studio-text-dim"}`}>
                     {name}
                   </span>
                 </div>
@@ -112,10 +112,10 @@ const FXRack = () => {
                       <button
                         key={t}
                         onClick={() => setTrackFXParam(trackId, type, "time", t)}
-                        className={`px-1.5 py-0.5 rounded text-[8px] font-mono transition-all ${
+                        className={`px-1.5 py-0.5 rounded-md text-[8px] font-mono transition-all border ${
                           String(slot?.params.time) === t
-                            ? "bg-studio-teal/20 text-studio-teal border border-studio-teal/30"
-                            : "bg-studio-metal text-studio-text-dim border border-border"
+                            ? "bg-studio-teal/20 text-studio-teal border-studio-teal/40"
+                            : "bg-studio-inset text-studio-text-dim border-studio-line-strong hover:text-foreground"
                         }`}
                       >
                         {t}
@@ -232,7 +232,7 @@ const FXRack = () => {
         )}
 
         {/* Output section */}
-        <div className="p-3">
+        <div className="rounded-lg border border-studio-line-strong p-3 bg-studio-inset/60">
           <div className="flex items-center gap-2 mb-2">
             <div className="studio-led active" />
             <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground">

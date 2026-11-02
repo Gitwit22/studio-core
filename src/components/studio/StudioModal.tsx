@@ -32,11 +32,11 @@ const StudioModal = ({ open, onClose, title, icon, width = "420px", children }: 
         onClick={onClose}
       />
       <div
-        className="relative studio-panel rounded-lg max-h-[85vh] overflow-y-auto shadow-2xl shadow-black/60"
+        className="relative studio-panel rounded-2xl max-h-[85vh] overflow-y-auto shadow-2xl shadow-black/60"
         style={{ width }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-studio-panel-header rounded-t-[inherit]">
           <div className="flex items-center gap-2">
             {icon}
             <span className="text-sm font-semibold uppercase tracking-wider text-foreground">

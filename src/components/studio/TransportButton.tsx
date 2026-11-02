@@ -8,40 +8,42 @@ interface TransportButtonProps {
   size?: number;
 }
 
+/**
+ * Round transport control. Inactive buttons are neutral raised surfaces; an active
+ * play button fills with the accent gradient and an active record button fills red,
+ * so transport state is readable at a glance.
+ */
 const TransportButton = ({ icon, active = false, variant = "default", onClick, size = 48 }: TransportButtonProps) => {
-  const baseStyles = "rounded-full flex items-center justify-center transition-all duration-150 active:scale-95 select-none";
+  const baseStyles =
+    "rounded-full flex items-center justify-center transition-all duration-150 active:scale-95 select-none border";
 
-  const variantStyles = {
-    default: active
-      ? "shadow-[0_0_12px_hsl(172_72%_55%/0.3)] border-studio-teal/30"
-      : "",
-    record: active
-      ? "shadow-[0_0_20px_hsl(0_100%_62%/0.4)] border-studio-record/50"
-      : "",
-    play: active
-      ? "shadow-[0_0_12px_hsl(172_72%_55%/0.3)] border-studio-teal/30"
-      : "",
-  };
+  let stateStyles: string;
+  let background: string | undefined;
 
-  const iconColor = {
-    default: active ? "text-studio-teal" : "text-studio-text-dim",
-    record: active ? "text-studio-record" : "text-studio-text-dim",
-    play: active ? "text-studio-teal" : "text-studio-text-dim",
-  };
+  if (active && variant === "record") {
+    stateStyles =
+      "border-studio-record text-white shadow-[0_0_0_3px_hsl(var(--studio-record)/0.2),0_6px_24px_-4px_hsl(var(--studio-record)/0.7)] animate-record-pulse";
+    background = "linear-gradient(180deg, hsl(354 92% 66%), hsl(354 80% 52%))";
+  } else if (active && variant === "play") {
+    stateStyles =
+      "border-transparent text-primary-foreground shadow-[0_0_0_3px_hsl(var(--studio-glow-teal)/0.18),0_6px_24px_-4px_hsl(var(--studio-glow-teal)/0.7)]";
+    background = "var(--accent-gradient)";
+  } else if (active) {
+    stateStyles =
+      "border-studio-teal/50 text-studio-teal bg-studio-teal/15 shadow-[0_0_14px_-2px_hsl(var(--studio-glow-teal)/0.5)]";
+  } else {
+    stateStyles = `border-studio-line-strong bg-studio-metal hover:bg-studio-metal-light hover:text-foreground shadow-[inset_0_1px_0_hsl(0_0%_100%/0.06),0_2px_6px_hsl(0_0%_0%/0.4)] ${
+      variant === "record" ? "text-studio-record" : "text-studio-text-dim"
+    }`;
+  }
 
   return (
     <button
       onClick={onClick}
-      className={`${baseStyles} ${variantStyles[variant]} ${active && variant === "record" ? "animate-record-pulse" : ""}`}
-      style={{
-        width: size,
-        height: size,
-        background: "radial-gradient(circle at 40% 35%, hsl(220 15% 20%), hsl(220 15% 10%))",
-        border: `2px solid ${active && variant === "record" ? "hsl(0 100% 62% / 0.5)" : active ? "hsl(172 72% 55% / 0.3)" : "hsl(220 15% 22%)"}`,
-        boxShadow: `inset 0 2px 4px hsl(0 0% 0% / 0.3), 0 2px 8px hsl(0 0% 0% / 0.4)${active && variant === "record" ? ", 0 0 20px hsl(0 100% 62% / 0.3)" : active ? ", 0 0 12px hsl(172 72% 55% / 0.2)" : ""}`,
-      }}
+      className={`${baseStyles} ${stateStyles}`}
+      style={{ width: size, height: size, background }}
     >
-      <span className={iconColor[variant]}>{icon}</span>
+      {icon}
     </button>
   );
 };

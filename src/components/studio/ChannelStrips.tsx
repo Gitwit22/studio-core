@@ -169,10 +169,8 @@ const ChannelStrips = () => {
   return (
     <div className="studio-panel flex flex-col gap-0 h-full overflow-hidden">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-studio-text-dim">
-          Mixer
-        </span>
+      <div className="studio-panel-header">
+        <span className="studio-panel-title">Mixer</span>
         <div className="flex items-center gap-1.5">
           <input
             ref={fileInputRef}
@@ -184,20 +182,18 @@ const ChannelStrips = () => {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider text-studio-teal hover:bg-studio-metal transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-semibold uppercase tracking-wider text-studio-teal bg-studio-teal/10 border border-studio-teal/25 hover:bg-studio-teal/20 transition-colors"
             title="Import audio file"
           >
             <Upload className="w-3 h-3" />
             Import
           </button>
-          <div className="studio-screw" />
-          <div className="studio-screw" />
         </div>
       </div>
 
       {/* Channels — scrollable when there are more tracks than fit */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden">
-        <div className="flex h-full" style={{ minWidth: tracks.length * 56 }}>
+        <div className="flex h-full gap-1 p-1" style={{ minWidth: tracks.length * 60 + 8 }}>
         {tracks.map((track, idx) => {
           const ch = mixerChannels.find((c) => c.id === track.channelId);
           const volume = ch?.volume ?? 0.75;
@@ -214,22 +210,29 @@ const ChannelStrips = () => {
               onDragOver={(e) => handleDragOver(e, idx)}
               onDrop={(e) => handleDrop(e, idx)}
               onDragEnd={handleDragEnd}
-              className={`flex flex-col items-center py-3 gap-2 border-r border-border last:border-r-0 relative transition-all ${
+              className={`flex flex-col items-center pt-3.5 pb-3 gap-2 rounded-lg border relative overflow-hidden transition-all ${
                 dragIdx === idx ? "opacity-40" : ""
-              } ${isDragOver ? "bg-studio-teal/5 border-l-2 border-l-studio-teal" : ""}`}
+              } ${
+                isDragOver
+                  ? "border-studio-teal ring-1 ring-studio-teal/40"
+                  : track.armed
+                  ? "border-studio-record/30"
+                  : "border-studio-line-strong"
+              }`}
               style={{
                 minWidth: 56,
                 flex: "1 0 56px",
                 background: track.armed && !isDragOver
-                  ? `linear-gradient(180deg, hsl(0 100% 62% / 0.03), transparent)`
-                  : undefined,
+                  ? "linear-gradient(180deg, hsl(var(--studio-record) / 0.08), hsl(var(--studio-panel-top)) 45%)"
+                  : `linear-gradient(180deg, color-mix(in srgb, ${color} 9%, hsl(var(--studio-panel-top))), hsl(var(--studio-panel-top)) 45%)`,
+                boxShadow: "inset 0 1px 0 hsl(0 0% 100% / 0.04)",
               }}
             >
               {/* Drag handle */}
               <GripVertical className="w-3 h-3 text-studio-text-dim/40 cursor-grab active:cursor-grabbing shrink-0" />
 
               {/* Track type badge */}
-              <span className="text-[7px] font-bold uppercase tracking-wider px-1 py-0.5 rounded bg-studio-metal" style={{ color }}>
+              <span className="text-[7px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-studio-inset border border-studio-line" style={{ color }}>
                 {typeConf?.icon} {typeConf?.label ?? track.type}
               </span>
 
@@ -247,7 +250,7 @@ const ChannelStrips = () => {
                 <select
                   value={track.busId ?? ""}
                   onChange={(e) => moveTrackToBus(track.id, e.target.value || undefined)}
-                  className="w-[48px] text-[7px] bg-studio-metal text-studio-text-dim border border-border rounded px-0.5 py-0.5 uppercase tracking-wider truncate cursor-pointer hover:border-studio-teal/50 transition-colors"
+                  className="w-[48px] text-[7px] bg-studio-inset text-studio-text-dim border border-studio-line-strong rounded-md px-0.5 py-0.5 uppercase tracking-wider truncate cursor-pointer hover:border-studio-teal/50 transition-colors"
                   title={track.busId ? `Routed to ${tracks.find((t) => t.id === track.busId)?.name ?? "bus"}` : "No bus routing"}
                 >
                   <option value="">Direct</option>
@@ -266,17 +269,21 @@ const ChannelStrips = () => {
 
               {/* Record arm */}
               <button
-                className="flex flex-col items-center gap-0.5"
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border transition-colors ${
+                  track.armed
+                    ? "bg-studio-record/15 border-studio-record/40"
+                    : "bg-studio-inset border-studio-line-strong hover:border-studio-record/40"
+                }`}
                 onClick={() => updateTrack(track.id, { armed: !track.armed })}
               >
                 <div
-                  className={`w-2 h-2 rounded-full transition-all ${
+                  className={`w-1.5 h-1.5 rounded-full transition-all ${
                     track.armed
-                      ? "bg-studio-record shadow-[0_0_8px_hsl(0_100%_62%/0.5)] animate-record-pulse"
+                      ? "bg-studio-record shadow-[0_0_6px_hsl(var(--studio-record))] animate-record-pulse"
                       : "bg-studio-metal-light"
                   }`}
                 />
-                <span className="text-[7px] text-studio-text-dim uppercase">Rec</span>
+                <span className={`text-[7px] font-semibold uppercase ${track.armed ? "text-studio-record" : "text-studio-text-dim"}`}>Rec</span>
               </button>
 
               {/* Mic input selector — vocal tracks only */}
@@ -286,7 +293,7 @@ const ChannelStrips = () => {
                   <select
                     value={track.inputDeviceId ?? ""}
                     onChange={(e) => updateTrack(track.id, { inputDeviceId: e.target.value || undefined })}
-                    className="w-full text-[6px] bg-studio-metal text-studio-text-dim border border-border rounded px-0.5 py-0.5 truncate cursor-pointer hover:border-studio-teal/50 transition-colors"
+                    className="w-full text-[6px] bg-studio-inset text-studio-text-dim border border-studio-line-strong rounded-md px-0.5 py-0.5 truncate cursor-pointer hover:border-studio-teal/50 transition-colors"
                     title={
                       track.inputDeviceId
                         ? micDevices.find((d) => d.deviceId === track.inputDeviceId)?.label ?? "Selected mic"
@@ -307,20 +314,20 @@ const ChannelStrips = () => {
               <div className="flex gap-1">
                 <button
                   onClick={() => ch && updateMixerChannel(ch.id, { mute: !muted })}
-                  className={`w-6 h-5 rounded text-[8px] font-bold transition-all ${
+                  className={`w-6 h-5 rounded-md text-[8px] font-bold transition-all border ${
                     muted
-                      ? "bg-studio-record/20 text-studio-record border border-studio-record/30"
-                      : "bg-studio-metal text-studio-text-dim border border-border"
+                      ? "bg-studio-warn text-studio-inset border-studio-warn shadow-[0_0_8px_-1px_hsl(var(--studio-warn)/0.6)]"
+                      : "bg-studio-metal text-studio-text-dim border-studio-line-strong hover:text-foreground"
                   }`}
                 >
                   M
                 </button>
                 <button
                   onClick={() => ch && updateMixerChannel(ch.id, { solo: !soloed })}
-                  className={`w-6 h-5 rounded text-[8px] font-bold transition-all ${
+                  className={`w-6 h-5 rounded-md text-[8px] font-bold transition-all border ${
                     soloed
-                      ? "bg-studio-teal/20 text-studio-teal border border-studio-teal/30"
-                      : "bg-studio-metal text-studio-text-dim border border-border"
+                      ? "bg-studio-teal text-primary-foreground border-studio-teal shadow-[0_0_8px_-1px_hsl(var(--studio-glow-teal)/0.6)]"
+                      : "bg-studio-metal text-studio-text-dim border-studio-line-strong hover:text-foreground"
                   }`}
                 >
                   S
@@ -344,14 +351,10 @@ const ChannelStrips = () => {
                 level={trackLevels[track.id] ?? 0}
               />
 
-              {/* Color strip at bottom + left sidebar */}
+              {/* Track color cap */}
               <div
-                className="absolute bottom-0 left-0 right-0 h-1 rounded-b"
-                style={{ background: color, opacity: muted ? 0.2 : 0.9 }}
-              />
-              <div
-                className="absolute top-0 left-0 bottom-0 w-[3px]"
-                style={{ background: color, opacity: muted ? 0.15 : 0.6 }}
+                className="absolute top-0 left-0 right-0 h-[3px]"
+                style={{ background: color, opacity: muted ? 0.25 : 1, boxShadow: muted ? undefined : `0 0 10px ${color}` }}
               />
             </div>
           );

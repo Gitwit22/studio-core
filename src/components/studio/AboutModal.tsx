@@ -18,7 +18,7 @@ const AboutModal = ({ open, onClose }: AboutModalProps) => {
       <div className="flex flex-col items-center text-center space-y-4">
         {/* Logo */}
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full bg-studio-teal shadow-[0_0_12px_hsl(172_72%_55%/0.5)]" />
+          <div className="w-4 h-4 rounded-full bg-studio-teal shadow-[0_0_12px_hsl(var(--studio-glow-teal)/0.5)]" />
           <span className="text-lg font-bold tracking-wide text-foreground">
             StreamLine
           </span>

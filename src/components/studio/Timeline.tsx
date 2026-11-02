@@ -33,6 +33,14 @@ const MIN_TOTAL_BEATS = 32;     // minimum timeline length
 const TAIL_PADDING = 16;        // empty beats after last clip
 const RULER_H = 28;             // ruler row height (bar + seconds)
 
+/**
+ * Apply an alpha (0–100%) to any CSS color string. Track/clip colors are stored as
+ * `hsl(...)` strings, so hex-alpha suffixes (e.g. `${color}20`) produce invalid CSS
+ * and the browser silently drops the declaration; color-mix works for hsl and hex.
+ */
+const withAlpha = (color: string, pct: number) =>
+  `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+
 const LANE_PRESETS: Record<string, number> = { Compact: 40, Standard: 80, Large: 120 };
 
 const fxLabels: Record<string, string> = {
@@ -692,18 +700,16 @@ const Timeline = () => {
   return (
     <div className="studio-panel h-full flex flex-col overflow-hidden">
       {/* ── Toolbar ── */}
-      <div className="flex items-center border-b border-border px-2 py-1 gap-2 shrink-0">
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-studio-text-dim">
-          Timeline
-        </span>
+      <div className="studio-panel-header !justify-start">
+        <span className="studio-panel-title">Timeline</span>
         {isRecording && (
-          <span className="text-[8px] text-studio-record uppercase tracking-wider animate-record-pulse">
+          <span className="text-[8px] font-semibold text-studio-record uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-studio-record/15 animate-record-pulse">
             ● REC
           </span>
         )}
 
         {/* ── Edit tool selector ── */}
-        <div className="flex items-center gap-0.5 ml-2 border border-border rounded px-0.5 py-0.5">
+        <div className="studio-segment ml-2">
           {([
             { tool: "select" as TimelineEditTool, icon: MousePointer2, label: "Select (V)", key: "V" },
             { tool: "blade" as TimelineEditTool, icon: Scissors, label: "Blade / Split (B)", key: "B" },
@@ -712,10 +718,10 @@ const Timeline = () => {
             <button
               key={tool}
               onClick={() => setEditTool(tool)}
-              className={`p-1 rounded transition-colors ${
+              className={`p-1 rounded-md transition-colors ${
                 editTool === tool
-                  ? "bg-studio-teal/20 text-studio-teal"
-                  : "text-studio-text-dim hover:bg-studio-metal"
+                  ? "bg-studio-metal-light text-studio-teal shadow-[inset_0_1px_0_hsl(0_0%_100%/0.08)]"
+                  : "text-studio-text-dim hover:text-foreground hover:bg-studio-metal"
               }`}
               title={label}
             >
@@ -723,17 +729,17 @@ const Timeline = () => {
             </button>
           ))}
         </div>
-        <span className="text-[7px] text-studio-text-dim/50 uppercase">Alt+drag = stretch</span>
+        <span className="text-[8px] text-studio-text-dim/60 uppercase tracking-wider">Alt+drag = stretch</span>
 
         <div className="flex-1" />
 
         {/* Loop toggle */}
         <button
           onClick={toggleLoop}
-          className={`p-1 rounded transition-colors ${
+          className={`p-1.5 rounded-md transition-colors ${
             loop.enabled
               ? "bg-amber-500/15 text-amber-400 hover:bg-amber-500/25"
-              : "hover:bg-studio-metal text-studio-text-dim"
+              : "hover:bg-studio-metal text-studio-text-dim hover:text-foreground"
           }`}
           title="Toggle loop region"
         >
@@ -743,10 +749,10 @@ const Timeline = () => {
         {/* Snap toggle */}
         <button
           onClick={toggleSnapToGrid}
-          className={`px-2 py-1 rounded text-[9px] font-semibold uppercase tracking-wider border transition-colors ${
+          className={`px-2 py-1 rounded-md text-[9px] font-semibold uppercase tracking-wider border transition-colors ${
             snapToGrid
               ? "bg-studio-teal/15 text-studio-teal border-studio-teal/40"
-              : "bg-studio-metal text-studio-text-dim border-border"
+              : "bg-studio-inset text-studio-text-dim border-studio-line-strong hover:text-foreground"
           }`}
           title="Toggle movement mode (G)"
         >
@@ -754,15 +760,15 @@ const Timeline = () => {
         </button>
 
         {/* Lane height selector */}
-        <div className="flex items-center gap-1">
+        <div className="studio-segment">
           {Object.entries(LANE_PRESETS).map(([label, h]) => (
             <button
               key={label}
               onClick={() => setTrackLaneHeight(h)}
-              className={`px-1.5 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wider transition-colors ${
+              className={`w-5 h-5 rounded-md text-[8px] font-semibold uppercase tracking-wider transition-colors ${
                 trackLaneHeight === h
-                  ? "bg-studio-teal/15 text-studio-teal"
-                  : "text-studio-text-dim hover:bg-studio-metal"
+                  ? "bg-studio-metal-light text-studio-teal shadow-[inset_0_1px_0_hsl(0_0%_100%/0.08)]"
+                  : "text-studio-text-dim hover:text-foreground hover:bg-studio-metal"
               }`}
             >
               {label[0]}
@@ -771,24 +777,26 @@ const Timeline = () => {
         </div>
 
         {/* Fit project */}
-        <button onClick={fitProject} className="p-1 rounded hover:bg-studio-metal" title="Fit project in view">
-          <Maximize2 className="w-3 h-3 text-studio-text-dim" />
+        <button onClick={fitProject} className="studio-icon-btn p-1.5" title="Fit project in view">
+          <Maximize2 className="w-3 h-3" />
         </button>
 
         {/* Zoom controls */}
-        <button
-          onClick={() => setZoom(Math.max(0.1, zoom - 0.25))}
-          className="p-1 rounded hover:bg-studio-metal"
-        >
-          <ZoomOut className="w-3 h-3 text-studio-text-dim" />
-        </button>
-        <span className="studio-readout text-[9px]">{Math.round(zoom * 100)}%</span>
-        <button
-          onClick={() => setZoom(Math.min(3, zoom + 0.25))}
-          className="p-1 rounded hover:bg-studio-metal"
-        >
-          <ZoomIn className="w-3 h-3 text-studio-text-dim" />
-        </button>
+        <div className="studio-segment">
+          <button
+            onClick={() => setZoom(Math.max(0.1, zoom - 0.25))}
+            className="studio-icon-btn p-1"
+          >
+            <ZoomOut className="w-3 h-3" />
+          </button>
+          <span className="studio-readout text-[9px] min-w-[34px] text-center">{Math.round(zoom * 100)}%</span>
+          <button
+            onClick={() => setZoom(Math.min(3, zoom + 0.25))}
+            className="studio-icon-btn p-1"
+          >
+            <ZoomIn className="w-3 h-3" />
+          </button>
+        </div>
       </div>
 
       {/* ── Scrollable timeline area ── */}
@@ -797,15 +805,15 @@ const Timeline = () => {
 
           {/* ── Ruler (sticky top) ── */}
           <div
-            className="sticky top-0 z-20 flex border-b border-border bg-studio-panel"
+            className="sticky top-0 z-20 flex border-b border-border bg-studio-panel-header"
             style={{ height: RULER_H }}
           >
             {/* Ruler label column */}
             <div
-              className="shrink-0 border-r border-border flex items-end justify-center pb-0.5 sticky left-0 z-30 bg-studio-panel"
+              className="shrink-0 border-r border-border flex items-end justify-center pb-1 sticky left-0 z-30 bg-studio-panel-header"
               style={{ width: TRACK_LABEL_W }}
             >
-              <span className="text-[7px] text-studio-text-dim uppercase">{bpm} bpm</span>
+              <span className="text-[7px] font-mono text-studio-text-dim uppercase">{bpm} bpm</span>
             </div>
 
             {/* Ruler content */}
@@ -832,7 +840,7 @@ const Timeline = () => {
                   className="absolute top-0 bottom-0 flex flex-col items-center"
                   style={{ left: i * beatWidth }}
                 >
-                  <div className={`w-px ${i % 4 === 0 ? "h-full bg-border" : "h-2 bg-border/50"}`} />
+                  <div className={`w-px ${i % 4 === 0 ? "h-full bg-studio-line-strong" : "h-2 bg-studio-metal-light/70"}`} />
                   {i % 4 === 0 && (
                     <>
                       <span className="studio-readout text-[7px] absolute top-0.5 left-1">
@@ -883,19 +891,19 @@ const Timeline = () => {
             </div>
           )}
 
-          {tracks.map((track) => {
+          {tracks.map((track, laneIdx) => {
             const trackClips = clips.filter((c) => c.trackId === track.id);
             const color = track.color ?? "hsl(220 15% 60%)";
             return (
               <div
                 key={track.id}
-                className="flex border-b border-border"
+                className={`flex border-b border-studio-line ${laneIdx % 2 === 1 ? "bg-white/[0.015]" : ""}`}
                 style={{ height: trackLaneHeight }}
               >
                 {/* Sticky track label */}
                 <div
-                  className={`shrink-0 border-r border-border flex flex-col items-center justify-center gap-0.5 cursor-pointer sticky left-0 z-10 bg-studio-panel ${
-                    track.id === selectedTrackId ? "bg-studio-teal/5" : ""
+                  className={`shrink-0 border-r border-border flex flex-col items-center justify-center gap-0.5 cursor-pointer sticky left-0 z-10 transition-colors ${
+                    track.id === selectedTrackId ? "bg-studio-metal" : "bg-studio-panel-header hover:bg-studio-metal/70"
                   }`}
                   style={{ width: TRACK_LABEL_W }}
                   onClick={(e) => {
@@ -910,6 +918,11 @@ const Timeline = () => {
                   >
                     {track.name}
                   </span>
+                  {/* Track color bar — brighter when the track is selected */}
+                  <span
+                    className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r"
+                    style={{ background: color, opacity: track.id === selectedTrackId ? 1 : 0.45 }}
+                  />
                   {trackLaneHeight >= 60 && (
                     <div className="flex flex-wrap justify-center gap-px mt-0.5">
                       {track.fxChain.map((fx) => (
@@ -917,8 +930,8 @@ const Timeline = () => {
                           key={fx.type}
                           className="text-[5px] font-bold uppercase leading-none px-0.5 rounded-sm"
                           style={{
-                            color: fx.enabled ? "hsl(172 72% 55%)" : "hsl(220 15% 40%)",
-                            background: fx.enabled ? "hsl(172 72% 55% / 0.1)" : "transparent",
+                            color: fx.enabled ? "hsl(var(--studio-glow-teal))" : "hsl(var(--studio-text-dim) / 0.5)",
+                            background: fx.enabled ? "hsl(var(--studio-glow-teal) / 0.12)" : "transparent",
                           }}
                         >
                           {fxLabels[fx.type] ?? fx.type}
@@ -937,7 +950,7 @@ const Timeline = () => {
                       className="absolute top-0 bottom-0 w-px"
                       style={{
                         left: i * beatWidth,
-                        background: i % 4 === 0 ? "hsl(220 15% 14%)" : "hsl(220 15% 10%)",
+                        background: i % 4 === 0 ? "hsl(var(--studio-line-strong))" : "hsl(var(--studio-line))",
                       }}
                     />
                   ))}
@@ -1007,13 +1020,13 @@ const Timeline = () => {
                         style={{
                           left: clip.start * beatWidth,
                           width,
-                          background: `linear-gradient(180deg, ${clipColor}20, ${clipColor}10)`,
+                          background: `linear-gradient(180deg, ${withAlpha(clipColor, 22)}, ${withAlpha(clipColor, 10)})`,
                           border: selected
                             ? `2px solid ${clipColor}`
-                            : `1px solid ${clipColor}40`,
+                            : `1px solid ${withAlpha(clipColor, 45)}`,
                           boxShadow: selected
-                            ? `0 0 12px ${clipColor}40`
-                            : `inset 0 1px 0 ${clipColor}15, 0 0 8px ${clipColor}10`,
+                            ? `0 0 0 1px ${withAlpha(clipColor, 30)}, 0 4px 16px -2px ${withAlpha(clipColor, 45)}`
+                            : `inset 0 1px 0 ${withAlpha(clipColor, 20)}, 0 2px 6px hsl(0 0% 0% / 0.35)`,
                         }}
                       >
                         {/* Waveform — Canvas-based from peak data */}
@@ -1042,7 +1055,7 @@ const Timeline = () => {
                             className="absolute top-0 bottom-0 left-0 pointer-events-none"
                             style={{
                               width: fadeInPx,
-                              background: `linear-gradient(90deg, ${clipColor}50 0%, transparent 100%)`,
+                              background: `linear-gradient(90deg, ${withAlpha(clipColor, 31)} 0%, transparent 100%)`,
                             }}
                           />
                         )}
@@ -1053,7 +1066,7 @@ const Timeline = () => {
                             className="absolute top-0 bottom-0 right-0 pointer-events-none"
                             style={{
                               width: fadeOutPx,
-                              background: `linear-gradient(270deg, ${clipColor}50 0%, transparent 100%)`,
+                              background: `linear-gradient(270deg, ${withAlpha(clipColor, 31)} 0%, transparent 100%)`,
                             }}
                           />
                         )}
@@ -1062,14 +1075,14 @@ const Timeline = () => {
                         {overlapping && (
                           <div
                             className="absolute inset-0 pointer-events-none border-2 border-dashed rounded-lg"
-                            style={{ borderColor: `${clipColor}60` }}
+                            style={{ borderColor: withAlpha(clipColor, 38) }}
                           />
                         )}
 
                         {/* Center line */}
                         <div
                           className="absolute left-0 right-0 h-px top-1/2 -translate-y-px pointer-events-none"
-                          style={{ background: `${clip.color}20` }}
+                          style={{ background: withAlpha(clipColor, 12) }}
                         />
 
                         <div className="absolute top-1 left-2 flex items-center gap-1">
@@ -1082,7 +1095,7 @@ const Timeline = () => {
                               className="text-[7px] font-bold px-1 rounded"
                               style={{
                                 color: clipColor,
-                                background: `${clipColor}20`,
+                                background: withAlpha(clipColor, 12),
                               }}
                             >
                               {(rate * 100).toFixed(0)}%
@@ -1155,7 +1168,7 @@ const Timeline = () => {
             className="absolute top-0 bottom-0 w-px bg-studio-teal z-30 pointer-events-none"
             style={{
               left: TRACK_LABEL_W + playheadPosition * beatWidth,
-              boxShadow: "0 0 8px hsl(172 72% 55% / 0.5)",
+              boxShadow: "0 0 8px hsl(var(--studio-glow-teal) / 0.6)",
             }}
           >
             <div
@@ -1168,14 +1181,14 @@ const Timeline = () => {
         {/* ── Context Menu ── */}
         {ctxMenu && (
           <div
-            className="fixed z-50 min-w-[196px] rounded-lg border border-border bg-studio-panel shadow-xl py-1"
+            className="fixed z-50 min-w-[196px] rounded-lg border border-studio-line-strong bg-popover p-1 shadow-[0_16px_40px_-12px_hsl(0_0%_0%/0.8)]"
             style={{ left: ctxMenu.x, top: ctxMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
             {ctxMenu.clipId ? (
               <button
                 onClick={handleDeleteClip}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-studio-record hover:bg-studio-record/10 transition-colors text-left"
+                className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[11px] text-studio-record hover:bg-studio-record/10 transition-colors text-left"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Delete Clip
@@ -1192,28 +1205,28 @@ const Timeline = () => {
                     <div className="my-1 border-t border-border" />
                     <button
                       onClick={handleImportToTrack}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
                     >
                       <Upload className="w-3.5 h-3.5 text-studio-text-dim" />
                       Import Audio to Track
                     </button>
                     <button
                       onClick={handleToggleArm}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
                     >
                       <Mic className="w-3.5 h-3.5 text-studio-text-dim" />
                       {t?.armed ? "Disarm Record" : "Record Arm"}
                     </button>
                     <button
                       onClick={handleDuplicateTrack}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
                     >
                       <Copy className="w-3.5 h-3.5 text-studio-text-dim" />
                       Duplicate Track
                     </button>
                     <button
                       onClick={handleRenameTrack}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
                     >
                       <PenLine className="w-3.5 h-3.5 text-studio-text-dim" />
                       Rename
@@ -1247,14 +1260,14 @@ const Timeline = () => {
                     </div>
                     <button
                       onClick={handleToggleFreezeTrack}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
                     >
                       <Snowflake className="w-3.5 h-3.5 text-studio-text-dim" />
                       {t?.frozen ? "Unfreeze Track" : "Freeze Track"}
                     </button>
                     <button
                       onClick={handleToggleMute}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[11px] text-foreground hover:bg-studio-metal transition-colors text-left"
                     >
                       <Volume2 className="w-3.5 h-3.5 text-studio-text-dim" />
                       {ch?.mute ? "Unmute" : "Mute"}
@@ -1262,7 +1275,7 @@ const Timeline = () => {
                     <div className="my-1 border-t border-border" />
                     <button
                       onClick={handleDeleteTrack}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-[11px] text-studio-record hover:bg-studio-record/10 transition-colors text-left"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[11px] text-studio-record hover:bg-studio-record/10 transition-colors text-left"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       Delete Track

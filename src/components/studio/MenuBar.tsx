@@ -61,13 +61,8 @@ export default function MenuBar() {
   return (
     <div
       ref={menuRef}
-      className="flex items-center shrink-0 select-none z-50 relative"
-      style={{
-        height: 32,
-        background: "#1a1a1a",
-        fontSize: 12,
-        borderBottom: "1px solid #333",
-      }}
+      className="flex items-center shrink-0 select-none z-50 relative px-1.5 bg-studio-inset border-b border-border"
+      style={{ height: 32, fontSize: 12 }}
     >
       {studioMenu.map((menu) => {
         const isSettingsMenu = menu.title === "Settings";
@@ -75,7 +70,11 @@ export default function MenuBar() {
         return (
           <div key={menu.title} className="relative">
             <button
-              className="px-3 py-1 text-gray-300 hover:text-white transition-colors"
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                openMenu === menu.title
+                  ? "bg-studio-metal text-foreground"
+                  : "text-studio-text-dim hover:text-foreground hover:bg-studio-metal/60"
+              }`}
               style={{ fontSize: 12 }}
               onMouseDown={() => {
                 if (isSettingsMenu) {
@@ -94,16 +93,14 @@ export default function MenuBar() {
 
             {openMenu === menu.title && !isSettingsMenu && (
               <div
-                className="absolute top-full left-0 mt-0 min-w-[220px] py-1 rounded shadow-lg z-50"
-                style={{ background: "#252525", border: "1px solid #333" }}
+                className="absolute top-full left-0 mt-1 min-w-[230px] p-1 rounded-lg z-50 bg-popover border border-studio-line-strong shadow-[0_16px_40px_-12px_hsl(0_0%_0%/0.8)]"
               >
                 {menu.items.map((item, idx) => {
                   if (item.separator) {
                     return (
                       <div
                         key={`sep-${idx}`}
-                        className="my-1 mx-2"
-                        style={{ height: 1, background: "#3a3a3a" }}
+                        className="my-1 mx-2 h-px bg-border"
                       />
                     );
                   }
@@ -111,19 +108,11 @@ export default function MenuBar() {
                   return (
                     <button
                       key={item.action}
-                      className="w-full text-left px-3 py-1.5 flex items-center justify-between transition-colors"
-                      style={{
-                        fontSize: 12,
-                        color: item.disabled ? "#666" : undefined,
-                        cursor: item.disabled ? "default" : "pointer",
-                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md flex items-center justify-between transition-colors ${
+                        item.disabled ? "cursor-default" : "cursor-pointer hover:bg-studio-teal/15 group/item"
+                      }`}
+                      style={{ fontSize: 12 }}
                       disabled={item.disabled}
-                      onMouseEnter={(e) => {
-                        if (!item.disabled) e.currentTarget.style.background = "#3a3a3a";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "transparent";
-                      }}
                       onClick={() => {
                         if (!item.disabled) {
                           runCommand(item.action);
@@ -131,12 +120,12 @@ export default function MenuBar() {
                         }
                       }}
                     >
-                      <span className={item.disabled ? "text-gray-600" : "text-gray-300"}>
+                      <span className={item.disabled ? "text-studio-text-dim/40" : "text-foreground/90 group-hover/item:text-foreground"}>
                         {item.label}
                       </span>
                       {item.shortcut && (
                         <span
-                          className="ml-6 text-gray-500"
+                          className="ml-6 font-mono text-studio-text-dim/70"
                           style={{ fontSize: 10 }}
                         >
                           {item.shortcut}

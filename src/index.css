@@ -4,62 +4,91 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * StreamLine design tokens.
+ *
+ * Surfaces are a layered graphite scale with clear lightness steps so panels,
+ * controls and displays separate from each other:
+ *   inset (4%) < backdrop (5%) < panel (9–11%) < raised control (15%) < hover (21%)
+ *
+ * Legacy token NAMES are kept so existing class usages keep working:
+ *   --studio-glow-teal  → primary accent (now azure)
+ *   --studio-glow-blue  → secondary accent (now violet)
+ */
 @layer base {
   :root {
-    --background: 220 25% 4%;
-    --foreground: 220 30% 93%;
+    --background: 228 16% 5%;
+    --foreground: 225 30% 95%;
 
-    --card: 220 20% 8%;
-    --card-foreground: 220 30% 93%;
+    --card: 228 13% 9%;
+    --card-foreground: 225 30% 95%;
 
-    --popover: 220 20% 8%;
-    --popover-foreground: 220 30% 93%;
+    --popover: 228 13% 11%;
+    --popover-foreground: 225 30% 95%;
 
-    --primary: 172 72% 55%;
-    --primary-foreground: 220 25% 4%;
+    --primary: 205 100% 60%;
+    --primary-foreground: 228 30% 6%;
 
-    --secondary: 217 100% 71%;
-    --secondary-foreground: 220 25% 4%;
+    --secondary: 262 85% 70%;
+    --secondary-foreground: 228 30% 6%;
 
-    --muted: 220 18% 14%;
-    --muted-foreground: 215 12% 61%;
+    --muted: 228 11% 15%;
+    --muted-foreground: 225 12% 64%;
 
-    --accent: 172 72% 55%;
-    --accent-foreground: 220 25% 4%;
+    --accent: 205 100% 60%;
+    --accent-foreground: 228 30% 6%;
 
-    --destructive: 0 100% 62%;
-    --destructive-foreground: 220 30% 93%;
+    --destructive: 354 88% 61%;
+    --destructive-foreground: 225 30% 95%;
 
-    --border: 220 15% 18%;
-    --input: 220 15% 18%;
-    --ring: 172 72% 55%;
+    --border: 228 11% 17%;
+    --input: 228 11% 19%;
+    --ring: 205 100% 60%;
 
-    --radius: 0.5rem;
+    --radius: 0.625rem;
 
-    /* Studio-specific tokens */
-    --studio-bg: 220 25% 4%;
-    --studio-panel: 220 20% 8%;
-    --studio-metal: 220 18% 14%;
-    --studio-metal-light: 220 15% 20%;
-    --studio-glow-teal: 172 72% 55%;
-    --studio-glow-blue: 217 100% 71%;
-    --studio-record: 0 100% 62%;
-    --studio-text: 220 30% 93%;
-    --studio-text-dim: 215 12% 61%;
+    /* Studio surfaces */
+    --studio-bg: 228 16% 5%;
+    --studio-inset: 230 18% 4%;
+    --studio-panel: 228 13% 9%;
+    --studio-panel-top: 228 12% 11%;
+    --studio-panel-header: 228 12% 11.5%;
+    --studio-metal: 228 11% 15%;
+    --studio-metal-light: 228 10% 21%;
+    --studio-line: 228 12% 13%;
+    --studio-line-strong: 228 11% 18%;
+    --studio-highlight: 0 0% 100%;
 
-    /* Glow effects */
-    --glow-teal: 0 0 12px hsl(172 72% 55% / 0.5), 0 0 30px hsl(172 72% 55% / 0.2);
-    --glow-teal-strong: 0 0 15px hsl(172 72% 55% / 0.6), 0 0 40px hsl(172 72% 55% / 0.3), 0 0 80px hsl(172 72% 55% / 0.1);
-    --glow-red: 0 0 12px hsl(0 100% 62% / 0.5), 0 0 30px hsl(0 100% 62% / 0.2);
-    --glow-red-strong: 0 0 15px hsl(0 100% 62% / 0.6), 0 0 40px hsl(0 100% 62% / 0.3);
-    --glow-blue: 0 0 12px hsl(217 100% 71% / 0.5), 0 0 30px hsl(217 100% 71% / 0.2);
+    /* Studio accents */
+    --studio-glow-teal: 205 100% 60%;
+    --studio-glow-blue: 262 85% 70%;
+    --studio-record: 354 88% 61%;
+    --studio-warn: 42 100% 58%;
+    --studio-ok: 152 65% 50%;
+    --studio-text: 225 30% 95%;
+    --studio-text-dim: 225 12% 64%;
 
-    /* Metallic gradients */
-    --metal-gradient: linear-gradient(145deg, hsl(220 18% 16%), hsl(220 18% 11%));
-    --metal-gradient-light: linear-gradient(145deg, hsl(220 15% 22%), hsl(220 15% 16%));
-    --metal-border: linear-gradient(145deg, hsl(220 15% 24%), hsl(220 15% 10%));
-    --knob-gradient: conic-gradient(from 180deg, hsl(220 15% 26%), hsl(220 15% 14%), hsl(220 15% 22%), hsl(220 15% 12%), hsl(220 15% 26%));
-    --knob-highlight: radial-gradient(circle at 35% 35%, hsl(220 15% 30%), transparent 60%);
+    /* Glow effects — kept soft; a ring + low-spread bloom reads modern */
+    --glow-teal: 0 0 0 1px hsl(var(--studio-glow-teal) / 0.35), 0 0 14px hsl(var(--studio-glow-teal) / 0.35);
+    --glow-teal-strong: 0 0 0 1px hsl(var(--studio-glow-teal) / 0.5), 0 0 22px hsl(var(--studio-glow-teal) / 0.45);
+    --glow-red: 0 0 0 1px hsl(var(--studio-record) / 0.4), 0 0 14px hsl(var(--studio-record) / 0.4);
+    --glow-red-strong: 0 0 0 1px hsl(var(--studio-record) / 0.55), 0 0 24px hsl(var(--studio-record) / 0.5);
+    --glow-blue: 0 0 0 1px hsl(var(--studio-glow-blue) / 0.35), 0 0 14px hsl(var(--studio-glow-blue) / 0.35);
+
+    /* Brand gradient (accent → violet) */
+    --accent-gradient: linear-gradient(135deg, hsl(var(--studio-glow-teal)), hsl(var(--studio-glow-blue)));
+
+    /* Elevation */
+    --shadow-panel: inset 0 1px 0 hsl(var(--studio-highlight) / 0.045), 0 1px 2px hsl(0 0% 0% / 0.45), 0 10px 30px -12px hsl(0 0% 0% / 0.7);
+    --shadow-raised: inset 0 1px 0 hsl(var(--studio-highlight) / 0.06), 0 1px 2px hsl(0 0% 0% / 0.5);
+    --shadow-inset: inset 0 1px 3px hsl(0 0% 0% / 0.6), inset 0 0 0 1px hsl(0 0% 0% / 0.25);
+
+    /* Legacy gradients (retained for any remaining consumers) */
+    --metal-gradient: linear-gradient(180deg, hsl(var(--studio-panel-top)), hsl(var(--studio-panel)));
+    --metal-gradient-light: linear-gradient(180deg, hsl(var(--studio-metal-light)), hsl(var(--studio-metal)));
+    --metal-border: linear-gradient(180deg, hsl(var(--studio-line-strong)), hsl(var(--studio-line)));
+    --knob-gradient: conic-gradient(from 180deg, hsl(228 10% 26%), hsl(228 10% 14%), hsl(228 10% 22%), hsl(228 10% 12%), hsl(228 10% 26%));
+    --knob-highlight: radial-gradient(circle at 35% 35%, hsl(228 10% 30%), transparent 60%);
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -78,55 +107,148 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Space Grotesk', sans-serif;
     overflow: hidden;
+  }
+
+  /* Thin, low-contrast scrollbars so panels don't get chunky grey gutters */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--studio-metal-light)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--studio-metal-light));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(228 9% 28%);
+    background-clip: padding-box;
+  }
+
+  ::selection {
+    background: hsl(var(--studio-glow-teal) / 0.3);
   }
 }
 
 @layer components {
-  /* Metallic panel surface */
+  /* Floating panel card — the primary container for every workspace region */
   .studio-panel {
-    background: var(--metal-gradient);
+    background: linear-gradient(180deg, hsl(var(--studio-panel-top)), hsl(var(--studio-panel)) 120px);
     border: 1px solid hsl(var(--border));
-    box-shadow: inset 0 1px 0 hsl(220 15% 22% / 0.5), 0 4px 12px hsl(0 0% 0% / 0.4);
+    border-radius: 0.75rem;
+    box-shadow: var(--shadow-panel);
   }
 
+  /* Raised surface for cards/controls sitting inside a panel */
   .studio-panel-raised {
-    background: var(--metal-gradient-light);
-    border: 1px solid hsl(220 15% 22%);
-    box-shadow: inset 0 1px 0 hsl(220 15% 28% / 0.4), 0 2px 8px hsl(0 0% 0% / 0.3);
+    background: linear-gradient(180deg, hsl(var(--studio-metal)), hsl(228 11% 13%));
+    border: 1px solid hsl(var(--studio-line-strong));
+    box-shadow: var(--shadow-raised);
   }
 
-  /* Screw / rivet decoration */
+  /* Recessed display well (timecode, readouts, meters) */
+  .studio-well {
+    background: hsl(var(--studio-inset));
+    border: 1px solid hsl(var(--studio-line));
+    box-shadow: var(--shadow-inset);
+  }
+
+  /* Panel header bar */
+  .studio-panel-header {
+    @apply flex items-center justify-between gap-2 px-3 shrink-0;
+    height: 2.25rem;
+    background: hsl(var(--studio-panel-header));
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  .studio-panel-title {
+    @apply flex items-center gap-2 text-[10px] font-semibold uppercase;
+    letter-spacing: 0.16em;
+    color: hsl(var(--studio-text-dim));
+  }
+
+  /* Small accent bar used in front of panel titles */
+  .studio-panel-title::before {
+    content: "";
+    width: 3px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--accent-gradient);
+  }
+
+  /* Neutral icon / tool button */
+  .studio-icon-btn {
+    @apply inline-flex items-center justify-center rounded-md transition-colors;
+    color: hsl(var(--studio-text-dim));
+  }
+  .studio-icon-btn:hover {
+    background: hsl(var(--studio-metal));
+    color: hsl(var(--foreground));
+  }
+
+  /* Segmented control group */
+  .studio-segment {
+    @apply inline-flex items-center gap-0.5 rounded-lg p-0.5;
+    background: hsl(var(--studio-inset));
+    border: 1px solid hsl(var(--studio-line));
+  }
+
+  /* Legacy rivet decoration (no longer rendered in the main UI) */
   .studio-screw {
     @apply w-2 h-2 rounded-full;
-    background: radial-gradient(circle at 35% 35%, hsl(220 15% 30%), hsl(220 15% 10%));
-    box-shadow: inset 0 1px 2px hsl(0 0% 0% / 0.5), 0 1px 0 hsl(220 15% 20% / 0.3);
+    background: radial-gradient(circle at 35% 35%, hsl(var(--studio-metal-light)), hsl(var(--studio-inset)));
   }
 
   /* LED indicator */
   .studio-led {
     @apply w-2 h-2 rounded-full;
-    background: hsl(var(--studio-text-dim));
-    box-shadow: none;
+    background: hsl(var(--studio-metal-light));
+    box-shadow: inset 0 1px 1px hsl(0 0% 0% / 0.4);
     transition: all 0.15s ease;
   }
   .studio-led.active {
     background: hsl(var(--studio-glow-teal));
-    box-shadow: var(--glow-teal);
+    box-shadow: 0 0 8px hsl(var(--studio-glow-teal) / 0.7);
   }
   .studio-led.recording {
     background: hsl(var(--studio-record));
-    box-shadow: var(--glow-red);
+    box-shadow: 0 0 8px hsl(var(--studio-record) / 0.7);
   }
 
   /* Monospace readout */
   .studio-readout {
     font-family: 'JetBrains Mono', monospace;
     @apply text-xs tracking-wider;
+    font-variant-numeric: tabular-nums;
     color: hsl(var(--studio-glow-teal));
-    text-shadow: 0 0 8px hsl(172 72% 55% / 0.4);
+    text-shadow: 0 0 10px hsl(var(--studio-glow-teal) / 0.25);
+  }
+
+  /* Primary call-to-action */
+  .studio-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-all;
+    background: var(--accent-gradient);
+    color: hsl(var(--primary-foreground));
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.25), 0 6px 20px -6px hsl(var(--studio-glow-teal) / 0.6);
+  }
+  .studio-btn-primary:hover {
+    filter: brightness(1.08);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.3), 0 8px 26px -6px hsl(var(--studio-glow-teal) / 0.75);
+  }
+  .studio-btn-primary:disabled {
+    filter: grayscale(0.5);
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Pulse animation for recording */

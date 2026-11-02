@@ -34,13 +34,13 @@ const ModalActions = ({
   <div className="flex gap-3 pt-4">
     <button
       onClick={onPrimary}
-      className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25"
+      className="flex-1 py-2 studio-btn-primary text-xs uppercase tracking-wider"
     >
       {primaryLabel}
     </button>
     <button
       onClick={onCancel}
-      className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-border bg-studio-metal text-studio-text-dim hover:text-foreground hover:border-studio-metal-light"
+      className="flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all border border-studio-line-strong bg-studio-metal text-studio-text-dim hover:text-foreground hover:bg-studio-metal-light"
     >
       Cancel
     </button>
@@ -70,7 +70,7 @@ export const NewSessionModal = ({ open, onClose }: ModalProps) => (
         <input
           type="text"
           placeholder="Untitled Session"
-          className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-xs text-foreground outline-none focus:border-studio-teal/50 transition-colors"
+          className="w-full bg-studio-inset border border-studio-line-strong rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:border-studio-teal/50 transition-colors"
         />
       </div>
       <ModalActions primaryLabel="Create" onPrimary={onClose} onCancel={onClose} />
@@ -103,7 +103,7 @@ export const SaveSessionAsModal = ({ open, onClose }: ModalProps) => (
         <input
           type="text"
           placeholder="My Session"
-          className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-xs text-foreground outline-none focus:border-studio-teal/50 transition-colors"
+          className="w-full bg-studio-inset border border-studio-line-strong rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:border-studio-teal/50 transition-colors"
         />
       </div>
       <ModalActions primaryLabel="Save" onPrimary={onClose} onCancel={onClose} />
@@ -244,7 +244,7 @@ export const ReportProblemModal = ({ open, onClose }: ModalProps) => (
         <textarea
           rows={4}
           placeholder="What happened?"
-          className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-xs text-foreground outline-none resize-none focus:border-studio-teal/50 transition-colors"
+          className="w-full bg-studio-inset border border-studio-line-strong rounded-lg px-3 py-2 text-xs text-foreground outline-none resize-none focus:border-studio-teal/50 transition-colors"
         />
       </div>
       <ModalActions primaryLabel="Submit" onPrimary={onClose} onCancel={onClose} />
@@ -271,7 +271,7 @@ export const ConfirmDeleteModal = ({ open, onClose }: ModalProps) => (
         </button>
         <button
           onClick={onClose}
-          className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-border bg-studio-metal text-studio-text-dim hover:text-foreground hover:border-studio-metal-light"
+          className="flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all border border-studio-line-strong bg-studio-metal text-studio-text-dim hover:text-foreground hover:bg-studio-metal-light"
         >
           Cancel
         </button>
@@ -293,7 +293,7 @@ export const UnsavedChangesModal = ({ open, onClose }: ModalProps) => (
       <div className="flex gap-3">
         <button
           onClick={onClose}
-          className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-studio-teal/40 bg-studio-teal/15 text-studio-teal hover:bg-studio-teal/25"
+          className="flex-1 py-2 studio-btn-primary text-xs uppercase tracking-wider"
         >
           Save
         </button>
@@ -305,7 +305,7 @@ export const UnsavedChangesModal = ({ open, onClose }: ModalProps) => (
         </button>
         <button
           onClick={onClose}
-          className="flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wider transition-all border border-border bg-studio-metal text-studio-text-dim hover:text-foreground hover:border-studio-metal-light"
+          className="flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all border border-studio-line-strong bg-studio-metal text-studio-text-dim hover:text-foreground hover:bg-studio-metal-light"
         >
           Cancel
         </button>

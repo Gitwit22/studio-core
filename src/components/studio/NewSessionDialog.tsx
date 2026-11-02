@@ -112,9 +112,9 @@ const NewSessionDialog = ({ open, onClose, onSessionReady, initialTab = "new", o
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div className="relative studio-panel rounded-lg w-[480px] max-h-[85vh] overflow-y-auto shadow-2xl shadow-black/60">
+      <div className="relative studio-panel rounded-2xl w-[480px] max-h-[85vh] overflow-y-auto shadow-2xl shadow-black/60">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-studio-panel-header rounded-t-[inherit]">
           <div className="flex items-center gap-2">
             <Music className="w-4 h-4 text-studio-teal" />
             <span className="text-sm font-semibold uppercase tracking-wider text-foreground">
@@ -170,7 +170,7 @@ const NewSessionDialog = ({ open, onClose, onSessionReady, initialTab = "new", o
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-studio-teal"
+                  className="w-full bg-studio-inset border border-studio-line-strong rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-studio-teal"
                   autoFocus
                 />
               </div>
@@ -187,7 +187,7 @@ const NewSessionDialog = ({ open, onClose, onSessionReady, initialTab = "new", o
                     onChange={(e) => setBpm(Math.max(20, Math.min(300, Number(e.target.value))))}
                     min={20}
                     max={300}
-                    className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-studio-teal"
+                    className="w-full bg-studio-inset border border-studio-line-strong rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-studio-teal"
                   />
                 </div>
                 <div className="flex-1">
@@ -197,7 +197,7 @@ const NewSessionDialog = ({ open, onClose, onSessionReady, initialTab = "new", o
                   <select
                     value={sampleRate}
                     onChange={(e) => setSampleRate(Number(e.target.value))}
-                    className="w-full bg-studio-metal border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-studio-teal"
+                    className="w-full bg-studio-inset border border-studio-line-strong rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-studio-teal"
                   >
                     {sampleRates.map((sr) => (
                       <option key={sr} value={sr}>
@@ -236,7 +236,7 @@ const NewSessionDialog = ({ open, onClose, onSessionReady, initialTab = "new", o
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         onClick={handleChooseFolder}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-studio-metal border border-border rounded text-xs text-foreground hover:border-studio-teal transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-studio-metal border border-studio-line-strong rounded-lg text-xs text-foreground hover:border-studio-teal transition-colors"
                       >
                         <FolderOpen className="w-3.5 h-3.5" />
                         Choose Folder
@@ -263,7 +263,7 @@ const NewSessionDialog = ({ open, onClose, onSessionReady, initialTab = "new", o
                 <button
                   onClick={handleCreate}
                   disabled={creating || !name.trim()}
-                  className="px-5 py-2 bg-studio-teal/20 border border-studio-teal text-studio-teal rounded text-xs uppercase tracking-wider font-medium hover:bg-studio-teal/30 transition-colors disabled:opacity-40"
+                  className="studio-btn-primary px-5 py-2 text-xs uppercase tracking-wider"
                 >
                   {creating ? "Creating…" : "Create Session"}
                 </button>

@@ -22,12 +22,15 @@ const TransportControls = () => {
   const bar = Math.floor(playhead / 4) + 1;
 
   return (
-    <div className="studio-panel h-16 shrink-0 flex items-center justify-center gap-3 px-6">
+    <div className="studio-panel h-16 shrink-0 flex items-center justify-center gap-2.5 px-6">
       {/* Left: Timecode */}
-      <div className="studio-panel-raised rounded px-3 py-1.5 flex items-center gap-2 mr-6">
-        <span className="studio-readout text-sm tracking-widest">{formatTimecode(playhead, bpm)}</span>
-        <div className="w-px h-4 bg-border" />
-        <span className="text-[9px] text-studio-text-dim uppercase tracking-wider">Bar {bar}</span>
+      <div className="studio-well rounded-lg px-3.5 py-1.5 flex items-center gap-3 mr-6">
+        <span className="studio-readout text-lg leading-none tracking-[0.12em]">{formatTimecode(playhead, bpm)}</span>
+        <div className="w-px h-6 bg-studio-line-strong" />
+        <div className="flex flex-col items-center leading-none">
+          <span className="text-[8px] text-studio-text-dim uppercase tracking-wider">Bar</span>
+          <span className="font-mono text-sm text-foreground tabular-nums mt-0.5">{bar}</span>
+        </div>
       </div>
 
       {/* Transport buttons */}
@@ -46,7 +49,7 @@ const TransportControls = () => {
         onClick={() => runCommand("transport:stop")}
       />
       <TransportButton
-        icon={<Circle className="w-4 h-4" />}
+        icon={<Circle className="w-4 h-4 fill-current" />}
         active={recording}
         variant="record"
         onClick={() => runCommand("transport:record")}
@@ -63,20 +66,20 @@ const TransportControls = () => {
       />
 
       {/* Right: BPM and countdown */}
-      <div className="studio-panel-raised rounded px-3 py-1.5 flex items-center gap-3 ml-6">
-        <div className="flex flex-col items-center">
-          <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">BPM</span>
-          <span className="studio-readout text-sm">{bpm}</span>
+      <div className="studio-well rounded-lg px-3.5 py-1.5 flex items-center gap-3.5 ml-6">
+        <div className="flex flex-col items-center leading-none">
+          <span className="text-[8px] text-studio-text-dim uppercase tracking-wider">BPM</span>
+          <span className="studio-readout text-sm mt-1">{bpm}</span>
         </div>
-        <div className="w-px h-4 bg-border" />
-        <div className="flex flex-col items-center">
-          <span className="text-[7px] text-studio-text-dim uppercase tracking-wider">Key</span>
-          <span className="studio-readout text-sm">C min</span>
+        <div className="w-px h-6 bg-studio-line-strong" />
+        <div className="flex flex-col items-center leading-none">
+          <span className="text-[8px] text-studio-text-dim uppercase tracking-wider">Key</span>
+          <span className="studio-readout text-sm mt-1">C min</span>
         </div>
-        <div className="w-px h-4 bg-border" />
-        <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${recording ? "bg-studio-record animate-record-pulse" : playing ? "bg-studio-teal" : "bg-studio-metal-light"}`} />
-          <span className="text-[8px] text-studio-text-dim uppercase">
+        <div className="w-px h-6 bg-studio-line-strong" />
+        <div className="flex items-center gap-1.5 min-w-[64px]">
+          <div className={`w-1.5 h-1.5 rounded-full ${recording ? "bg-studio-record shadow-[0_0_6px_hsl(var(--studio-record))] animate-record-pulse" : playing ? "bg-studio-teal shadow-[0_0_6px_hsl(var(--studio-glow-teal))]" : "bg-studio-metal-light"}`} />
+          <span className="text-[9px] font-medium text-studio-text-dim uppercase tracking-wider">
             {recording ? "Recording" : playing && !isPaused ? "Playing" : isPaused ? "Paused" : "Idle"}
           </span>
         </div>

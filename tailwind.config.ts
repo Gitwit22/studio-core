@@ -54,7 +54,13 @@ export default {
         },
         studio: {
           bg: "hsl(var(--studio-bg))",
+          inset: "hsl(var(--studio-inset))",
           panel: "hsl(var(--studio-panel))",
+          "panel-header": "hsl(var(--studio-panel-header))",
+          line: "hsl(var(--studio-line))",
+          "line-strong": "hsl(var(--studio-line-strong))",
+          warn: "hsl(var(--studio-warn))",
+          ok: "hsl(var(--studio-ok))",
           metal: "hsl(var(--studio-metal))",
           "metal-light": "hsl(var(--studio-metal-light))",
           teal: "hsl(var(--studio-glow-teal))",
